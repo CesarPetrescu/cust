@@ -41,6 +41,10 @@ Last updated: 2026-05-04
 - `== != < <= > >=`
 - `//` comments
 
+## Diagnostics
+
+- Lexer errors include 1-based line and column for unexpected characters and out-of-range integer literals.
+
 ## Verified commands
 
 ```bash
@@ -51,7 +55,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed at v0.1 initial commit.
+All passed after adding lexer error source locations in the 2026-05-04 autonomous run. Docker images were rebuilt before the final Docker verification so container tests used the updated source.
 
 ## Operating rule for autonomous agent
 

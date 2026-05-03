@@ -51,3 +51,27 @@ fn reports_division_by_zero() {
     let err = interpret(program).unwrap_err();
     assert!(err.to_string().contains("division by zero"));
 }
+
+#[test]
+fn reports_line_and_column_for_unexpected_character() {
+    let program = "int main() {\nreturn 1;\n@\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unexpected character '@' at line 3, column 1"
+    );
+}
+
+#[test]
+fn reports_line_and_column_for_out_of_range_integer_literal() {
+    let program = "int main() {\nreturn 999999999999999999999999999999;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "integer literal out of range at line 2, column 8"
+    );
+}

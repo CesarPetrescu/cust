@@ -115,32 +115,39 @@ fn lex(source: &str) -> CustResult<Vec<Token>> {
     let chars: Vec<char> = source.chars().collect();
     let mut tokens = Vec::new();
     let mut i = 0;
+    let mut line = 1usize;
+    let mut column = 1usize;
 
     while i < chars.len() {
         let c = chars[i];
         match c {
-            c if c.is_whitespace() => i += 1,
+            c if c.is_whitespace() => advance_position(c, &mut line, &mut column, &mut i),
             '/' if chars.get(i + 1) == Some(&'/') => {
-                i += 2;
+                advance_position('/', &mut line, &mut column, &mut i);
+                advance_position('/', &mut line, &mut column, &mut i);
                 while i < chars.len() && chars[i] != '\n' {
-                    i += 1;
+                    advance_position(chars[i], &mut line, &mut column, &mut i);
                 }
             }
             '0'..='9' => {
                 let start = i;
+                let start_line = line;
+                let start_column = column;
                 while i < chars.len() && chars[i].is_ascii_digit() {
-                    i += 1;
+                    advance_position(chars[i], &mut line, &mut column, &mut i);
                 }
                 let text: String = chars[start..i].iter().collect();
-                let value = text
-                    .parse::<i64>()
-                    .map_err(|_| CustError::new("integer literal out of range"))?;
+                let value = text.parse::<i64>().map_err(|_| {
+                    CustError::new(format!(
+                        "integer literal out of range at line {start_line}, column {start_column}"
+                    ))
+                })?;
                 tokens.push(Token::Number(value));
             }
             'a'..='z' | 'A'..='Z' | '_' => {
                 let start = i;
                 while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                    i += 1;
+                    advance_position(chars[i], &mut line, &mut column, &mut i);
                 }
                 let text: String = chars[start..i].iter().collect();
                 tokens.push(match text.as_str() {
@@ -154,78 +161,96 @@ fn lex(source: &str) -> CustResult<Vec<Token>> {
             }
             '+' => {
                 tokens.push(Token::Plus);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '-' => {
                 tokens.push(Token::Minus);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '*' => {
                 tokens.push(Token::Star);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '/' => {
                 tokens.push(Token::Slash);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '%' => {
                 tokens.push(Token::Percent);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '(' => {
                 tokens.push(Token::LParen);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             ')' => {
                 tokens.push(Token::RParen);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '{' => {
                 tokens.push(Token::LBrace);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '}' => {
                 tokens.push(Token::RBrace);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             ';' => {
                 tokens.push(Token::Semi);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '=' if chars.get(i + 1) == Some(&'=') => {
                 tokens.push(Token::Eq);
-                i += 2;
+                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
             }
             '!' if chars.get(i + 1) == Some(&'=') => {
                 tokens.push(Token::Ne);
-                i += 2;
+                advance_position('!', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
             }
             '<' if chars.get(i + 1) == Some(&'=') => {
                 tokens.push(Token::Le);
-                i += 2;
+                advance_position('<', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
             }
             '>' if chars.get(i + 1) == Some(&'=') => {
                 tokens.push(Token::Ge);
-                i += 2;
+                advance_position('>', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
             }
             '=' => {
                 tokens.push(Token::Assign);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '<' => {
                 tokens.push(Token::Lt);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '>' => {
                 tokens.push(Token::Gt);
-                i += 1;
+                advance_position(c, &mut line, &mut column, &mut i);
             }
-            other => return Err(CustError::new(format!("unexpected character '{other}'"))),
+            other => {
+                return Err(CustError::new(format!(
+                    "unexpected character '{other}' at line {line}, column {column}"
+                )));
+            }
         }
     }
 
     tokens.push(Token::Eof);
     Ok(tokens)
+}
+
+fn advance_position(c: char, line: &mut usize, column: &mut usize, i: &mut usize) {
+    *i += 1;
+    if c == '\n' {
+        *line += 1;
+        *column = 1;
+    } else {
+        *column += 1;
+    }
 }
 
 struct Parser {
