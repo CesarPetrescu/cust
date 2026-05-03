@@ -8,7 +8,6 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Cargo Book: https://doc.rust-lang.org/cargo/
 - Rust API docs: https://doc.rust-lang.org/std/
 - Docker Compose docs: https://docs.docker.com/compose/
-- GitHub Actions docs: https://docs.github.com/actions
 - C language reference: https://en.cppreference.com/w/c/language
 
 ## Research rules

@@ -4,14 +4,11 @@ The autonomous agent should pick only one small task per cron run unless the tas
 
 ## Next recommended tasks
 
-1. Add GitHub Actions CI.
-   - Create `.github/workflows/ci.yml`
-   - Run `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`
-   - Run Docker build/test if possible
-2. Add source location tracking to lexer errors.
-3. Add parser error location tracking.
-4. Add fixtures under `tests/fixtures/valid` and `tests/fixtures/invalid`.
-5. Add block scoping with TDD.
+1. Add source location tracking to lexer errors.
+2. Add parser error location tracking.
+3. Add fixtures under `tests/fixtures/valid` and `tests/fixtures/invalid`.
+4. Add block scoping with TDD.
+5. Improve local Docker test ergonomics if repeated cron runs expose issues.
 
 ## Every-run checklist
 

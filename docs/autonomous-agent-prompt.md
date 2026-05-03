@@ -20,5 +20,5 @@ Rules:
 10. If verification passes and files changed, always commit with a conventional commit message and push to origin main before ending the run. If only status files changed, commit and push those too. If absolutely nothing changed, report `no changes to commit`.
 11. Final response must include: selected task, changed files, verification results, commit hash/push status, blockers, next recommended task.
 
-Initial recommended task if no blocker exists: add GitHub Actions CI for Rust and Docker verification.
+Initial recommended task if no blocker exists: add source location tracking to lexer errors. Do not add GitHub Actions or external CI unless the user explicitly asks later; this project relies on local Docker verification run by the autonomous agent.
 ```
