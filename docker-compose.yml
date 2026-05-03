@@ -1,0 +1,27 @@
+services:
+  cust:
+    build: .
+    image: cust:v0.1
+    network_mode: "none"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    volumes:
+      - ./examples:/workspace/examples:ro
+    command: ["/workspace/examples/sum.c"]
+
+  test:
+    build:
+      context: .
+      target: build
+    image: cust-test:v0.1
+    network_mode: "none"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: ["cargo", "test", "--locked"]
