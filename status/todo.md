@@ -15,7 +15,7 @@ The autonomous agent should pick only one small task per cron run unless the tas
 
 ## Every-run checklist
 
-- [ ] Pull latest `main`
+- [ ] Pull latest `main` with `git checkout main && git pull --ff-only`
 - [ ] Read all files in `status/`
 - [ ] Pick one small TODO from `status/missing-features.md` or `status/todo.md`
 - [ ] Research docs if uncertain
@@ -27,4 +27,5 @@ The autonomous agent should pick only one small task per cron run unless the tas
 - [ ] Update `status/todo.md`
 - [ ] Update `status/stuck.md` if blocked
 - [ ] Update `status/research.md` with useful links/findings
-- [ ] Commit and push only if verification passes
+- [ ] Commit all verified changes, including status-only updates
+- [ ] Push to `origin main` before ending the run

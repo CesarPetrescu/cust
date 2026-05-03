@@ -20,6 +20,7 @@
 6. **No risky rewrites:** do not rewrite the interpreter architecture unless the status plan explicitly says so.
 7. **No secret leakage:** never commit private keys, tokens, `.env`, or machine secrets.
 8. **Honest reporting:** distinguish verified results from attempted/unverified work.
+9. **Always version controlled:** every run must start with `git pull --ff-only`; every verified change must be committed and pushed before the run ends. If there are no code/docs changes, still update status files when useful and commit/push those status updates.
 
 ## Files owned by the autonomous process
 
@@ -103,7 +104,7 @@ Update relevant files in `status/`:
 
 ### 8. Commit and push
 
-Only after verification passes:
+Every successful run must end version-controlled. Only commit/push after verification passes:
 
 ```bash
 git status --short
@@ -111,6 +112,8 @@ git add <changed files>
 git commit -m "type: concise description"
 git push
 ```
+
+If code/docs did not change but status files were updated, commit and push the status update. If absolutely nothing changed, report `no changes to commit`.
 
 Commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `chore`.
 
