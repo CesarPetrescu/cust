@@ -123,10 +123,27 @@ cargo run -- examples/sum.c
 ├── examples/
 │   └── sum.c
 ├── docs/
+│   ├── autonomous-agent-prompt.md
+│   ├── plans/autonomous-agent.md
 │   └── v0.1.md
+├── status/           # autonomous maintainer state/backlog/blockers/research
 ├── Dockerfile
 └── docker-compose.yml
 ```
+
+## Autonomous maintenance
+
+Cust includes a `status/` workspace for an autonomous Hermes maintainer:
+
+| File | Purpose |
+|---|---|
+| `status/current-state.md` | current project snapshot |
+| `status/missing-features.md` | prioritized backlog |
+| `status/todo.md` | next tasks and every-run checklist |
+| `status/stuck.md` | blockers and failed attempts |
+| `status/research.md` | links/findings from docs research |
+
+See `docs/plans/autonomous-agent.md` and `docs/autonomous-agent-prompt.md` for the cron-based maintenance loop.
 
 ## Development
 
