@@ -377,6 +377,42 @@ fn reports_missing_opening_braces_after_for_clauses() {
 }
 
 #[test]
+fn reports_unmatched_closing_parens_in_statements() {
+    let program = "int main() {\n)\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unmatched ')' in statement at line 2, column 1"
+    );
+}
+
+#[test]
+fn reports_unmatched_closing_brackets_in_statements() {
+    let program = "int main() {\n]\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unmatched ']' in statement at line 2, column 1"
+    );
+}
+
+#[test]
+fn reports_unmatched_closing_braces_at_top_level() {
+    let program = "int main() {\nreturn 0;\n}\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unmatched '}' at top level at line 4, column 1"
+    );
+}
+
+#[test]
 fn reports_missing_semicolon_after_variable_declarations() {
     let program = "int main() {\nint x = 1\nreturn x;\n}\n";
 
@@ -659,6 +695,30 @@ fn reports_missing_semicolon_after_for_conditions() {
     assert_eq!(
         err.to_string(),
         "expected ';' after for condition, found Ident(\"i\") at line 2, column 23"
+    );
+}
+
+#[test]
+fn rejects_break_in_for_initializers() {
+    let program = "int main() {\nfor (break; 1; 1) {\nreturn 1;\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "break is not allowed in for initializer at line 2, column 6"
+    );
+}
+
+#[test]
+fn rejects_continue_in_for_increments() {
+    let program = "int main() {\nfor (; 1; continue) {\nreturn 1;\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "continue is not allowed in for increment at line 2, column 11"
     );
 }
 

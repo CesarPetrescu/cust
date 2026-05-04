@@ -556,6 +556,12 @@ impl Parser {
     fn parse_program(&mut self) -> CustResult<Program> {
         let mut functions = HashMap::new();
         while !self.check(&Token::Eof) {
+            if self.check(&Token::RBrace) {
+                return Err(Self::error_at(
+                    "unmatched '}' at top level".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let (name, function) = self.parse_function()?;
             if functions.insert(name.clone(), function).is_some() {
                 return Err(CustError::new(format!("function '{name}' already defined")));
@@ -657,6 +663,14 @@ impl Parser {
             | Token::Minus
             | Token::Bang
             | Token::LParen => self.parse_expr_stmt_with_semi(true),
+            Token::RParen => Err(Self::error_at(
+                "unmatched ')' in statement".to_string(),
+                self.peek_located(),
+            )),
+            Token::RBracket => Err(Self::error_at(
+                "unmatched ']' in statement".to_string(),
+                self.peek_located(),
+            )),
             token => Err(Self::error_at(
                 format!("unexpected token in statement: {token:?}"),
                 self.peek_located(),
@@ -798,6 +812,12 @@ impl Parser {
             Some(Box::new(self.parse_assign()?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(true)?))
+        } else if matches!(self.peek(), Token::Break | Token::Continue) {
+            let control = self.loop_control_keyword();
+            return Err(Self::error_at(
+                format!("{control} is not allowed in for initializer"),
+                self.peek_located(),
+            ));
         } else {
             return Err(Self::error_at(
                 format!("unexpected token in for initializer: {:?}", self.peek()),
@@ -819,6 +839,12 @@ impl Parser {
             Some(Box::new(self.parse_assign_with_semi(false)?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(false)?))
+        } else if matches!(self.peek(), Token::Break | Token::Continue) {
+            let control = self.loop_control_keyword();
+            return Err(Self::error_at(
+                format!("{control} is not allowed in for increment"),
+                self.peek_located(),
+            ));
         } else {
             return Err(Self::error_at(
                 format!("unexpected token in for increment: {:?}", self.peek()),
@@ -1182,6 +1208,14 @@ impl Parser {
             }
         }
         false
+    }
+
+    fn loop_control_keyword(&self) -> &'static str {
+        match self.peek() {
+            Token::Break => "break",
+            Token::Continue => "continue",
+            _ => "loop control statement",
+        }
     }
 
     fn peek_located(&self) -> &LocatedToken {

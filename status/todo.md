@@ -4,8 +4,8 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
-1. Continue improving parser recovery/error messages for additional malformed programs (for example unmatched delimiters, malformed `for` clauses beyond missing condition semicolons, missing `{` after nested block statements where useful, and other delimiter-list boundary errors).
-2. Design the pointer model before implementing pointer arithmetic or address/dereference operators.
+1. Design the pointer model before implementing pointer arithmetic or address/dereference operators; include concrete acceptance tests for address-of, dereference, pointer parameters, null/invalid pointer diagnostics, and array/pointer interactions.
+2. Continue parser recovery/error-message expansion only for newly discovered malformed programs not already covered by the exact-error suite (remaining examples: nested block brace diagnostics where useful and other delimiter-list boundary errors).
 3. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
 4. Add CLI flags such as `--version`, `--ast`, `--tokens`, or `--max-steps` after the core C-subset expansion stabilizes.
 5. Add C compatibility tests that compare Cust results against `gcc`/`clang` for supported fixture programs in Docker.
