@@ -20,7 +20,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Unary plus
 - [x] `for` loops
 - [x] `break` and `continue`
-- [ ] Empty statements and expression statements
+- [x] Empty statements and expression statements
 
 ## P2 — data types
 

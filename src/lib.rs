@@ -102,8 +102,10 @@ enum BinaryOp {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Stmt {
+    Empty,
     VarDecl(String, Expr),
     Assign(String, Expr),
+    Expr(Expr),
     Return(Expr),
     Break,
     Continue,
@@ -137,6 +139,7 @@ enum Stmt {
 /// - `while (expression) { ... }`
 /// - `for (initializer; condition; increment) { ... }`
 /// - `break;` and `continue;` inside loops
+/// - empty statements (`;`) and side-effect-free expression statements (`expr;`)
 /// - integer arithmetic/comparisons/logical operators: `+ - * / % == != < <= > >= && || !`
 pub fn interpret(source: &str) -> CustResult<i64> {
     let tokens = lex(source)?;
@@ -372,6 +375,7 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> CustResult<Stmt> {
         match self.peek() {
+            Token::Semi => self.parse_empty(),
             Token::Int => self.parse_var_decl(),
             Token::Return => self.parse_return(),
             Token::LBrace => Ok(Stmt::Block(self.parse_block()?)),
@@ -380,12 +384,23 @@ impl Parser {
             Token::For => self.parse_for(),
             Token::Break => self.parse_break(),
             Token::Continue => self.parse_continue(),
-            Token::Ident(_) => self.parse_assign(),
+            Token::Ident(_) if self.peek_next() == &Token::Assign => self.parse_assign(),
+            Token::Ident(_)
+            | Token::Number(_)
+            | Token::Plus
+            | Token::Minus
+            | Token::Bang
+            | Token::LParen => self.parse_expr_stmt_with_semi(true),
             token => Err(Self::error_at(
                 format!("unexpected token in statement: {token:?}"),
                 self.peek_located(),
             )),
         }
+    }
+
+    fn parse_empty(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::Semi)?;
+        Ok(Stmt::Empty)
     }
 
     fn parse_var_decl(&mut self) -> CustResult<Stmt> {
@@ -415,6 +430,14 @@ impl Parser {
             self.expect(Token::Semi)?;
         }
         Ok(Stmt::Assign(name, expr))
+    }
+
+    fn parse_expr_stmt_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
+        let expr = self.parse_expr()?;
+        if require_semi {
+            self.expect(Token::Semi)?;
+        }
+        Ok(Stmt::Expr(expr))
     }
 
     fn parse_return(&mut self) -> CustResult<Stmt> {
@@ -471,8 +494,10 @@ impl Parser {
             None
         } else if self.check(&Token::Int) {
             Some(Box::new(self.parse_var_decl()?))
-        } else if matches!(self.peek(), Token::Ident(_)) {
+        } else if matches!(self.peek(), Token::Ident(_)) && self.peek_next() == &Token::Assign {
             Some(Box::new(self.parse_assign()?))
+        } else if self.starts_expr() {
+            Some(Box::new(self.parse_expr_stmt_with_semi(true)?))
         } else {
             return Err(Self::error_at(
                 format!("unexpected token in for initializer: {:?}", self.peek()),
@@ -490,8 +515,10 @@ impl Parser {
 
         let increment = if self.check(&Token::RParen) {
             None
-        } else if matches!(self.peek(), Token::Ident(_)) {
+        } else if matches!(self.peek(), Token::Ident(_)) && self.peek_next() == &Token::Assign {
             Some(Box::new(self.parse_assign_with_semi(false)?))
+        } else if self.starts_expr() {
+            Some(Box::new(self.parse_expr_stmt_with_semi(false)?))
         } else {
             return Err(Self::error_at(
                 format!("unexpected token in for increment: {:?}", self.peek()),
@@ -685,6 +712,26 @@ impl Parser {
         &self.peek_located().kind
     }
 
+    fn peek_next(&self) -> &Token {
+        &self
+            .tokens
+            .get(self.pos + 1)
+            .unwrap_or_else(|| self.peek_located())
+            .kind
+    }
+
+    fn starts_expr(&self) -> bool {
+        matches!(
+            self.peek(),
+            Token::Ident(_)
+                | Token::Number(_)
+                | Token::Plus
+                | Token::Minus
+                | Token::Bang
+                | Token::LParen
+        )
+    }
+
     fn peek_located(&self) -> &LocatedToken {
         self.tokens
             .get(self.pos)
@@ -771,6 +818,7 @@ impl Interpreter {
 
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
         match stmt {
+            Stmt::Empty => Ok(ExecFlow::None),
             Stmt::VarDecl(name, expr) => {
                 let value = self.eval(expr)?;
                 let scope = self.current_scope_mut();
@@ -792,6 +840,10 @@ impl Interpreter {
                         "assignment to undeclared variable '{name}'"
                     )))
                 }
+            }
+            Stmt::Expr(expr) => {
+                self.eval(expr)?;
+                Ok(ExecFlow::None)
             }
             Stmt::Return(expr) => Ok(ExecFlow::Return(self.eval(expr)?)),
             Stmt::Break => Ok(ExecFlow::Break),

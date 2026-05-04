@@ -138,6 +138,22 @@ fn break_exits_only_the_innermost_loop() {
 }
 
 #[test]
+fn supports_empty_and_expression_statements() {
+    let program = include_str!("fixtures/valid/empty_and_expression_statements.c");
+
+    assert_eq!(interpret(program).unwrap(), 16);
+}
+
+#[test]
+fn expression_statements_evaluate_their_expression() {
+    let program = include_str!("fixtures/invalid/expression_statement_undefined_variable.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "undefined variable 'missing'");
+}
+
+#[test]
 fn rejects_break_without_required_semicolon() {
     let program = "int main() {\nwhile (1) {\nbreak\n}\nreturn 0;\n}\n";
 

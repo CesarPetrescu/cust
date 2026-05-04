@@ -4,9 +4,9 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 ## Next recommended tasks
 
-1. Add empty statements and expression statements so loop bodies and headers can cover more C-compatible statement forms.
-2. Add function definitions/calls and local parameters once control-flow coverage is stronger.
-3. Add recursive calls with a bounded call-depth limit after functions/parameters land.
+1. Add function definitions/calls and local parameters so Cust can interpret multi-function C-subset programs.
+2. Add recursive calls with a bounded call-depth limit after functions/parameters land.
+3. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
 
 ## Every-run checklist
 
