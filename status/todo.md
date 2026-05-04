@@ -4,10 +4,9 @@ The autonomous agent should pick only one small task per cron run unless the tas
 
 ## Next recommended tasks
 
-1. Add parser error location tracking.
-2. Add token context snippets to lexer errors.
-3. Add fixtures under `tests/fixtures/valid` and `tests/fixtures/invalid`.
-4. Add block scoping with TDD.
+1. Add token context snippets to lexer errors.
+2. Add fixtures under `tests/fixtures/valid` and `tests/fixtures/invalid`.
+3. Add block scoping with TDD.
 
 ## Every-run checklist
 

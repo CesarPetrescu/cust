@@ -55,6 +55,19 @@ enum Token {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct LocatedToken {
+    kind: Token,
+    line: usize,
+    column: usize,
+}
+
+impl LocatedToken {
+    fn new(kind: Token, line: usize, column: usize) -> Self {
+        Self { kind, line, column }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Expr {
     Number(i64),
     Var(String),
@@ -111,7 +124,7 @@ pub fn interpret(source: &str) -> CustResult<i64> {
     interpreter.run(&program)
 }
 
-fn lex(source: &str) -> CustResult<Vec<Token>> {
+fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
     let chars: Vec<char> = source.chars().collect();
     let mut tokens = Vec::new();
     let mut i = 0;
@@ -142,93 +155,100 @@ fn lex(source: &str) -> CustResult<Vec<Token>> {
                         "integer literal out of range at line {start_line}, column {start_column}"
                     ))
                 })?;
-                tokens.push(Token::Number(value));
+                tokens.push(LocatedToken::new(
+                    Token::Number(value),
+                    start_line,
+                    start_column,
+                ));
             }
             'a'..='z' | 'A'..='Z' | '_' => {
                 let start = i;
+                let start_line = line;
+                let start_column = column;
                 while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
                     advance_position(chars[i], &mut line, &mut column, &mut i);
                 }
                 let text: String = chars[start..i].iter().collect();
-                tokens.push(match text.as_str() {
+                let kind = match text.as_str() {
                     "int" => Token::Int,
                     "return" => Token::Return,
                     "if" => Token::If,
                     "else" => Token::Else,
                     "while" => Token::While,
                     _ => Token::Ident(text),
-                });
+                };
+                tokens.push(LocatedToken::new(kind, start_line, start_column));
             }
             '+' => {
-                tokens.push(Token::Plus);
+                push_token(&mut tokens, Token::Plus, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '-' => {
-                tokens.push(Token::Minus);
+                push_token(&mut tokens, Token::Minus, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '*' => {
-                tokens.push(Token::Star);
+                push_token(&mut tokens, Token::Star, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '/' => {
-                tokens.push(Token::Slash);
+                push_token(&mut tokens, Token::Slash, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '%' => {
-                tokens.push(Token::Percent);
+                push_token(&mut tokens, Token::Percent, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '(' => {
-                tokens.push(Token::LParen);
+                push_token(&mut tokens, Token::LParen, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             ')' => {
-                tokens.push(Token::RParen);
+                push_token(&mut tokens, Token::RParen, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '{' => {
-                tokens.push(Token::LBrace);
+                push_token(&mut tokens, Token::LBrace, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '}' => {
-                tokens.push(Token::RBrace);
+                push_token(&mut tokens, Token::RBrace, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             ';' => {
-                tokens.push(Token::Semi);
+                push_token(&mut tokens, Token::Semi, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '=' if chars.get(i + 1) == Some(&'=') => {
-                tokens.push(Token::Eq);
+                push_token(&mut tokens, Token::Eq, line, column);
                 advance_position('=', &mut line, &mut column, &mut i);
                 advance_position('=', &mut line, &mut column, &mut i);
             }
             '!' if chars.get(i + 1) == Some(&'=') => {
-                tokens.push(Token::Ne);
+                push_token(&mut tokens, Token::Ne, line, column);
                 advance_position('!', &mut line, &mut column, &mut i);
                 advance_position('=', &mut line, &mut column, &mut i);
             }
             '<' if chars.get(i + 1) == Some(&'=') => {
-                tokens.push(Token::Le);
+                push_token(&mut tokens, Token::Le, line, column);
                 advance_position('<', &mut line, &mut column, &mut i);
                 advance_position('=', &mut line, &mut column, &mut i);
             }
             '>' if chars.get(i + 1) == Some(&'=') => {
-                tokens.push(Token::Ge);
+                push_token(&mut tokens, Token::Ge, line, column);
                 advance_position('>', &mut line, &mut column, &mut i);
                 advance_position('=', &mut line, &mut column, &mut i);
             }
             '=' => {
-                tokens.push(Token::Assign);
+                push_token(&mut tokens, Token::Assign, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '<' => {
-                tokens.push(Token::Lt);
+                push_token(&mut tokens, Token::Lt, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '>' => {
-                tokens.push(Token::Gt);
+                push_token(&mut tokens, Token::Gt, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             other => {
@@ -239,8 +259,12 @@ fn lex(source: &str) -> CustResult<Vec<Token>> {
         }
     }
 
-    tokens.push(Token::Eof);
+    tokens.push(LocatedToken::new(Token::Eof, line, column));
     Ok(tokens)
+}
+
+fn push_token(tokens: &mut Vec<LocatedToken>, kind: Token, line: usize, column: usize) {
+    tokens.push(LocatedToken::new(kind, line, column));
 }
 
 fn advance_position(c: char, line: &mut usize, column: &mut usize, i: &mut usize) {
@@ -254,12 +278,12 @@ fn advance_position(c: char, line: &mut usize, column: &mut usize, i: &mut usize
 }
 
 struct Parser {
-    tokens: Vec<Token>,
+    tokens: Vec<LocatedToken>,
     pos: usize,
 }
 
 impl Parser {
-    fn new(tokens: Vec<Token>) -> Self {
+    fn new(tokens: Vec<LocatedToken>) -> Self {
         Self { tokens, pos: 0 }
     }
 
@@ -278,7 +302,8 @@ impl Parser {
         let mut statements = Vec::new();
         while !self.check(&Token::RBrace) {
             if self.check(&Token::Eof) {
-                return Err(CustError::new("unterminated block"));
+                let eof = self.peek_located().clone();
+                return Err(Self::error_at("unterminated block".to_string(), &eof));
             }
             statements.push(self.parse_stmt()?);
         }
@@ -293,9 +318,10 @@ impl Parser {
             Token::If => self.parse_if(),
             Token::While => self.parse_while(),
             Token::Ident(_) => self.parse_assign(),
-            token => Err(CustError::new(format!(
-                "unexpected token in statement: {token:?}"
-            ))),
+            token => Err(Self::error_at(
+                format!("unexpected token in statement: {token:?}"),
+                self.peek_located(),
+            )),
         }
     }
 
@@ -433,7 +459,8 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> CustResult<Expr> {
-        match self.advance() {
+        let found = self.advance();
+        match found.kind.clone() {
             Token::Number(value) => Ok(Expr::Number(value)),
             Token::Ident(name) => Ok(Expr::Var(name)),
             Token::LParen => {
@@ -441,40 +468,48 @@ impl Parser {
                 self.expect(Token::RParen)?;
                 Ok(expr)
             }
-            token => Err(CustError::new(format!(
-                "expected expression, found {token:?}"
-            ))),
+            token => Err(Self::error_at(
+                format!("expected expression, found {token:?}"),
+                &found,
+            )),
         }
     }
 
     fn expect(&mut self, expected: Token) -> CustResult<()> {
         let found = self.advance();
-        if found == expected {
+        if found.kind == expected {
             Ok(())
         } else {
-            Err(CustError::new(format!(
-                "expected {expected:?}, found {found:?}"
-            )))
+            Err(Self::error_at(
+                format!("expected {expected:?}, found {:?}", found.kind),
+                &found,
+            ))
         }
     }
 
     fn expect_ident(&mut self) -> CustResult<String> {
-        match self.advance() {
+        let found = self.advance();
+        match found.kind.clone() {
             Token::Ident(name) => Ok(name),
-            token => Err(CustError::new(format!(
-                "expected identifier, found {token:?}"
-            ))),
+            token => Err(Self::error_at(
+                format!("expected identifier, found {token:?}"),
+                &found,
+            )),
         }
     }
 
     fn expect_ident_named(&mut self, expected: &str) -> CustResult<()> {
-        let name = self.expect_ident()?;
-        if name == expected {
-            Ok(())
-        } else {
-            Err(CustError::new(format!(
-                "expected function '{expected}', found '{name}'"
-            )))
+        let found = self.advance();
+        match found.kind.clone() {
+            Token::Ident(name) if name == expected => Ok(()),
+            Token::Ident(name) => Err(Self::error_at(
+                format!("expected function '{expected}', found '{name}'"),
+                &found,
+            )),
+            token => Err(Self::error_at(
+                format!("expected identifier, found {token:?}"),
+                &found,
+            )),
         }
     }
 
@@ -492,15 +527,28 @@ impl Parser {
     }
 
     fn peek(&self) -> &Token {
-        self.tokens.get(self.pos).unwrap_or(&Token::Eof)
+        &self.peek_located().kind
     }
 
-    fn advance(&mut self) -> Token {
-        let token = self.peek().clone();
-        if !matches!(token, Token::Eof) {
+    fn peek_located(&self) -> &LocatedToken {
+        self.tokens
+            .get(self.pos)
+            .expect("lexer always appends an EOF token")
+    }
+
+    fn advance(&mut self) -> LocatedToken {
+        let token = self.peek_located().clone();
+        if !matches!(token.kind, Token::Eof) {
             self.pos += 1;
         }
         token
+    }
+
+    fn error_at(message: String, token: &LocatedToken) -> CustError {
+        CustError::new(format!(
+            "{message} at line {}, column {}",
+            token.line, token.column
+        ))
     }
 }
 

@@ -75,3 +75,15 @@ fn reports_line_and_column_for_out_of_range_integer_literal() {
         "integer literal out of range at line 2, column 8"
     );
 }
+
+#[test]
+fn reports_line_and_column_for_parser_expression_errors() {
+    let program = "int main() {\nreturn ;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected expression, found Semi at line 2, column 8"
+    );
+}

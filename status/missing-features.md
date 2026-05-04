@@ -4,7 +4,7 @@ Prioritized backlog for autonomous implementation.
 
 ## P0 — correctness and developer trust
 
-- [ ] Parser errors with source spans: line, column, token context
+- [x] Parser errors with source spans: line, column, token context
 - [ ] Add token context snippets to lexer errors
 - [ ] Block scoping rules for variables inside `{ ... }`
 - [ ] Better parser recovery/error messages
