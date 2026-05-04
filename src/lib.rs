@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::rc::Rc;
@@ -46,6 +46,7 @@ enum Token {
     Star,
     Slash,
     Percent,
+    Amp,
     AndAnd,
     OrOr,
     Bang,
@@ -87,6 +88,8 @@ enum Expr {
     Var(String),
     ArrayGet { name: String, index: Box<Expr> },
     StringGet { values: Vec<i64>, index: Box<Expr> },
+    AddressOf(String),
+    Deref(Box<Expr>),
     Call { name: String, args: Vec<Expr> },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
@@ -138,11 +141,16 @@ enum BinaryOp {
 enum Stmt {
     Empty,
     VarDecl(String, Expr),
+    PointerDecl(String, Expr),
     ArrayDecl {
         name: String,
         len: usize,
     },
     Assign(String, Expr),
+    DerefAssign {
+        pointer: Expr,
+        value: Expr,
+    },
     ArrayAssign {
         name: String,
         index: Expr,
@@ -427,6 +435,10 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 advance_position('&', &mut line, &mut column, &mut i);
                 advance_position('&', &mut line, &mut column, &mut i);
             }
+            '&' => {
+                push_token(&mut tokens, Token::Amp, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
+            }
             '|' if chars.get(i + 1) == Some(&'|') => {
                 push_token(&mut tokens, Token::OrOr, line, column);
                 advance_position('|', &mut line, &mut column, &mut i);
@@ -655,6 +667,7 @@ impl Parser {
             Token::For => self.parse_for(),
             Token::Break => self.parse_break(),
             Token::Continue => self.parse_continue(),
+            Token::Star if self.starts_deref_assignment_stmt() => self.parse_deref_assign(),
             Token::Ident(_) if self.starts_assignment_stmt() => self.parse_assign(),
             Token::Ident(_)
             | Token::Number(_)
@@ -662,6 +675,8 @@ impl Parser {
             | Token::Plus
             | Token::Minus
             | Token::Bang
+            | Token::Star
+            | Token::Amp
             | Token::LParen => self.parse_expr_stmt_with_semi(true),
             Token::RParen => Err(Self::error_at(
                 "unmatched ')' in statement".to_string(),
@@ -689,7 +704,16 @@ impl Parser {
 
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         self.expect_type()?;
+        let is_pointer = self.matches(&Token::Star);
         let name = self.expect_ident()?;
+        if is_pointer {
+            self.expect(Token::Assign)?;
+            let expr = self.parse_expr()?;
+            if require_semi {
+                self.expect_semicolon_after("pointer declaration")?;
+            }
+            return Ok(Stmt::PointerDecl(name, expr));
+        }
         if self.matches(&Token::LBracket) {
             let len = self.expect_array_len()?;
             self.expect_closing_bracket_after("array length")?;
@@ -724,6 +748,15 @@ impl Parser {
 
     fn parse_assign(&mut self) -> CustResult<Stmt> {
         self.parse_assign_with_semi(true)
+    }
+
+    fn parse_deref_assign(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::Star)?;
+        let pointer = self.parse_unary()?;
+        self.expect(Token::Assign)?;
+        let value = self.parse_expr()?;
+        self.expect_semicolon_after("assignment")?;
+        Ok(Stmt::DerefAssign { pointer, value })
     }
 
     fn parse_assign_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
@@ -961,6 +994,17 @@ impl Parser {
             Ok(Expr::UnaryMinus(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Bang) {
             Ok(Expr::LogicalNot(Box::new(self.parse_unary()?)))
+        } else if self.matches(&Token::Star) {
+            Ok(Expr::Deref(Box::new(self.parse_unary()?)))
+        } else if self.matches(&Token::Amp) {
+            let found = self.advance();
+            match found.kind.clone() {
+                Token::Ident(name) => Ok(Expr::AddressOf(name)),
+                token => Err(Self::error_at(
+                    format!("expected identifier after '&', found {token:?}"),
+                    &found,
+                )),
+            }
         } else {
             self.parse_primary()
         }
@@ -1175,7 +1219,19 @@ impl Parser {
                 | Token::Plus
                 | Token::Minus
                 | Token::Bang
+                | Token::Star
+                | Token::Amp
                 | Token::LParen
+        )
+    }
+
+    fn starts_deref_assignment_stmt(&self) -> bool {
+        matches!(
+            (
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                self.tokens.get(self.pos + 2).map(|token| &token.kind),
+            ),
+            (Some(Token::Ident(_)), Some(Token::Assign))
         )
     }
 
@@ -1244,9 +1300,17 @@ const MAX_CALL_DEPTH: usize = 256;
 
 #[derive(Default)]
 struct Interpreter {
-    scopes: Vec<HashMap<String, Value>>,
+    scopes: Vec<Scope>,
+    live_scope_ids: HashSet<usize>,
+    next_scope_id: usize,
     functions: HashMap<String, Function>,
     call_depth: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Scope {
+    id: usize,
+    values: HashMap<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1261,6 +1325,13 @@ enum ExecFlow {
 enum Value {
     Scalar(i64),
     Array(Rc<RefCell<ArrayValue>>),
+    Pointer(PointerValue),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PointerValue {
+    Null,
+    Scalar { scope_id: usize, name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1329,7 +1400,7 @@ impl Interpreter {
         }
 
         self.call_depth += 1;
-        self.scopes.push(param_scope);
+        self.push_scope_with_values(param_scope);
         let result = match self.exec_block(&function.body) {
             Ok(ExecFlow::Return(value)) => Ok(value),
             Ok(ExecFlow::None) => Err(CustError::new(format!(
@@ -1339,7 +1410,7 @@ impl Interpreter {
             Ok(ExecFlow::Continue) => Err(CustError::new("continue outside loop")),
             Err(error) => Err(error),
         };
-        self.scopes.pop();
+        self.pop_scope();
         self.call_depth -= 1;
         result
     }
@@ -1380,52 +1451,173 @@ impl Interpreter {
     }
 
     fn exec_block(&mut self, statements: &[Stmt]) -> CustResult<ExecFlow> {
-        self.scopes.push(HashMap::new());
+        self.push_scope();
         for stmt in statements {
             match self.exec_stmt(stmt) {
                 Ok(ExecFlow::None) => {}
                 Ok(flow) => {
-                    self.scopes.pop();
+                    self.pop_scope();
                     return Ok(flow);
                 }
                 Err(error) => {
-                    self.scopes.pop();
+                    self.pop_scope();
                     return Err(error);
                 }
             }
         }
-        self.scopes.pop();
+        self.pop_scope();
         Ok(ExecFlow::None)
     }
 
+    fn push_scope(&mut self) {
+        self.push_scope_with_values(HashMap::new());
+    }
+
+    fn push_scope_with_values(&mut self, values: HashMap<String, Value>) {
+        let id = self.next_scope_id;
+        self.next_scope_id += 1;
+        self.live_scope_ids.insert(id);
+        self.scopes.push(Scope { id, values });
+    }
+
+    fn pop_scope(&mut self) {
+        if let Some(scope) = self.scopes.pop() {
+            self.live_scope_ids.remove(&scope.id);
+        }
+    }
+
     fn current_scope_mut(&mut self) -> &mut HashMap<String, Value> {
-        self.scopes
+        &mut self
+            .scopes
             .last_mut()
             .expect("exec_block always creates a current scope")
+            .values
+    }
+
+    fn find_variable(&self, name: &str) -> Option<&Value> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.values.get(name))
     }
 
     fn find_variable_mut(&mut self, name: &str) -> Option<&mut Value> {
         self.scopes
             .iter_mut()
             .rev()
-            .find_map(|scope| scope.get_mut(name))
+            .find_map(|scope| scope.values.get_mut(name))
     }
 
     fn find_scalar(&self, name: &str) -> CustResult<i64> {
-        match self.scopes.iter().rev().find_map(|scope| scope.get(name)) {
+        match self.find_variable(name) {
             Some(Value::Scalar(value)) => Ok(*value),
             Some(Value::Array(_)) => Err(CustError::new(format!("array '{name}' used as scalar"))),
+            Some(Value::Pointer(_)) => {
+                Err(CustError::new(format!("pointer '{name}' used as scalar")))
+            }
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
 
     fn find_array(&self, name: &str) -> CustResult<Rc<RefCell<ArrayValue>>> {
-        match self.scopes.iter().rev().find_map(|scope| scope.get(name)) {
+        match self.find_variable(name) {
             Some(Value::Array(values)) => Ok(Rc::clone(values)),
             Some(Value::Scalar(_)) => {
                 Err(CustError::new(format!("variable '{name}' is not an array")))
             }
+            Some(Value::Pointer(_)) => {
+                Err(CustError::new(format!("pointer '{name}' is not an array")))
+            }
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn address_of_scalar(&self, name: &str) -> CustResult<PointerValue> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(value) = scope.values.get(name) {
+                return match value {
+                    Value::Scalar(_) => Ok(PointerValue::Scalar {
+                        scope_id: scope.id,
+                        name: name.to_string(),
+                    }),
+                    Value::Array(_) => Err(CustError::new(format!(
+                        "array '{name}' requires indexed address-of"
+                    ))),
+                    Value::Pointer(_) => Err(CustError::new(format!(
+                        "pointer '{name}' cannot be addressed in this pointer milestone"
+                    ))),
+                };
+            }
+        }
+        Err(CustError::new(format!("undefined variable '{name}'")))
+    }
+
+    fn eval_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
+        match expr {
+            Expr::Number(0) => Ok(PointerValue::Null),
+            Expr::AddressOf(name) => self.address_of_scalar(name),
+            Expr::Var(name) => match self.find_variable(name) {
+                Some(Value::Pointer(pointer)) => Ok(pointer.clone()),
+                Some(Value::Scalar(_)) => Err(CustError::new(format!(
+                    "variable '{name}' is not a pointer"
+                ))),
+                Some(Value::Array(_)) => {
+                    Err(CustError::new(format!("array '{name}' is not a pointer")))
+                }
+                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            _ => Err(CustError::new("expected pointer expression")),
+        }
+    }
+
+    fn deref_pointer(&self, pointer: &PointerValue) -> CustResult<i64> {
+        match pointer {
+            PointerValue::Null => Err(CustError::new("null pointer dereference")),
+            PointerValue::Scalar { scope_id, name } => {
+                if !self.live_scope_ids.contains(scope_id) {
+                    return Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    )));
+                }
+                let value = self
+                    .scopes
+                    .iter()
+                    .find(|scope| scope.id == *scope_id)
+                    .and_then(|scope| scope.values.get(name));
+                match value {
+                    Some(Value::Scalar(value)) => Ok(*value),
+                    _ => Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    ))),
+                }
+            }
+        }
+    }
+
+    fn assign_deref_pointer(&mut self, pointer: &PointerValue, value: i64) -> CustResult<()> {
+        match pointer {
+            PointerValue::Null => Err(CustError::new("null pointer dereference")),
+            PointerValue::Scalar { scope_id, name } => {
+                if !self.live_scope_ids.contains(scope_id) {
+                    return Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    )));
+                }
+                let slot = self
+                    .scopes
+                    .iter_mut()
+                    .find(|scope| scope.id == *scope_id)
+                    .and_then(|scope| scope.values.get_mut(name));
+                match slot {
+                    Some(Value::Scalar(slot)) => {
+                        *slot = value;
+                        Ok(())
+                    }
+                    _ => Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    ))),
+                }
+            }
         }
     }
 
@@ -1464,6 +1656,17 @@ impl Interpreter {
                 scope.insert(name.clone(), Value::Scalar(value));
                 Ok(ExecFlow::None)
             }
+            Stmt::PointerDecl(name, expr) => {
+                let pointer = self.eval_pointer(expr)?;
+                let scope = self.current_scope_mut();
+                if scope.contains_key(name) {
+                    return Err(CustError::new(format!(
+                        "variable '{name}' already declared in this scope"
+                    )));
+                }
+                scope.insert(name.clone(), Value::Pointer(pointer));
+                Ok(ExecFlow::None)
+            }
             Stmt::ArrayDecl { name, len } => {
                 let scope = self.current_scope_mut();
                 if scope.contains_key(name) {
@@ -1478,22 +1681,35 @@ impl Interpreter {
                 Ok(ExecFlow::None)
             }
             Stmt::Assign(name, expr) => {
-                let value = self.eval(expr)?;
-                if let Some(slot) = self.find_variable_mut(name) {
-                    match slot {
-                        Value::Scalar(slot) => {
+                let existing = self.find_variable(name).cloned();
+                match existing {
+                    Some(Value::Scalar(_)) => {
+                        let value = self.eval(expr)?;
+                        if let Some(Value::Scalar(slot)) = self.find_variable_mut(name) {
                             *slot = value;
-                            Ok(ExecFlow::None)
                         }
-                        Value::Array(_) => Err(CustError::new(format!(
-                            "array '{name}' requires indexed assignment"
-                        ))),
+                        Ok(ExecFlow::None)
                     }
-                } else {
-                    Err(CustError::new(format!(
+                    Some(Value::Pointer(_)) => {
+                        let pointer = self.eval_pointer(expr)?;
+                        if let Some(Value::Pointer(slot)) = self.find_variable_mut(name) {
+                            *slot = pointer;
+                        }
+                        Ok(ExecFlow::None)
+                    }
+                    Some(Value::Array(_)) => Err(CustError::new(format!(
+                        "array '{name}' requires indexed assignment"
+                    ))),
+                    None => Err(CustError::new(format!(
                         "assignment to undeclared variable '{name}'"
-                    )))
+                    ))),
                 }
+            }
+            Stmt::DerefAssign { pointer, value } => {
+                let pointer = self.eval_pointer(pointer)?;
+                let value = self.eval(value)?;
+                self.assign_deref_pointer(&pointer, value)?;
+                Ok(ExecFlow::None)
             }
             Stmt::ArrayAssign { name, index, value } => {
                 let value = self.eval(value)?;
@@ -1557,9 +1773,9 @@ impl Interpreter {
         increment: Option<&Stmt>,
         body: &[Stmt],
     ) -> CustResult<ExecFlow> {
-        self.scopes.push(HashMap::new());
+        self.push_scope();
         let result = self.exec_for_in_current_scope(init, cond, increment, body);
-        self.scopes.pop();
+        self.pop_scope();
         result
     }
 
@@ -1615,6 +1831,11 @@ impl Interpreter {
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
             Expr::Var(name) => self.find_scalar(name),
+            Expr::AddressOf(_) => Err(CustError::new("pointer value used as scalar")),
+            Expr::Deref(pointer) => {
+                let pointer = self.eval_pointer(pointer)?;
+                self.deref_pointer(&pointer)
+            }
             Expr::ArrayGet { name, index } => {
                 let (array, index) = self.checked_array_index(name, index)?;
                 Ok(array.borrow().elements[index])

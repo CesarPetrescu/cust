@@ -576,6 +576,31 @@ fn supports_string_literals_as_read_only_byte_arrays() {
 }
 
 #[test]
+fn supports_scalar_pointer_address_dereference_write_and_reassignment() {
+    let program = include_str!("fixtures/valid/pointers_scalars.c");
+
+    assert_eq!(interpret(program).unwrap(), 54);
+}
+
+#[test]
+fn reports_null_pointer_dereferences() {
+    let program = include_str!("fixtures/invalid/null_pointer_dereference.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "null pointer dereference");
+}
+
+#[test]
+fn reports_pointer_dereferences_after_scalar_scope_ends() {
+    let program = include_str!("fixtures/invalid/pointer_out_of_scope.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "pointer to out-of-scope variable 'x'");
+}
+
+#[test]
 fn rejects_writes_through_string_literal_array_parameters() {
     let program = include_str!("fixtures/invalid/string_literal_assignment.c");
 

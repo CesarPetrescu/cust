@@ -283,4 +283,4 @@ Expected diagnostic contains `cannot modify read-only array`.
 
 ## Recommended next work package
 
-Implement the first pointer milestone using the implementation steps above, starting with scalar address-of/dereference and the `pointers_scalars.c` RED fixture before touching interpreter storage.
+The scalar pointer milestone is implemented. Next, extend pointer support to parameters plus array/string decay: parse `int *`/`char *` parameters, pass `&x` to pointer parameters, decay arrays and string literals to pointer arguments, support pointer indexing for array-base targets, and add valid/invalid interpreter plus C compatibility fixtures for the supported subset.

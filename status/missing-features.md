@@ -28,6 +28,8 @@ Prioritized backlog for autonomous implementation.
 - [x] arrays
 - [x] string literals as read-only byte arrays
 - [x] pointer model design document before implementation
+- [x] first scalar pointer milestone: pointer declarations, scalar address-of/dereference, dereference assignment, reassignment, null diagnostics, and out-of-scope scalar diagnostics
+- [ ] pointer parameters, array/string decay to pointer arguments, pointer indexing, and `&array[index]`
 
 ## P3 — C compatibility tooling
 

@@ -39,9 +39,10 @@ Last updated: 2026-05-04
 - declarations: `int x = expr;`, `char x = expr;`, `int xs[N];`, or `char cs[N];`
 - `int` and `char` function parameters (stored as integer values in the current interpreter model)
 - one-dimensional array parameters such as `int values[3]`, passed by reference to the same array storage; string literals can be passed to `char` array parameters as read-only NUL-terminated byte arrays
-- Pointer support is not implemented yet, but `docs/plans/pointer-model.md` now defines the safe first-pass model, implementation steps, and concrete valid/invalid acceptance fixtures for the next pointer milestones.
-- assignments: `x = expr;` and `xs[index] = expr;`
-- array indexing expressions `xs[index]` and string literal indexing expressions `"text"[index]` with runtime negative/out-of-bounds diagnostics
+- First-pass scalar pointer support from `docs/plans/pointer-model.md`: `int *p = &x;`, `char *p = &c;`, `p = &y;`, `p = 0;`, `*p` reads, and `*p = expr;` writes through interpreter-owned scalar references. Null dereferences report `null pointer dereference`; pointers to scalar variables whose block/function scope has ended report `pointer to out-of-scope variable '<name>'`.
+- Pointer parameters, array/string decay to pointers, pointer indexing, and `&array[index]` are not implemented yet.
+- assignments: `x = expr;`, `xs[index] = expr;`, pointer reassignment (`p = &x;`/`p = 0;`), and scalar dereference assignment (`*p = expr;`)
+- array indexing expressions `xs[index]`, string literal indexing expressions `"text"[index]`, and scalar pointer dereference expressions `*p` with runtime negative/out-of-bounds/null/out-of-scope diagnostics as applicable
 - `return expr;`
 - nested block statements `{ ... }` with per-block variable scopes, inner shadowing, and outer-scope assignment lookup
 - `if (...) { ... } else { ... }`
@@ -49,7 +50,7 @@ Last updated: 2026-05-04
 - `for (init; condition; increment) { ... }` with optional clauses, declaration/assignment initializers, assignment increments, loop-local initializer scope, and the shared 1,000,000-iteration safety limit
 - `break;` and `continue;` in `while` and `for` loop bodies, including propagation through nested blocks/conditionals and diagnostics when used outside loops
 - empty statements (`;`) and expression statements (`expr;`) in block bodies and C-style `for` initializer/increment clauses
-- `+ - * / %`, unary `+`, unary `-`
+- `+ - * / %`, unary `+`, unary `-`, unary `*` for scalar pointer dereference, and unary `&` for scalar address-of
 - `== != < <= > >=`
 - logical operators `&&`, `||`, and `!` with C-style integer truth values and short-circuit evaluation for `&&`/`||`
 - `//` comments
@@ -57,7 +58,7 @@ Last updated: 2026-05-04
 ## Test/tooling coverage
 
 - `tests/c_compat.rs` compiles supported compatibility fixtures with `$CC`, `gcc`, `clang`, or `cc`, runs the resulting native executables, and asserts their process exit codes match `cust::interpret` results. The Docker build/test image installs `gcc` and `libc6-dev` so this coverage runs under `docker compose run --rm test`.
-- Compatibility corpus currently covers arithmetic/control flow/logical operators plus functions, recursion, arrays, and string-literal/char-array interactions under `tests/fixtures/compat/valid/`.
+- Compatibility corpus currently covers arithmetic/control flow/logical operators plus functions, recursion, arrays, string-literal/char-array interactions, and scalar pointer reads/writes under `tests/fixtures/compat/valid/`.
 
 ## Diagnostics
 
@@ -80,7 +81,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding pointer design documentation and the `--version` CLI flag in the 2026-05-04 autonomous run. The suite includes `tests/c_compat.rs`, which compiles supported fixture programs with a native C compiler and compares the compiled C exit code to Cust's interpreted result. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after adding scalar pointer declarations/address-of/dereference/reassignment and related diagnostics in the 2026-05-04 autonomous run. The suite includes `tests/c_compat.rs`, which compiles supported fixture programs with a native C compiler and compares the compiled C exit code to Cust's interpreted result. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 
