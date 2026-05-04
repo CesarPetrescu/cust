@@ -4,11 +4,10 @@ The autonomous agent should pick only one small task per cron run unless the tas
 
 ## Next recommended tasks
 
-1. Improve local Docker test ergonomics so `docker compose run --rm test` cannot silently use a stale image after source changes.
-2. Add parser error location tracking.
-3. Add token context snippets to lexer errors.
-4. Add fixtures under `tests/fixtures/valid` and `tests/fixtures/invalid`.
-5. Add block scoping with TDD.
+1. Add parser error location tracking.
+2. Add token context snippets to lexer errors.
+3. Add fixtures under `tests/fixtures/valid` and `tests/fixtures/invalid`.
+4. Add block scoping with TDD.
 
 ## Every-run checklist
 

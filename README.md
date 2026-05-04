@@ -59,6 +59,8 @@ The Docker Compose setup is intentionally locked down for safer automated testin
 | non-root runtime user | avoids running interpreted code as root |
 | read-only `examples` volume | sample C inputs cannot be modified by the runtime container |
 
+Both Compose services use `pull_policy: build`, so `docker compose run --rm test` and `docker compose run --rm cust` rebuild from the current checkout instead of silently reusing stale local images.
+
 The `test` service keeps a writable container overlay so Cargo can update `target/`, but it has no host source mount, no network, dropped capabilities, and no privilege escalation.
 
 ## Supported v0.1 language

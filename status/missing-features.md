@@ -9,7 +9,7 @@ Prioritized backlog for autonomous implementation.
 - [ ] Block scoping rules for variables inside `{ ... }`
 - [ ] Better parser recovery/error messages
 - [ ] Test fixtures for valid and invalid programs
-- [ ] Improve local Docker test automation for repeatable cron runs
+- [x] Improve local Docker test automation for repeatable cron runs
 
 ## P1 — C subset expansion
 

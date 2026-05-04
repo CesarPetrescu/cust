@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-04 autonomous run after local and Docker verification passed.
+None. Last reviewed in the 2026-05-04 autonomous run after local and Docker verification passed with Compose `pull_policy: build` enabled.
 
 ## Blocker template
 

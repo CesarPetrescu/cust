@@ -2,6 +2,7 @@ services:
   cust:
     build: .
     image: cust:v0.1
+    pull_policy: build
     network_mode: "none"
     read_only: true
     security_opt:
@@ -19,6 +20,7 @@ services:
       context: .
       target: build
     image: cust-test:v0.1
+    pull_policy: build
     network_mode: "none"
     security_opt:
       - no-new-privileges:true

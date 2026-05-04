@@ -27,6 +27,7 @@ Last updated: 2026-05-04
   - `Dockerfile`
   - `docker-compose.yml`
   - safe runtime service with no network, non-root user, read-only FS, dropped capabilities
+  - Compose services force source rebuilds with `pull_policy: build` to avoid stale-image test/runtime runs
 
 ## Supported language subset
 
@@ -55,7 +56,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding lexer error source locations in the 2026-05-04 autonomous run. Docker images were rebuilt before the final Docker verification so container tests used the updated source.
+All passed after improving Docker Compose rebuild ergonomics in the 2026-05-04 autonomous run. `docker compose run --rm test` and `docker compose run --rm cust` now build from the current checkout via Compose `pull_policy: build`.
 
 ## Operating rule for autonomous agent
 
