@@ -1,6 +1,6 @@
 # Cust TODO
 
-The autonomous agent should complete a meaningful work package per cron run: usually one full C/interpreter feature or 2-4 tightly related small tasks. Prefer real code and test expansion over status-only churn.
+The autonomous agent should complete a meaningful roadmap work package per cron run: usually one full C/interpreter/tooling feature or 2-4 tightly related backlog items. Prefer finishing concrete unchecked items with code/tests over generic improvement or status-only churn.
 
 ## Next recommended tasks
 
@@ -14,12 +14,12 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 - [ ] Pull latest `main` with `git checkout main && git pull --ff-only`
 - [ ] Read all files in `status/`
-- [ ] Ideate candidate improvements from status/backlog/current code
+- [ ] Ideate candidate roadmap-completion tasks from status/backlog/current code
 - [ ] Think through impact, safety, dependencies, and testability; choose the best meaningful work package
 - [ ] Record good overflow ideas in `status/todo.md` or `status/missing-features.md`
 - [ ] Research docs if uncertain
 - [ ] Write/update failing tests first for code behavior
-- [ ] Create/implement the full selected C/interpreter work package, not only the smallest possible status/docs change
+- [ ] Create/implement the full selected C/interpreter/tooling work package and close concrete backlog items, not vague improvements
 - [ ] Run local verification
 - [ ] Run Docker verification
 - [ ] Update `status/current-state.md`

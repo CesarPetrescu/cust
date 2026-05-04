@@ -2,9 +2,9 @@
 
 > **For Hermes:** Use this plan as the operating specification for recurring autonomous development on Cust.
 
-**Goal:** Run a safe autonomous coding loop that improves Cust substantially each run while keeping status files, tests, Docker verification, and Git history clean.
+**Goal:** Run a safe autonomous coding loop that aggressively finishes concrete Cust roadmap items each run while keeping status files, tests, Docker verification, and Git history clean.
 
-**Architecture:** A Hermes cron job runs against `/root/hermes-workspace/cust`. Each run pulls first, reads `status/`, ideates candidate improvements, thinks through impact/safety/testability, selects a meaningful work package, researches as needed, uses TDD for implementation, verifies locally and in Docker, updates status/backlog files, commits, pushes, and reports results. If blocked, it records the blocker and stops without pushing broken code.
+**Architecture:** A Hermes cron job runs against `/root/hermes-workspace/cust`. Each run pulls first, reads `status/`, ideates candidate roadmap-completion work, thinks through impact/safety/testability, selects the highest-impact finishable work package, researches as needed, uses TDD for implementation, verifies locally and in Docker, updates status/backlog files, commits, pushes, and reports results. If blocked, it records the blocker and stops without pushing broken code.
 
 **Tech Stack:** Rust, Cargo, Docker Compose, Git/GitHub SSH deploy key, Hermes cron, Hermes web/search + file + terminal toolsets.
 
@@ -12,7 +12,7 @@
 
 ## Operating Principles
 
-1. **Substantial safe increments:** complete one meaningful C/interpreter work package per run, usually one full C language feature or 2-4 tightly related small tasks.
+1. **Finish roadmap items:** complete one meaningful C/interpreter/tooling work package per run, usually one full feature or 2-4 tightly related backlog items. The goal is to finish the backlog, not merely improve things.
 2. **TDD for behavior:** tests before implementation for code changes.
 3. **Docker verification:** no push unless Docker test path passes.
 4. **Status-first:** update `status/` every run.
@@ -58,7 +58,7 @@ Read:
 
 ### 3. Ideate, evaluate, and choose a work package
 
-First list several candidate improvements from `status/`, current code shape, and the C-subset roadmap. Think through whether each idea is good now: impact on Cust, safety, dependencies, testability, and expected verification cost. Choose the best work package that can be completed and verified in this run. If more good ideas exist than fit, preserve them in `status/todo.md` or `status/missing-features.md`.
+First list several candidate roadmap-completion tasks from `status/`, current code shape, and the C-subset/tooling roadmap. Think through whether each idea is good now: impact on Cust, safety, dependencies, testability, and expected verification cost. Choose the highest-impact work package that can be completed and verified in this run. If more good ideas exist than fit, preserve them in `status/todo.md` or `status/missing-features.md` with concrete acceptance tests.
 
 Priority order:
 
@@ -68,7 +68,7 @@ Priority order:
 4. First items from `todo.md`
 5. Documentation/status-only improvement only if no safe code task exists or code work is blocked
 
-A work package should normally produce real interpreter/test changes. Prefer implementing missing C behavior over cosmetic cleanup. It is acceptable to complete multiple tightly related TODOs in the same run when they share parser/interpreter/test setup.
+A work package should normally produce real interpreter/tooling/test changes. Prefer implementing missing C behavior, compatibility tooling, diagnostics, or CLI/product items over cosmetic cleanup. It is acceptable to complete multiple tightly related TODOs in the same run when they share parser/interpreter/test setup.
 
 ### 4. Research if needed
 
@@ -129,7 +129,8 @@ Report compactly:
 
 - ideation summary and why the selected work package was chosen
 - work package selected
-- C/features implemented
+- backlog items completed
+- C/tooling/product features implemented
 - tests added/expanded
 - files changed
 - tests run + pass/fail
