@@ -1,6 +1,8 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::rc::Rc;
 
 pub type CustResult<T> = Result<T, CustError>;
 
@@ -55,6 +57,8 @@ enum Token {
     Ge,
     LParen,
     RParen,
+    LBracket,
+    RBracket,
     LBrace,
     RBrace,
     Comma,
@@ -79,6 +83,7 @@ impl LocatedToken {
 enum Expr {
     Number(i64),
     Var(String),
+    ArrayGet { name: String, index: Box<Expr> },
     Call { name: String, args: Vec<Expr> },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
@@ -93,8 +98,20 @@ struct Program {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Function {
-    params: Vec<String>,
+    params: Vec<Param>,
     body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Param {
+    name: String,
+    kind: ParamKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParamKind {
+    Scalar,
+    Array(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,7 +135,16 @@ enum BinaryOp {
 enum Stmt {
     Empty,
     VarDecl(String, Expr),
+    ArrayDecl {
+        name: String,
+        len: usize,
+    },
     Assign(String, Expr),
+    ArrayAssign {
+        name: String,
+        index: Expr,
+        value: Expr,
+    },
     Expr(Expr),
     Return(Expr),
     Break,
@@ -340,6 +366,14 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 push_token(&mut tokens, Token::RParen, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
+            '[' => {
+                push_token(&mut tokens, Token::LBracket, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
+            }
+            ']' => {
+                push_token(&mut tokens, Token::RBracket, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
+            }
             '{' => {
                 push_token(&mut tokens, Token::LBrace, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
@@ -470,7 +504,7 @@ impl Parser {
         Ok((name, Function { params, body }))
     }
 
-    fn parse_params(&mut self) -> CustResult<Vec<String>> {
+    fn parse_params(&mut self) -> CustResult<Vec<Param>> {
         let mut params = Vec::new();
         if self.check(&Token::RParen) {
             return Ok(params);
@@ -478,7 +512,15 @@ impl Parser {
 
         loop {
             self.expect_type()?;
-            params.push(self.expect_ident()?);
+            let name = self.expect_ident()?;
+            let kind = if self.matches(&Token::LBracket) {
+                let len = self.expect_array_len()?;
+                self.expect(Token::RBracket)?;
+                ParamKind::Array(len)
+            } else {
+                ParamKind::Scalar
+            };
+            params.push(Param { name, kind });
 
             if self.matches(&Token::Comma) {
                 if self.check(&Token::RParen) {
@@ -530,7 +572,7 @@ impl Parser {
             Token::For => self.parse_for(),
             Token::Break => self.parse_break(),
             Token::Continue => self.parse_continue(),
-            Token::Ident(_) if self.peek_next() == &Token::Assign => self.parse_assign(),
+            Token::Ident(_) if self.starts_assignment_stmt() => self.parse_assign(),
             Token::Ident(_)
             | Token::Number(_)
             | Token::Plus
@@ -556,6 +598,14 @@ impl Parser {
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         self.expect_type()?;
         let name = self.expect_ident()?;
+        if self.matches(&Token::LBracket) {
+            let len = self.expect_array_len()?;
+            self.expect(Token::RBracket)?;
+            if require_semi {
+                self.expect(Token::Semi)?;
+            }
+            return Ok(Stmt::ArrayDecl { name, len });
+        }
         self.expect(Token::Assign)?;
         let expr = self.parse_expr()?;
         if require_semi {
@@ -564,12 +614,38 @@ impl Parser {
         Ok(Stmt::VarDecl(name, expr))
     }
 
+    fn expect_array_len(&mut self) -> CustResult<usize> {
+        let found = self.advance();
+        match &found.kind {
+            Token::Number(value) if *value > 0 => usize::try_from(*value)
+                .map_err(|_| Self::error_at("array length is too large".to_string(), &found)),
+            Token::Number(_) => Err(Self::error_at(
+                "array length must be positive".to_string(),
+                &found,
+            )),
+            token => Err(Self::error_at(
+                format!("expected array length, found {token:?}"),
+                &found,
+            )),
+        }
+    }
+
     fn parse_assign(&mut self) -> CustResult<Stmt> {
         self.parse_assign_with_semi(true)
     }
 
     fn parse_assign_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         let name = self.expect_ident()?;
+        if self.matches(&Token::LBracket) {
+            let index = self.parse_expr()?;
+            self.expect(Token::RBracket)?;
+            self.expect(Token::Assign)?;
+            let value = self.parse_expr()?;
+            if require_semi {
+                self.expect(Token::Semi)?;
+            }
+            return Ok(Stmt::ArrayAssign { name, index, value });
+        }
         self.expect(Token::Assign)?;
         let expr = self.parse_expr()?;
         if require_semi {
@@ -640,7 +716,7 @@ impl Parser {
             None
         } else if matches!(self.peek(), Token::Int | Token::Char) {
             Some(Box::new(self.parse_var_decl()?))
-        } else if matches!(self.peek(), Token::Ident(_)) && self.peek_next() == &Token::Assign {
+        } else if self.starts_assignment_stmt() {
             Some(Box::new(self.parse_assign()?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(true)?))
@@ -661,7 +737,7 @@ impl Parser {
 
         let increment = if self.check(&Token::RParen) {
             None
-        } else if matches!(self.peek(), Token::Ident(_)) && self.peek_next() == &Token::Assign {
+        } else if self.starts_assignment_stmt() {
             Some(Box::new(self.parse_assign_with_semi(false)?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(false)?))
@@ -795,6 +871,13 @@ impl Parser {
                     let args = self.parse_call_args()?;
                     self.expect(Token::RParen)?;
                     Ok(Expr::Call { name, args })
+                } else if self.matches(&Token::LBracket) {
+                    let index = self.parse_expr()?;
+                    self.expect(Token::RBracket)?;
+                    Ok(Expr::ArrayGet {
+                        name,
+                        index: Box::new(index),
+                    })
                 } else {
                     Ok(Expr::Var(name))
                 }
@@ -916,6 +999,37 @@ impl Parser {
         )
     }
 
+    fn starts_assignment_stmt(&self) -> bool {
+        if !matches!(self.peek(), Token::Ident(_)) {
+            return false;
+        }
+        if self.peek_next() == &Token::Assign {
+            return true;
+        }
+        if self.peek_next() != &Token::LBracket {
+            return false;
+        }
+
+        let mut depth = 0usize;
+        for index in (self.pos + 1)..self.tokens.len() {
+            match &self.tokens[index].kind {
+                Token::LBracket => depth += 1,
+                Token::RBracket => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return self
+                            .tokens
+                            .get(index + 1)
+                            .is_some_and(|candidate| candidate.kind == Token::Assign);
+                    }
+                }
+                Token::Eof if depth > 0 => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
     fn peek_located(&self) -> &LocatedToken {
         self.tokens
             .get(self.pos)
@@ -942,17 +1056,23 @@ const MAX_CALL_DEPTH: usize = 256;
 
 #[derive(Default)]
 struct Interpreter {
-    scopes: Vec<HashMap<String, i64>>,
+    scopes: Vec<HashMap<String, Value>>,
     functions: HashMap<String, Function>,
     call_depth: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ExecFlow {
     None,
     Return(i64),
     Break,
     Continue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Value {
+    Scalar(i64),
+    Array(Rc<RefCell<Vec<i64>>>),
 }
 
 impl Interpreter {
@@ -961,18 +1081,18 @@ impl Interpreter {
         self.call_function("main", &[])
     }
 
-    fn call_function(&mut self, name: &str, args: &[i64]) -> CustResult<i64> {
+    fn call_function(&mut self, name: &str, arg_exprs: &[Expr]) -> CustResult<i64> {
         let function = self
             .functions
             .get(name)
             .cloned()
             .ok_or_else(|| CustError::new(format!("undefined function '{name}'")))?;
 
-        if function.params.len() != args.len() {
+        if function.params.len() != arg_exprs.len() {
             return Err(CustError::new(format!(
                 "function '{name}' expected {} arguments, got {}",
                 function.params.len(),
-                args.len()
+                arg_exprs.len()
             )));
         }
 
@@ -982,18 +1102,23 @@ impl Interpreter {
             )));
         }
 
-        self.call_depth += 1;
-
         let mut param_scope = HashMap::new();
-        for (param, arg) in function.params.iter().zip(args) {
-            if param_scope.insert(param.clone(), *arg).is_some() {
-                self.call_depth -= 1;
+        for (param, arg_expr) in function.params.iter().zip(arg_exprs) {
+            let arg = match param.kind {
+                ParamKind::Scalar => Value::Scalar(self.eval(arg_expr)?),
+                ParamKind::Array(expected_len) => {
+                    self.eval_array_argument(name, &param.name, expected_len, arg_expr)?
+                }
+            };
+            if param_scope.insert(param.name.clone(), arg).is_some() {
                 return Err(CustError::new(format!(
-                    "parameter '{param}' already declared in this function"
+                    "parameter '{}' already declared in this function",
+                    param.name
                 )));
             }
         }
 
+        self.call_depth += 1;
         self.scopes.push(param_scope);
         let result = match self.exec_block(&function.body) {
             Ok(ExecFlow::Return(value)) => Ok(value),
@@ -1007,6 +1132,28 @@ impl Interpreter {
         self.scopes.pop();
         self.call_depth -= 1;
         result
+    }
+
+    fn eval_array_argument(
+        &self,
+        function_name: &str,
+        param_name: &str,
+        expected_len: usize,
+        arg_expr: &Expr,
+    ) -> CustResult<Value> {
+        let Expr::Var(arg_name) = arg_expr else {
+            return Err(CustError::new(format!(
+                "function '{function_name}' array parameter '{param_name}' requires an array argument"
+            )));
+        };
+        let array = self.find_array(arg_name)?;
+        let actual_len = array.borrow().len();
+        if actual_len != expected_len {
+            return Err(CustError::new(format!(
+                "function '{function_name}' array parameter '{param_name}' expected length {expected_len}, got {actual_len}"
+            )));
+        }
+        Ok(Value::Array(array))
     }
 
     fn exec_block(&mut self, statements: &[Stmt]) -> CustResult<ExecFlow> {
@@ -1028,24 +1175,56 @@ impl Interpreter {
         Ok(ExecFlow::None)
     }
 
-    fn current_scope_mut(&mut self) -> &mut HashMap<String, i64> {
+    fn current_scope_mut(&mut self) -> &mut HashMap<String, Value> {
         self.scopes
             .last_mut()
             .expect("exec_block always creates a current scope")
     }
 
-    fn find_variable_mut(&mut self, name: &str) -> Option<&mut i64> {
+    fn find_variable_mut(&mut self, name: &str) -> Option<&mut Value> {
         self.scopes
             .iter_mut()
             .rev()
             .find_map(|scope| scope.get_mut(name))
     }
 
-    fn find_variable(&self, name: &str) -> Option<i64> {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|scope| scope.get(name).copied())
+    fn find_scalar(&self, name: &str) -> CustResult<i64> {
+        match self.scopes.iter().rev().find_map(|scope| scope.get(name)) {
+            Some(Value::Scalar(value)) => Ok(*value),
+            Some(Value::Array(_)) => Err(CustError::new(format!("array '{name}' used as scalar"))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn find_array(&self, name: &str) -> CustResult<Rc<RefCell<Vec<i64>>>> {
+        match self.scopes.iter().rev().find_map(|scope| scope.get(name)) {
+            Some(Value::Array(values)) => Ok(Rc::clone(values)),
+            Some(Value::Scalar(_)) => {
+                Err(CustError::new(format!("variable '{name}' is not an array")))
+            }
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn checked_array_index(
+        &mut self,
+        name: &str,
+        index: &Expr,
+    ) -> CustResult<(Rc<RefCell<Vec<i64>>>, usize)> {
+        let index_value = self.eval(index)?;
+        let array = self.find_array(name)?;
+        let len = array.borrow().len();
+        let Ok(index) = usize::try_from(index_value) else {
+            return Err(CustError::new(format!(
+                "array '{name}' index {index_value} out of bounds for length {len}"
+            )));
+        };
+        if index >= len {
+            return Err(CustError::new(format!(
+                "array '{name}' index {index_value} out of bounds for length {len}"
+            )));
+        }
+        Ok((array, index))
     }
 
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
@@ -1059,19 +1238,45 @@ impl Interpreter {
                         "variable '{name}' already declared in this scope"
                     )));
                 }
-                scope.insert(name.clone(), value);
+                scope.insert(name.clone(), Value::Scalar(value));
+                Ok(ExecFlow::None)
+            }
+            Stmt::ArrayDecl { name, len } => {
+                let scope = self.current_scope_mut();
+                if scope.contains_key(name) {
+                    return Err(CustError::new(format!(
+                        "variable '{name}' already declared in this scope"
+                    )));
+                }
+                scope.insert(
+                    name.clone(),
+                    Value::Array(Rc::new(RefCell::new(vec![0; *len]))),
+                );
                 Ok(ExecFlow::None)
             }
             Stmt::Assign(name, expr) => {
                 let value = self.eval(expr)?;
                 if let Some(slot) = self.find_variable_mut(name) {
-                    *slot = value;
-                    Ok(ExecFlow::None)
+                    match slot {
+                        Value::Scalar(slot) => {
+                            *slot = value;
+                            Ok(ExecFlow::None)
+                        }
+                        Value::Array(_) => Err(CustError::new(format!(
+                            "array '{name}' requires indexed assignment"
+                        ))),
+                    }
                 } else {
                     Err(CustError::new(format!(
                         "assignment to undeclared variable '{name}'"
                     )))
                 }
+            }
+            Stmt::ArrayAssign { name, index, value } => {
+                let value = self.eval(value)?;
+                let (array, index) = self.checked_array_index(name, index)?;
+                array.borrow_mut()[index] = value;
+                Ok(ExecFlow::None)
             }
             Stmt::Expr(expr) => {
                 self.eval(expr)?;
@@ -1179,16 +1384,12 @@ impl Interpreter {
     fn eval(&mut self, expr: &Expr) -> CustResult<i64> {
         match expr {
             Expr::Number(value) => Ok(*value),
-            Expr::Var(name) => self
-                .find_variable(name)
-                .ok_or_else(|| CustError::new(format!("undefined variable '{name}'"))),
-            Expr::Call { name, args } => {
-                let evaluated_args = args
-                    .iter()
-                    .map(|arg| self.eval(arg))
-                    .collect::<CustResult<Vec<_>>>()?;
-                self.call_function(name, &evaluated_args)
+            Expr::Var(name) => self.find_scalar(name),
+            Expr::ArrayGet { name, index } => {
+                let (array, index) = self.checked_array_index(name, index)?;
+                Ok(array.borrow()[index])
             }
+            Expr::Call { name, args } => self.call_function(name, args),
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::LogicalNot(inner) => Ok((self.eval(inner)? == 0) as i64),

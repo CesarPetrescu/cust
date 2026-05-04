@@ -4,9 +4,9 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 ## Next recommended tasks
 
-1. Design and implement one-dimensional integer/char arrays as the next P2 data-type expansion, including indexing expressions, bounds diagnostics, and fixture coverage.
+1. Add string literals as read-only byte arrays now that indexed array storage exists, including escape handling, terminator semantics, and fixture coverage.
 2. Continue improving parser recovery/error messages for additional malformed programs (for example trailing commas in function parameter lists, missing semicolons after declarations/assignments, and unmatched delimiters).
-3. Add string literals as read-only byte arrays after arrays exist, so string storage/indexing has a clear model.
+3. Design the pointer model before implementing pointer arithmetic or address/dereference operators.
 4. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
 5. Add CLI flags such as `--version`, `--ast`, `--tokens`, or `--max-steps` after the core C-subset expansion stabilizes.
 

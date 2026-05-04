@@ -202,6 +202,13 @@ fn supports_char_literals_variables_and_parameters() {
 }
 
 #[test]
+fn supports_one_dimensional_arrays_indexing_and_parameters() {
+    let program = include_str!("fixtures/valid/arrays.c");
+
+    assert_eq!(interpret(program).unwrap(), 195);
+}
+
+#[test]
 fn rejects_multi_character_char_literals() {
     let program = include_str!("fixtures/invalid/unterminated_char_literal.c");
 
@@ -243,6 +250,30 @@ fn rejects_function_calls_with_wrong_argument_count() {
     assert_eq!(
         err.to_string(),
         "function 'add' expected 2 arguments, got 1"
+    );
+}
+
+#[test]
+fn reports_array_index_out_of_bounds() {
+    let program = include_str!("fixtures/invalid/array_index_out_of_bounds.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array 'values' index 2 out of bounds for length 2"
+    );
+}
+
+#[test]
+fn reports_negative_array_indices() {
+    let program = include_str!("fixtures/invalid/array_negative_index.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array 'values' index -1 out of bounds for length 2"
     );
 }
 
