@@ -283,4 +283,4 @@ Expected diagnostic contains `cannot modify read-only array`.
 
 ## Recommended next work package
 
-The scalar pointer milestone is implemented. Next, extend pointer support to parameters plus array/string decay: parse `int *`/`char *` parameters, pass `&x` to pointer parameters, decay arrays and string literals to pointer arguments, support pointer indexing for array-base targets, and add valid/invalid fixtures with explicit expected results plus optional compiler-oracle comparisons for the supported subset.
+The scalar pointer, pointer parameter/decay, pointer indexing, and array-element pointer milestones are implemented. Next, move beyond pointer-specific roadmap work into deterministic fuzz/property tests for lexer/parser safety, then continue conformance fixtures and product-quality CLI flags as prioritized in `status/todo.md`.

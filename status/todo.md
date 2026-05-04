@@ -4,8 +4,8 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
-1. Add `&array[index]` array-element pointers and dereference assignment/read support; acceptance: `*(&values[1])` reads/writes exactly that element, array-element pointers can be passed to `int *`/`char *` parameters where C-compatible, out-of-bounds diagnostics match the pointer model, and fixtures include optional compiler-oracle comparisons where supported.
-2. Add fuzz/property tests for lexer/parser safety; acceptance: generate random byte/string inputs, assert lexing/parsing never panics, and keep the test deterministic enough for Docker cron verification.
+1. Add fuzz/property tests for lexer/parser safety; acceptance: generate random byte/string inputs, assert lexing/parsing/interpretation setup never panics (errors are OK), include malformed delimiters and arbitrary bytes, and keep the test deterministic enough for Docker cron verification.
+2. Add more conformance fixtures with explicit expected results and optional compiler-oracle comparisons where supported; acceptance: cover newly completed pointer array-element cases plus mixed char/string/array behavior without using native compilers as Cust's runtime path.
 3. Continue parser recovery/error-message expansion only for newly discovered malformed programs not already covered by the exact-error suite (remaining examples: nested block brace diagnostics where useful and other delimiter-list boundary errors).
 4. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
 5. Add CLI flags such as `--ast`, `--tokens`, or `--max-steps` after the core C-subset expansion stabilizes.

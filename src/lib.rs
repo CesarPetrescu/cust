@@ -89,6 +89,7 @@ enum Expr {
     ArrayGet { name: String, index: Box<Expr> },
     StringGet { values: Vec<i64>, index: Box<Expr> },
     AddressOf(String),
+    AddressOfArray { name: String, index: Box<Expr> },
     Deref(Box<Expr>),
     Call { name: String, args: Vec<Expr> },
     UnaryPlus(Box<Expr>),
@@ -1003,7 +1004,18 @@ impl Parser {
         } else if self.matches(&Token::Amp) {
             let found = self.advance();
             match found.kind.clone() {
-                Token::Ident(name) => Ok(Expr::AddressOf(name)),
+                Token::Ident(name) => {
+                    if self.matches(&Token::LBracket) {
+                        let index = self.parse_expr()?;
+                        self.expect_closing_bracket_after("array index")?;
+                        Ok(Expr::AddressOfArray {
+                            name,
+                            index: Box::new(index),
+                        })
+                    } else {
+                        Ok(Expr::AddressOf(name))
+                    }
+                }
                 token => Err(Self::error_at(
                     format!("expected identifier after '&', found {token:?}"),
                     &found,
@@ -1230,13 +1242,22 @@ impl Parser {
     }
 
     fn starts_deref_assignment_stmt(&self) -> bool {
-        matches!(
-            (
-                self.tokens.get(self.pos + 1).map(|token| &token.kind),
-                self.tokens.get(self.pos + 2).map(|token| &token.kind),
-            ),
-            (Some(Token::Ident(_)), Some(Token::Assign))
-        )
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
+
+        for token in self.tokens.iter().skip(self.pos + 1) {
+            match &token.kind {
+                Token::LParen => paren_depth += 1,
+                Token::RParen => paren_depth = paren_depth.saturating_sub(1),
+                Token::LBracket => bracket_depth += 1,
+                Token::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
+                Token::Assign if paren_depth == 0 && bracket_depth == 0 => return true,
+                Token::Semi | Token::Eof if paren_depth == 0 && bracket_depth == 0 => return false,
+                _ => {}
+            }
+        }
+
+        false
     }
 
     fn starts_assignment_stmt(&self) -> bool {
@@ -1342,6 +1363,11 @@ enum PointerValue {
     ArrayBase {
         array: Rc<RefCell<ArrayValue>>,
         source_name: Option<String>,
+    },
+    ArrayElement {
+        array: Rc<RefCell<ArrayValue>>,
+        source_name: Option<String>,
+        index: usize,
     },
 }
 
@@ -1568,6 +1594,14 @@ impl Interpreter {
         match expr {
             Expr::Number(0) => Ok(PointerValue::Null),
             Expr::AddressOf(name) => self.address_of_scalar(name),
+            Expr::AddressOfArray { name, index } => {
+                let (array, index) = self.checked_array_index(name, index)?;
+                Ok(PointerValue::ArrayElement {
+                    array,
+                    source_name: Some(name.clone()),
+                    index,
+                })
+            }
             Expr::StringLiteral(values) => Ok(PointerValue::ArrayBase {
                 array: Rc::new(RefCell::new(ArrayValue::read_only(values.clone()))),
                 source_name: None,
@@ -1614,6 +1648,7 @@ impl Interpreter {
                     CustError::new("array pointer index 0 out of bounds for length 0")
                 })
             }
+            PointerValue::ArrayElement { array, index, .. } => Ok(array.borrow().elements[*index]),
         }
     }
 
@@ -1641,7 +1676,9 @@ impl Interpreter {
                     ))),
                 }
             }
-            PointerValue::ArrayBase { .. } => self.assign_pointer_index(pointer, 0, value),
+            PointerValue::ArrayBase { .. } | PointerValue::ArrayElement { .. } => {
+                self.assign_pointer_index(pointer, 0, value)
+            }
         }
     }
 
@@ -1684,6 +1721,25 @@ impl Interpreter {
                 if index >= len {
                     return Err(CustError::new(format!(
                         "array pointer index {index_value} out of bounds for length {len}"
+                    )));
+                }
+                Ok((Rc::clone(array), source_name.clone(), index))
+            }
+            PointerValue::ArrayElement {
+                array,
+                source_name,
+                index: base_index,
+            } => {
+                let len = array.borrow().elements.len();
+                let candidate = *base_index as i64 + index_value;
+                let Ok(index) = usize::try_from(candidate) else {
+                    return Err(CustError::new(format!(
+                        "array pointer index {candidate} out of bounds for length {len}"
+                    )));
+                };
+                if index >= len {
+                    return Err(CustError::new(format!(
+                        "array pointer index {candidate} out of bounds for length {len}"
                     )));
                 }
                 Ok((Rc::clone(array), source_name.clone(), index))
@@ -1927,7 +1983,9 @@ impl Interpreter {
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
             Expr::Var(name) => self.find_scalar(name),
-            Expr::AddressOf(_) => Err(CustError::new("pointer value used as scalar")),
+            Expr::AddressOf(_) | Expr::AddressOfArray { .. } => {
+                Err(CustError::new("pointer value used as scalar"))
+            }
             Expr::Deref(pointer) => {
                 let pointer = self.eval_pointer(pointer)?;
                 self.deref_pointer(&pointer)

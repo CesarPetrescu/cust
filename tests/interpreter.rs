@@ -604,6 +604,25 @@ fn supports_string_literal_decay_to_pointer_parameters_for_reads() {
 }
 
 #[test]
+fn supports_array_element_address_of_and_pointer_reads_writes() {
+    let program = include_str!("fixtures/valid/pointer_array_elements.c");
+
+    assert_eq!(interpret(program).unwrap(), 116);
+}
+
+#[test]
+fn reports_array_element_pointer_index_out_of_bounds() {
+    let program = include_str!("fixtures/invalid/pointer_array_element_out_of_bounds.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array pointer index 2 out of bounds for length 2"
+    );
+}
+
+#[test]
 fn reports_pointer_array_index_out_of_bounds() {
     let program = include_str!("fixtures/invalid/pointer_array_out_of_bounds.c");
 
