@@ -1,0 +1,11 @@
+int main() {
+    int i = 0;
+    int sum = 0;
+    for (i = 0; i < 5; i = i + 1) {
+        if (i < 3) {
+            continue;
+        }
+        sum = sum + i;
+    }
+    return sum;
+}

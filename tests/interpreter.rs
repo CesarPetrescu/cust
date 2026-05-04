@@ -117,6 +117,51 @@ fn supports_break_and_continue_in_while_and_for_loops() {
 }
 
 #[test]
+fn respects_arithmetic_precedence_with_unary_and_remainder() {
+    let program = include_str!("fixtures/valid/arithmetic_precedence.c");
+
+    assert_eq!(interpret(program).unwrap(), 22);
+}
+
+#[test]
+fn for_continue_still_runs_increment_clause() {
+    let program = include_str!("fixtures/valid/for_continue_runs_increment.c");
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn break_exits_only_the_innermost_loop() {
+    let program = include_str!("fixtures/valid/nested_loop_break.c");
+
+    assert_eq!(interpret(program).unwrap(), 33);
+}
+
+#[test]
+fn rejects_break_without_required_semicolon() {
+    let program = "int main() {\nwhile (1) {\nbreak\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected Semi, found RBrace at line 4, column 1"
+    );
+}
+
+#[test]
+fn rejects_continue_without_required_semicolon() {
+    let program = "int main() {\nwhile (1) {\ncontinue\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected Semi, found RBrace at line 4, column 1"
+    );
+}
+
+#[test]
 fn rejects_break_outside_loops() {
     let program = include_str!("fixtures/invalid/break_outside_loop.c");
 

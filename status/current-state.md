@@ -61,7 +61,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding `break`/`continue` loop control flow and fixture coverage in the 2026-05-04 autonomous run. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after expanding interpreter regression coverage in the 2026-05-04 manual maintenance run. The suite now includes arithmetic precedence/unary/remainder fixture coverage, `for`-`continue` increment behavior, innermost-loop `break` behavior, and missing-semicolon diagnostics for `break`/`continue`. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 
