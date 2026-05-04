@@ -58,7 +58,8 @@ Last updated: 2026-05-04
 - Parser diagnostics now include targeted separator messages for malformed function parameter lists and function call argument lists, including missing commas and trailing commas.
 - Parser diagnostics now include targeted missing-semicolon messages after variable declarations, array declarations, scalar/indexed assignments, expression statements, and return statements.
 - Parser diagnostics now include targeted missing-`]` messages for array declaration lengths, array parameter lengths, indexed assignments, indexed array expressions, and string-literal indexing expressions.
-- Parser diagnostics now include targeted missing-`)` messages for grouped expressions, function call arguments, and `if`/`while`/`for` headers.
+- Parser diagnostics now include targeted missing-`)` messages for grouped expressions, function call arguments, function definition parameters, and `if`/`while`/`for` headers.
+- Parser diagnostics now include targeted missing-`{` messages after function headers and `if`/`else`/`while`/`for` control-flow headers.
 
 ## Verified commands
 
@@ -70,7 +71,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after improving parser missing-`)` diagnostics in the 2026-05-04 autonomous run. The suite now includes exact-error regression tests for missing closing parentheses after grouped expressions, function call arguments, and `if`/`while`/`for` headers. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after improving parser missing-`)`/missing-`{` diagnostics in the 2026-05-04 autonomous run. The suite now includes exact-error regression tests for missing closing parentheses after function definition parameter lists and missing opening braces after function/control-flow headers. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

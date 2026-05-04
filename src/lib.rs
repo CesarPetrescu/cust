@@ -573,8 +573,8 @@ impl Parser {
         let name = self.expect_ident()?;
         self.expect(Token::LParen)?;
         let params = self.parse_params()?;
-        self.expect(Token::RParen)?;
-        let body = self.parse_block()?;
+        self.expect_closing_paren_after("function parameters")?;
+        let body = self.parse_block_after("function header")?;
         Ok((name, Function { params, body }))
     }
 
@@ -606,7 +606,10 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
-            } else if self.check(&Token::RParen) {
+            } else if matches!(
+                self.peek(),
+                Token::RParen | Token::Semi | Token::LBrace | Token::RBrace | Token::Eof
+            ) {
                 break;
             } else {
                 return Err(Self::error_at(
@@ -621,8 +624,8 @@ impl Parser {
         Ok(params)
     }
 
-    fn parse_block(&mut self) -> CustResult<Vec<Stmt>> {
-        self.expect(Token::LBrace)?;
+    fn parse_block_after(&mut self, context: &str) -> CustResult<Vec<Stmt>> {
+        self.expect_opening_brace_after(context)?;
         let mut statements = Vec::new();
         while !self.check(&Token::RBrace) {
             if self.check(&Token::Eof) {
@@ -640,7 +643,7 @@ impl Parser {
             Token::Semi => self.parse_empty(),
             Token::Int | Token::Char => self.parse_var_decl(),
             Token::Return => self.parse_return(),
-            Token::LBrace => Ok(Stmt::Block(self.parse_block()?)),
+            Token::LBrace => Ok(Stmt::Block(self.parse_block_after("block statement")?)),
             Token::If => self.parse_if(),
             Token::While => self.parse_while(),
             Token::For => self.parse_for(),
@@ -761,9 +764,9 @@ impl Parser {
         self.expect(Token::LParen)?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("if condition")?;
-        let then_branch = self.parse_block()?;
+        let then_branch = self.parse_block_after("if condition")?;
         let else_branch = if self.matches(&Token::Else) {
-            self.parse_block()?
+            self.parse_block_after("else")?
         } else {
             Vec::new()
         };
@@ -779,7 +782,7 @@ impl Parser {
         self.expect(Token::LParen)?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("while condition")?;
-        let body = self.parse_block()?;
+        let body = self.parse_block_after("while condition")?;
         Ok(Stmt::While { cond, body })
     }
 
@@ -824,7 +827,7 @@ impl Parser {
         };
         self.expect_closing_paren_after("for clauses")?;
 
-        let body = self.parse_block()?;
+        let body = self.parse_block_after("for clauses")?;
         Ok(Stmt::For {
             init,
             cond,
@@ -1025,6 +1028,18 @@ impl Parser {
         } else {
             Err(Self::error_at(
                 format!("expected {expected:?}, found {:?}", found.kind),
+                &found,
+            ))
+        }
+    }
+
+    fn expect_opening_brace_after(&mut self, context: &str) -> CustResult<()> {
+        let found = self.advance();
+        if found.kind == Token::LBrace {
+            Ok(())
+        } else {
+            Err(Self::error_at(
+                format!("expected '{{' after {context}, found {:?}", found.kind),
                 &found,
             ))
         }

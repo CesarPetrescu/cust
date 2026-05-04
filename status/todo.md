@@ -4,7 +4,7 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 ## Next recommended tasks
 
-1. Continue improving parser recovery/error messages for additional malformed programs (for example unmatched delimiters, malformed `for` clauses beyond missing closing `)`, missing `)` in function definition headers, and missing `{` after function/control-flow headers).
+1. Continue improving parser recovery/error messages for additional malformed programs (for example unmatched delimiters, malformed `for` clauses beyond missing closing `)`, missing `{` after nested block statements where useful, and other delimiter-list boundary errors).
 2. Design the pointer model before implementing pointer arithmetic or address/dereference operators.
 3. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
 4. Add CLI flags such as `--version`, `--ast`, `--tokens`, or `--max-steps` after the core C-subset expansion stabilizes.

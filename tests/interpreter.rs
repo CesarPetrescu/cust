@@ -209,6 +209,18 @@ fn reports_missing_closing_parens_after_grouped_expressions() {
 }
 
 #[test]
+fn reports_missing_closing_parens_after_function_definition_parameters() {
+    let program = "int add(int a, int b { return a + b; }\nint main() { return add(1, 2); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ')' after function parameters, found LBrace at line 1, column 22"
+    );
+}
+
+#[test]
 fn reports_missing_closing_parens_after_function_call_arguments() {
     let program = "int add(int a, int b) { return a + b; }\nint main() {\nreturn add(1, 2;\n}\n";
 
@@ -253,6 +265,66 @@ fn reports_missing_closing_parens_after_for_clauses() {
     assert_eq!(
         err.to_string(),
         "expected ')' after for clauses, found LBrace at line 2, column 34"
+    );
+}
+
+#[test]
+fn reports_missing_opening_braces_after_function_headers() {
+    let program = "int main()\nreturn 0;\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '{' after function header, found Return at line 2, column 1"
+    );
+}
+
+#[test]
+fn reports_missing_opening_braces_after_if_conditions() {
+    let program = "int main() {\nif (1) return 1;\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '{' after if condition, found Return at line 2, column 8"
+    );
+}
+
+#[test]
+fn reports_missing_opening_braces_after_else_keywords() {
+    let program = "int main() {\nif (0) { return 0; } else return 1;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '{' after else, found Return at line 2, column 27"
+    );
+}
+
+#[test]
+fn reports_missing_opening_braces_after_while_conditions() {
+    let program = "int main() {\nwhile (1) return 1;\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '{' after while condition, found Return at line 2, column 11"
+    );
+}
+
+#[test]
+fn reports_missing_opening_braces_after_for_clauses() {
+    let program = "int main() {\nfor (int i = 0; i < 3; i = i + 1) return i;\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '{' after for clauses, found Return at line 2, column 35"
     );
 }
 
