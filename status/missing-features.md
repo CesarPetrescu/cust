@@ -19,7 +19,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Boolean/logical operators: `&&`, `||`, `!`
 - [x] Unary plus
 - [x] `for` loops
-- [ ] `break` and `continue`
+- [x] `break` and `continue`
 - [ ] Empty statements and expression statements
 
 ## P2 — data types

@@ -40,6 +40,7 @@ Last updated: 2026-05-04
 - `if (...) { ... } else { ... }`
 - `while (...) { ... }`
 - `for (init; condition; increment) { ... }` with optional clauses, declaration/assignment initializers, assignment increments, loop-local initializer scope, and the shared 1,000,000-iteration safety limit
+- `break;` and `continue;` in `while` and `for` loop bodies, including propagation through nested blocks/conditionals and diagnostics when used outside loops
 - `+ - * / %`, unary `+`, unary `-`
 - `== != < <= > >=`
 - logical operators `&&`, `||`, and `!` with C-style integer truth values and short-circuit evaluation for `&&`/`||`
@@ -60,7 +61,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding `for` loops and fixture coverage in the 2026-05-04 autonomous run. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after adding `break`/`continue` loop control flow and fixture coverage in the 2026-05-04 autonomous run. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

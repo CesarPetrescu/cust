@@ -110,6 +110,31 @@ fn supports_for_loops_with_declaration_assignment_and_empty_clauses() {
 }
 
 #[test]
+fn supports_break_and_continue_in_while_and_for_loops() {
+    let program = include_str!("fixtures/valid/break_continue.c");
+
+    assert_eq!(interpret(program).unwrap(), 68);
+}
+
+#[test]
+fn rejects_break_outside_loops() {
+    let program = include_str!("fixtures/invalid/break_outside_loop.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "break outside loop");
+}
+
+#[test]
+fn rejects_continue_outside_loops() {
+    let program = include_str!("fixtures/invalid/continue_outside_loop.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "continue outside loop");
+}
+
+#[test]
 fn for_loop_initializer_variables_are_scoped_to_the_loop() {
     let program = include_str!("fixtures/invalid/for_loop_initializer_scope.c");
 

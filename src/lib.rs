@@ -33,6 +33,8 @@ enum Token {
     Else,
     While,
     For,
+    Break,
+    Continue,
     Ident(String),
     Number(i64),
     Plus,
@@ -103,6 +105,8 @@ enum Stmt {
     VarDecl(String, Expr),
     Assign(String, Expr),
     Return(Expr),
+    Break,
+    Continue,
     Block(Vec<Stmt>),
     If {
         cond: Expr,
@@ -132,6 +136,7 @@ enum Stmt {
 /// - `if (expression) { ... } else { ... }`
 /// - `while (expression) { ... }`
 /// - `for (initializer; condition; increment) { ... }`
+/// - `break;` and `continue;` inside loops
 /// - integer arithmetic/comparisons/logical operators: `+ - * / % == != < <= > >= && || !`
 pub fn interpret(source: &str) -> CustResult<i64> {
     let tokens = lex(source)?;
@@ -196,6 +201,8 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "else" => Token::Else,
                     "while" => Token::While,
                     "for" => Token::For,
+                    "break" => Token::Break,
+                    "continue" => Token::Continue,
                     _ => Token::Ident(text),
                 };
                 tokens.push(LocatedToken::new(kind, start_line, start_column));
@@ -371,6 +378,8 @@ impl Parser {
             Token::If => self.parse_if(),
             Token::While => self.parse_while(),
             Token::For => self.parse_for(),
+            Token::Break => self.parse_break(),
+            Token::Continue => self.parse_continue(),
             Token::Ident(_) => self.parse_assign(),
             token => Err(Self::error_at(
                 format!("unexpected token in statement: {token:?}"),
@@ -413,6 +422,18 @@ impl Parser {
         let expr = self.parse_expr()?;
         self.expect(Token::Semi)?;
         Ok(Stmt::Return(expr))
+    }
+
+    fn parse_break(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::Break)?;
+        self.expect(Token::Semi)?;
+        Ok(Stmt::Break)
+    }
+
+    fn parse_continue(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::Continue)?;
+        self.expect(Token::Semi)?;
+        Ok(Stmt::Continue)
     }
 
     fn parse_if(&mut self) -> CustResult<Stmt> {
@@ -691,23 +712,33 @@ struct Interpreter {
     scopes: Vec<HashMap<String, i64>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecFlow {
+    None,
+    Return(i64),
+    Break,
+    Continue,
+}
+
 impl Interpreter {
     fn run(&mut self, statements: &[Stmt]) -> CustResult<i64> {
         match self.exec_block(statements)? {
-            Some(value) => Ok(value),
-            None => Err(CustError::new("main() finished without return")),
+            ExecFlow::Return(value) => Ok(value),
+            ExecFlow::None => Err(CustError::new("main() finished without return")),
+            ExecFlow::Break => Err(CustError::new("break outside loop")),
+            ExecFlow::Continue => Err(CustError::new("continue outside loop")),
         }
     }
 
-    fn exec_block(&mut self, statements: &[Stmt]) -> CustResult<Option<i64>> {
+    fn exec_block(&mut self, statements: &[Stmt]) -> CustResult<ExecFlow> {
         self.scopes.push(HashMap::new());
         for stmt in statements {
             match self.exec_stmt(stmt) {
-                Ok(Some(value)) => {
+                Ok(ExecFlow::None) => {}
+                Ok(flow) => {
                     self.scopes.pop();
-                    return Ok(Some(value));
+                    return Ok(flow);
                 }
-                Ok(None) => {}
                 Err(error) => {
                     self.scopes.pop();
                     return Err(error);
@@ -715,7 +746,7 @@ impl Interpreter {
             }
         }
         self.scopes.pop();
-        Ok(None)
+        Ok(ExecFlow::None)
     }
 
     fn current_scope_mut(&mut self) -> &mut HashMap<String, i64> {
@@ -738,7 +769,7 @@ impl Interpreter {
             .find_map(|scope| scope.get(name).copied())
     }
 
-    fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<Option<i64>> {
+    fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
         match stmt {
             Stmt::VarDecl(name, expr) => {
                 let value = self.eval(expr)?;
@@ -749,20 +780,22 @@ impl Interpreter {
                     )));
                 }
                 scope.insert(name.clone(), value);
-                Ok(None)
+                Ok(ExecFlow::None)
             }
             Stmt::Assign(name, expr) => {
                 let value = self.eval(expr)?;
                 if let Some(slot) = self.find_variable_mut(name) {
                     *slot = value;
-                    Ok(None)
+                    Ok(ExecFlow::None)
                 } else {
                     Err(CustError::new(format!(
                         "assignment to undeclared variable '{name}'"
                     )))
                 }
             }
-            Stmt::Return(expr) => Ok(Some(self.eval(expr)?)),
+            Stmt::Return(expr) => Ok(ExecFlow::Return(self.eval(expr)?)),
+            Stmt::Break => Ok(ExecFlow::Break),
+            Stmt::Continue => Ok(ExecFlow::Continue),
             Stmt::Block(statements) => self.exec_block(statements),
             Stmt::If {
                 cond,
@@ -782,11 +815,13 @@ impl Interpreter {
                     if iterations > 1_000_000 {
                         return Err(CustError::new("loop iteration limit exceeded"));
                     }
-                    if let Some(value) = self.exec_block(body)? {
-                        return Ok(Some(value));
+                    match self.exec_block(body)? {
+                        ExecFlow::None | ExecFlow::Continue => {}
+                        ExecFlow::Break => break,
+                        ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
                     }
                 }
-                Ok(None)
+                Ok(ExecFlow::None)
             }
             Stmt::For {
                 init,
@@ -803,7 +838,7 @@ impl Interpreter {
         cond: Option<&Expr>,
         increment: Option<&Stmt>,
         body: &[Stmt],
-    ) -> CustResult<Option<i64>> {
+    ) -> CustResult<ExecFlow> {
         self.scopes.push(HashMap::new());
         let result = self.exec_for_in_current_scope(init, cond, increment, body);
         self.scopes.pop();
@@ -816,11 +851,13 @@ impl Interpreter {
         cond: Option<&Expr>,
         increment: Option<&Stmt>,
         body: &[Stmt],
-    ) -> CustResult<Option<i64>> {
+    ) -> CustResult<ExecFlow> {
         if let Some(init) = init {
-            let init_result = self.exec_stmt(init)?;
-            if let Some(value) = init_result {
-                return Ok(Some(value));
+            match self.exec_stmt(init)? {
+                ExecFlow::None => {}
+                ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
+                ExecFlow::Break => return Err(CustError::new("break outside loop")),
+                ExecFlow::Continue => return Err(CustError::new("continue outside loop")),
             }
         }
 
@@ -836,19 +873,23 @@ impl Interpreter {
                 return Err(CustError::new("loop iteration limit exceeded"));
             }
 
-            if let Some(value) = self.exec_block(body)? {
-                return Ok(Some(value));
+            match self.exec_block(body)? {
+                ExecFlow::None | ExecFlow::Continue => {}
+                ExecFlow::Break => break,
+                ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
             }
 
             if let Some(increment) = increment {
-                let increment_result = self.exec_stmt(increment)?;
-                if let Some(value) = increment_result {
-                    return Ok(Some(value));
+                match self.exec_stmt(increment)? {
+                    ExecFlow::None => {}
+                    ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
+                    ExecFlow::Break => return Err(CustError::new("break outside loop")),
+                    ExecFlow::Continue => return Err(CustError::new("continue outside loop")),
                 }
             }
         }
 
-        Ok(None)
+        Ok(ExecFlow::None)
     }
 
     fn eval(&self, expr: &Expr) -> CustResult<i64> {

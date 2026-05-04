@@ -4,9 +4,9 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 ## Next recommended tasks
 
-1. Add `break` and `continue` for loop/while control flow now that `for` loops are in place.
-2. Add empty statements and expression statements so loop bodies and headers can cover more C-compatible statement forms.
-3. Add function definitions/calls and local parameters once control-flow coverage is stronger.
+1. Add empty statements and expression statements so loop bodies and headers can cover more C-compatible statement forms.
+2. Add function definitions/calls and local parameters once control-flow coverage is stronger.
+3. Add recursive calls with a bounded call-depth limit after functions/parameters land.
 
 ## Every-run checklist
 
