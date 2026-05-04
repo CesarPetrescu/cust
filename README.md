@@ -91,6 +91,7 @@ Features:
 - integer literals and variables
 - declarations: `int x = 1;`
 - assignment: `x = x + 1;`
+- nested block scopes with inner shadowing
 - `return`
 - `if` / `else`
 - `while`
@@ -121,6 +122,7 @@ cargo run -- examples/sum.c
 │   ├── lib.rs        # lexer, parser, AST, interpreter
 │   └── main.rs       # CLI wrapper
 ├── tests/
+│   ├── fixtures/      # valid/invalid C fixture programs
 │   └── interpreter.rs
 ├── examples/
 │   └── sum.c
@@ -168,13 +170,13 @@ docker compose run --rm cust
 
 ## v0.1 limitations
 
-Cust is not a full C implementation yet. Missing features include pointers, arrays, structs, function calls, preprocessor support, includes, standard library calls, floating-point values, and full C scoping rules.
+Cust is not a full C implementation yet. Missing features include pointers, arrays, structs, function calls, preprocessor support, includes, standard library calls, floating-point values, and many richer C compatibility rules.
 
 See [docs/v0.1.md](docs/v0.1.md) for implementation details and safety notes.
 
 ## Roadmap
 
-- v0.2: block scopes and better diagnostics with source spans
+- v0.2: better diagnostics with source spans and expanded test fixtures
 - v0.3: function definitions and calls
 - v0.4: arrays and strings
 - v0.5: richer C compatibility tests

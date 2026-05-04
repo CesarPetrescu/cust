@@ -4,8 +4,8 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 ## Next recommended tasks
 
-1. Implement block scoping with TDD and add valid/invalid fixture coverage for scoped variables.
-2. Continue P1 C-subset expansion with logical operators, unary plus, `for` loops, `break`/`continue`, or function definitions/calls.
+1. Continue P1 C-subset expansion with logical operators (`&&`, `||`, `!`) and unary plus, including precedence/short-circuit tests.
+2. Add `for` loops or `break`/`continue` after logical/unary operators are in place.
 
 ## Every-run checklist
 

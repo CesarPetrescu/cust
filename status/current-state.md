@@ -36,6 +36,7 @@ Last updated: 2026-05-04
 - declarations: `int x = expr;`
 - assignments: `x = expr;`
 - `return expr;`
+- nested block statements `{ ... }` with per-block variable scopes, inner shadowing, and outer-scope assignment lookup
 - `if (...) { ... } else { ... }`
 - `while (...) { ... }`
 - `+ - * / %`
@@ -57,7 +58,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding lexer source context snippets in the 2026-05-04 autonomous run. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after adding block scoping and fixture coverage in the 2026-05-04 autonomous run. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

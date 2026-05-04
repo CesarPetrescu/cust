@@ -95,6 +95,7 @@ enum Stmt {
     VarDecl(String, Expr),
     Assign(String, Expr),
     Return(Expr),
+    Block(Vec<Stmt>),
     If {
         cond: Expr,
         then_branch: Vec<Stmt>,
@@ -113,6 +114,7 @@ enum Stmt {
 /// - `int name = expression;`
 /// - `name = expression;`
 /// - `return expression;`
+/// - block statements: `{ ... }`
 /// - `if (expression) { ... } else { ... }`
 /// - `while (expression) { ... }`
 /// - integer arithmetic/comparisons: `+ - * / % == != < <= > >=`
@@ -335,6 +337,7 @@ impl Parser {
         match self.peek() {
             Token::Int => self.parse_var_decl(),
             Token::Return => self.parse_return(),
+            Token::LBrace => Ok(Stmt::Block(self.parse_block()?)),
             Token::If => self.parse_if(),
             Token::While => self.parse_while(),
             Token::Ident(_) => self.parse_assign(),
@@ -574,7 +577,7 @@ impl Parser {
 
 #[derive(Default)]
 struct Interpreter {
-    env: HashMap<String, i64>,
+    scopes: Vec<HashMap<String, i64>>,
 }
 
 impl Interpreter {
@@ -586,37 +589,70 @@ impl Interpreter {
     }
 
     fn exec_block(&mut self, statements: &[Stmt]) -> CustResult<Option<i64>> {
+        self.scopes.push(HashMap::new());
         for stmt in statements {
-            if let Some(value) = self.exec_stmt(stmt)? {
-                return Ok(Some(value));
+            match self.exec_stmt(stmt) {
+                Ok(Some(value)) => {
+                    self.scopes.pop();
+                    return Ok(Some(value));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    self.scopes.pop();
+                    return Err(error);
+                }
             }
         }
+        self.scopes.pop();
         Ok(None)
+    }
+
+    fn current_scope_mut(&mut self) -> &mut HashMap<String, i64> {
+        self.scopes
+            .last_mut()
+            .expect("exec_block always creates a current scope")
+    }
+
+    fn find_variable_mut(&mut self, name: &str) -> Option<&mut i64> {
+        self.scopes
+            .iter_mut()
+            .rev()
+            .find_map(|scope| scope.get_mut(name))
+    }
+
+    fn find_variable(&self, name: &str) -> Option<i64> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
     }
 
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<Option<i64>> {
         match stmt {
             Stmt::VarDecl(name, expr) => {
-                if self.env.contains_key(name) {
+                let value = self.eval(expr)?;
+                let scope = self.current_scope_mut();
+                if scope.contains_key(name) {
                     return Err(CustError::new(format!(
-                        "variable '{name}' already declared"
+                        "variable '{name}' already declared in this scope"
                     )));
                 }
-                let value = self.eval(expr)?;
-                self.env.insert(name.clone(), value);
+                scope.insert(name.clone(), value);
                 Ok(None)
             }
             Stmt::Assign(name, expr) => {
-                if !self.env.contains_key(name) {
-                    return Err(CustError::new(format!(
-                        "assignment to undeclared variable '{name}'"
-                    )));
-                }
                 let value = self.eval(expr)?;
-                self.env.insert(name.clone(), value);
-                Ok(None)
+                if let Some(slot) = self.find_variable_mut(name) {
+                    *slot = value;
+                    Ok(None)
+                } else {
+                    Err(CustError::new(format!(
+                        "assignment to undeclared variable '{name}'"
+                    )))
+                }
             }
             Stmt::Return(expr) => Ok(Some(self.eval(expr)?)),
+            Stmt::Block(statements) => self.exec_block(statements),
             Stmt::If {
                 cond,
                 then_branch,
@@ -648,9 +684,7 @@ impl Interpreter {
         match expr {
             Expr::Number(value) => Ok(*value),
             Expr::Var(name) => self
-                .env
-                .get(name)
-                .copied()
+                .find_variable(name)
                 .ok_or_else(|| CustError::new(format!("undefined variable '{name}'"))),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::Binary(left, op, right) => {

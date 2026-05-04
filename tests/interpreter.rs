@@ -87,3 +87,31 @@ fn reports_line_and_column_for_parser_expression_errors() {
         "expected expression, found Semi at line 2, column 8"
     );
 }
+
+#[test]
+fn supports_block_scope_shadowing_and_outer_assignment() {
+    let program = include_str!("fixtures/valid/block_scope_shadowing.c");
+
+    assert_eq!(interpret(program).unwrap(), 43);
+}
+
+#[test]
+fn rejects_variables_after_their_block_scope_ends() {
+    let program = include_str!("fixtures/invalid/block_scope_leak.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "undefined variable 'inner'");
+}
+
+#[test]
+fn rejects_redeclaration_only_in_the_same_block_scope() {
+    let program = include_str!("fixtures/invalid/same_scope_redeclaration.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "variable 'x' already declared in this scope"
+    );
+}

@@ -6,9 +6,9 @@ Prioritized backlog for autonomous implementation.
 
 - [x] Parser errors with source spans: line, column, token context
 - [x] Add token context snippets to lexer errors
-- [ ] Block scoping rules for variables inside `{ ... }`
+- [x] Block scoping rules for variables inside `{ ... }`
 - [ ] Better parser recovery/error messages
-- [ ] Test fixtures for valid and invalid programs
+- [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 
 ## P1 — C subset expansion
@@ -32,7 +32,7 @@ Prioritized backlog for autonomous implementation.
 ## P3 — C compatibility tooling
 
 - [ ] Compare Cust output against `gcc`/`clang` for supported programs in Docker
-- [ ] Add a corpus under `tests/fixtures/`
+- [x] Add an initial corpus under `tests/fixtures/`
 - [ ] Add fuzz/property tests for lexer/parser safety
 
 ## P4 — product quality
