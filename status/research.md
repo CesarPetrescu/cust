@@ -13,11 +13,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 ## Research rules
 
 - Prefer official documentation.
-- Add the date, URL, and concise finding.
+- Use local `man` pages when command syntax, libc/C/POSIX behavior, or unavailable external docs make them useful.
+- Add the date, URL or `man <page>`, and concise finding.
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
 ## Findings
+
+- 2026-05-04: Autonomous research may use local manual pages (`man`) when needed for command syntax, C/POSIX/libc behavior, or when external docs are unavailable. Record concise `man <page>` findings here just like URL-based findings.
 
 - 2026-05-04: No external documentation was needed for lexer line/column tracking; implementation used simple 1-based position accounting over Rust `char`s in `src/lib.rs`.
 - 2026-05-04: `docker compose run --rm test` initially reused the existing `cust-test:v0.1` image and showed only the previous 4 integration tests. Running `docker compose build test cust` first rebuilt images, after which `docker compose run --rm test` showed all 6 tests. Next Docker ergonomics work should prevent stale-image verification.

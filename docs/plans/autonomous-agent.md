@@ -16,7 +16,7 @@
 2. **TDD for behavior:** tests before implementation for code changes.
 3. **Docker verification:** no push unless Docker test path passes.
 4. **Status-first:** update `status/` every run.
-5. **Research when unsure:** use official Rust/Cargo/Docker/GitHub/C docs first.
+5. **Research when unsure:** use official Rust/Cargo/Docker/GitHub/C docs first; when local command/C/POSIX details are needed or web docs are unavailable, use `man` pages and record the finding.
 6. **No risky rewrites:** do not rewrite the interpreter architecture unless the status plan explicitly says so.
 7. **No secret leakage:** never commit private keys, tokens, `.env`, or machine secrets.
 8. **Honest reporting:** distinguish verified results from attempted/unverified work.
@@ -72,7 +72,7 @@ A work package should normally produce real interpreter/test changes. Prefer imp
 
 ### 4. Research if needed
 
-Use web search/documentation for uncertain details. Record the decision in `status/research.md`.
+Use web search/documentation for uncertain details. If you need local command syntax, system/C/POSIX semantics, or external docs are unavailable, consult local manual pages with `man` (examples: `man cargo`, `man docker`, `man 3 printf`, relevant C/POSIX pages). Record the decision in `status/research.md`, including whether it came from a URL or a `man` page.
 
 ### 5. Create/implement with TDD
 
