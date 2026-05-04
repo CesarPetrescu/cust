@@ -68,7 +68,7 @@ Priority order:
 4. First items from `todo.md`
 5. Documentation/status-only improvement only if no safe code task exists or code work is blocked
 
-A work package should normally produce real interpreter/tooling/test changes. Prefer implementing missing C behavior, interpreter-only conformance tooling, diagnostics, or CLI/product items over cosmetic cleanup. It is acceptable to complete multiple tightly related TODOs in the same run when they share parser/interpreter/test setup.
+A work package should normally produce real interpreter/tooling/test changes. Prefer implementing missing C behavior, C-subset conformance tooling, diagnostics, or CLI/product items over cosmetic cleanup. Native compilers may be used only as external test oracles for supported fixtures, not as implementation helpers. It is acceptable to complete multiple tightly related TODOs in the same run when they share parser/interpreter/test setup.
 
 ### 4. Research if needed
 

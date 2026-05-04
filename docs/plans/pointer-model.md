@@ -155,7 +155,7 @@ Defer pointer arithmetic (`p + 1`, `p++`) until after this is stable.
 5. Implement dereference assignments (`*ptr = expr;`) and scalar pointer re-assignment.
 6. Implement pointer parameters and array/string literal decay to pointer arguments.
 7. Implement pointer indexing and `&array[index]`.
-8. Add interpreter-only fixtures with explicit expected results for the supported pointer subset after Cust behavior is green. Do not compile fixture programs with GCC/Clang/cc; Cust itself is the execution engine.
+8. Add fixtures with explicit expected results for the supported pointer subset after Cust behavior is green. Where a fixture is also valid supported C, optionally compare Cust output against GCC/Clang/cc as an external oracle only; Cust itself remains the execution engine.
 
 ## Acceptance tests
 
@@ -283,4 +283,4 @@ Expected diagnostic contains `cannot modify read-only array`.
 
 ## Recommended next work package
 
-The scalar pointer milestone is implemented. Next, extend pointer support to parameters plus array/string decay: parse `int *`/`char *` parameters, pass `&x` to pointer parameters, decay arrays and string literals to pointer arguments, support pointer indexing for array-base targets, and add valid/invalid interpreter-only fixtures with explicit expected results for the supported subset.
+The scalar pointer milestone is implemented. Next, extend pointer support to parameters plus array/string decay: parse `int *`/`char *` parameters, pass `&x` to pointer parameters, decay arrays and string literals to pointer arguments, support pointer indexing for array-base targets, and add valid/invalid fixtures with explicit expected results plus optional compiler-oracle comparisons for the supported subset.

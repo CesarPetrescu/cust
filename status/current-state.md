@@ -56,7 +56,7 @@ Last updated: 2026-05-04
 
 ## Test/tooling coverage
 
-- Cust is an interpreter. Tests and Docker verification must exercise `cust::interpret`/the `cust` CLI directly and must not compile user C programs with GCC, Clang, `cc`, or `clangd`.
+- Cust is an interpreter. The implementation and runtime path must execute via `cust::interpret`/the `cust` CLI. Native compilers (`$CC`, `gcc`, `clang`, or `cc`) are allowed only inside tests as external oracles that compile supported fixtures and compare native exit codes against Cust results; they must not be used as implementation helpers or as Cust's execution engine. `clangd` is editor/LSP-only and is not part of verification.
 
 ## Diagnostics
 
@@ -79,7 +79,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after removing native C compiler compatibility tests and keeping verification interpreter-only in the 2026-05-04 manual correction run. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after restoring compiler-oracle compatibility tests in the 2026-05-05 manual correction run. The suite includes `tests/c_compat.rs`, which compiles supported fixtures with a native C compiler only as an oracle and compares native exit codes to Cust interpreted results. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 
