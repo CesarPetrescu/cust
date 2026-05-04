@@ -1,7 +1,4 @@
 FROM rust:1.92-slim AS build
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
 COPY docker-compose.yml ./

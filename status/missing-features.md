@@ -31,10 +31,10 @@ Prioritized backlog for autonomous implementation.
 - [x] first scalar pointer milestone: pointer declarations, scalar address-of/dereference, dereference assignment, reassignment, null diagnostics, and out-of-scope scalar diagnostics
 - [ ] pointer parameters, array/string decay to pointer arguments, pointer indexing, and `&array[index]`
 
-## P3 — C compatibility tooling
+## P3 — interpreter-only conformance tooling
 
-- [x] Compare Cust output against `gcc`/`clang` for supported programs in Docker
 - [x] Add an initial corpus under `tests/fixtures/`
+- [ ] Add interpreter-only conformance fixtures with explicit expected results; do not compile with GCC/Clang/cc
 - [ ] Add fuzz/property tests for lexer/parser safety
 
 ## P4 — product quality

@@ -29,7 +29,6 @@ Last updated: 2026-05-04
   - `docker-compose.yml`
   - safe runtime service with no network, non-root user, read-only FS, dropped capabilities
   - Compose services force source rebuilds with `pull_policy: build` to avoid stale-image test/runtime runs
-  - build/test image installs `gcc`/`libc6-dev` so Rust integration tests can compile supported C compatibility fixtures inside Docker
 
 ## Supported language subset
 
@@ -57,8 +56,7 @@ Last updated: 2026-05-04
 
 ## Test/tooling coverage
 
-- `tests/c_compat.rs` compiles supported compatibility fixtures with `$CC`, `gcc`, `clang`, or `cc`, runs the resulting native executables, and asserts their process exit codes match `cust::interpret` results. The Docker build/test image installs `gcc` and `libc6-dev` so this coverage runs under `docker compose run --rm test`.
-- Compatibility corpus currently covers arithmetic/control flow/logical operators plus functions, recursion, arrays, string-literal/char-array interactions, and scalar pointer reads/writes under `tests/fixtures/compat/valid/`.
+- Cust is an interpreter. Tests and Docker verification must exercise `cust::interpret`/the `cust` CLI directly and must not compile user C programs with GCC, Clang, `cc`, or `clangd`.
 
 ## Diagnostics
 
@@ -81,7 +79,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding scalar pointer declarations/address-of/dereference/reassignment and related diagnostics in the 2026-05-04 autonomous run. The suite includes `tests/c_compat.rs`, which compiles supported fixture programs with a native C compiler and compares the compiled C exit code to Cust's interpreted result. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after removing native C compiler compatibility tests and keeping verification interpreter-only in the 2026-05-04 manual correction run. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

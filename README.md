@@ -178,7 +178,7 @@ docker compose run --rm cust
 
 ## v0.1 limitations
 
-Cust is not a full C implementation yet. Missing features include pointers, structs, preprocessor support, includes, standard library calls, floating-point values, and many richer C compatibility rules.
+Cust is not a full C implementation yet. Missing features include richer pointer support, structs, preprocessor support, includes, standard library calls, floating-point values, and many richer C-subset compatibility rules. Cust is an interpreter: its test/runtime path must not compile user programs with GCC/Clang.
 
 See [docs/v0.1.md](docs/v0.1.md) for implementation details and safety notes.
 
@@ -187,7 +187,7 @@ See [docs/v0.1.md](docs/v0.1.md) for implementation details and safety notes.
 - v0.2: better diagnostics with source spans and expanded test fixtures
 - v0.3: recursive calls with an explicit bounded-depth regression suite
 - v0.4: arrays and strings
-- v0.5: richer C compatibility tests
+- v0.5: richer interpreter-only C-subset conformance tests
 
 ## License
 
