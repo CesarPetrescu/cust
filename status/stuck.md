@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-04 autonomous run after local and Docker verification passed for unmatched-delimiter and malformed-`for` parser diagnostics. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-05-04 autonomous run after local and Docker verification passed for C compiler compatibility tests. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 

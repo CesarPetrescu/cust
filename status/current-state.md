@@ -28,6 +28,7 @@ Last updated: 2026-05-04
   - `docker-compose.yml`
   - safe runtime service with no network, non-root user, read-only FS, dropped capabilities
   - Compose services force source rebuilds with `pull_policy: build` to avoid stale-image test/runtime runs
+  - build/test image installs `gcc`/`libc6-dev` so Rust integration tests can compile supported C compatibility fixtures inside Docker
 
 ## Supported language subset
 
@@ -51,6 +52,11 @@ Last updated: 2026-05-04
 - logical operators `&&`, `||`, and `!` with C-style integer truth values and short-circuit evaluation for `&&`/`||`
 - `//` comments
 
+## Test/tooling coverage
+
+- `tests/c_compat.rs` compiles supported compatibility fixtures with `$CC`, `gcc`, `clang`, or `cc`, runs the resulting native executables, and asserts their process exit codes match `cust::interpret` results. The Docker build/test image installs `gcc` and `libc6-dev` so this coverage runs under `docker compose run --rm test`.
+- Compatibility corpus currently covers arithmetic/control flow/logical operators plus functions, recursion, arrays, and string-literal/char-array interactions under `tests/fixtures/compat/valid/`.
+
 ## Diagnostics
 
 - Lexer errors include 1-based line and column plus a source-line/caret context snippet for unexpected characters and out-of-range integer literals.
@@ -72,7 +78,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after improving unmatched-delimiter and malformed-`for` parser diagnostics in the 2026-05-04 autonomous run. The suite now includes exact-error regression tests for stray `)`/`]` in statement position, extra `}` after the top-level program, and `break`/`continue` in non-body `for` clauses. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after adding C compiler compatibility tests in the 2026-05-04 autonomous run. The suite now includes `tests/c_compat.rs`, which compiles supported fixture programs with a native C compiler and compares the compiled C exit code to Cust's interpreted result. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

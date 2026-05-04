@@ -31,7 +31,7 @@ Prioritized backlog for autonomous implementation.
 
 ## P3 — C compatibility tooling
 
-- [ ] Compare Cust output against `gcc`/`clang` for supported programs in Docker
+- [x] Compare Cust output against `gcc`/`clang` for supported programs in Docker
 - [x] Add an initial corpus under `tests/fixtures/`
 - [ ] Add fuzz/property tests for lexer/parser safety
 
