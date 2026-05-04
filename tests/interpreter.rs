@@ -197,6 +197,66 @@ fn reports_missing_closing_brackets_after_string_literal_indices() {
 }
 
 #[test]
+fn reports_missing_closing_parens_after_grouped_expressions() {
+    let program = "int main() {\nreturn (1 + 2;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ')' after grouped expression, found Semi at line 2, column 14"
+    );
+}
+
+#[test]
+fn reports_missing_closing_parens_after_function_call_arguments() {
+    let program = "int add(int a, int b) { return a + b; }\nint main() {\nreturn add(1, 2;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ')' after function call arguments, found Semi at line 3, column 16"
+    );
+}
+
+#[test]
+fn reports_missing_closing_parens_after_if_conditions() {
+    let program = "int main() {\nif (1 {\nreturn 1;\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ')' after if condition, found LBrace at line 2, column 7"
+    );
+}
+
+#[test]
+fn reports_missing_closing_parens_after_while_conditions() {
+    let program = "int main() {\nwhile (1 {\nreturn 1;\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ')' after while condition, found LBrace at line 2, column 10"
+    );
+}
+
+#[test]
+fn reports_missing_closing_parens_after_for_clauses() {
+    let program = "int main() {\nfor (int i = 0; i < 3; i = i + 1 {\nreturn i;\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ')' after for clauses, found LBrace at line 2, column 34"
+    );
+}
+
+#[test]
 fn reports_missing_semicolon_after_variable_declarations() {
     let program = "int main() {\nint x = 1\nreturn x;\n}\n";
 

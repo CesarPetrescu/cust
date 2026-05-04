@@ -760,7 +760,7 @@ impl Parser {
         self.expect(Token::If)?;
         self.expect(Token::LParen)?;
         let cond = self.parse_expr()?;
-        self.expect(Token::RParen)?;
+        self.expect_closing_paren_after("if condition")?;
         let then_branch = self.parse_block()?;
         let else_branch = if self.matches(&Token::Else) {
             self.parse_block()?
@@ -778,7 +778,7 @@ impl Parser {
         self.expect(Token::While)?;
         self.expect(Token::LParen)?;
         let cond = self.parse_expr()?;
-        self.expect(Token::RParen)?;
+        self.expect_closing_paren_after("while condition")?;
         let body = self.parse_block()?;
         Ok(Stmt::While { cond, body })
     }
@@ -822,7 +822,7 @@ impl Parser {
                 self.peek_located(),
             ));
         };
-        self.expect(Token::RParen)?;
+        self.expect_closing_paren_after("for clauses")?;
 
         let body = self.parse_block()?;
         Ok(Stmt::For {
@@ -956,7 +956,7 @@ impl Parser {
             Token::Ident(name) => {
                 if self.matches(&Token::LParen) {
                     let args = self.parse_call_args()?;
-                    self.expect(Token::RParen)?;
+                    self.expect_closing_paren_after("function call arguments")?;
                     Ok(Expr::Call { name, args })
                 } else if self.matches(&Token::LBracket) {
                     let index = self.parse_expr()?;
@@ -971,7 +971,7 @@ impl Parser {
             }
             Token::LParen => {
                 let expr = self.parse_expr()?;
-                self.expect(Token::RParen)?;
+                self.expect_closing_paren_after("grouped expression")?;
                 Ok(expr)
             }
             token => Err(Self::error_at(
@@ -1000,7 +1000,10 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
-            } else if self.check(&Token::RParen) {
+            } else if matches!(
+                self.peek(),
+                Token::RParen | Token::Semi | Token::LBrace | Token::RBrace | Token::Eof
+            ) {
                 break;
             } else {
                 return Err(Self::error_at(
@@ -1034,6 +1037,18 @@ impl Parser {
         } else {
             Err(Self::error_at(
                 format!("expected ']' after {context}, found {:?}", found.kind),
+                &found,
+            ))
+        }
+    }
+
+    fn expect_closing_paren_after(&mut self, context: &str) -> CustResult<()> {
+        let found = self.advance();
+        if found.kind == Token::RParen {
+            Ok(())
+        } else {
+            Err(Self::error_at(
+                format!("expected ')' after {context}, found {:?}", found.kind),
                 &found,
             ))
         }

@@ -58,6 +58,7 @@ Last updated: 2026-05-04
 - Parser diagnostics now include targeted separator messages for malformed function parameter lists and function call argument lists, including missing commas and trailing commas.
 - Parser diagnostics now include targeted missing-semicolon messages after variable declarations, array declarations, scalar/indexed assignments, expression statements, and return statements.
 - Parser diagnostics now include targeted missing-`]` messages for array declaration lengths, array parameter lengths, indexed assignments, indexed array expressions, and string-literal indexing expressions.
+- Parser diagnostics now include targeted missing-`)` messages for grouped expressions, function call arguments, and `if`/`while`/`for` headers.
 
 ## Verified commands
 
@@ -69,7 +70,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after improving parser missing-`]` diagnostics in the 2026-05-04 autonomous run. The suite now includes exact-error regression tests for trailing commas in function parameter lists and missing closing brackets after array lengths, array parameter lengths, array assignment/read indices, and string-literal indices. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after improving parser missing-`)` diagnostics in the 2026-05-04 autonomous run. The suite now includes exact-error regression tests for missing closing parentheses after grouped expressions, function call arguments, and `if`/`while`/`for` headers. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 
