@@ -4,9 +4,9 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 ## Next recommended tasks
 
-1. Add function definitions/calls and local parameters so Cust can interpret multi-function C-subset programs.
-2. Add recursive calls with a bounded call-depth limit after functions/parameters land.
-3. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
+1. Add explicit recursive-call fixture coverage (including depth-limit behavior) now that ordinary functions and local parameters are implemented.
+2. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
+3. Add CLI flags such as `--version`, `--ast`, `--tokens`, or `--max-steps` after the core C-subset expansion stabilizes.
 
 ## Every-run checklist
 

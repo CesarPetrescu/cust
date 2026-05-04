@@ -31,7 +31,8 @@ Last updated: 2026-05-04
 
 ## Supported language subset
 
-- `int main() { ... }`
+- `int main() { ... }` plus additional `int name(...) { ... }` function definitions
+- function calls as expressions with integer arguments, local parameter scopes, arity diagnostics, undefined-function diagnostics, and a 1,000-call-depth safety limit
 - integer literals and variables
 - declarations: `int x = expr;`
 - assignments: `x = expr;`
@@ -62,7 +63,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after implementing empty statements and expression statements in the 2026-05-04 autonomous run. The suite now includes fixture coverage for bare `;`, evaluated `expr;` statements, and expression statements in `for` initializer/increment clauses. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after implementing function definitions, function calls, and local parameters in the 2026-05-04 autonomous run. The suite now includes fixture coverage for multi-function programs, nested function-call expressions, undefined function calls, and argument-count diagnostics. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

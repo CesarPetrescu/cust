@@ -13,9 +13,9 @@ Prioritized backlog for autonomous implementation.
 
 ## P1 — C subset expansion
 
-- [ ] Function definitions and function calls
-- [ ] Local function parameters
-- [ ] Recursive calls with a bounded call-depth limit
+- [x] Function definitions and function calls
+- [x] Local function parameters
+- [ ] Recursive calls with a bounded call-depth limit regression suite
 - [x] Boolean/logical operators: `&&`, `||`, `!`
 - [x] Unary plus
 - [x] `for` loops

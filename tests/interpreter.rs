@@ -145,6 +145,34 @@ fn supports_empty_and_expression_statements() {
 }
 
 #[test]
+fn supports_function_definitions_calls_and_parameters() {
+    let program = include_str!("fixtures/valid/functions_and_parameters.c");
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn rejects_calls_to_undefined_functions() {
+    let program = include_str!("fixtures/invalid/undefined_function_call.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "undefined function 'missing'");
+}
+
+#[test]
+fn rejects_function_calls_with_wrong_argument_count() {
+    let program = include_str!("fixtures/invalid/function_arity_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function 'add' expected 2 arguments, got 1"
+    );
+}
+
+#[test]
 fn expression_statements_evaluate_their_expression() {
     let program = include_str!("fixtures/invalid/expression_statement_undefined_variable.c");
 

@@ -87,7 +87,8 @@ int main() {
 
 Features:
 
-- `int main() { ... }`
+- `int main() { ... }` plus additional `int` function definitions
+- function calls with integer arguments and local function parameters
 - integer literals and variables
 - declarations: `int x = 1;`
 - assignment: `x = x + 1;`
@@ -95,6 +96,9 @@ Features:
 - `return`
 - `if` / `else`
 - `while`
+- `for`
+- `break` / `continue`
+- empty statements (`;`) and expression statements (`expr;`)
 - arithmetic: `+ - * / %`
 - comparisons: `== != < <= > >=`
 - logical operators with C-style truth values and short-circuiting: `&& || !`
@@ -172,14 +176,14 @@ docker compose run --rm cust
 
 ## v0.1 limitations
 
-Cust is not a full C implementation yet. Missing features include pointers, arrays, structs, function calls, preprocessor support, includes, standard library calls, floating-point values, and many richer C compatibility rules.
+Cust is not a full C implementation yet. Missing features include pointers, arrays, structs, preprocessor support, includes, standard library calls, floating-point values, and many richer C compatibility rules.
 
 See [docs/v0.1.md](docs/v0.1.md) for implementation details and safety notes.
 
 ## Roadmap
 
 - v0.2: better diagnostics with source spans and expanded test fixtures
-- v0.3: function definitions and calls
+- v0.3: recursive calls with an explicit bounded-depth regression suite
 - v0.4: arrays and strings
 - v0.5: richer C compatibility tests
 

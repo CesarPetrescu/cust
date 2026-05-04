@@ -56,6 +56,7 @@ enum Token {
     RParen,
     LBrace,
     RBrace,
+    Comma,
     Semi,
     Eof,
 }
@@ -77,10 +78,22 @@ impl LocatedToken {
 enum Expr {
     Number(i64),
     Var(String),
+    Call { name: String, args: Vec<Expr> },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
     LogicalNot(Box<Expr>),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Program {
+    functions: HashMap<String, Function>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Function {
+    params: Vec<String>,
+    body: Vec<Stmt>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,6 +144,7 @@ enum Stmt {
 ///
 /// Supported v0.1 syntax:
 /// - `int main() { ... }`
+/// - `int name(int param, ...) { ... }` function definitions and calls
 /// - `int name = expression;`
 /// - `name = expression;`
 /// - `return expression;`
@@ -256,6 +270,10 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 push_token(&mut tokens, Token::RBrace, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
+            ',' => {
+                push_token(&mut tokens, Token::Comma, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
+            }
             ';' => {
                 push_token(&mut tokens, Token::Semi, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
@@ -349,14 +367,45 @@ impl Parser {
         Self { tokens, pos: 0 }
     }
 
-    fn parse_program(&mut self) -> CustResult<Vec<Stmt>> {
+    fn parse_program(&mut self) -> CustResult<Program> {
+        let mut functions = HashMap::new();
+        while !self.check(&Token::Eof) {
+            let (name, function) = self.parse_function()?;
+            if functions.insert(name.clone(), function).is_some() {
+                return Err(CustError::new(format!("function '{name}' already defined")));
+            }
+        }
+        self.expect(Token::Eof)?;
+        if !functions.contains_key("main") {
+            return Err(CustError::new("missing main() function"));
+        }
+        Ok(Program { functions })
+    }
+
+    fn parse_function(&mut self) -> CustResult<(String, Function)> {
         self.expect(Token::Int)?;
-        self.expect_ident_named("main")?;
+        let name = self.expect_ident()?;
         self.expect(Token::LParen)?;
+        let params = self.parse_params()?;
         self.expect(Token::RParen)?;
         let body = self.parse_block()?;
-        self.expect(Token::Eof)?;
-        Ok(body)
+        Ok((name, Function { params, body }))
+    }
+
+    fn parse_params(&mut self) -> CustResult<Vec<String>> {
+        let mut params = Vec::new();
+        if self.check(&Token::RParen) {
+            return Ok(params);
+        }
+
+        loop {
+            self.expect(Token::Int)?;
+            params.push(self.expect_ident()?);
+            if !self.matches(&Token::Comma) {
+                break;
+            }
+        }
+        Ok(params)
     }
 
     fn parse_block(&mut self) -> CustResult<Vec<Stmt>> {
@@ -644,7 +693,15 @@ impl Parser {
         let found = self.advance();
         match found.kind.clone() {
             Token::Number(value) => Ok(Expr::Number(value)),
-            Token::Ident(name) => Ok(Expr::Var(name)),
+            Token::Ident(name) => {
+                if self.matches(&Token::LParen) {
+                    let args = self.parse_call_args()?;
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Call { name, args })
+                } else {
+                    Ok(Expr::Var(name))
+                }
+            }
             Token::LParen => {
                 let expr = self.parse_expr()?;
                 self.expect(Token::RParen)?;
@@ -655,6 +712,21 @@ impl Parser {
                 &found,
             )),
         }
+    }
+
+    fn parse_call_args(&mut self) -> CustResult<Vec<Expr>> {
+        let mut args = Vec::new();
+        if self.check(&Token::RParen) {
+            return Ok(args);
+        }
+
+        loop {
+            args.push(self.parse_expr()?);
+            if !self.matches(&Token::Comma) {
+                break;
+            }
+        }
+        Ok(args)
     }
 
     fn expect(&mut self, expected: Token) -> CustResult<()> {
@@ -673,21 +745,6 @@ impl Parser {
         let found = self.advance();
         match found.kind.clone() {
             Token::Ident(name) => Ok(name),
-            token => Err(Self::error_at(
-                format!("expected identifier, found {token:?}"),
-                &found,
-            )),
-        }
-    }
-
-    fn expect_ident_named(&mut self, expected: &str) -> CustResult<()> {
-        let found = self.advance();
-        match found.kind.clone() {
-            Token::Ident(name) if name == expected => Ok(()),
-            Token::Ident(name) => Err(Self::error_at(
-                format!("expected function '{expected}', found '{name}'"),
-                &found,
-            )),
             token => Err(Self::error_at(
                 format!("expected identifier, found {token:?}"),
                 &found,
@@ -757,6 +814,8 @@ impl Parser {
 #[derive(Default)]
 struct Interpreter {
     scopes: Vec<HashMap<String, i64>>,
+    functions: HashMap<String, Function>,
+    call_depth: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -768,13 +827,55 @@ enum ExecFlow {
 }
 
 impl Interpreter {
-    fn run(&mut self, statements: &[Stmt]) -> CustResult<i64> {
-        match self.exec_block(statements)? {
-            ExecFlow::Return(value) => Ok(value),
-            ExecFlow::None => Err(CustError::new("main() finished without return")),
-            ExecFlow::Break => Err(CustError::new("break outside loop")),
-            ExecFlow::Continue => Err(CustError::new("continue outside loop")),
+    fn run(&mut self, program: &Program) -> CustResult<i64> {
+        self.functions = program.functions.clone();
+        self.call_function("main", &[])
+    }
+
+    fn call_function(&mut self, name: &str, args: &[i64]) -> CustResult<i64> {
+        let function = self
+            .functions
+            .get(name)
+            .cloned()
+            .ok_or_else(|| CustError::new(format!("undefined function '{name}'")))?;
+
+        if function.params.len() != args.len() {
+            return Err(CustError::new(format!(
+                "function '{name}' expected {} arguments, got {}",
+                function.params.len(),
+                args.len()
+            )));
         }
+
+        self.call_depth += 1;
+        if self.call_depth > 1_000 {
+            self.call_depth -= 1;
+            return Err(CustError::new("function call depth limit exceeded"));
+        }
+
+        let mut param_scope = HashMap::new();
+        for (param, arg) in function.params.iter().zip(args) {
+            if param_scope.insert(param.clone(), *arg).is_some() {
+                self.call_depth -= 1;
+                return Err(CustError::new(format!(
+                    "parameter '{param}' already declared in this function"
+                )));
+            }
+        }
+
+        self.scopes.push(param_scope);
+        let result = match self.exec_block(&function.body) {
+            Ok(ExecFlow::Return(value)) => Ok(value),
+            Ok(ExecFlow::None) => Err(CustError::new(format!(
+                "function '{name}' finished without return"
+            ))),
+            Ok(ExecFlow::Break) => Err(CustError::new("break outside loop")),
+            Ok(ExecFlow::Continue) => Err(CustError::new("continue outside loop")),
+            Err(error) => Err(error),
+        };
+        self.scopes.pop();
+        self.call_depth -= 1;
+        result
     }
 
     fn exec_block(&mut self, statements: &[Stmt]) -> CustResult<ExecFlow> {
@@ -944,12 +1045,19 @@ impl Interpreter {
         Ok(ExecFlow::None)
     }
 
-    fn eval(&self, expr: &Expr) -> CustResult<i64> {
+    fn eval(&mut self, expr: &Expr) -> CustResult<i64> {
         match expr {
             Expr::Number(value) => Ok(*value),
             Expr::Var(name) => self
                 .find_variable(name)
                 .ok_or_else(|| CustError::new(format!("undefined variable '{name}'"))),
+            Expr::Call { name, args } => {
+                let evaluated_args = args
+                    .iter()
+                    .map(|arg| self.eval(arg))
+                    .collect::<CustResult<Vec<_>>>()?;
+                self.call_function(name, &evaluated_args)
+            }
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::LogicalNot(inner) => Ok((self.eval(inner)? == 0) as i64),
