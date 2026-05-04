@@ -401,8 +401,27 @@ impl Parser {
         loop {
             self.expect(Token::Int)?;
             params.push(self.expect_ident()?);
-            if !self.matches(&Token::Comma) {
+
+            if self.matches(&Token::Comma) {
+                if self.check(&Token::RParen) {
+                    return Err(Self::error_at(
+                        format!(
+                            "expected function parameter after ',', found {:?}",
+                            self.peek()
+                        ),
+                        self.peek_located(),
+                    ));
+                }
+            } else if self.check(&Token::RParen) {
                 break;
+            } else {
+                return Err(Self::error_at(
+                    format!(
+                        "expected ',' or ')' after function parameter, found {:?}",
+                        self.peek()
+                    ),
+                    self.peek_located(),
+                ));
             }
         }
         Ok(params)
@@ -722,8 +741,27 @@ impl Parser {
 
         loop {
             args.push(self.parse_expr()?);
-            if !self.matches(&Token::Comma) {
+
+            if self.matches(&Token::Comma) {
+                if self.check(&Token::RParen) {
+                    return Err(Self::error_at(
+                        format!(
+                            "expected function call argument after ',', found {:?}",
+                            self.peek()
+                        ),
+                        self.peek_located(),
+                    ));
+                }
+            } else if self.check(&Token::RParen) {
                 break;
+            } else {
+                return Err(Self::error_at(
+                    format!(
+                        "expected ',' or ')' after function call argument, found {:?}",
+                        self.peek()
+                    ),
+                    self.peek_located(),
+                ));
             }
         }
         Ok(args)

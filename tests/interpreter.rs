@@ -89,6 +89,42 @@ fn reports_line_and_column_for_parser_expression_errors() {
 }
 
 #[test]
+fn reports_missing_commas_in_function_parameter_lists() {
+    let program = "int add(int a int b) { return a + b; }\nint main() { return add(1, 2); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ',' or ')' after function parameter, found Int at line 1, column 15"
+    );
+}
+
+#[test]
+fn reports_missing_commas_in_function_call_argument_lists() {
+    let program = "int add(int a, int b) { return a + b; }\nint main() { return add(1 2); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ',' or ')' after function call argument, found Number(2) at line 2, column 27"
+    );
+}
+
+#[test]
+fn reports_trailing_commas_in_function_call_argument_lists() {
+    let program = "int add(int a, int b) { return a + b; }\nint main() { return add(1,); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected function call argument after ',', found RParen at line 2, column 27"
+    );
+}
+
+#[test]
 fn supports_block_scope_shadowing_and_outer_assignment() {
     let program = include_str!("fixtures/valid/block_scope_shadowing.c");
 

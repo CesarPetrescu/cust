@@ -52,6 +52,7 @@ Last updated: 2026-05-04
 
 - Lexer errors include 1-based line and column plus a source-line/caret context snippet for unexpected characters and out-of-range integer literals.
 - Parser errors include 1-based line and column plus token context for expected-token, identifier, expression, statement, and unterminated-block failures.
+- Parser diagnostics now include targeted separator messages for malformed function parameter lists and function call argument lists, including missing commas and trailing commas.
 
 ## Verified commands
 
@@ -63,7 +64,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding explicit recursive-call coverage and tightening the recursive call-depth guard in the 2026-05-04 autonomous run. The suite now includes fixture coverage for direct recursion, mutual recursion, and depth-limit diagnostics that name the function being called. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after improving function parameter/call argument parser diagnostics in the 2026-05-04 autonomous run. The suite now includes exact-error regression coverage for missing separators in function parameter lists, missing separators in function call argument lists, and trailing call-argument commas. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

@@ -4,10 +4,10 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 ## Next recommended tasks
 
-1. Improve parser recovery/error messages for common malformed programs (for example missing separators in function parameter and call argument lists).
-2. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
-3. Add CLI flags such as `--version`, `--ast`, `--tokens`, or `--max-steps` after the core C-subset expansion stabilizes.
-4. Add `char` literals/type support as the next P2 data-type expansion after parser diagnostics are stronger.
+1. Add `char` literal/type support as the next P2 data-type expansion now that core integer functions/control flow and first-pass parser diagnostics are stable.
+2. Continue improving parser recovery/error messages for additional malformed programs (for example trailing commas in function parameter lists, missing semicolons after declarations/assignments, and unmatched delimiters).
+3. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
+4. Add CLI flags such as `--version`, `--ast`, `--tokens`, or `--max-steps` after the core C-subset expansion stabilizes.
 
 ## Every-run checklist
 
