@@ -89,9 +89,11 @@ Features:
 
 - `int main() { ... }` plus additional `int` function definitions
 - function calls with integer arguments and local function parameters
-- integer literals and variables
-- declarations: `int x = 1;`
-- assignment: `x = x + 1;`
+- integer, character, and string literals
+- declarations: `int x = 1;`, `char c = 'A';`, `int xs[3];`, `char text[4];`
+- assignment: `x = x + 1;` and `xs[0] = x;`
+- one-dimensional `int`/`char` arrays with indexed reads/writes
+- array parameters such as `char text[4]`; string literals are read-only NUL-terminated byte arrays and can be passed to matching array parameters
 - nested block scopes with inner shadowing
 - `return`
 - `if` / `else`
@@ -176,7 +178,7 @@ docker compose run --rm cust
 
 ## v0.1 limitations
 
-Cust is not a full C implementation yet. Missing features include pointers, arrays, structs, preprocessor support, includes, standard library calls, floating-point values, and many richer C compatibility rules.
+Cust is not a full C implementation yet. Missing features include pointers, structs, preprocessor support, includes, standard library calls, floating-point values, and many richer C compatibility rules.
 
 See [docs/v0.1.md](docs/v0.1.md) for implementation details and safety notes.
 

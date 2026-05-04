@@ -33,12 +33,12 @@ Last updated: 2026-05-04
 
 - `int main() { ... }` plus additional `int name(...) { ... }` function definitions
 - function calls as expressions with integer arguments, local parameter scopes, direct/mutual recursion support, arity diagnostics, undefined-function diagnostics, and a 256-call-depth safety limit with function-name context
-- integer literals, character literals, variables, and one-dimensional `int`/`char` arrays
+- integer literals, character literals, string literals, variables, and one-dimensional `int`/`char` arrays
 - declarations: `int x = expr;`, `char x = expr;`, `int xs[N];`, or `char cs[N];`
 - `int` and `char` function parameters (stored as integer values in the current interpreter model)
-- one-dimensional array parameters such as `int values[3]`, passed by reference to the same array storage
+- one-dimensional array parameters such as `int values[3]`, passed by reference to the same array storage; string literals can be passed to `char` array parameters as read-only NUL-terminated byte arrays
 - assignments: `x = expr;` and `xs[index] = expr;`
-- array indexing expressions `xs[index]` with runtime negative/out-of-bounds diagnostics
+- array indexing expressions `xs[index]` and string literal indexing expressions `"text"[index]` with runtime negative/out-of-bounds diagnostics
 - `return expr;`
 - nested block statements `{ ... }` with per-block variable scopes, inner shadowing, and outer-scope assignment lookup
 - `if (...) { ... } else { ... }`
@@ -67,7 +67,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding one-dimensional array support in the 2026-05-04 autonomous run. The suite now includes valid fixture coverage for zero-initialized `int`/`char` arrays, indexed reads/writes, array expression statements, indexed loop access, and array parameters passed to functions, plus invalid fixture coverage for negative and out-of-bounds indices. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after adding string literal support in the 2026-05-04 autonomous run. The suite now includes valid fixture coverage for NUL-terminated string literal indexing, supported string escapes, and passing read-only string literals to `char` array parameters, plus invalid fixture coverage for rejecting writes through a string-backed array parameter. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

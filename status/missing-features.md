@@ -26,7 +26,7 @@ Prioritized backlog for autonomous implementation.
 
 - [x] `char` literals, declarations, and function parameters
 - [x] arrays
-- [ ] string literals as read-only byte arrays
+- [x] string literals as read-only byte arrays
 - [ ] pointer model design document before implementation
 
 ## P3 — C compatibility tooling

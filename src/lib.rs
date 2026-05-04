@@ -40,6 +40,7 @@ enum Token {
     Continue,
     Ident(String),
     Number(i64),
+    StringLiteral(Vec<i64>),
     Plus,
     Minus,
     Star,
@@ -82,8 +83,10 @@ impl LocatedToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Expr {
     Number(i64),
+    StringLiteral(Vec<i64>),
     Var(String),
     ArrayGet { name: String, index: Box<Expr> },
+    StringGet { values: Vec<i64>, index: Box<Expr> },
     Call { name: String, args: Vec<Expr> },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
@@ -181,6 +184,7 @@ enum Stmt {
 /// - `for (initializer; condition; increment) { ... }`
 /// - `break;` and `continue;` inside loops
 /// - empty statements (`;`) and side-effect-free expression statements (`expr;`)
+/// - integer, character, and string literals (string literals are read-only NUL-terminated byte arrays)
 /// - integer arithmetic/comparisons/logical operators: `+ - * / % == != < <= > >= && || !`
 pub fn interpret(source: &str) -> CustResult<i64> {
     let tokens = lex(source)?;
@@ -229,6 +233,76 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     start_line,
                     start_column,
                 ));
+            }
+            '"' => {
+                let start_line = line;
+                let start_column = column;
+                advance_position('"', &mut line, &mut column, &mut i);
+                let mut values = Vec::new();
+
+                loop {
+                    let Some(next) = chars.get(i).copied() else {
+                        return Err(lexer_error_with_context(
+                            "unterminated string literal",
+                            source,
+                            start_line,
+                            start_column,
+                        ));
+                    };
+                    match next {
+                        '"' => {
+                            advance_position('"', &mut line, &mut column, &mut i);
+                            values.push('\0' as i64);
+                            tokens.push(LocatedToken::new(
+                                Token::StringLiteral(values),
+                                start_line,
+                                start_column,
+                            ));
+                            break;
+                        }
+                        '\\' => {
+                            advance_position('\\', &mut line, &mut column, &mut i);
+                            let Some(escape_char) = chars.get(i).copied() else {
+                                return Err(lexer_error_with_context(
+                                    "unterminated string literal",
+                                    source,
+                                    start_line,
+                                    start_column,
+                                ));
+                            };
+                            let escaped = match escape_char {
+                                'n' => '\n',
+                                't' => '\t',
+                                '0' => '\0',
+                                '\\' => '\\',
+                                '\'' => '\'',
+                                '"' => '"',
+                                other => {
+                                    return Err(lexer_error_with_context(
+                                        format!("unsupported string escape '\\{other}'"),
+                                        source,
+                                        start_line,
+                                        start_column,
+                                    ));
+                                }
+                            };
+                            advance_position(escape_char, &mut line, &mut column, &mut i);
+                            values.push(escaped as i64);
+                        }
+                        '\n' => {
+                            return Err(lexer_error_with_context(
+                                "unterminated string literal",
+                                source,
+                                start_line,
+                                start_column,
+                            ));
+                        }
+                        value => {
+                            advance_position(value, &mut line, &mut column, &mut i);
+                            values.push(value as i64);
+                        }
+                    }
+                }
             }
             '\'' => {
                 let start_line = line;
@@ -575,6 +649,7 @@ impl Parser {
             Token::Ident(_) if self.starts_assignment_stmt() => self.parse_assign(),
             Token::Ident(_)
             | Token::Number(_)
+            | Token::StringLiteral(_)
             | Token::Plus
             | Token::Minus
             | Token::Bang
@@ -866,6 +941,18 @@ impl Parser {
         let found = self.advance();
         match found.kind.clone() {
             Token::Number(value) => Ok(Expr::Number(value)),
+            Token::StringLiteral(values) => {
+                if self.matches(&Token::LBracket) {
+                    let index = self.parse_expr()?;
+                    self.expect(Token::RBracket)?;
+                    Ok(Expr::StringGet {
+                        values,
+                        index: Box::new(index),
+                    })
+                } else {
+                    Ok(Expr::StringLiteral(values))
+                }
+            }
             Token::Ident(name) => {
                 if self.matches(&Token::LParen) {
                     let args = self.parse_call_args()?;
@@ -992,6 +1079,7 @@ impl Parser {
             self.peek(),
             Token::Ident(_)
                 | Token::Number(_)
+                | Token::StringLiteral(_)
                 | Token::Plus
                 | Token::Minus
                 | Token::Bang
@@ -1072,7 +1160,29 @@ enum ExecFlow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Value {
     Scalar(i64),
-    Array(Rc<RefCell<Vec<i64>>>),
+    Array(Rc<RefCell<ArrayValue>>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArrayValue {
+    elements: Vec<i64>,
+    read_only: bool,
+}
+
+impl ArrayValue {
+    fn mutable_zeroed(len: usize) -> Self {
+        Self {
+            elements: vec![0; len],
+            read_only: false,
+        }
+    }
+
+    fn read_only(elements: Vec<i64>) -> Self {
+        Self {
+            elements,
+            read_only: true,
+        }
+    }
 }
 
 impl Interpreter {
@@ -1141,19 +1251,32 @@ impl Interpreter {
         expected_len: usize,
         arg_expr: &Expr,
     ) -> CustResult<Value> {
-        let Expr::Var(arg_name) = arg_expr else {
-            return Err(CustError::new(format!(
+        match arg_expr {
+            Expr::Var(arg_name) => {
+                let array = self.find_array(arg_name)?;
+                let actual_len = array.borrow().elements.len();
+                if actual_len != expected_len {
+                    return Err(CustError::new(format!(
+                        "function '{function_name}' array parameter '{param_name}' expected length {expected_len}, got {actual_len}"
+                    )));
+                }
+                Ok(Value::Array(array))
+            }
+            Expr::StringLiteral(values) => {
+                let actual_len = values.len();
+                if actual_len != expected_len {
+                    return Err(CustError::new(format!(
+                        "function '{function_name}' array parameter '{param_name}' expected length {expected_len}, got {actual_len}"
+                    )));
+                }
+                Ok(Value::Array(Rc::new(RefCell::new(ArrayValue::read_only(
+                    values.clone(),
+                )))))
+            }
+            _ => Err(CustError::new(format!(
                 "function '{function_name}' array parameter '{param_name}' requires an array argument"
-            )));
-        };
-        let array = self.find_array(arg_name)?;
-        let actual_len = array.borrow().len();
-        if actual_len != expected_len {
-            return Err(CustError::new(format!(
-                "function '{function_name}' array parameter '{param_name}' expected length {expected_len}, got {actual_len}"
-            )));
+            ))),
         }
-        Ok(Value::Array(array))
     }
 
     fn exec_block(&mut self, statements: &[Stmt]) -> CustResult<ExecFlow> {
@@ -1196,7 +1319,7 @@ impl Interpreter {
         }
     }
 
-    fn find_array(&self, name: &str) -> CustResult<Rc<RefCell<Vec<i64>>>> {
+    fn find_array(&self, name: &str) -> CustResult<Rc<RefCell<ArrayValue>>> {
         match self.scopes.iter().rev().find_map(|scope| scope.get(name)) {
             Some(Value::Array(values)) => Ok(Rc::clone(values)),
             Some(Value::Scalar(_)) => {
@@ -1210,10 +1333,10 @@ impl Interpreter {
         &mut self,
         name: &str,
         index: &Expr,
-    ) -> CustResult<(Rc<RefCell<Vec<i64>>>, usize)> {
+    ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
         let index_value = self.eval(index)?;
         let array = self.find_array(name)?;
-        let len = array.borrow().len();
+        let len = array.borrow().elements.len();
         let Ok(index) = usize::try_from(index_value) else {
             return Err(CustError::new(format!(
                 "array '{name}' index {index_value} out of bounds for length {len}"
@@ -1250,7 +1373,7 @@ impl Interpreter {
                 }
                 scope.insert(
                     name.clone(),
-                    Value::Array(Rc::new(RefCell::new(vec![0; *len]))),
+                    Value::Array(Rc::new(RefCell::new(ArrayValue::mutable_zeroed(*len)))),
                 );
                 Ok(ExecFlow::None)
             }
@@ -1275,7 +1398,13 @@ impl Interpreter {
             Stmt::ArrayAssign { name, index, value } => {
                 let value = self.eval(value)?;
                 let (array, index) = self.checked_array_index(name, index)?;
-                array.borrow_mut()[index] = value;
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new(format!(
+                        "cannot modify read-only array '{name}'"
+                    )));
+                }
+                array.elements[index] = value;
                 Ok(ExecFlow::None)
             }
             Stmt::Expr(expr) => {
@@ -1384,10 +1513,26 @@ impl Interpreter {
     fn eval(&mut self, expr: &Expr) -> CustResult<i64> {
         match expr {
             Expr::Number(value) => Ok(*value),
+            Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
             Expr::Var(name) => self.find_scalar(name),
             Expr::ArrayGet { name, index } => {
                 let (array, index) = self.checked_array_index(name, index)?;
-                Ok(array.borrow()[index])
+                Ok(array.borrow().elements[index])
+            }
+            Expr::StringGet { values, index } => {
+                let index_value = self.eval(index)?;
+                let Ok(index) = usize::try_from(index_value) else {
+                    return Err(CustError::new(format!(
+                        "string literal index {index_value} out of bounds for length {}",
+                        values.len()
+                    )));
+                };
+                values.get(index).copied().ok_or_else(|| {
+                    CustError::new(format!(
+                        "string literal index {index_value} out of bounds for length {}",
+                        values.len()
+                    ))
+                })
             }
             Expr::Call { name, args } => self.call_function(name, args),
             Expr::UnaryPlus(inner) => self.eval(inner),

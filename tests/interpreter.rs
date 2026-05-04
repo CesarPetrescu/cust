@@ -209,6 +209,22 @@ fn supports_one_dimensional_arrays_indexing_and_parameters() {
 }
 
 #[test]
+fn supports_string_literals_as_read_only_byte_arrays() {
+    let program = include_str!("fixtures/valid/string_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 579);
+}
+
+#[test]
+fn rejects_writes_through_string_literal_array_parameters() {
+    let program = include_str!("fixtures/invalid/string_literal_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot modify read-only array 'text'");
+}
+
+#[test]
 fn rejects_multi_character_char_literals() {
     let program = include_str!("fixtures/invalid/unterminated_char_literal.c");
 
