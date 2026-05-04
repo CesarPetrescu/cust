@@ -37,11 +37,12 @@ Prioritized backlog for autonomous implementation.
 - [x] Compare Cust output against `gcc`/`clang`/`cc` for supported programs as an external test oracle only
 - [x] Add an initial corpus under `tests/fixtures/`
 - [ ] Add more conformance fixtures with explicit expected results and optional compiler-oracle comparisons where supported (pointer scalar/parameter/array-decay/array-element coverage has been added; continue expanding mixed supported-subset fixtures as new features land)
-- [ ] Add fuzz/property tests for lexer/parser safety
+- [x] Add fuzz/property tests for lexer/parser safety
 
 ## P4 — product quality
 
-- [ ] CLI flags: `--ast`, `--tokens`, `--max-steps`
+- [x] CLI flag: `--tokens`
+- [ ] CLI flags: `--ast`, `--max-steps`
 - [x] CLI flag: `--version`
 - [ ] Better README examples
 - [ ] Release notes and tags

@@ -1,4 +1,6 @@
+use std::fs;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn version_flag_prints_package_version_without_requiring_a_source_file() {
@@ -17,4 +19,72 @@ fn version_flag_prints_package_version_without_requiring_a_source_file() {
         format!("cust {}\n", env!("CARGO_PKG_VERSION"))
     );
     assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[test]
+fn tokens_flag_prints_lexer_tokens_without_interpreting_source() {
+    let path = write_temp_source("int main() { return 1 / 0; }\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--tokens")
+        .arg(&path)
+        .output()
+        .expect("cust binary should run");
+
+    fs::remove_file(&path).expect("temporary source should be removable");
+    assert!(
+        output.status.success(),
+        "--tokens should lex without interpreting, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        concat!(
+            "1:1 Int\n",
+            "1:5 Ident(\"main\")\n",
+            "1:9 LParen\n",
+            "1:10 RParen\n",
+            "1:12 LBrace\n",
+            "1:14 Return\n",
+            "1:21 Number(1)\n",
+            "1:23 Slash\n",
+            "1:25 Number(0)\n",
+            "1:26 Semi\n",
+            "1:28 RBrace\n",
+            "2:1 Eof\n",
+        )
+    );
+}
+
+#[test]
+fn tokens_flag_reports_lexer_errors_with_context() {
+    let path = write_temp_source("int main() {\n@\n}\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--tokens")
+        .arg(&path)
+        .output()
+        .expect("cust binary should run");
+
+    fs::remove_file(&path).expect("temporary source should be removable");
+    assert!(
+        !output.status.success(),
+        "--tokens should reject lexer errors"
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "cust: unexpected character '@' at line 2, column 1\n@\n^\n"
+    );
+}
+
+fn write_temp_source(source: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock should be after Unix epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("cust-cli-{}-{nanos}.c", std::process::id()));
+    fs::write(&path, source).expect("temporary source should be writable");
+    path.to_string_lossy().into_owned()
 }

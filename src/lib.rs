@@ -204,6 +204,21 @@ pub fn interpret(source: &str) -> CustResult<i64> {
     interpreter.run(&program)
 }
 
+/// Format the lexer token stream with 1-based source locations.
+///
+/// This powers the `cust --tokens <file.c>` CLI inspection mode. It intentionally
+/// stops after lexing, so runtime errors such as division by zero are not
+/// evaluated while inspecting tokens.
+pub fn format_tokens(source: &str) -> CustResult<String> {
+    let tokens = lex(source)?;
+    Ok(tokens
+        .into_iter()
+        .map(|token| format!("{}:{} {:?}", token.line, token.column, token.kind))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n")
+}
+
 fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
     let chars: Vec<char> = source.chars().collect();
     let mut tokens = Vec::new();

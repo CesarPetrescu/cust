@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-05 autonomous run after local and Docker verification passed for array-element pointers (`&values[index]`), direct/grouped dereference reads and writes (`*(&values[1])`), array-element pointers passed to `int *`/`char *` parameters, relative pointer indexing diagnostics, and compiler-oracle pointer compatibility fixtures. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-05-05 autonomous lexer-safety and `--tokens` CLI run after local and Docker verification passed for deterministic generated malformed-program/arbitrary-byte panic-safety tests plus lexer token inspection mode. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 
