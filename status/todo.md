@@ -1,20 +1,20 @@
 # Cust TODO
 
-The autonomous agent should pick only one small task per cron run unless the task is documentation-only.
+The autonomous agent should complete a meaningful work package per cron run: usually one full C/interpreter feature or 2-4 tightly related small tasks. Prefer real code and test expansion over status-only churn.
 
 ## Next recommended tasks
 
-1. Add fixtures under `tests/fixtures/valid` and `tests/fixtures/invalid`.
-2. Add block scoping with TDD.
+1. Implement block scoping with TDD and add valid/invalid fixture coverage for scoped variables.
+2. Continue P1 C-subset expansion with logical operators, unary plus, `for` loops, `break`/`continue`, or function definitions/calls.
 
 ## Every-run checklist
 
 - [ ] Pull latest `main` with `git checkout main && git pull --ff-only`
 - [ ] Read all files in `status/`
-- [ ] Pick one small TODO from `status/missing-features.md` or `status/todo.md`
+- [ ] Pick one meaningful work package from `status/missing-features.md` or `status/todo.md`
 - [ ] Research docs if uncertain
 - [ ] Write/update failing tests first for code behavior
-- [ ] Implement minimal change
+- [ ] Implement the full selected C/interpreter work package, not only the smallest possible status/docs change
 - [ ] Run local verification
 - [ ] Run Docker verification
 - [ ] Update `status/current-state.md`

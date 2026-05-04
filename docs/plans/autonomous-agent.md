@@ -2,9 +2,9 @@
 
 > **For Hermes:** Use this plan as the operating specification for recurring autonomous development on Cust.
 
-**Goal:** Run a safe autonomous coding loop that improves Cust incrementally while keeping status files, tests, Docker verification, and Git history clean.
+**Goal:** Run a safe autonomous coding loop that improves Cust substantially each run while keeping status files, tests, Docker verification, and Git history clean.
 
-**Architecture:** A Hermes cron job runs against `/root/hermes-workspace/cust`. Each run reads `status/`, selects one small task, researches as needed, uses TDD for implementation, verifies locally and in Docker, updates status files, commits, pushes, and reports results. If blocked, it records the blocker and stops without pushing broken code.
+**Architecture:** A Hermes cron job runs against `/root/hermes-workspace/cust`. Each run reads `status/`, selects a meaningful work package, researches as needed, uses TDD for implementation, verifies locally and in Docker, updates status files, commits, pushes, and reports results. If blocked, it records the blocker and stops without pushing broken code.
 
 **Tech Stack:** Rust, Cargo, Docker Compose, Git/GitHub SSH deploy key, Hermes cron, Hermes web/search + file + terminal toolsets.
 
@@ -12,7 +12,7 @@
 
 ## Operating Principles
 
-1. **Small safe increments:** one feature/fix per run.
+1. **Substantial safe increments:** complete one meaningful C/interpreter work package per run, usually one full C language feature or 2-4 tightly related small tasks.
 2. **TDD for behavior:** tests before implementation for code changes.
 3. **Docker verification:** no push unless Docker test path passes.
 4. **Status-first:** update `status/` every run.
@@ -55,15 +55,17 @@ Read:
 - `status/stuck.md`
 - `status/research.md`
 
-### 3. Choose one task
+### 3. Choose a work package
 
 Priority order:
 
 1. Fix failing tests/builds
 2. Resolve active blocker if possible
 3. P0 item from `missing-features.md`
-4. First item from `todo.md`
-5. Documentation improvement if no safe code task exists
+4. First items from `todo.md`
+5. Documentation/status-only improvement only if no safe code task exists or code work is blocked
+
+A work package should normally produce real interpreter/test changes. Prefer implementing missing C behavior over cosmetic cleanup. It is acceptable to complete multiple tightly related TODOs in the same run when they share parser/interpreter/test setup.
 
 ### 4. Research if needed
 
@@ -73,8 +75,8 @@ Use web search/documentation for uncertain details. Record the decision in `stat
 
 For behavior changes:
 
-1. Add/modify a focused test.
-2. Run it and confirm it fails for the expected reason.
+1. Add/modify focused tests. Prefer multiple layers when practical: interpreter regression tests, valid/invalid fixtures, and error/negative tests.
+2. Run them and confirm they fail for the expected reason.
 3. Implement the minimum code needed.
 4. Run the focused test.
 5. Run the full suite.
@@ -121,7 +123,9 @@ Commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `chore`.
 
 Report compactly:
 
-- task selected
+- work package selected
+- C/features implemented
+- tests added/expanded
 - files changed
 - tests run + pass/fail
 - commit hash if pushed
