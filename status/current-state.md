@@ -32,7 +32,7 @@ Last updated: 2026-05-04
 ## Supported language subset
 
 - `int main() { ... }` plus additional `int name(...) { ... }` function definitions
-- function calls as expressions with integer arguments, local parameter scopes, arity diagnostics, undefined-function diagnostics, and a 1,000-call-depth safety limit
+- function calls as expressions with integer arguments, local parameter scopes, direct/mutual recursion support, arity diagnostics, undefined-function diagnostics, and a 256-call-depth safety limit with function-name context
 - integer literals and variables
 - declarations: `int x = expr;`
 - assignments: `x = expr;`
@@ -63,7 +63,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after implementing function definitions, function calls, and local parameters in the 2026-05-04 autonomous run. The suite now includes fixture coverage for multi-function programs, nested function-call expressions, undefined function calls, and argument-count diagnostics. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after adding explicit recursive-call coverage and tightening the recursive call-depth guard in the 2026-05-04 autonomous run. The suite now includes fixture coverage for direct recursion, mutual recursion, and depth-limit diagnostics that name the function being called. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

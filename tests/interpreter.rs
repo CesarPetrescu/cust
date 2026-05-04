@@ -152,6 +152,25 @@ fn supports_function_definitions_calls_and_parameters() {
 }
 
 #[test]
+fn supports_direct_and_mutual_recursive_calls() {
+    let program = include_str!("fixtures/valid/recursive_calls.c");
+
+    assert_eq!(interpret(program).unwrap(), 125);
+}
+
+#[test]
+fn reports_function_name_when_recursive_calls_exceed_depth_limit() {
+    let program = include_str!("fixtures/invalid/recursive_call_depth_limit.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function call depth limit exceeded while calling 'recurse'"
+    );
+}
+
+#[test]
 fn rejects_calls_to_undefined_functions() {
     let program = include_str!("fixtures/invalid/undefined_function_call.c");
 

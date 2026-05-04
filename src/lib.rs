@@ -144,7 +144,7 @@ enum Stmt {
 ///
 /// Supported v0.1 syntax:
 /// - `int main() { ... }`
-/// - `int name(int param, ...) { ... }` function definitions and calls
+/// - `int name(int param, ...) { ... }` function definitions and calls, including bounded recursion
 /// - `int name = expression;`
 /// - `name = expression;`
 /// - `return expression;`
@@ -811,6 +811,8 @@ impl Parser {
     }
 }
 
+const MAX_CALL_DEPTH: usize = 256;
+
 #[derive(Default)]
 struct Interpreter {
     scopes: Vec<HashMap<String, i64>>,
@@ -847,11 +849,13 @@ impl Interpreter {
             )));
         }
 
-        self.call_depth += 1;
-        if self.call_depth > 1_000 {
-            self.call_depth -= 1;
-            return Err(CustError::new("function call depth limit exceeded"));
+        if self.call_depth >= MAX_CALL_DEPTH {
+            return Err(CustError::new(format!(
+                "function call depth limit exceeded while calling '{name}'"
+            )));
         }
+
+        self.call_depth += 1;
 
         let mut param_scope = HashMap::new();
         for (param, arg) in function.params.iter().zip(args) {

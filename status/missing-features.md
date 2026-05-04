@@ -15,7 +15,7 @@ Prioritized backlog for autonomous implementation.
 
 - [x] Function definitions and function calls
 - [x] Local function parameters
-- [ ] Recursive calls with a bounded call-depth limit regression suite
+- [x] Recursive calls with a bounded call-depth limit regression suite
 - [x] Boolean/logical operators: `&&`, `||`, `!`
 - [x] Unary plus
 - [x] `for` loops

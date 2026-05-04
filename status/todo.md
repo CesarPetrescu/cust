@@ -4,9 +4,10 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 ## Next recommended tasks
 
-1. Add explicit recursive-call fixture coverage (including depth-limit behavior) now that ordinary functions and local parameters are implemented.
+1. Improve parser recovery/error messages for common malformed programs (for example missing separators in function parameter and call argument lists).
 2. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
 3. Add CLI flags such as `--version`, `--ast`, `--tokens`, or `--max-steps` after the core C-subset expansion stabilizes.
+4. Add `char` literals/type support as the next P2 data-type expansion after parser diagnostics are stronger.
 
 ## Every-run checklist
 
