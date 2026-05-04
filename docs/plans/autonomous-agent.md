@@ -4,7 +4,7 @@
 
 **Goal:** Run a safe autonomous coding loop that improves Cust substantially each run while keeping status files, tests, Docker verification, and Git history clean.
 
-**Architecture:** A Hermes cron job runs against `/root/hermes-workspace/cust`. Each run reads `status/`, selects a meaningful work package, researches as needed, uses TDD for implementation, verifies locally and in Docker, updates status files, commits, pushes, and reports results. If blocked, it records the blocker and stops without pushing broken code.
+**Architecture:** A Hermes cron job runs against `/root/hermes-workspace/cust`. Each run pulls first, reads `status/`, ideates candidate improvements, thinks through impact/safety/testability, selects a meaningful work package, researches as needed, uses TDD for implementation, verifies locally and in Docker, updates status/backlog files, commits, pushes, and reports results. If blocked, it records the blocker and stops without pushing broken code.
 
 **Tech Stack:** Rust, Cargo, Docker Compose, Git/GitHub SSH deploy key, Hermes cron, Hermes web/search + file + terminal toolsets.
 
@@ -21,6 +21,7 @@
 7. **No secret leakage:** never commit private keys, tokens, `.env`, or machine secrets.
 8. **Honest reporting:** distinguish verified results from attempted/unverified work.
 9. **Always version controlled:** every run must start with `git pull --ff-only`; every verified change must be committed and pushed before the run ends. If there are no code/docs changes, still update status files when useful and commit/push those status updates.
+10. **Ideate before create:** before coding, generate candidate improvements, judge whether each is worth doing now, and save overflow ideas in `status/todo.md` or `status/missing-features.md`.
 
 ## Files owned by the autonomous process
 
@@ -55,7 +56,9 @@ Read:
 - `status/stuck.md`
 - `status/research.md`
 
-### 3. Choose a work package
+### 3. Ideate, evaluate, and choose a work package
+
+First list several candidate improvements from `status/`, current code shape, and the C-subset roadmap. Think through whether each idea is good now: impact on Cust, safety, dependencies, testability, and expected verification cost. Choose the best work package that can be completed and verified in this run. If more good ideas exist than fit, preserve them in `status/todo.md` or `status/missing-features.md`.
 
 Priority order:
 
@@ -71,13 +74,13 @@ A work package should normally produce real interpreter/test changes. Prefer imp
 
 Use web search/documentation for uncertain details. Record the decision in `status/research.md`.
 
-### 5. TDD implementation
+### 5. Create/implement with TDD
 
 For behavior changes:
 
 1. Add/modify focused tests. Prefer multiple layers when practical: interpreter regression tests, valid/invalid fixtures, and error/negative tests.
 2. Run them and confirm they fail for the expected reason.
-3. Implement the minimum code needed.
+3. Implement/create the selected feature or fix completely enough for the documented C subset.
 4. Run the focused test.
 5. Run the full suite.
 
@@ -95,7 +98,7 @@ docker compose run --rm cust
 
 If Docker is unavailable or fails for infrastructure reasons, record the exact blocker in `status/stuck.md` and do not claim Docker verification passed.
 
-### 7. Update status
+### 7. Update status and idea backlog
 
 Update relevant files in `status/`:
 
@@ -103,6 +106,7 @@ Update relevant files in `status/`:
 - completed/moved TODOs
 - blockers
 - research findings
+- promising ideas discovered during ideation that did not fit this run
 
 ### 8. Commit and push
 
@@ -123,6 +127,7 @@ Commit types: `feat`, `fix`, `test`, `docs`, `ci`, `refactor`, `chore`.
 
 Report compactly:
 
+- ideation summary and why the selected work package was chosen
 - work package selected
 - C/features implemented
 - tests added/expanded

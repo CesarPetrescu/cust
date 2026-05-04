@@ -12,10 +12,12 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 - [ ] Pull latest `main` with `git checkout main && git pull --ff-only`
 - [ ] Read all files in `status/`
-- [ ] Pick one meaningful work package from `status/missing-features.md` or `status/todo.md`
+- [ ] Ideate candidate improvements from status/backlog/current code
+- [ ] Think through impact, safety, dependencies, and testability; choose the best meaningful work package
+- [ ] Record good overflow ideas in `status/todo.md` or `status/missing-features.md`
 - [ ] Research docs if uncertain
 - [ ] Write/update failing tests first for code behavior
-- [ ] Implement the full selected C/interpreter work package, not only the smallest possible status/docs change
+- [ ] Create/implement the full selected C/interpreter work package, not only the smallest possible status/docs change
 - [ ] Run local verification
 - [ ] Run Docker verification
 - [ ] Update `status/current-state.md`
