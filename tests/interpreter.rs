@@ -125,6 +125,78 @@ fn reports_trailing_commas_in_function_call_argument_lists() {
 }
 
 #[test]
+fn reports_trailing_commas_in_function_parameter_lists() {
+    let program = "int add(int a,) { return a; }\nint main() { return add(1); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected function parameter after ',', found RParen at line 1, column 15"
+    );
+}
+
+#[test]
+fn reports_missing_closing_brackets_after_array_lengths() {
+    let program = "int main() {\nint values[2;\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ']' after array length, found Semi at line 2, column 13"
+    );
+}
+
+#[test]
+fn reports_missing_closing_brackets_after_array_parameter_lengths() {
+    let program = "int first(int values[2) { return values[0]; }\nint main() { int xs[2]; return first(xs); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ']' after array parameter length, found RParen at line 1, column 23"
+    );
+}
+
+#[test]
+fn reports_missing_closing_brackets_after_array_assignment_indices() {
+    let program = "int main() {\nint values[2];\nvalues[0 = 3;\nreturn values[0];\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ']' after array index, found Assign at line 3, column 10"
+    );
+}
+
+#[test]
+fn reports_missing_closing_brackets_after_array_expression_indices() {
+    let program = "int main() {\nint values[2];\nreturn values[0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ']' after array index, found Semi at line 3, column 16"
+    );
+}
+
+#[test]
+fn reports_missing_closing_brackets_after_string_literal_indices() {
+    let program = "int main() {\nreturn \"ab\"[1;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ']' after string literal index, found Semi at line 2, column 14"
+    );
+}
+
+#[test]
 fn reports_missing_semicolon_after_variable_declarations() {
     let program = "int main() {\nint x = 1\nreturn x;\n}\n";
 

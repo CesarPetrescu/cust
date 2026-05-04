@@ -589,7 +589,7 @@ impl Parser {
             let name = self.expect_ident()?;
             let kind = if self.matches(&Token::LBracket) {
                 let len = self.expect_array_len()?;
-                self.expect(Token::RBracket)?;
+                self.expect_closing_bracket_after("array parameter length")?;
                 ParamKind::Array(len)
             } else {
                 ParamKind::Scalar
@@ -675,7 +675,7 @@ impl Parser {
         let name = self.expect_ident()?;
         if self.matches(&Token::LBracket) {
             let len = self.expect_array_len()?;
-            self.expect(Token::RBracket)?;
+            self.expect_closing_bracket_after("array length")?;
             if require_semi {
                 self.expect_semicolon_after("array declaration")?;
             }
@@ -713,7 +713,7 @@ impl Parser {
         let name = self.expect_ident()?;
         if self.matches(&Token::LBracket) {
             let index = self.parse_expr()?;
-            self.expect(Token::RBracket)?;
+            self.expect_closing_bracket_after("array index")?;
             self.expect(Token::Assign)?;
             let value = self.parse_expr()?;
             if require_semi {
@@ -944,7 +944,7 @@ impl Parser {
             Token::StringLiteral(values) => {
                 if self.matches(&Token::LBracket) {
                     let index = self.parse_expr()?;
-                    self.expect(Token::RBracket)?;
+                    self.expect_closing_bracket_after("string literal index")?;
                     Ok(Expr::StringGet {
                         values,
                         index: Box::new(index),
@@ -960,7 +960,7 @@ impl Parser {
                     Ok(Expr::Call { name, args })
                 } else if self.matches(&Token::LBracket) {
                     let index = self.parse_expr()?;
-                    self.expect(Token::RBracket)?;
+                    self.expect_closing_bracket_after("array index")?;
                     Ok(Expr::ArrayGet {
                         name,
                         index: Box::new(index),
@@ -1022,6 +1022,18 @@ impl Parser {
         } else {
             Err(Self::error_at(
                 format!("expected {expected:?}, found {:?}", found.kind),
+                &found,
+            ))
+        }
+    }
+
+    fn expect_closing_bracket_after(&mut self, context: &str) -> CustResult<()> {
+        let found = self.advance();
+        if found.kind == Token::RBracket {
+            Ok(())
+        } else {
+            Err(Self::error_at(
+                format!("expected ']' after {context}, found {:?}", found.kind),
                 &found,
             ))
         }
