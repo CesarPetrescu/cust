@@ -44,7 +44,7 @@ Last updated: 2026-05-04
 
 ## Diagnostics
 
-- Lexer errors include 1-based line and column for unexpected characters and out-of-range integer literals.
+- Lexer errors include 1-based line and column plus a source-line/caret context snippet for unexpected characters and out-of-range integer literals.
 - Parser errors include 1-based line and column plus token context for expected-token, identifier, expression, statement, and unterminated-block failures.
 
 ## Verified commands
@@ -57,7 +57,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding parser error location tracking in the 2026-05-04 autonomous run. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after adding lexer source context snippets in the 2026-05-04 autonomous run. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

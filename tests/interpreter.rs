@@ -53,26 +53,26 @@ fn reports_division_by_zero() {
 }
 
 #[test]
-fn reports_line_and_column_for_unexpected_character() {
+fn reports_source_context_for_unexpected_character() {
     let program = "int main() {\nreturn 1;\n@\n}\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "unexpected character '@' at line 3, column 1"
+        "unexpected character '@' at line 3, column 1\n@\n^"
     );
 }
 
 #[test]
-fn reports_line_and_column_for_out_of_range_integer_literal() {
+fn reports_source_context_for_out_of_range_integer_literal() {
     let program = "int main() {\nreturn 999999999999999999999999999999;\n}\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "integer literal out of range at line 2, column 8"
+        "integer literal out of range at line 2, column 8\nreturn 999999999999999999999999999999;\n       ^"
     );
 }
 

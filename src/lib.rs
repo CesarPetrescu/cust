@@ -151,9 +151,12 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 }
                 let text: String = chars[start..i].iter().collect();
                 let value = text.parse::<i64>().map_err(|_| {
-                    CustError::new(format!(
-                        "integer literal out of range at line {start_line}, column {start_column}"
-                    ))
+                    lexer_error_with_context(
+                        "integer literal out of range",
+                        source,
+                        start_line,
+                        start_column,
+                    )
                 })?;
                 tokens.push(LocatedToken::new(
                     Token::Number(value),
@@ -252,15 +255,32 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             other => {
-                return Err(CustError::new(format!(
-                    "unexpected character '{other}' at line {line}, column {column}"
-                )));
+                return Err(lexer_error_with_context(
+                    format!("unexpected character '{other}'"),
+                    source,
+                    line,
+                    column,
+                ));
             }
         }
     }
 
     tokens.push(LocatedToken::new(Token::Eof, line, column));
     Ok(tokens)
+}
+
+fn lexer_error_with_context(
+    message: impl Into<String>,
+    source: &str,
+    line: usize,
+    column: usize,
+) -> CustError {
+    let source_line = source.lines().nth(line.saturating_sub(1)).unwrap_or("");
+    let caret_padding = " ".repeat(column.saturating_sub(1));
+    CustError::new(format!(
+        "{} at line {line}, column {column}\n{source_line}\n{caret_padding}^",
+        message.into()
+    ))
 }
 
 fn push_token(tokens: &mut Vec<LocatedToken>, kind: Token, line: usize, column: usize) {
