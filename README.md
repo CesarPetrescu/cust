@@ -97,6 +97,8 @@ Features:
 - `while`
 - arithmetic: `+ - * / %`
 - comparisons: `== != < <= > >=`
+- logical operators with C-style truth values and short-circuiting: `&& || !`
+- unary plus: `+expr`
 - `//` comments
 
 ## CLI

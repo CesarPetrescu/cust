@@ -96,6 +96,13 @@ fn supports_block_scope_shadowing_and_outer_assignment() {
 }
 
 #[test]
+fn supports_logical_operators_short_circuiting_and_unary_plus() {
+    let program = include_str!("fixtures/valid/logical_operators.c");
+
+    assert_eq!(interpret(program).unwrap(), 4);
+}
+
+#[test]
 fn rejects_variables_after_their_block_scope_ends() {
     let program = include_str!("fixtures/invalid/block_scope_leak.c");
 

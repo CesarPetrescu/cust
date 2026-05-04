@@ -39,8 +39,9 @@ Last updated: 2026-05-04
 - nested block statements `{ ... }` with per-block variable scopes, inner shadowing, and outer-scope assignment lookup
 - `if (...) { ... } else { ... }`
 - `while (...) { ... }`
-- `+ - * / %`
+- `+ - * / %`, unary `+`, unary `-`
 - `== != < <= > >=`
+- logical operators `&&`, `||`, and `!` with C-style integer truth values and short-circuit evaluation for `&&`/`||`
 - `//` comments
 
 ## Diagnostics
@@ -58,7 +59,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding block scoping and fixture coverage in the 2026-05-04 autonomous run. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after adding logical operators, unary plus, and fixture coverage in the 2026-05-04 autonomous run. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

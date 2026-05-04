@@ -39,6 +39,9 @@ enum Token {
     Star,
     Slash,
     Percent,
+    AndAnd,
+    OrOr,
+    Bang,
     Assign,
     Eq,
     Ne,
@@ -71,7 +74,9 @@ impl LocatedToken {
 enum Expr {
     Number(i64),
     Var(String),
+    UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
+    LogicalNot(Box<Expr>),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
 }
 
@@ -88,6 +93,8 @@ enum BinaryOp {
     Le,
     Gt,
     Ge,
+    LogicalAnd,
+    LogicalOr,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,7 +124,7 @@ enum Stmt {
 /// - block statements: `{ ... }`
 /// - `if (expression) { ... } else { ... }`
 /// - `while (expression) { ... }`
-/// - integer arithmetic/comparisons: `+ - * / % == != < <= > >=`
+/// - integer arithmetic/comparisons/logical operators: `+ - * / % == != < <= > >= && || !`
 pub fn interpret(source: &str) -> CustResult<i64> {
     let tokens = lex(source)?;
     let mut parser = Parser::new(tokens);
@@ -204,6 +211,16 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 push_token(&mut tokens, Token::Percent, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
+            '&' if chars.get(i + 1) == Some(&'&') => {
+                push_token(&mut tokens, Token::AndAnd, line, column);
+                advance_position('&', &mut line, &mut column, &mut i);
+                advance_position('&', &mut line, &mut column, &mut i);
+            }
+            '|' if chars.get(i + 1) == Some(&'|') => {
+                push_token(&mut tokens, Token::OrOr, line, column);
+                advance_position('|', &mut line, &mut column, &mut i);
+                advance_position('|', &mut line, &mut column, &mut i);
+            }
             '(' => {
                 push_token(&mut tokens, Token::LParen, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
@@ -233,6 +250,10 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 push_token(&mut tokens, Token::Ne, line, column);
                 advance_position('!', &mut line, &mut column, &mut i);
                 advance_position('=', &mut line, &mut column, &mut i);
+            }
+            '!' => {
+                push_token(&mut tokens, Token::Bang, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
             }
             '<' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::Le, line, column);
@@ -400,7 +421,25 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> CustResult<Expr> {
-        self.parse_equality()
+        self.parse_logical_or()
+    }
+
+    fn parse_logical_or(&mut self) -> CustResult<Expr> {
+        let mut expr = self.parse_logical_and()?;
+        while self.matches(&Token::OrOr) {
+            let rhs = self.parse_logical_and()?;
+            expr = Expr::Binary(Box::new(expr), BinaryOp::LogicalOr, Box::new(rhs));
+        }
+        Ok(expr)
+    }
+
+    fn parse_logical_and(&mut self) -> CustResult<Expr> {
+        let mut expr = self.parse_equality()?;
+        while self.matches(&Token::AndAnd) {
+            let rhs = self.parse_equality()?;
+            expr = Expr::Binary(Box::new(expr), BinaryOp::LogicalAnd, Box::new(rhs));
+        }
+        Ok(expr)
     }
 
     fn parse_equality(&mut self) -> CustResult<Expr> {
@@ -474,8 +513,12 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> CustResult<Expr> {
-        if self.matches(&Token::Minus) {
+        if self.matches(&Token::Plus) {
+            Ok(Expr::UnaryPlus(Box::new(self.parse_unary()?)))
+        } else if self.matches(&Token::Minus) {
             Ok(Expr::UnaryMinus(Box::new(self.parse_unary()?)))
+        } else if self.matches(&Token::Bang) {
+            Ok(Expr::LogicalNot(Box::new(self.parse_unary()?)))
         } else {
             self.parse_primary()
         }
@@ -686,9 +729,26 @@ impl Interpreter {
             Expr::Var(name) => self
                 .find_variable(name)
                 .ok_or_else(|| CustError::new(format!("undefined variable '{name}'"))),
+            Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
+            Expr::LogicalNot(inner) => Ok((self.eval(inner)? == 0) as i64),
             Expr::Binary(left, op, right) => {
                 let lhs = self.eval(left)?;
+                match op {
+                    BinaryOp::LogicalAnd => {
+                        if lhs == 0 {
+                            return Ok(0);
+                        }
+                        return Ok((self.eval(right)? != 0) as i64);
+                    }
+                    BinaryOp::LogicalOr => {
+                        if lhs != 0 {
+                            return Ok(1);
+                        }
+                        return Ok((self.eval(right)? != 0) as i64);
+                    }
+                    _ => {}
+                }
                 let rhs = self.eval(right)?;
                 match op {
                     BinaryOp::Add => Ok(lhs + rhs),
@@ -704,6 +764,9 @@ impl Interpreter {
                     BinaryOp::Le => Ok((lhs <= rhs) as i64),
                     BinaryOp::Gt => Ok((lhs > rhs) as i64),
                     BinaryOp::Ge => Ok((lhs >= rhs) as i64),
+                    BinaryOp::LogicalAnd | BinaryOp::LogicalOr => unreachable!(
+                        "logical operators are handled before evaluating the right operand"
+                    ),
                 }
             }
         }
