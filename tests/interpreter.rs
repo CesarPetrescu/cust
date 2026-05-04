@@ -195,6 +195,25 @@ fn supports_direct_and_mutual_recursive_calls() {
 }
 
 #[test]
+fn supports_char_literals_variables_and_parameters() {
+    let program = include_str!("fixtures/valid/char_literals_and_variables.c");
+
+    assert_eq!(interpret(program).unwrap(), 206);
+}
+
+#[test]
+fn rejects_multi_character_char_literals() {
+    let program = include_str!("fixtures/invalid/unterminated_char_literal.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unterminated character literal at line 2, column 12\n    return 'ab';\n           ^"
+    );
+}
+
+#[test]
 fn reports_function_name_when_recursive_calls_exceed_depth_limit() {
     let program = include_str!("fixtures/invalid/recursive_call_depth_limit.c");
 

@@ -33,8 +33,9 @@ Last updated: 2026-05-04
 
 - `int main() { ... }` plus additional `int name(...) { ... }` function definitions
 - function calls as expressions with integer arguments, local parameter scopes, direct/mutual recursion support, arity diagnostics, undefined-function diagnostics, and a 256-call-depth safety limit with function-name context
-- integer literals and variables
-- declarations: `int x = expr;`
+- integer literals, character literals, and variables
+- declarations: `int x = expr;` or `char x = expr;`
+- `int` and `char` function parameters (stored as integer values in the current interpreter model)
 - assignments: `x = expr;`
 - `return expr;`
 - nested block statements `{ ... }` with per-block variable scopes, inner shadowing, and outer-scope assignment lookup
@@ -64,7 +65,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after improving function parameter/call argument parser diagnostics in the 2026-05-04 autonomous run. The suite now includes exact-error regression coverage for missing separators in function parameter lists, missing separators in function call argument lists, and trailing call-argument commas. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after adding first-pass `char` support in the 2026-05-04 autonomous run. The suite now includes valid fixture coverage for `char` declarations, `char` function parameters, ordinary character literals, and escaped character literals (`\n`, `\'`, `\\`), plus invalid fixture coverage for malformed multi-character literals. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

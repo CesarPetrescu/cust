@@ -24,7 +24,7 @@ Prioritized backlog for autonomous implementation.
 
 ## P2 — data types
 
-- [ ] `char`
+- [x] `char` literals, declarations, and function parameters
 - [ ] arrays
 - [ ] string literals as read-only byte arrays
 - [ ] pointer model design document before implementation

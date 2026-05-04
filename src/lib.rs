@@ -28,6 +28,7 @@ impl Error for CustError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Token {
     Int,
+    Char,
     Return,
     If,
     Else,
@@ -144,8 +145,8 @@ enum Stmt {
 ///
 /// Supported v0.1 syntax:
 /// - `int main() { ... }`
-/// - `int name(int param, ...) { ... }` function definitions and calls, including bounded recursion
-/// - `int name = expression;`
+/// - `int name(int param, char param, ...) { ... }` function definitions and calls, including bounded recursion
+/// - `int name = expression;` and `char name = expression;`
 /// - `name = expression;`
 /// - `return expression;`
 /// - block statements: `{ ... }`
@@ -203,6 +204,82 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     start_column,
                 ));
             }
+            '\'' => {
+                let start_line = line;
+                let start_column = column;
+                advance_position('\'', &mut line, &mut column, &mut i);
+
+                let value = match chars.get(i).copied() {
+                    Some('\\') => {
+                        advance_position('\\', &mut line, &mut column, &mut i);
+                        match chars.get(i).copied() {
+                            Some('n') => {
+                                advance_position('n', &mut line, &mut column, &mut i);
+                                '\n' as i64
+                            }
+                            Some('t') => {
+                                advance_position('t', &mut line, &mut column, &mut i);
+                                '\t' as i64
+                            }
+                            Some('0') => {
+                                advance_position('0', &mut line, &mut column, &mut i);
+                                '\0' as i64
+                            }
+                            Some('\\') => {
+                                advance_position('\\', &mut line, &mut column, &mut i);
+                                '\\' as i64
+                            }
+                            Some('\'') => {
+                                advance_position('\'', &mut line, &mut column, &mut i);
+                                '\'' as i64
+                            }
+                            Some(other) => {
+                                return Err(lexer_error_with_context(
+                                    format!("unsupported character escape '\\{other}'"),
+                                    source,
+                                    start_line,
+                                    start_column,
+                                ));
+                            }
+                            None => {
+                                return Err(lexer_error_with_context(
+                                    "unterminated character literal",
+                                    source,
+                                    start_line,
+                                    start_column,
+                                ));
+                            }
+                        }
+                    }
+                    Some('\n') | None => {
+                        return Err(lexer_error_with_context(
+                            "unterminated character literal",
+                            source,
+                            start_line,
+                            start_column,
+                        ));
+                    }
+                    Some(value) => {
+                        advance_position(value, &mut line, &mut column, &mut i);
+                        value as i64
+                    }
+                };
+
+                if chars.get(i) != Some(&'\'') {
+                    return Err(lexer_error_with_context(
+                        "unterminated character literal",
+                        source,
+                        start_line,
+                        start_column,
+                    ));
+                }
+                advance_position('\'', &mut line, &mut column, &mut i);
+                tokens.push(LocatedToken::new(
+                    Token::Number(value),
+                    start_line,
+                    start_column,
+                ));
+            }
             'a'..='z' | 'A'..='Z' | '_' => {
                 let start = i;
                 let start_line = line;
@@ -213,6 +290,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 let text: String = chars[start..i].iter().collect();
                 let kind = match text.as_str() {
                     "int" => Token::Int,
+                    "char" => Token::Char,
                     "return" => Token::Return,
                     "if" => Token::If,
                     "else" => Token::Else,
@@ -399,7 +477,7 @@ impl Parser {
         }
 
         loop {
-            self.expect(Token::Int)?;
+            self.expect_type()?;
             params.push(self.expect_ident()?);
 
             if self.matches(&Token::Comma) {
@@ -444,7 +522,7 @@ impl Parser {
     fn parse_stmt(&mut self) -> CustResult<Stmt> {
         match self.peek() {
             Token::Semi => self.parse_empty(),
-            Token::Int => self.parse_var_decl(),
+            Token::Int | Token::Char => self.parse_var_decl(),
             Token::Return => self.parse_return(),
             Token::LBrace => Ok(Stmt::Block(self.parse_block()?)),
             Token::If => self.parse_if(),
@@ -476,7 +554,7 @@ impl Parser {
     }
 
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
-        self.expect(Token::Int)?;
+        self.expect_type()?;
         let name = self.expect_ident()?;
         self.expect(Token::Assign)?;
         let expr = self.parse_expr()?;
@@ -560,7 +638,7 @@ impl Parser {
 
         let init = if self.matches(&Token::Semi) {
             None
-        } else if self.check(&Token::Int) {
+        } else if matches!(self.peek(), Token::Int | Token::Char) {
             Some(Box::new(self.parse_var_decl()?))
         } else if matches!(self.peek(), Token::Ident(_)) && self.peek_next() == &Token::Assign {
             Some(Box::new(self.parse_assign()?))
@@ -785,6 +863,17 @@ impl Parser {
             Token::Ident(name) => Ok(name),
             token => Err(Self::error_at(
                 format!("expected identifier, found {token:?}"),
+                &found,
+            )),
+        }
+    }
+
+    fn expect_type(&mut self) -> CustResult<()> {
+        let found = self.advance();
+        match &found.kind {
+            Token::Int | Token::Char => Ok(()),
+            token => Err(Self::error_at(
+                format!("expected type, found {token:?}"),
                 &found,
             )),
         }
