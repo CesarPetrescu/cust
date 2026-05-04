@@ -197,6 +197,54 @@ fn reports_missing_closing_brackets_after_string_literal_indices() {
 }
 
 #[test]
+fn reports_missing_opening_parens_after_function_names() {
+    let program = "int main { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '(' after function name, found LBrace at line 1, column 10"
+    );
+}
+
+#[test]
+fn reports_missing_opening_parens_after_if_keywords() {
+    let program = "int main() {\nif 1) {\nreturn 1;\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '(' after if, found Number(1) at line 2, column 4"
+    );
+}
+
+#[test]
+fn reports_missing_opening_parens_after_while_keywords() {
+    let program = "int main() {\nwhile 1) {\nreturn 1;\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '(' after while, found Number(1) at line 2, column 7"
+    );
+}
+
+#[test]
+fn reports_missing_opening_parens_after_for_keywords() {
+    let program = "int main() {\nfor int i = 0; i < 3; i = i + 1) {\nreturn i;\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '(' after for, found Int at line 2, column 5"
+    );
+}
+
+#[test]
 fn reports_missing_closing_parens_after_grouped_expressions() {
     let program = "int main() {\nreturn (1 + 2;\n}\n";
 
@@ -579,26 +627,38 @@ fn expression_statements_evaluate_their_expression() {
 }
 
 #[test]
-fn rejects_break_without_required_semicolon() {
+fn reports_missing_semicolon_after_break_statements() {
     let program = "int main() {\nwhile (1) {\nbreak\n}\nreturn 0;\n}\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "expected Semi, found RBrace at line 4, column 1"
+        "expected ';' after break statement, found RBrace at line 4, column 1"
     );
 }
 
 #[test]
-fn rejects_continue_without_required_semicolon() {
+fn reports_missing_semicolon_after_continue_statements() {
     let program = "int main() {\nwhile (1) {\ncontinue\n}\nreturn 0;\n}\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "expected Semi, found RBrace at line 4, column 1"
+        "expected ';' after continue statement, found RBrace at line 4, column 1"
+    );
+}
+
+#[test]
+fn reports_missing_semicolon_after_for_conditions() {
+    let program = "int main() {\nfor (int i = 0; i < 3 i = i + 1) {\nreturn i;\n}\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ';' after for condition, found Ident(\"i\") at line 2, column 23"
     );
 }
 

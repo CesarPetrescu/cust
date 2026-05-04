@@ -571,7 +571,7 @@ impl Parser {
     fn parse_function(&mut self) -> CustResult<(String, Function)> {
         self.expect(Token::Int)?;
         let name = self.expect_ident()?;
-        self.expect(Token::LParen)?;
+        self.expect_opening_paren_after("function name")?;
         let params = self.parse_params()?;
         self.expect_closing_paren_after("function parameters")?;
         let body = self.parse_block_after("function header")?;
@@ -749,19 +749,19 @@ impl Parser {
 
     fn parse_break(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Break)?;
-        self.expect(Token::Semi)?;
+        self.expect_semicolon_after("break statement")?;
         Ok(Stmt::Break)
     }
 
     fn parse_continue(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Continue)?;
-        self.expect(Token::Semi)?;
+        self.expect_semicolon_after("continue statement")?;
         Ok(Stmt::Continue)
     }
 
     fn parse_if(&mut self) -> CustResult<Stmt> {
         self.expect(Token::If)?;
-        self.expect(Token::LParen)?;
+        self.expect_opening_paren_after("if")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("if condition")?;
         let then_branch = self.parse_block_after("if condition")?;
@@ -779,7 +779,7 @@ impl Parser {
 
     fn parse_while(&mut self) -> CustResult<Stmt> {
         self.expect(Token::While)?;
-        self.expect(Token::LParen)?;
+        self.expect_opening_paren_after("while")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("while condition")?;
         let body = self.parse_block_after("while condition")?;
@@ -788,7 +788,7 @@ impl Parser {
 
     fn parse_for(&mut self) -> CustResult<Stmt> {
         self.expect(Token::For)?;
-        self.expect(Token::LParen)?;
+        self.expect_opening_paren_after("for")?;
 
         let init = if self.matches(&Token::Semi) {
             None
@@ -809,7 +809,7 @@ impl Parser {
             None
         } else {
             let expr = self.parse_expr()?;
-            self.expect(Token::Semi)?;
+            self.expect_semicolon_after("for condition")?;
             Some(expr)
         };
 
@@ -1028,6 +1028,18 @@ impl Parser {
         } else {
             Err(Self::error_at(
                 format!("expected {expected:?}, found {:?}", found.kind),
+                &found,
+            ))
+        }
+    }
+
+    fn expect_opening_paren_after(&mut self, context: &str) -> CustResult<()> {
+        let found = self.advance();
+        if found.kind == Token::LParen {
+            Ok(())
+        } else {
+            Err(Self::error_at(
+                format!("expected '(' after {context}, found {:?}", found.kind),
                 &found,
             ))
         }
