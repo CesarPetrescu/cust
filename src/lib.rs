@@ -677,14 +677,14 @@ impl Parser {
             let len = self.expect_array_len()?;
             self.expect(Token::RBracket)?;
             if require_semi {
-                self.expect(Token::Semi)?;
+                self.expect_semicolon_after("array declaration")?;
             }
             return Ok(Stmt::ArrayDecl { name, len });
         }
         self.expect(Token::Assign)?;
         let expr = self.parse_expr()?;
         if require_semi {
-            self.expect(Token::Semi)?;
+            self.expect_semicolon_after("variable declaration")?;
         }
         Ok(Stmt::VarDecl(name, expr))
     }
@@ -717,14 +717,14 @@ impl Parser {
             self.expect(Token::Assign)?;
             let value = self.parse_expr()?;
             if require_semi {
-                self.expect(Token::Semi)?;
+                self.expect_semicolon_after("assignment")?;
             }
             return Ok(Stmt::ArrayAssign { name, index, value });
         }
         self.expect(Token::Assign)?;
         let expr = self.parse_expr()?;
         if require_semi {
-            self.expect(Token::Semi)?;
+            self.expect_semicolon_after("assignment")?;
         }
         Ok(Stmt::Assign(name, expr))
     }
@@ -732,7 +732,7 @@ impl Parser {
     fn parse_expr_stmt_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         let expr = self.parse_expr()?;
         if require_semi {
-            self.expect(Token::Semi)?;
+            self.expect_semicolon_after("expression statement")?;
         }
         Ok(Stmt::Expr(expr))
     }
@@ -740,7 +740,7 @@ impl Parser {
     fn parse_return(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Return)?;
         let expr = self.parse_expr()?;
-        self.expect(Token::Semi)?;
+        self.expect_semicolon_after("return statement")?;
         Ok(Stmt::Return(expr))
     }
 
@@ -1022,6 +1022,18 @@ impl Parser {
         } else {
             Err(Self::error_at(
                 format!("expected {expected:?}, found {:?}", found.kind),
+                &found,
+            ))
+        }
+    }
+
+    fn expect_semicolon_after(&mut self, context: &str) -> CustResult<()> {
+        let found = self.advance();
+        if found.kind == Token::Semi {
+            Ok(())
+        } else {
+            Err(Self::error_at(
+                format!("expected ';' after {context}, found {:?}", found.kind),
                 &found,
             ))
         }

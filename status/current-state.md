@@ -56,6 +56,7 @@ Last updated: 2026-05-04
 - Lexer errors include 1-based line and column plus a source-line/caret context snippet for unexpected characters and out-of-range integer literals.
 - Parser errors include 1-based line and column plus token context for expected-token, identifier, expression, statement, and unterminated-block failures.
 - Parser diagnostics now include targeted separator messages for malformed function parameter lists and function call argument lists, including missing commas and trailing commas.
+- Parser diagnostics now include targeted missing-semicolon messages after variable declarations, array declarations, scalar/indexed assignments, expression statements, and return statements.
 
 ## Verified commands
 
@@ -67,7 +68,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding string literal support in the 2026-05-04 autonomous run. The suite now includes valid fixture coverage for NUL-terminated string literal indexing, supported string escapes, and passing read-only string literals to `char` array parameters, plus invalid fixture coverage for rejecting writes through a string-backed array parameter. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after improving parser missing-semicolon diagnostics in the 2026-05-04 autonomous run. The suite now includes exact-error regression tests for missing semicolons after variable declarations, array declarations, scalar/indexed assignments, expression statements, and return statements. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

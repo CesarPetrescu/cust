@@ -125,6 +125,78 @@ fn reports_trailing_commas_in_function_call_argument_lists() {
 }
 
 #[test]
+fn reports_missing_semicolon_after_variable_declarations() {
+    let program = "int main() {\nint x = 1\nreturn x;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ';' after variable declaration, found Return at line 3, column 1"
+    );
+}
+
+#[test]
+fn reports_missing_semicolon_after_array_declarations() {
+    let program = "int main() {\nint values[2]\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ';' after array declaration, found Return at line 3, column 1"
+    );
+}
+
+#[test]
+fn reports_missing_semicolon_after_assignments() {
+    let program = "int main() {\nint x = 1;\nx = 2\nreturn x;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ';' after assignment, found Return at line 4, column 1"
+    );
+}
+
+#[test]
+fn reports_missing_semicolon_after_array_assignments() {
+    let program = "int main() {\nint values[2];\nvalues[0] = 3\nreturn values[0];\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ';' after assignment, found Return at line 4, column 1"
+    );
+}
+
+#[test]
+fn reports_missing_semicolon_after_expression_statements() {
+    let program = "int main() {\n1 + 2\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ';' after expression statement, found Return at line 3, column 1"
+    );
+}
+
+#[test]
+fn reports_missing_semicolon_after_return_statements() {
+    let program = "int main() {\nreturn 1\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ';' after return statement, found RBrace at line 3, column 1"
+    );
+}
+
+#[test]
 fn supports_block_scope_shadowing_and_outer_assignment() {
     let program = include_str!("fixtures/valid/block_scope_shadowing.c");
 
