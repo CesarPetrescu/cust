@@ -18,7 +18,7 @@ Prioritized backlog for autonomous implementation.
 - [ ] Recursive calls with a bounded call-depth limit
 - [x] Boolean/logical operators: `&&`, `||`, `!`
 - [x] Unary plus
-- [ ] `for` loops
+- [x] `for` loops
 - [ ] `break` and `continue`
 - [ ] Empty statements and expression statements
 

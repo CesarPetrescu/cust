@@ -32,6 +32,7 @@ enum Token {
     If,
     Else,
     While,
+    For,
     Ident(String),
     Number(i64),
     Plus,
@@ -112,6 +113,12 @@ enum Stmt {
         cond: Expr,
         body: Vec<Stmt>,
     },
+    For {
+        init: Option<Box<Stmt>>,
+        cond: Option<Expr>,
+        increment: Option<Box<Stmt>>,
+        body: Vec<Stmt>,
+    },
 }
 
 /// Interpret a small, safe C subset and return `main()`'s integer exit value.
@@ -124,6 +131,7 @@ enum Stmt {
 /// - block statements: `{ ... }`
 /// - `if (expression) { ... } else { ... }`
 /// - `while (expression) { ... }`
+/// - `for (initializer; condition; increment) { ... }`
 /// - integer arithmetic/comparisons/logical operators: `+ - * / % == != < <= > >= && || !`
 pub fn interpret(source: &str) -> CustResult<i64> {
     let tokens = lex(source)?;
@@ -187,6 +195,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "if" => Token::If,
                     "else" => Token::Else,
                     "while" => Token::While,
+                    "for" => Token::For,
                     _ => Token::Ident(text),
                 };
                 tokens.push(LocatedToken::new(kind, start_line, start_column));
@@ -361,6 +370,7 @@ impl Parser {
             Token::LBrace => Ok(Stmt::Block(self.parse_block()?)),
             Token::If => self.parse_if(),
             Token::While => self.parse_while(),
+            Token::For => self.parse_for(),
             Token::Ident(_) => self.parse_assign(),
             token => Err(Self::error_at(
                 format!("unexpected token in statement: {token:?}"),
@@ -370,19 +380,31 @@ impl Parser {
     }
 
     fn parse_var_decl(&mut self) -> CustResult<Stmt> {
+        self.parse_var_decl_with_semi(true)
+    }
+
+    fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         self.expect(Token::Int)?;
         let name = self.expect_ident()?;
         self.expect(Token::Assign)?;
         let expr = self.parse_expr()?;
-        self.expect(Token::Semi)?;
+        if require_semi {
+            self.expect(Token::Semi)?;
+        }
         Ok(Stmt::VarDecl(name, expr))
     }
 
     fn parse_assign(&mut self) -> CustResult<Stmt> {
+        self.parse_assign_with_semi(true)
+    }
+
+    fn parse_assign_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         let name = self.expect_ident()?;
         self.expect(Token::Assign)?;
         let expr = self.parse_expr()?;
-        self.expect(Token::Semi)?;
+        if require_semi {
+            self.expect(Token::Semi)?;
+        }
         Ok(Stmt::Assign(name, expr))
     }
 
@@ -418,6 +440,52 @@ impl Parser {
         self.expect(Token::RParen)?;
         let body = self.parse_block()?;
         Ok(Stmt::While { cond, body })
+    }
+
+    fn parse_for(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::For)?;
+        self.expect(Token::LParen)?;
+
+        let init = if self.matches(&Token::Semi) {
+            None
+        } else if self.check(&Token::Int) {
+            Some(Box::new(self.parse_var_decl()?))
+        } else if matches!(self.peek(), Token::Ident(_)) {
+            Some(Box::new(self.parse_assign()?))
+        } else {
+            return Err(Self::error_at(
+                format!("unexpected token in for initializer: {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        };
+
+        let cond = if self.matches(&Token::Semi) {
+            None
+        } else {
+            let expr = self.parse_expr()?;
+            self.expect(Token::Semi)?;
+            Some(expr)
+        };
+
+        let increment = if self.check(&Token::RParen) {
+            None
+        } else if matches!(self.peek(), Token::Ident(_)) {
+            Some(Box::new(self.parse_assign_with_semi(false)?))
+        } else {
+            return Err(Self::error_at(
+                format!("unexpected token in for increment: {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        };
+        self.expect(Token::RParen)?;
+
+        let body = self.parse_block()?;
+        Ok(Stmt::For {
+            init,
+            cond,
+            increment,
+            body,
+        })
     }
 
     fn parse_expr(&mut self) -> CustResult<Expr> {
@@ -720,7 +788,67 @@ impl Interpreter {
                 }
                 Ok(None)
             }
+            Stmt::For {
+                init,
+                cond,
+                increment,
+                body,
+            } => self.exec_for(init.as_deref(), cond.as_ref(), increment.as_deref(), body),
         }
+    }
+
+    fn exec_for(
+        &mut self,
+        init: Option<&Stmt>,
+        cond: Option<&Expr>,
+        increment: Option<&Stmt>,
+        body: &[Stmt],
+    ) -> CustResult<Option<i64>> {
+        self.scopes.push(HashMap::new());
+        let result = self.exec_for_in_current_scope(init, cond, increment, body);
+        self.scopes.pop();
+        result
+    }
+
+    fn exec_for_in_current_scope(
+        &mut self,
+        init: Option<&Stmt>,
+        cond: Option<&Expr>,
+        increment: Option<&Stmt>,
+        body: &[Stmt],
+    ) -> CustResult<Option<i64>> {
+        if let Some(init) = init {
+            let init_result = self.exec_stmt(init)?;
+            if let Some(value) = init_result {
+                return Ok(Some(value));
+            }
+        }
+
+        let mut iterations = 0usize;
+        loop {
+            match cond {
+                Some(cond) if self.eval(cond)? == 0 => break,
+                Some(_) | None => {}
+            }
+
+            iterations += 1;
+            if iterations > 1_000_000 {
+                return Err(CustError::new("loop iteration limit exceeded"));
+            }
+
+            if let Some(value) = self.exec_block(body)? {
+                return Ok(Some(value));
+            }
+
+            if let Some(increment) = increment {
+                let increment_result = self.exec_stmt(increment)?;
+                if let Some(value) = increment_result {
+                    return Ok(Some(value));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     fn eval(&self, expr: &Expr) -> CustResult<i64> {

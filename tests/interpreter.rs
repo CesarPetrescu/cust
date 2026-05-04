@@ -103,6 +103,22 @@ fn supports_logical_operators_short_circuiting_and_unary_plus() {
 }
 
 #[test]
+fn supports_for_loops_with_declaration_assignment_and_empty_clauses() {
+    let program = include_str!("fixtures/valid/for_loops.c");
+
+    assert_eq!(interpret(program).unwrap(), 41);
+}
+
+#[test]
+fn for_loop_initializer_variables_are_scoped_to_the_loop() {
+    let program = include_str!("fixtures/invalid/for_loop_initializer_scope.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "undefined variable 'i'");
+}
+
+#[test]
 fn rejects_variables_after_their_block_scope_ends() {
     let program = include_str!("fixtures/invalid/block_scope_leak.c");
 

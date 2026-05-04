@@ -4,8 +4,8 @@ The autonomous agent should complete a meaningful work package per cron run: usu
 
 ## Next recommended tasks
 
-1. Continue P1 C-subset expansion with `for` loops, including initializer/condition/increment behavior and fixture coverage.
-2. Add `break` and `continue` for loop/while control flow after `for` loops are in place.
+1. Add `break` and `continue` for loop/while control flow now that `for` loops are in place.
+2. Add empty statements and expression statements so loop bodies and headers can cover more C-compatible statement forms.
 3. Add function definitions/calls and local parameters once control-flow coverage is stronger.
 
 ## Every-run checklist
