@@ -118,6 +118,7 @@ struct Param {
 enum ParamKind {
     Scalar,
     Array(usize),
+    Pointer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -604,8 +605,11 @@ impl Parser {
 
         loop {
             self.expect_type()?;
+            let is_pointer = self.matches(&Token::Star);
             let name = self.expect_ident()?;
-            let kind = if self.matches(&Token::LBracket) {
+            let kind = if is_pointer {
+                ParamKind::Pointer
+            } else if self.matches(&Token::LBracket) {
                 let len = self.expect_array_len()?;
                 self.expect_closing_bracket_after("array parameter length")?;
                 ParamKind::Array(len)
@@ -1296,7 +1300,7 @@ impl Parser {
     }
 }
 
-const MAX_CALL_DEPTH: usize = 256;
+const MAX_CALL_DEPTH: usize = 64;
 
 #[derive(Default)]
 struct Interpreter {
@@ -1331,7 +1335,14 @@ enum Value {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PointerValue {
     Null,
-    Scalar { scope_id: usize, name: String },
+    Scalar {
+        scope_id: usize,
+        name: String,
+    },
+    ArrayBase {
+        array: Rc<RefCell<ArrayValue>>,
+        source_name: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1390,6 +1401,7 @@ impl Interpreter {
                 ParamKind::Array(expected_len) => {
                     self.eval_array_argument(name, &param.name, expected_len, arg_expr)?
                 }
+                ParamKind::Pointer => Value::Pointer(self.eval_pointer(arg_expr)?),
             };
             if param_scope.insert(param.name.clone(), arg).is_some() {
                 return Err(CustError::new(format!(
@@ -1556,14 +1568,19 @@ impl Interpreter {
         match expr {
             Expr::Number(0) => Ok(PointerValue::Null),
             Expr::AddressOf(name) => self.address_of_scalar(name),
+            Expr::StringLiteral(values) => Ok(PointerValue::ArrayBase {
+                array: Rc::new(RefCell::new(ArrayValue::read_only(values.clone()))),
+                source_name: None,
+            }),
             Expr::Var(name) => match self.find_variable(name) {
                 Some(Value::Pointer(pointer)) => Ok(pointer.clone()),
+                Some(Value::Array(array)) => Ok(PointerValue::ArrayBase {
+                    array: Rc::clone(array),
+                    source_name: Some(name.clone()),
+                }),
                 Some(Value::Scalar(_)) => Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
                 ))),
-                Some(Value::Array(_)) => {
-                    Err(CustError::new(format!("array '{name}' is not a pointer")))
-                }
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             _ => Err(CustError::new("expected pointer expression")),
@@ -1590,6 +1607,12 @@ impl Interpreter {
                         "pointer to out-of-scope variable '{name}'"
                     ))),
                 }
+            }
+            PointerValue::ArrayBase { array, .. } => {
+                let array = array.borrow();
+                array.elements.first().copied().ok_or_else(|| {
+                    CustError::new("array pointer index 0 out of bounds for length 0")
+                })
             }
         }
     }
@@ -1618,7 +1641,72 @@ impl Interpreter {
                     ))),
                 }
             }
+            PointerValue::ArrayBase { .. } => self.assign_pointer_index(pointer, 0, value),
         }
+    }
+
+    fn checked_pointer_index(
+        &mut self,
+        name: &str,
+        index: &Expr,
+    ) -> CustResult<(Rc<RefCell<ArrayValue>>, Option<String>, usize)> {
+        let index_value = self.eval(index)?;
+        let pointer = match self.find_variable(name) {
+            Some(Value::Pointer(pointer)) => pointer.clone(),
+            Some(Value::Scalar(_)) => {
+                return Err(CustError::new(format!(
+                    "variable '{name}' is not a pointer"
+                )));
+            }
+            Some(Value::Array(_)) => {
+                return Err(CustError::new(format!("array '{name}' is not a pointer")));
+            }
+            None => return Err(CustError::new(format!("undefined variable '{name}'"))),
+        };
+        self.checked_pointer_value_index(&pointer, index_value)
+    }
+
+    fn checked_pointer_value_index(
+        &self,
+        pointer: &PointerValue,
+        index_value: i64,
+    ) -> CustResult<(Rc<RefCell<ArrayValue>>, Option<String>, usize)> {
+        match pointer {
+            PointerValue::Null => Err(CustError::new("null pointer dereference")),
+            PointerValue::Scalar { .. } => Err(CustError::new("scalar pointer is not indexable")),
+            PointerValue::ArrayBase { array, source_name } => {
+                let len = array.borrow().elements.len();
+                let Ok(index) = usize::try_from(index_value) else {
+                    return Err(CustError::new(format!(
+                        "array pointer index {index_value} out of bounds for length {len}"
+                    )));
+                };
+                if index >= len {
+                    return Err(CustError::new(format!(
+                        "array pointer index {index_value} out of bounds for length {len}"
+                    )));
+                }
+                Ok((Rc::clone(array), source_name.clone(), index))
+            }
+        }
+    }
+
+    fn assign_pointer_index(
+        &mut self,
+        pointer: &PointerValue,
+        index_value: i64,
+        value: i64,
+    ) -> CustResult<()> {
+        let (array, source_name, index) = self.checked_pointer_value_index(pointer, index_value)?;
+        let mut array = array.borrow_mut();
+        if array.read_only {
+            return Err(CustError::new(match source_name {
+                Some(name) => format!("cannot modify read-only array '{name}'"),
+                None => "cannot modify read-only array through pointer".to_string(),
+            }));
+        }
+        array.elements[index] = value;
+        Ok(())
     }
 
     fn checked_array_index(
@@ -1713,14 +1801,22 @@ impl Interpreter {
             }
             Stmt::ArrayAssign { name, index, value } => {
                 let value = self.eval(value)?;
-                let (array, index) = self.checked_array_index(name, index)?;
-                let mut array = array.borrow_mut();
-                if array.read_only {
-                    return Err(CustError::new(format!(
-                        "cannot modify read-only array '{name}'"
-                    )));
+                match self.find_variable(name).cloned() {
+                    Some(Value::Pointer(pointer)) => {
+                        let index_value = self.eval(index)?;
+                        self.assign_pointer_index(&pointer, index_value, value)?;
+                    }
+                    Some(_) | None => {
+                        let (array, index) = self.checked_array_index(name, index)?;
+                        let mut array = array.borrow_mut();
+                        if array.read_only {
+                            return Err(CustError::new(format!(
+                                "cannot modify read-only array '{name}'"
+                            )));
+                        }
+                        array.elements[index] = value;
+                    }
                 }
-                array.elements[index] = value;
                 Ok(ExecFlow::None)
             }
             Stmt::Expr(expr) => {
@@ -1836,10 +1932,16 @@ impl Interpreter {
                 let pointer = self.eval_pointer(pointer)?;
                 self.deref_pointer(&pointer)
             }
-            Expr::ArrayGet { name, index } => {
-                let (array, index) = self.checked_array_index(name, index)?;
-                Ok(array.borrow().elements[index])
-            }
+            Expr::ArrayGet { name, index } => match self.find_variable(name).cloned() {
+                Some(Value::Pointer(_)) => {
+                    let (array, _, index) = self.checked_pointer_index(name, index)?;
+                    Ok(array.borrow().elements[index])
+                }
+                Some(_) | None => {
+                    let (array, index) = self.checked_array_index(name, index)?;
+                    Ok(array.borrow().elements[index])
+                }
+            },
             Expr::StringGet { values, index } => {
                 let index_value = self.eval(index)?;
                 let Ok(index) = usize::try_from(index_value) else {

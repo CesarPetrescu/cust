@@ -583,6 +583,51 @@ fn supports_scalar_pointer_address_dereference_write_and_reassignment() {
 }
 
 #[test]
+fn supports_scalar_pointer_parameters() {
+    let program = include_str!("fixtures/valid/pointer_parameters.c");
+
+    assert_eq!(interpret(program).unwrap(), 77);
+}
+
+#[test]
+fn supports_array_decay_to_pointer_parameters_and_pointer_indexing() {
+    let program = include_str!("fixtures/valid/pointer_arrays.c");
+
+    assert_eq!(interpret(program).unwrap(), 11);
+}
+
+#[test]
+fn supports_string_literal_decay_to_pointer_parameters_for_reads() {
+    let program = include_str!("fixtures/valid/pointer_string_reads.c");
+
+    assert_eq!(interpret(program).unwrap(), 98);
+}
+
+#[test]
+fn reports_pointer_array_index_out_of_bounds() {
+    let program = include_str!("fixtures/invalid/pointer_array_out_of_bounds.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array pointer index 2 out of bounds for length 2"
+    );
+}
+
+#[test]
+fn rejects_writes_through_string_literal_pointer_parameters() {
+    let program = include_str!("fixtures/invalid/pointer_string_write.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot modify read-only array through pointer"
+    );
+}
+
+#[test]
 fn reports_null_pointer_dereferences() {
     let program = include_str!("fixtures/invalid/null_pointer_dereference.c");
 

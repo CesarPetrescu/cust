@@ -29,13 +29,14 @@ Prioritized backlog for autonomous implementation.
 - [x] string literals as read-only byte arrays
 - [x] pointer model design document before implementation
 - [x] first scalar pointer milestone: pointer declarations, scalar address-of/dereference, dereference assignment, reassignment, null diagnostics, and out-of-scope scalar diagnostics
-- [ ] pointer parameters, array/string decay to pointer arguments, pointer indexing, and `&array[index]`
+- [x] pointer parameters, array/string decay to pointer arguments, and pointer indexing for array-base pointers
+- [ ] `&array[index]` array-element pointers and dereference assignment/read support for array elements
 
 ## P3 — C-subset conformance tooling
 
 - [x] Compare Cust output against `gcc`/`clang`/`cc` for supported programs as an external test oracle only
 - [x] Add an initial corpus under `tests/fixtures/`
-- [ ] Add more conformance fixtures with explicit expected results and optional compiler-oracle comparisons where supported
+- [ ] Add more conformance fixtures with explicit expected results and optional compiler-oracle comparisons where supported (pointer scalar/parameter/array-decay coverage has been added; continue expanding as new supported subset features land)
 - [ ] Add fuzz/property tests for lexer/parser safety
 
 ## P4 — product quality

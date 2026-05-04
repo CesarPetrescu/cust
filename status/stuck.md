@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-04 autonomous run after local and Docker verification passed for scalar pointer declarations/address-of/dereference/reassignment plus null/out-of-scope diagnostics. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-05-05 autonomous run after local and Docker verification passed for pointer parameters, array/string decay to pointer arguments, pointer indexing reads/writes, read-only string pointer diagnostics, and compiler-oracle pointer compatibility fixtures. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 

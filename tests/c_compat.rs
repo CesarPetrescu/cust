@@ -6,6 +6,8 @@ use std::process::Command;
 const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/arithmetic_control_flow.c",
     "tests/fixtures/compat/valid/functions_arrays_and_strings.c",
+    "tests/fixtures/compat/valid/pointer_parameters_and_arrays.c",
+    "tests/fixtures/compat/valid/pointers_scalars.c",
 ];
 
 #[test]
