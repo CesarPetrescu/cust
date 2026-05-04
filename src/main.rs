@@ -9,6 +9,11 @@ fn main() {
         process::exit(64);
     };
 
+    if path == "--version" {
+        println!("cust {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     if args.next().is_some() {
         eprintln!("Usage: cust <file.c>");
         process::exit(64);

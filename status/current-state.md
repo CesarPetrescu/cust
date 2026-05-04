@@ -19,6 +19,7 @@ Last updated: 2026-05-04
   - interpreter
   - CLI wrapper
 - CLI command shape: `cust <file.c>`
+- CLI supports `cust --version`, printing the Cargo package version without requiring a source file.
 - Example: `examples/sum.c`
 - Docs:
   - `README.md`
@@ -38,6 +39,7 @@ Last updated: 2026-05-04
 - declarations: `int x = expr;`, `char x = expr;`, `int xs[N];`, or `char cs[N];`
 - `int` and `char` function parameters (stored as integer values in the current interpreter model)
 - one-dimensional array parameters such as `int values[3]`, passed by reference to the same array storage; string literals can be passed to `char` array parameters as read-only NUL-terminated byte arrays
+- Pointer support is not implemented yet, but `docs/plans/pointer-model.md` now defines the safe first-pass model, implementation steps, and concrete valid/invalid acceptance fixtures for the next pointer milestones.
 - assignments: `x = expr;` and `xs[index] = expr;`
 - array indexing expressions `xs[index]` and string literal indexing expressions `"text"[index]` with runtime negative/out-of-bounds diagnostics
 - `return expr;`
@@ -78,7 +80,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after adding C compiler compatibility tests in the 2026-05-04 autonomous run. The suite now includes `tests/c_compat.rs`, which compiles supported fixture programs with a native C compiler and compares the compiled C exit code to Cust's interpreted result. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after adding pointer design documentation and the `--version` CLI flag in the 2026-05-04 autonomous run. The suite includes `tests/c_compat.rs`, which compiles supported fixture programs with a native C compiler and compares the compiled C exit code to Cust's interpreted result. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

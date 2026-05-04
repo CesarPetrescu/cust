@@ -4,11 +4,12 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
-1. Design the pointer model before implementing pointer arithmetic or address/dereference operators; include concrete acceptance tests for address-of, dereference, pointer parameters, null/invalid pointer diagnostics, and array/pointer interactions.
-2. Add fuzz/property tests for lexer/parser safety; acceptance: generate random byte/string inputs, assert lexing/parsing never panics, and keep the test deterministic enough for Docker cron verification.
-3. Continue parser recovery/error-message expansion only for newly discovered malformed programs not already covered by the exact-error suite (remaining examples: nested block brace diagnostics where useful and other delimiter-list boundary errors).
-4. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
-5. Add CLI flags such as `--version`, `--ast`, `--tokens`, or `--max-steps` after the core C-subset expansion stabilizes.
+1. Implement the first pointer milestone from `docs/plans/pointer-model.md`; acceptance: scalar `int *p = &x;`, `*p` reads/writes, pointer reassignment, null dereference diagnostics, and valid/invalid interpreter fixtures.
+2. Extend pointer support to parameters and array/string decay from `docs/plans/pointer-model.md`; acceptance: `int *`/`char *` parameters, array-base pointer indexing, string-literal read-only write diagnostics, and C compatibility fixtures where supported.
+3. Add fuzz/property tests for lexer/parser safety; acceptance: generate random byte/string inputs, assert lexing/parsing never panics, and keep the test deterministic enough for Docker cron verification.
+4. Continue parser recovery/error-message expansion only for newly discovered malformed programs not already covered by the exact-error suite (remaining examples: nested block brace diagnostics where useful and other delimiter-list boundary errors).
+5. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
+6. Add CLI flags such as `--ast`, `--tokens`, or `--max-steps` after the core C-subset expansion stabilizes.
 
 ## Every-run checklist
 

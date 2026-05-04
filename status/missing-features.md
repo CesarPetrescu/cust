@@ -27,7 +27,7 @@ Prioritized backlog for autonomous implementation.
 - [x] `char` literals, declarations, and function parameters
 - [x] arrays
 - [x] string literals as read-only byte arrays
-- [ ] pointer model design document before implementation
+- [x] pointer model design document before implementation
 
 ## P3 — C compatibility tooling
 
@@ -37,7 +37,8 @@ Prioritized backlog for autonomous implementation.
 
 ## P4 — product quality
 
-- [ ] CLI flags: `--version`, `--ast`, `--tokens`, `--max-steps`
+- [ ] CLI flags: `--ast`, `--tokens`, `--max-steps`
+- [x] CLI flag: `--version`
 - [ ] Better README examples
 - [ ] Release notes and tags
 - [ ] License file
