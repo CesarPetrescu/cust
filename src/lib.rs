@@ -639,6 +639,12 @@ impl Parser {
 
     fn parse_function(&mut self) -> CustResult<(String, Function)> {
         self.expect(Token::Int)?;
+        if self.check(&Token::Star) {
+            return Err(Self::error_at(
+                "pointer return types are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
         let name = self.expect_ident_after("function name after return type")?;
         self.expect_opening_paren_after("function name")?;
         let params = self.parse_params()?;
@@ -662,6 +668,12 @@ impl Parser {
                 self.expect_ident_after("parameter name after type")?
             };
             let kind = if is_pointer {
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "pointer array parameters are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 ParamKind::Pointer
             } else if self.matches(&Token::LBracket) {
                 let len = self.expect_array_len()?;
@@ -782,6 +794,12 @@ impl Parser {
             self.expect_ident_after("variable name after type")?
         };
         if is_pointer {
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "pointer array declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             self.expect_assign_after("pointer declaration")?;
             let expr = self.parse_expr()?;
             if require_semi {

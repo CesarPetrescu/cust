@@ -557,6 +557,79 @@ fn reports_missing_parameter_types_before_parameter_names() {
 }
 
 #[test]
+fn rejects_pointer_return_types_with_context() {
+    let program = "int *identity(int x) { return &x; }\nint main() { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer return types are not supported at line 1, column 5"
+    );
+}
+
+#[test]
+fn rejects_pointer_array_parameters_with_context() {
+    let program = "int first(int *values[2]) { return values[0]; }\nint main() { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer array parameters are not supported at line 1, column 22"
+    );
+}
+
+#[test]
+fn rejects_pointer_array_declarations_with_context() {
+    let program = "int main() {\nint *values[2];\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer array declarations are not supported at line 2, column 12"
+    );
+}
+
+#[test]
+fn reports_missing_pointer_parameter_names_after_stars() {
+    let program = "int identity(int *) { return 0; }\nint main() { return identity(0); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected parameter name after '*', found RParen at line 1, column 19"
+    );
+}
+
+#[test]
+fn reports_missing_commas_after_pointer_parameters() {
+    let program =
+        "int sum(int *values int count) { return values[0] + count; }\nint main() { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ',' or ')' after function parameter, found Int at line 1, column 21"
+    );
+}
+
+#[test]
+fn reports_trailing_commas_after_pointer_parameters() {
+    let program = "int first(int *values,) { return values[0]; }\nint main() { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected function parameter after ',', found RParen at line 1, column 23"
+    );
+}
+
+#[test]
 fn reports_missing_assignment_operator_after_variable_declarations() {
     let program = "int main() {\nint x 1;\nreturn x;\n}\n";
 
