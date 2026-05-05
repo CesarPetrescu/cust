@@ -91,6 +91,25 @@ fn supports_global_scalar_array_and_pointer_variables() {
 }
 
 #[test]
+fn supports_sizeof_operator_for_types_scalars_arrays_strings_and_pointers() {
+    let program = include_str!("fixtures/valid/sizeof_operator.c");
+
+    assert_eq!(interpret(program).unwrap(), 85);
+}
+
+#[test]
+fn rejects_sizeof_void_with_context() {
+    let program = include_str!("fixtures/invalid/sizeof_void.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "sizeof(void) is not supported at line 2, column 19"
+    );
+}
+
+#[test]
 fn reports_duplicate_global_variables() {
     let program = include_str!("fixtures/invalid/duplicate_global_variable.c");
 

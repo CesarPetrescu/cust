@@ -27,11 +27,16 @@ impl fmt::Display for CustError {
 
 impl Error for CustError {}
 
+const INT_SIZE: i64 = 8;
+const CHAR_SIZE: i64 = 1;
+const POINTER_SIZE: i64 = 8;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Token {
     Int,
     Char,
     Void,
+    Sizeof,
     Return,
     If,
     Else,
@@ -106,6 +111,8 @@ impl LocatedToken {
 enum Expr {
     Number(i64),
     StringLiteral(Vec<i64>),
+    SizeOfType(SizeOfType),
+    SizeOfValue(Box<Expr>),
     Var(String),
     ArrayGet {
         name: String,
@@ -191,8 +198,39 @@ enum ReturnType {
     Void,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CType {
+    Int,
+    Char,
+}
+
+impl CType {
+    fn size(self) -> i64 {
+        match self {
+            CType::Int => INT_SIZE,
+            CType::Char => CHAR_SIZE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SizeOfType {
+    Scalar(CType),
+    Pointer,
+}
+
+impl SizeOfType {
+    fn size(self) -> i64 {
+        match self {
+            SizeOfType::Scalar(ty) => ty.size(),
+            SizeOfType::Pointer => POINTER_SIZE,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Param {
+    ty: CType,
     name: String,
     kind: ParamKind,
 }
@@ -246,10 +284,19 @@ enum IncrementOp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Stmt {
     Empty,
-    VarDecl(String, Expr),
-    PointerDecl(String, Expr),
+    VarDecl {
+        name: String,
+        ty: CType,
+        expr: Expr,
+    },
+    PointerDecl {
+        name: String,
+        ty: CType,
+        expr: Expr,
+    },
     ArrayDecl {
         name: String,
+        elem_type: CType,
         len: usize,
     },
     Assign(String, Expr),
@@ -608,6 +655,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "int" => Token::Int,
                     "char" => Token::Char,
                     "void" => Token::Void,
+                    "sizeof" => Token::Sizeof,
                     "return" => Token::Return,
                     "if" => Token::If,
                     "else" => Token::Else,
@@ -968,7 +1016,7 @@ impl Parser {
         }
 
         loop {
-            self.expect_type_after("parameter type")?;
+            let ty = self.expect_type_after("parameter type")?;
             let is_pointer = self.matches(&Token::Star);
             if is_pointer && self.check(&Token::Star) {
                 return Err(Self::error_at(
@@ -996,7 +1044,7 @@ impl Parser {
             } else {
                 ParamKind::Scalar
             };
-            params.push(Param { name, kind });
+            params.push(Param { ty, name, kind });
 
             if self.matches(&Token::Comma) {
                 if matches!(
@@ -1095,6 +1143,7 @@ impl Parser {
             | Token::PlusPlus
             | Token::MinusMinus
             | Token::Bang
+            | Token::Sizeof
             | Token::Star
             | Token::Amp
             | Token::LParen => self.parse_expr_stmt_with_semi(true),
@@ -1123,7 +1172,7 @@ impl Parser {
     }
 
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
-        self.expect_type()?;
+        let ty = self.expect_type()?;
         let is_pointer = self.matches(&Token::Star);
         if is_pointer && self.check(&Token::Star) {
             return Err(Self::error_at(
@@ -1148,7 +1197,7 @@ impl Parser {
             if require_semi {
                 self.expect_semicolon_after("pointer declaration")?;
             }
-            return Ok(Stmt::PointerDecl(name, expr));
+            return Ok(Stmt::PointerDecl { name, ty, expr });
         }
         if self.matches(&Token::LBracket) {
             let len = self.expect_array_len()?;
@@ -1156,14 +1205,18 @@ impl Parser {
             if require_semi {
                 self.expect_semicolon_after("array declaration")?;
             }
-            return Ok(Stmt::ArrayDecl { name, len });
+            return Ok(Stmt::ArrayDecl {
+                name,
+                elem_type: ty,
+                len,
+            });
         }
         self.expect_assign_after("variable declaration")?;
         let expr = self.parse_expr()?;
         if require_semi {
             self.expect_semicolon_after("variable declaration")?;
         }
-        Ok(Stmt::VarDecl(name, expr))
+        Ok(Stmt::VarDecl { name, ty, expr })
     }
 
     fn expect_array_len(&mut self) -> CustResult<usize> {
@@ -1695,6 +1748,8 @@ impl Parser {
             Ok(Expr::BitwiseNot(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Bang) {
             Ok(Expr::LogicalNot(Box::new(self.parse_unary()?)))
+        } else if self.matches(&Token::Sizeof) {
+            self.parse_sizeof()
         } else if self.matches(&Token::Star) {
             Ok(Expr::Deref(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Amp) {
@@ -1719,6 +1774,38 @@ impl Parser {
             }
         } else {
             self.parse_postfix()
+        }
+    }
+
+    fn parse_sizeof(&mut self) -> CustResult<Expr> {
+        if self.matches(&Token::LParen) {
+            if matches!(self.peek(), Token::Int | Token::Char | Token::Void) {
+                let type_token = self.advance();
+                if matches!(type_token.kind, Token::Void) {
+                    return Err(Self::error_at(
+                        "sizeof(void) is not supported".to_string(),
+                        &type_token,
+                    ));
+                }
+                let ty = match type_token.kind {
+                    Token::Int => CType::Int,
+                    Token::Char => CType::Char,
+                    _ => unreachable!("void returned above and parser checked type tokens"),
+                };
+                let sizeof_type = if self.matches(&Token::Star) {
+                    SizeOfType::Pointer
+                } else {
+                    SizeOfType::Scalar(ty)
+                };
+                self.expect_closing_paren_after("sizeof type")?;
+                Ok(Expr::SizeOfType(sizeof_type))
+            } else {
+                let expr = self.parse_expr()?;
+                self.expect_closing_paren_after("sizeof expression")?;
+                Ok(Expr::SizeOfValue(Box::new(expr)))
+            }
+        } else {
+            Ok(Expr::SizeOfValue(Box::new(self.parse_unary()?)))
         }
     }
 
@@ -1974,10 +2061,11 @@ impl Parser {
         }
     }
 
-    fn expect_type(&mut self) -> CustResult<()> {
+    fn expect_type(&mut self) -> CustResult<CType> {
         let found = self.advance();
         match &found.kind {
-            Token::Int | Token::Char => Ok(()),
+            Token::Int => Ok(CType::Int),
+            Token::Char => Ok(CType::Char),
             token => Err(Self::error_at(
                 format!("expected type, found {token:?}"),
                 &found,
@@ -1985,10 +2073,11 @@ impl Parser {
         }
     }
 
-    fn expect_type_after(&mut self, context: &str) -> CustResult<()> {
+    fn expect_type_after(&mut self, context: &str) -> CustResult<CType> {
         let found = self.advance();
         match &found.kind {
-            Token::Int | Token::Char => Ok(()),
+            Token::Int => Ok(CType::Int),
+            Token::Char => Ok(CType::Char),
             token => Err(Self::error_at(
                 format!("expected {context}, found {token:?}"),
                 &found,
@@ -2063,6 +2152,7 @@ impl Parser {
                 | Token::PlusPlus
                 | Token::MinusMinus
                 | Token::Bang
+                | Token::Sizeof
                 | Token::Star
                 | Token::Amp
                 | Token::LParen
@@ -2296,9 +2386,9 @@ enum ExecFlow {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Value {
-    Scalar(i64),
+    Scalar { value: i64, ty: CType },
     Array(Rc<RefCell<ArrayValue>>),
-    Pointer(PointerValue),
+    Pointer { pointer: PointerValue, ty: CType },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2322,13 +2412,15 @@ enum PointerValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ArrayValue {
     elements: Vec<i64>,
+    elem_type: CType,
     read_only: bool,
 }
 
 impl ArrayValue {
-    fn mutable_zeroed(len: usize) -> Self {
+    fn mutable_zeroed(len: usize, elem_type: CType) -> Self {
         Self {
             elements: vec![0; len],
+            elem_type,
             read_only: false,
         }
     }
@@ -2336,6 +2428,7 @@ impl ArrayValue {
     fn read_only(elements: Vec<i64>) -> Self {
         Self {
             elements,
+            elem_type: CType::Char,
             read_only: true,
         }
     }
@@ -2400,11 +2493,17 @@ impl Interpreter {
         let mut param_scope = HashMap::new();
         for (param, arg_expr) in function.params.iter().zip(arg_exprs) {
             let arg = match param.kind {
-                ParamKind::Scalar => Value::Scalar(self.eval(arg_expr)?),
+                ParamKind::Scalar => Value::Scalar {
+                    value: self.eval(arg_expr)?,
+                    ty: param.ty,
+                },
                 ParamKind::Array(expected_len) => {
                     self.eval_array_argument(name, &param.name, expected_len, arg_expr)?
                 }
-                ParamKind::Pointer => Value::Pointer(self.eval_pointer(arg_expr)?),
+                ParamKind::Pointer => Value::Pointer {
+                    pointer: self.eval_pointer(arg_expr)?,
+                    ty: param.ty,
+                },
             };
             if param_scope.insert(param.name.clone(), arg).is_some() {
                 return Err(CustError::new(format!(
@@ -2545,9 +2644,9 @@ impl Interpreter {
 
     fn find_scalar(&self, name: &str) -> CustResult<i64> {
         match self.find_variable(name) {
-            Some(Value::Scalar(value)) => Ok(*value),
+            Some(Value::Scalar { value, .. }) => Ok(*value),
             Some(Value::Array(_)) => Err(CustError::new(format!("array '{name}' used as scalar"))),
-            Some(Value::Pointer(_)) => {
+            Some(Value::Pointer { .. }) => {
                 Err(CustError::new(format!("pointer '{name}' used as scalar")))
             }
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
@@ -2557,10 +2656,10 @@ impl Interpreter {
     fn find_array(&self, name: &str) -> CustResult<Rc<RefCell<ArrayValue>>> {
         match self.find_variable(name) {
             Some(Value::Array(values)) => Ok(Rc::clone(values)),
-            Some(Value::Scalar(_)) => {
+            Some(Value::Scalar { .. }) => {
                 Err(CustError::new(format!("variable '{name}' is not an array")))
             }
-            Some(Value::Pointer(_)) => {
+            Some(Value::Pointer { .. }) => {
                 Err(CustError::new(format!("pointer '{name}' is not an array")))
             }
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
@@ -2571,14 +2670,14 @@ impl Interpreter {
         for scope in self.scopes.iter().rev() {
             if let Some(value) = scope.values.get(name) {
                 return match value {
-                    Value::Scalar(_) => Ok(PointerValue::Scalar {
+                    Value::Scalar { .. } => Ok(PointerValue::Scalar {
                         scope_id: scope.id,
                         name: name.to_string(),
                     }),
                     Value::Array(_) => Err(CustError::new(format!(
                         "array '{name}' requires indexed address-of"
                     ))),
-                    Value::Pointer(_) => Err(CustError::new(format!(
+                    Value::Pointer { .. } => Err(CustError::new(format!(
                         "pointer '{name}' cannot be addressed in this pointer milestone"
                     ))),
                 };
@@ -2607,7 +2706,7 @@ impl Interpreter {
             }
             Expr::AddressOf(name) => self.address_of_scalar(name),
             Expr::AddressOfArray { name, index } => {
-                if let Some(Value::Pointer(pointer)) = self.find_variable(name).cloned() {
+                if let Some(Value::Pointer { pointer, .. }) = self.find_variable(name).cloned() {
                     let index_value = self.eval(index)?;
                     let (array, source_name, index) =
                         self.checked_pointer_value_index(&pointer, index_value)?;
@@ -2630,14 +2729,15 @@ impl Interpreter {
                 source_name: None,
             }),
             Expr::Assign { name, value } => match self.find_variable(name).cloned() {
-                Some(Value::Pointer(_)) => {
+                Some(Value::Pointer { .. }) => {
                     let pointer = self.eval_pointer(value)?;
-                    if let Some(Value::Pointer(slot)) = self.find_variable_mut(name) {
+                    if let Some(Value::Pointer { pointer: slot, .. }) = self.find_variable_mut(name)
+                    {
                         *slot = pointer.clone();
                     }
                     Ok(pointer)
                 }
-                Some(Value::Scalar(_)) => Err(CustError::new(format!(
+                Some(Value::Scalar { .. }) => Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
                 ))),
                 Some(Value::Array(_)) => Err(CustError::new(format!(
@@ -2648,12 +2748,12 @@ impl Interpreter {
                 ))),
             },
             Expr::Var(name) => match self.find_variable(name) {
-                Some(Value::Pointer(pointer)) => Ok(pointer.clone()),
+                Some(Value::Pointer { pointer, .. }) => Ok(pointer.clone()),
                 Some(Value::Array(array)) => Ok(PointerValue::ArrayBase {
                     array: Rc::clone(array),
                     source_name: Some(name.clone()),
                 }),
-                Some(Value::Scalar(_)) => Err(CustError::new(format!(
+                Some(Value::Scalar { .. }) => Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
                 ))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
@@ -2677,7 +2777,7 @@ impl Interpreter {
                     .find(|scope| scope.id == *scope_id)
                     .and_then(|scope| scope.values.get(name));
                 match value {
-                    Some(Value::Scalar(value)) => Ok(*value),
+                    Some(Value::Scalar { value, .. }) => Ok(*value),
                     _ => Err(CustError::new(format!(
                         "pointer to out-of-scope variable '{name}'"
                     ))),
@@ -2708,7 +2808,7 @@ impl Interpreter {
                     .find(|scope| scope.id == *scope_id)
                     .and_then(|scope| scope.values.get_mut(name));
                 match slot {
-                    Some(Value::Scalar(slot)) => {
+                    Some(Value::Scalar { value: slot, .. }) => {
                         *slot = value;
                         Ok(())
                     }
@@ -2730,8 +2830,8 @@ impl Interpreter {
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, Option<String>, usize)> {
         let index_value = self.eval(index)?;
         let pointer = match self.find_variable(name) {
-            Some(Value::Pointer(pointer)) => pointer.clone(),
-            Some(Value::Scalar(_)) => {
+            Some(Value::Pointer { pointer, .. }) => pointer.clone(),
+            Some(Value::Scalar { .. }) => {
                 return Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
                 )));
@@ -2911,8 +3011,8 @@ impl Interpreter {
                 Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
             }
             Expr::Assign { name, .. } => match self.find_variable(name).cloned() {
-                Some(Value::Pointer(_)) => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
-                Some(Value::Scalar(_)) => Ok(self.eval(expr)? != 0),
+                Some(Value::Pointer { .. }) => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
+                Some(Value::Scalar { .. }) => Ok(self.eval(expr)? != 0),
                 Some(Value::Array(_)) => Err(CustError::new(format!(
                     "array '{name}' requires indexed assignment"
                 ))),
@@ -2921,9 +3021,9 @@ impl Interpreter {
                 ))),
             },
             Expr::Var(name) => match self.find_variable(name).cloned() {
-                Some(Value::Pointer(pointer)) => Ok(Self::pointer_truthy(&pointer)),
+                Some(Value::Pointer { pointer, .. }) => Ok(Self::pointer_truthy(&pointer)),
                 Some(Value::Array(array)) => Ok(!array.borrow().elements.is_empty()),
-                Some(Value::Scalar(value)) => Ok(value != 0),
+                Some(Value::Scalar { value, .. }) => Ok(value != 0),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::Deref(_)
@@ -2939,6 +3039,8 @@ impl Interpreter {
             | Expr::UnaryMinus(_)
             | Expr::BitwiseNot(_)
             | Expr::LogicalNot(_)
+            | Expr::SizeOfType(_)
+            | Expr::SizeOfValue(_)
             | Expr::CompoundAssign { .. }
             | Expr::Increment { .. }
             | Expr::Conditional { .. }
@@ -2962,14 +3064,14 @@ impl Interpreter {
 
     fn eval_assignment_expr(&mut self, name: &str, value: &Expr) -> CustResult<i64> {
         match self.find_variable(name).cloned() {
-            Some(Value::Scalar(_)) => {
+            Some(Value::Scalar { .. }) => {
                 let value = self.eval(value)?;
-                if let Some(Value::Scalar(slot)) = self.find_variable_mut(name) {
+                if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
                     *slot = value;
                 }
                 Ok(value)
             }
-            Some(Value::Pointer(_)) => Err(CustError::new("pointer value used as scalar")),
+            Some(Value::Pointer { .. }) => Err(CustError::new("pointer value used as scalar")),
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
             ))),
@@ -2986,15 +3088,15 @@ impl Interpreter {
         value: &Expr,
     ) -> CustResult<i64> {
         match self.find_variable(name).cloned() {
-            Some(Value::Scalar(current)) => {
+            Some(Value::Scalar { value: current, .. }) => {
                 let rhs = self.eval(value)?;
                 let result = Self::apply_compound_op(current, op, rhs)?;
-                if let Some(Value::Scalar(slot)) = self.find_variable_mut(name) {
+                if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
                     *slot = result;
                 }
                 Ok(result)
             }
-            Some(Value::Pointer(_)) => Err(Self::pointer_compound_error(op)),
+            Some(Value::Pointer { .. }) => Err(Self::pointer_compound_error(op)),
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
             ))),
@@ -3061,6 +3163,96 @@ impl Interpreter {
         u32::try_from(rhs).map_err(|_| CustError::new("shift count too large"))
     }
 
+    fn sizeof_expr(&self, expr: &Expr) -> CustResult<i64> {
+        match expr {
+            Expr::Number(_) => Ok(INT_SIZE),
+            Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
+            Expr::SizeOfType(_) | Expr::SizeOfValue(_) => Ok(INT_SIZE),
+            Expr::Var(name) => self.sizeof_variable(name),
+            Expr::ArrayGet { name, .. } => self.sizeof_indexed_value(name),
+            Expr::StringGet { .. } => Ok(CHAR_SIZE),
+            Expr::AddressOf(_) | Expr::AddressOfArray { .. } => Ok(POINTER_SIZE),
+            Expr::Deref(pointer) => self.sizeof_deref(pointer),
+            Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
+                self.sizeof_assignment_result(name)
+            }
+            Expr::ArraySet { name, .. } | Expr::ArrayCompoundSet { name, .. } => {
+                self.sizeof_indexed_value(name)
+            }
+            Expr::DerefSet { pointer, .. } | Expr::DerefCompoundSet { pointer, .. } => {
+                self.sizeof_deref(pointer)
+            }
+            Expr::Increment { target, .. } => self.sizeof_expr(target),
+            Expr::Call { name, .. } => match self.functions.get(name) {
+                Some(function) if function.return_type == ReturnType::Int => Ok(INT_SIZE),
+                Some(_) => Err(CustError::new(format!(
+                    "void function '{name}' used as scalar expression"
+                ))),
+                None => Err(CustError::new(format!("undefined function '{name}'"))),
+            },
+            Expr::UnaryPlus(_)
+            | Expr::UnaryMinus(_)
+            | Expr::BitwiseNot(_)
+            | Expr::LogicalNot(_)
+            | Expr::Conditional { .. }
+            | Expr::Comma(_, _)
+            | Expr::Binary(_, _, _) => Ok(INT_SIZE),
+        }
+    }
+
+    fn sizeof_variable(&self, name: &str) -> CustResult<i64> {
+        match self.find_variable(name) {
+            Some(Value::Scalar { ty, .. }) => Ok(ty.size()),
+            Some(Value::Array(array)) => {
+                let array = array.borrow();
+                Ok(array.elements.len() as i64 * array.elem_type.size())
+            }
+            Some(Value::Pointer { .. }) => Ok(POINTER_SIZE),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn sizeof_assignment_result(&self, name: &str) -> CustResult<i64> {
+        match self.find_variable(name) {
+            Some(Value::Scalar { ty, .. }) => Ok(ty.size()),
+            Some(Value::Pointer { .. }) => Ok(POINTER_SIZE),
+            Some(Value::Array(_)) => Err(CustError::new(format!(
+                "array '{name}' requires indexed assignment"
+            ))),
+            None => Err(CustError::new(format!(
+                "assignment to undeclared variable '{name}'"
+            ))),
+        }
+    }
+
+    fn sizeof_indexed_value(&self, name: &str) -> CustResult<i64> {
+        match self.find_variable(name) {
+            Some(Value::Array(array)) => Ok(array.borrow().elem_type.size()),
+            Some(Value::Pointer { ty, .. }) => Ok(ty.size()),
+            Some(Value::Scalar { .. }) => {
+                Err(CustError::new(format!("variable '{name}' is not an array")))
+            }
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn sizeof_deref(&self, pointer: &Expr) -> CustResult<i64> {
+        match pointer {
+            Expr::Var(name) => match self.find_variable(name) {
+                Some(Value::Pointer { ty, .. }) => Ok(ty.size()),
+                Some(Value::Array(array)) => Ok(array.borrow().elem_type.size()),
+                Some(Value::Scalar { .. }) => Err(CustError::new(format!(
+                    "variable '{name}' is not a pointer"
+                ))),
+                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            Expr::AddressOf(name) => self.sizeof_variable(name),
+            Expr::AddressOfArray { name, .. } => self.sizeof_indexed_value(name),
+            Expr::StringLiteral(_) => Ok(CHAR_SIZE),
+            _ => Ok(INT_SIZE),
+        }
+    }
+
     fn eval_increment_expr(
         &mut self,
         target: &Expr,
@@ -3069,14 +3261,14 @@ impl Interpreter {
     ) -> CustResult<i64> {
         match target {
             Expr::Var(name) => match self.find_variable(name).cloned() {
-                Some(Value::Scalar(current)) => {
+                Some(Value::Scalar { value: current, .. }) => {
                     let updated = Self::apply_increment_op(current, op);
-                    if let Some(Value::Scalar(slot)) = self.find_variable_mut(name) {
+                    if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
                         *slot = updated;
                     }
                     Ok(Self::increment_result(current, updated, prefix))
                 }
-                Some(Value::Pointer(_)) => {
+                Some(Value::Pointer { .. }) => {
                     Err(CustError::new("pointer arithmetic is not supported"))
                 }
                 Some(Value::Array(_)) => Err(CustError::new(format!(
@@ -3086,7 +3278,7 @@ impl Interpreter {
             },
             Expr::ArrayGet { name, index } => {
                 let (array, index) = match self.find_variable(name).cloned() {
-                    Some(Value::Pointer(pointer)) => {
+                    Some(Value::Pointer { pointer, .. }) => {
                         let index_value = self.eval(index)?;
                         let (array, _, index) =
                             self.checked_pointer_value_index(&pointer, index_value)?;
@@ -3124,7 +3316,7 @@ impl Interpreter {
         value: &Expr,
     ) -> CustResult<i64> {
         let (array, index) = match self.find_variable(name).cloned() {
-            Some(Value::Pointer(pointer)) => {
+            Some(Value::Pointer { pointer, .. }) => {
                 let index_value = self.eval(index)?;
                 let (array, _, index) = self.checked_pointer_value_index(&pointer, index_value)?;
                 (array, index)
@@ -3187,7 +3379,7 @@ impl Interpreter {
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
         match stmt {
             Stmt::Empty => Ok(ExecFlow::None),
-            Stmt::VarDecl(name, expr) => {
+            Stmt::VarDecl { name, ty, expr } => {
                 let value = self.eval(expr)?;
                 let scope = self.current_scope_mut();
                 if scope.contains_key(name) {
@@ -3195,10 +3387,10 @@ impl Interpreter {
                         "variable '{name}' already declared in this scope"
                     )));
                 }
-                scope.insert(name.clone(), Value::Scalar(value));
+                scope.insert(name.clone(), Value::Scalar { value, ty: *ty });
                 Ok(ExecFlow::None)
             }
-            Stmt::PointerDecl(name, expr) => {
+            Stmt::PointerDecl { name, ty, expr } => {
                 let pointer = self.eval_pointer(expr)?;
                 let scope = self.current_scope_mut();
                 if scope.contains_key(name) {
@@ -3206,10 +3398,14 @@ impl Interpreter {
                         "variable '{name}' already declared in this scope"
                     )));
                 }
-                scope.insert(name.clone(), Value::Pointer(pointer));
+                scope.insert(name.clone(), Value::Pointer { pointer, ty: *ty });
                 Ok(ExecFlow::None)
             }
-            Stmt::ArrayDecl { name, len } => {
+            Stmt::ArrayDecl {
+                name,
+                elem_type,
+                len,
+            } => {
                 let scope = self.current_scope_mut();
                 if scope.contains_key(name) {
                     return Err(CustError::new(format!(
@@ -3218,23 +3414,29 @@ impl Interpreter {
                 }
                 scope.insert(
                     name.clone(),
-                    Value::Array(Rc::new(RefCell::new(ArrayValue::mutable_zeroed(*len)))),
+                    Value::Array(Rc::new(RefCell::new(ArrayValue::mutable_zeroed(
+                        *len, *elem_type,
+                    )))),
                 );
                 Ok(ExecFlow::None)
             }
             Stmt::Assign(name, expr) => {
                 let existing = self.find_variable(name).cloned();
                 match existing {
-                    Some(Value::Scalar(_)) => {
+                    Some(Value::Scalar { .. }) => {
                         let value = self.eval(expr)?;
-                        if let Some(Value::Scalar(slot)) = self.find_variable_mut(name) {
+                        if let Some(Value::Scalar { value: slot, .. }) =
+                            self.find_variable_mut(name)
+                        {
                             *slot = value;
                         }
                         Ok(ExecFlow::None)
                     }
-                    Some(Value::Pointer(_)) => {
+                    Some(Value::Pointer { .. }) => {
                         let pointer = self.eval_pointer(expr)?;
-                        if let Some(Value::Pointer(slot)) = self.find_variable_mut(name) {
+                        if let Some(Value::Pointer { pointer: slot, .. }) =
+                            self.find_variable_mut(name)
+                        {
                             *slot = pointer;
                         }
                         Ok(ExecFlow::None)
@@ -3256,7 +3458,7 @@ impl Interpreter {
             Stmt::ArrayAssign { name, index, value } => {
                 let value = self.eval(value)?;
                 match self.find_variable(name).cloned() {
-                    Some(Value::Pointer(pointer)) => {
+                    Some(Value::Pointer { pointer, .. }) => {
                         let index_value = self.eval(index)?;
                         self.assign_pointer_index(&pointer, index_value, value)?;
                     }
@@ -3447,6 +3649,8 @@ impl Interpreter {
         match expr {
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
+            Expr::SizeOfType(sizeof_type) => Ok(sizeof_type.size()),
+            Expr::SizeOfValue(expr) => self.sizeof_expr(expr),
             Expr::Var(name) => self.find_scalar(name),
             Expr::AddressOf(_) | Expr::AddressOfArray { .. } => {
                 Err(CustError::new("pointer value used as scalar"))
@@ -3461,7 +3665,7 @@ impl Interpreter {
             Expr::ArraySet { name, index, value } => {
                 let value = self.eval(value)?;
                 match self.find_variable(name).cloned() {
-                    Some(Value::Pointer(pointer)) => {
+                    Some(Value::Pointer { pointer, .. }) => {
                         let index_value = self.eval(index)?;
                         self.assign_pointer_index(&pointer, index_value, value)?;
                     }
@@ -3498,7 +3702,7 @@ impl Interpreter {
                 self.deref_pointer(&pointer)
             }
             Expr::ArrayGet { name, index } => match self.find_variable(name).cloned() {
-                Some(Value::Pointer(_)) => {
+                Some(Value::Pointer { .. }) => {
                     let (array, _, index) = self.checked_pointer_index(name, index)?;
                     Ok(array.borrow().elements[index])
                 }

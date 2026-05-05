@@ -22,6 +22,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/pointer_truthiness_and_equality.c",
     "tests/fixtures/compat/valid/pointers_scalars.c",
     "tests/fixtures/compat/valid/single_statement_control_bodies.c",
+    "tests/fixtures/compat/valid/sizeof_operator.c",
     "tests/fixtures/compat/valid/switch_statements.c",
     "tests/fixtures/compat/valid/void_functions.c",
 ];

@@ -34,6 +34,7 @@ Prioritized backlog for autonomous implementation.
 - [x] C-style block comments `/* ... */` treated as lexer whitespace across lines/inline token boundaries, with source-line/caret diagnostics for unterminated block comments and C compiler-oracle coverage
 - [x] `void` helper functions and empty `return;` statements, including side-effect-only void calls, int/void return-shape diagnostics, scalar-use diagnostics for void calls, and C compiler-oracle coverage
 - [x] Top-level global variables for scalar `int`/`char`, arrays, and supported pointer globals, initialized before `main()` in a persistent outer scope, mutable from helper functions, with duplicate-global diagnostics and C compiler-oracle coverage
+- [x] `sizeof` over supported types and expressions, with Cust-defined sizes (`int=8`, `char=1`, pointer `=8`), declared scalar/array/pointer element-type tracking, non-evaluating operand semantics, exact `sizeof(void)` diagnostics, interpreter fixtures, and stable C compiler-oracle coverage for char/string/char-array sizes
 
 ## P2 — data types
 
