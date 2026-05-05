@@ -14,6 +14,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/conditional_operator.c",
     "tests/fixtures/compat/valid/do_while_loops.c",
     "tests/fixtures/compat/valid/enums.c",
+    "tests/fixtures/compat/valid/function_prototypes.c",
     "tests/fixtures/compat/valid/functions_arrays_and_strings.c",
     "tests/fixtures/compat/valid/global_variables.c",
     "tests/fixtures/compat/valid/increment_decrement.c",

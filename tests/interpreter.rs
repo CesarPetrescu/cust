@@ -112,6 +112,25 @@ fn supports_enum_constants_with_implicit_values_and_block_scope() {
 }
 
 #[test]
+fn supports_function_prototypes_before_definitions() {
+    let program = include_str!("fixtures/valid/function_prototypes.c");
+
+    assert_eq!(interpret(program).unwrap(), 12);
+}
+
+#[test]
+fn rejects_conflicting_function_prototypes() {
+    let program = include_str!("fixtures/invalid/conflicting_function_prototype.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function prototype for 'helper' conflicts with previous declaration"
+    );
+}
+
+#[test]
 fn rejects_assignment_to_enum_constants() {
     let program = include_str!("fixtures/invalid/enum_constant_assignment.c");
 

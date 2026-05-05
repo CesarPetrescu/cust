@@ -14,6 +14,7 @@ Prioritized backlog for autonomous implementation.
 ## P1 — C subset expansion
 
 - [x] Function definitions and function calls
+- [x] Function prototypes/declarations at top level (`int helper(int);`, `void mutate(int *);`) with semicolon-terminated parser support, signature compatibility checks against definitions/earlier declarations, invalid conflicting-prototype diagnostics, and C compiler-oracle coverage
 - [x] Local function parameters
 - [x] Recursive calls with a bounded call-depth limit regression suite
 - [x] Boolean/logical operators: `&&`, `||`, `!`

@@ -193,6 +193,24 @@ struct Function {
     body: Vec<Stmt>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionSignature {
+    return_type: ReturnType,
+    params: Vec<ParamSignature>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ParamSignature {
+    ty: CType,
+    kind: ParamKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TopLevelFunction {
+    Definition(Function),
+    Prototype(FunctionSignature),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReturnType {
     Int,
@@ -241,6 +259,25 @@ enum ParamKind {
     Scalar,
     Array(usize),
     Pointer,
+}
+
+impl FunctionSignature {
+    fn new(return_type: ReturnType, params: &[Param]) -> Self {
+        Self {
+            return_type,
+            params: params
+                .iter()
+                .map(|param| ParamSignature {
+                    ty: param.ty,
+                    kind: param.kind,
+                })
+                .collect(),
+        }
+    }
+
+    fn from_function(function: &Function) -> Self {
+        Self::new(function.return_type, &function.params)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -917,6 +954,7 @@ impl Parser {
     fn parse_program(&mut self) -> CustResult<Program> {
         let mut globals = Vec::new();
         let mut functions = HashMap::new();
+        let mut prototypes = HashMap::new();
         while !self.check(&Token::Eof) {
             if self.check(&Token::RBrace) {
                 return Err(Self::error_at(
@@ -928,9 +966,45 @@ impl Parser {
                 || self.starts_malformed_function_definition()
                 || self.check(&Token::Void)
             {
-                let (name, function) = self.parse_function()?;
-                if functions.insert(name.clone(), function).is_some() {
-                    return Err(CustError::new(format!("function '{name}' already defined")));
+                let (name, top_level_function) = self.parse_function_declaration()?;
+                match top_level_function {
+                    TopLevelFunction::Definition(function) => {
+                        let signature = FunctionSignature::from_function(&function);
+                        match prototypes.get(&name) {
+                            Some(prototype) if prototype != &signature => {
+                                return Err(CustError::new(format!(
+                                    "function definition for '{name}' conflicts with previous prototype"
+                                )));
+                            }
+                            _ => {}
+                        }
+                        if functions.insert(name.clone(), function).is_some() {
+                            return Err(CustError::new(format!(
+                                "function '{name}' already defined"
+                            )));
+                        }
+                    }
+                    TopLevelFunction::Prototype(signature) => {
+                        match functions.get(&name) {
+                            Some(function)
+                                if FunctionSignature::from_function(function) != signature =>
+                            {
+                                return Err(CustError::new(format!(
+                                    "function prototype for '{name}' conflicts with previous definition"
+                                )));
+                            }
+                            _ => {}
+                        }
+                        if let Some(previous) = prototypes.get(&name) {
+                            if previous != &signature {
+                                return Err(CustError::new(format!(
+                                    "function prototype for '{name}' conflicts with previous declaration"
+                                )));
+                            }
+                        } else {
+                            prototypes.insert(name, signature);
+                        }
+                    }
                 }
             } else if matches!(self.peek(), Token::Int | Token::Char) {
                 globals.push(self.parse_var_decl()?);
@@ -987,7 +1061,7 @@ impl Parser {
         )
     }
 
-    fn parse_function(&mut self) -> CustResult<(String, Function)> {
+    fn parse_function_declaration(&mut self) -> CustResult<(String, TopLevelFunction)> {
         let return_type = self.parse_function_return_type()?;
         if self.check(&Token::Star) {
             return Err(Self::error_at(
@@ -999,14 +1073,20 @@ impl Parser {
         self.expect_opening_paren_after("function name")?;
         let params = self.parse_params()?;
         self.expect_closing_paren_after("function parameters")?;
+        if self.matches(&Token::Semi) {
+            return Ok((
+                name,
+                TopLevelFunction::Prototype(FunctionSignature::new(return_type, &params)),
+            ));
+        }
         let body = self.parse_block_after("function header")?;
         Ok((
             name,
-            Function {
+            TopLevelFunction::Definition(Function {
                 return_type,
                 params,
                 body,
-            },
+            }),
         ))
     }
 
