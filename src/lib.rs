@@ -196,6 +196,7 @@ enum Stmt {
 /// - empty statements (`;`) and side-effect-free expression statements (`expr;`)
 /// - integer, character, and string literals (string literals are read-only NUL-terminated byte arrays)
 /// - integer arithmetic/comparisons/logical operators: `+ - * / % == != < <= > >= && || !`
+/// - pointer truthiness and pointer equality/inequality for null, scalar pointers, and array-backed pointers
 pub fn interpret(source: &str) -> CustResult<i64> {
     interpret_with_options(source, InterpretOptions::default())
 }
@@ -1871,6 +1872,105 @@ impl Interpreter {
         Ok(())
     }
 
+    fn pointer_truthy(pointer: &PointerValue) -> bool {
+        !matches!(pointer, PointerValue::Null)
+    }
+
+    fn pointer_eq(left: &PointerValue, right: &PointerValue) -> bool {
+        match (left, right) {
+            (PointerValue::Null, PointerValue::Null) => true,
+            (PointerValue::Null, _) | (_, PointerValue::Null) => false,
+            (
+                PointerValue::Scalar {
+                    scope_id: left_scope,
+                    name: left_name,
+                },
+                PointerValue::Scalar {
+                    scope_id: right_scope,
+                    name: right_name,
+                },
+            ) => left_scope == right_scope && left_name == right_name,
+            (
+                PointerValue::ArrayBase { array: left, .. },
+                PointerValue::ArrayBase { array: right, .. },
+            ) => Rc::ptr_eq(left, right),
+            (
+                PointerValue::ArrayBase { array: left, .. },
+                PointerValue::ArrayElement {
+                    array: right,
+                    index,
+                    ..
+                },
+            )
+            | (
+                PointerValue::ArrayElement {
+                    array: right,
+                    index,
+                    ..
+                },
+                PointerValue::ArrayBase { array: left, .. },
+            ) => *index == 0 && Rc::ptr_eq(left, right),
+            (
+                PointerValue::ArrayElement {
+                    array: left,
+                    index: left_index,
+                    ..
+                },
+                PointerValue::ArrayElement {
+                    array: right,
+                    index: right_index,
+                    ..
+                },
+            ) => left_index == right_index && Rc::ptr_eq(left, right),
+            (PointerValue::Scalar { .. }, PointerValue::ArrayBase { .. })
+            | (PointerValue::Scalar { .. }, PointerValue::ArrayElement { .. })
+            | (PointerValue::ArrayBase { .. }, PointerValue::Scalar { .. })
+            | (PointerValue::ArrayElement { .. }, PointerValue::Scalar { .. }) => false,
+        }
+    }
+
+    fn eval_truthy(&mut self, expr: &Expr) -> CustResult<bool> {
+        match expr {
+            Expr::AddressOf(_) | Expr::AddressOfArray { .. } | Expr::StringLiteral(_) => {
+                Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
+            }
+            Expr::Var(name) => match self.find_variable(name).cloned() {
+                Some(Value::Pointer(pointer)) => Ok(Self::pointer_truthy(&pointer)),
+                Some(Value::Array(array)) => Ok(!array.borrow().elements.is_empty()),
+                Some(Value::Scalar(value)) => Ok(value != 0),
+                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            Expr::Deref(_) | Expr::ArrayGet { .. } | Expr::StringGet { .. } | Expr::Call { .. } => {
+                Ok(self.eval(expr)? != 0)
+            }
+            Expr::Number(value) => Ok(*value != 0),
+            Expr::UnaryPlus(_)
+            | Expr::UnaryMinus(_)
+            | Expr::LogicalNot(_)
+            | Expr::Binary(_, _, _) => Ok(self.eval(expr)? != 0),
+        }
+    }
+
+    fn eval_equality(&mut self, left: &Expr, op: &BinaryOp, right: &Expr) -> CustResult<i64> {
+        match (self.eval_pointer(left), self.eval_pointer(right)) {
+            (Ok(left_pointer), Ok(right_pointer)) => {
+                let equal = Self::pointer_eq(&left_pointer, &right_pointer);
+                Ok((*op == BinaryOp::Eq && equal || *op == BinaryOp::Ne && !equal) as i64)
+            }
+            (Ok(_), Err(error)) if !matches!(left, Expr::Number(0)) => Err(error),
+            (Err(error), Ok(_)) if !matches!(right, Expr::Number(0)) => Err(error),
+            (Ok(_), Err(_)) | (Err(_), Ok(_)) | (Err(_), Err(_)) => {
+                let lhs = self.eval(left)?;
+                let rhs = self.eval(right)?;
+                match op {
+                    BinaryOp::Eq => Ok((lhs == rhs) as i64),
+                    BinaryOp::Ne => Ok((lhs != rhs) as i64),
+                    _ => unreachable!("only equality operators use eval_equality"),
+                }
+            }
+        }
+    }
+
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
         match stmt {
             Stmt::Empty => Ok(ExecFlow::None),
@@ -1973,7 +2073,7 @@ impl Interpreter {
                 then_branch,
                 else_branch,
             } => {
-                if self.eval(cond)? != 0 {
+                if self.eval_truthy(cond)? {
                     self.exec_block(then_branch)
                 } else {
                     self.exec_block(else_branch)
@@ -1981,7 +2081,7 @@ impl Interpreter {
             }
             Stmt::While { cond, body } => {
                 let mut iterations = 0usize;
-                while self.eval(cond)? != 0 {
+                while self.eval_truthy(cond)? {
                     self.consume_loop_iteration()?;
                     iterations += 1;
                     if iterations > 1_000_000 {
@@ -2036,7 +2136,7 @@ impl Interpreter {
         let mut iterations = 0usize;
         loop {
             match cond {
-                Some(cond) if self.eval(cond)? == 0 => break,
+                Some(cond) if !self.eval_truthy(cond)? => break,
                 Some(_) | None => {}
             }
 
@@ -2105,44 +2205,55 @@ impl Interpreter {
             Expr::Call { name, args } => self.call_function(name, args),
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
-            Expr::LogicalNot(inner) => Ok((self.eval(inner)? == 0) as i64),
-            Expr::Binary(left, op, right) => {
-                let lhs = self.eval(left)?;
-                match op {
-                    BinaryOp::LogicalAnd => {
-                        if lhs == 0 {
-                            return Ok(0);
-                        }
-                        return Ok((self.eval(right)? != 0) as i64);
+            Expr::LogicalNot(inner) => Ok((!self.eval_truthy(inner)?) as i64),
+            Expr::Binary(left, op, right) => match op {
+                BinaryOp::LogicalAnd => {
+                    if !self.eval_truthy(left)? {
+                        Ok(0)
+                    } else {
+                        Ok(self.eval_truthy(right)? as i64)
                     }
-                    BinaryOp::LogicalOr => {
-                        if lhs != 0 {
-                            return Ok(1);
-                        }
-                        return Ok((self.eval(right)? != 0) as i64);
+                }
+                BinaryOp::LogicalOr => {
+                    if self.eval_truthy(left)? {
+                        Ok(1)
+                    } else {
+                        Ok(self.eval_truthy(right)? as i64)
                     }
-                    _ => {}
                 }
-                let rhs = self.eval(right)?;
-                match op {
-                    BinaryOp::Add => Ok(lhs + rhs),
-                    BinaryOp::Sub => Ok(lhs - rhs),
-                    BinaryOp::Mul => Ok(lhs * rhs),
-                    BinaryOp::Div if rhs == 0 => Err(CustError::new("division by zero")),
-                    BinaryOp::Div => Ok(lhs / rhs),
-                    BinaryOp::Rem if rhs == 0 => Err(CustError::new("division by zero")),
-                    BinaryOp::Rem => Ok(lhs % rhs),
-                    BinaryOp::Eq => Ok((lhs == rhs) as i64),
-                    BinaryOp::Ne => Ok((lhs != rhs) as i64),
-                    BinaryOp::Lt => Ok((lhs < rhs) as i64),
-                    BinaryOp::Le => Ok((lhs <= rhs) as i64),
-                    BinaryOp::Gt => Ok((lhs > rhs) as i64),
-                    BinaryOp::Ge => Ok((lhs >= rhs) as i64),
-                    BinaryOp::LogicalAnd | BinaryOp::LogicalOr => unreachable!(
-                        "logical operators are handled before evaluating the right operand"
-                    ),
+                BinaryOp::Eq | BinaryOp::Ne => self.eval_equality(left, op, right),
+                BinaryOp::Add
+                | BinaryOp::Sub
+                | BinaryOp::Mul
+                | BinaryOp::Div
+                | BinaryOp::Rem
+                | BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge => {
+                    let lhs = self.eval(left)?;
+                    let rhs = self.eval(right)?;
+                    match op {
+                        BinaryOp::Add => Ok(lhs + rhs),
+                        BinaryOp::Sub => Ok(lhs - rhs),
+                        BinaryOp::Mul => Ok(lhs * rhs),
+                        BinaryOp::Div if rhs == 0 => Err(CustError::new("division by zero")),
+                        BinaryOp::Div => Ok(lhs / rhs),
+                        BinaryOp::Rem if rhs == 0 => Err(CustError::new("division by zero")),
+                        BinaryOp::Rem => Ok(lhs % rhs),
+                        BinaryOp::Lt => Ok((lhs < rhs) as i64),
+                        BinaryOp::Le => Ok((lhs <= rhs) as i64),
+                        BinaryOp::Gt => Ok((lhs > rhs) as i64),
+                        BinaryOp::Ge => Ok((lhs >= rhs) as i64),
+                        BinaryOp::Eq
+                        | BinaryOp::Ne
+                        | BinaryOp::LogicalAnd
+                        | BinaryOp::LogicalOr => unreachable!(
+                            "non-scalar binary operators are handled before scalar evaluation"
+                        ),
+                    }
                 }
-            }
+            },
         }
     }
 }

@@ -618,6 +618,13 @@ fn supports_mixed_pointer_string_array_conformance_fixture() {
 }
 
 #[test]
+fn supports_pointer_truthiness_and_equality_comparisons() {
+    let program = include_str!("fixtures/valid/pointer_truthiness_and_equality.c");
+
+    assert_eq!(interpret(program).unwrap(), 127);
+}
+
+#[test]
 fn reports_array_element_pointer_index_out_of_bounds() {
     let program = include_str!("fixtures/invalid/pointer_array_element_out_of_bounds.c");
 
