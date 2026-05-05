@@ -649,6 +649,51 @@ fn reports_pointer_array_index_out_of_bounds() {
 }
 
 #[test]
+fn reports_negative_pointer_array_indices() {
+    let program = include_str!("fixtures/invalid/pointer_array_negative_index.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array pointer index -1 out of bounds for length 2"
+    );
+}
+
+#[test]
+fn rejects_pointer_comparison_with_nonzero_integer() {
+    let program = include_str!("fixtures/invalid/pointer_nonzero_integer_comparison.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot compare pointer with nonzero integer"
+    );
+}
+
+#[test]
+fn rejects_pointer_arithmetic() {
+    let program = include_str!("fixtures/invalid/pointer_arithmetic.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "pointer arithmetic is not supported");
+}
+
+#[test]
+fn rejects_pointer_ordering_comparisons() {
+    let program = include_str!("fixtures/invalid/pointer_ordering_comparison.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer ordering comparisons are not supported"
+    );
+}
+
+#[test]
 fn rejects_writes_through_string_literal_pointer_parameters() {
     let program = include_str!("fixtures/invalid/pointer_string_write.c");
 

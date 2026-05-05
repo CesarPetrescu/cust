@@ -36,7 +36,7 @@ Prioritized backlog for autonomous implementation.
 
 - [x] Compare Cust output against `gcc`/`clang`/`cc` for supported programs as an external test oracle only
 - [x] Add an initial corpus under `tests/fixtures/`
-- [ ] Add more conformance fixtures with explicit expected results and optional compiler-oracle comparisons where supported (pointer scalar/parameter/array-decay/array-element/truthiness/equality coverage has been added; continue expanding mixed supported-subset fixtures as new features land)
+- [x] Add more conformance fixtures with explicit expected results and optional compiler-oracle comparisons where supported (pointer scalar/parameter/array-decay/array-element/truthiness/equality coverage plus invalid negative pointer-index and unsupported pointer/integer diagnostics have been added; continue expanding mixed supported-subset fixtures as new features land)
 - [x] Add fuzz/property tests for lexer/parser safety
 
 ## P4 — product quality

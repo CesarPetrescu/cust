@@ -1876,6 +1876,10 @@ impl Interpreter {
         !matches!(pointer, PointerValue::Null)
     }
 
+    fn expr_is_pointer_value(&mut self, expr: &Expr) -> bool {
+        !matches!(expr, Expr::Number(_)) && self.eval_pointer(expr).is_ok()
+    }
+
     fn pointer_eq(left: &PointerValue, right: &PointerValue) -> bool {
         match (left, right) {
             (PointerValue::Null, PointerValue::Null) => true,
@@ -1957,6 +1961,12 @@ impl Interpreter {
                 let equal = Self::pointer_eq(&left_pointer, &right_pointer);
                 Ok((*op == BinaryOp::Eq && equal || *op == BinaryOp::Ne && !equal) as i64)
             }
+            (Ok(_), Err(_)) if matches!(right, Expr::Number(value) if *value != 0) => Err(
+                CustError::new("cannot compare pointer with nonzero integer"),
+            ),
+            (Err(_), Ok(_)) if matches!(left, Expr::Number(value) if *value != 0) => Err(
+                CustError::new("cannot compare pointer with nonzero integer"),
+            ),
             (Ok(_), Err(error)) if !matches!(left, Expr::Number(0)) => Err(error),
             (Err(error), Ok(_)) if !matches!(right, Expr::Number(0)) => Err(error),
             (Ok(_), Err(_)) | (Err(_), Ok(_)) | (Err(_), Err(_)) => {
@@ -2222,35 +2232,44 @@ impl Interpreter {
                     }
                 }
                 BinaryOp::Eq | BinaryOp::Ne => self.eval_equality(left, op, right),
-                BinaryOp::Add
-                | BinaryOp::Sub
-                | BinaryOp::Mul
-                | BinaryOp::Div
-                | BinaryOp::Rem
-                | BinaryOp::Lt
-                | BinaryOp::Le
-                | BinaryOp::Gt
-                | BinaryOp::Ge => {
+                BinaryOp::Add | BinaryOp::Sub => {
+                    if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
+                        return Err(CustError::new("pointer arithmetic is not supported"));
+                    }
                     let lhs = self.eval(left)?;
                     let rhs = self.eval(right)?;
                     match op {
                         BinaryOp::Add => Ok(lhs + rhs),
                         BinaryOp::Sub => Ok(lhs - rhs),
+                        _ => unreachable!("only addition/subtraction handled in this branch"),
+                    }
+                }
+                BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+                    if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
+                        return Err(CustError::new(
+                            "pointer ordering comparisons are not supported",
+                        ));
+                    }
+                    let lhs = self.eval(left)?;
+                    let rhs = self.eval(right)?;
+                    match op {
+                        BinaryOp::Lt => Ok((lhs < rhs) as i64),
+                        BinaryOp::Le => Ok((lhs <= rhs) as i64),
+                        BinaryOp::Gt => Ok((lhs > rhs) as i64),
+                        BinaryOp::Ge => Ok((lhs >= rhs) as i64),
+                        _ => unreachable!("only ordering operators handled in this branch"),
+                    }
+                }
+                BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem => {
+                    let lhs = self.eval(left)?;
+                    let rhs = self.eval(right)?;
+                    match op {
                         BinaryOp::Mul => Ok(lhs * rhs),
                         BinaryOp::Div if rhs == 0 => Err(CustError::new("division by zero")),
                         BinaryOp::Div => Ok(lhs / rhs),
                         BinaryOp::Rem if rhs == 0 => Err(CustError::new("division by zero")),
                         BinaryOp::Rem => Ok(lhs % rhs),
-                        BinaryOp::Lt => Ok((lhs < rhs) as i64),
-                        BinaryOp::Le => Ok((lhs <= rhs) as i64),
-                        BinaryOp::Gt => Ok((lhs > rhs) as i64),
-                        BinaryOp::Ge => Ok((lhs >= rhs) as i64),
-                        BinaryOp::Eq
-                        | BinaryOp::Ne
-                        | BinaryOp::LogicalAnd
-                        | BinaryOp::LogicalOr => unreachable!(
-                            "non-scalar binary operators are handled before scalar evaluation"
-                        ),
+                        _ => unreachable!("only multiplicative operators handled in this branch"),
                     }
                 }
             },
