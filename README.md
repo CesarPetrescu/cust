@@ -91,7 +91,7 @@ Features:
 - function calls with integer arguments and local function parameters
 - integer, character, and string literals
 - declarations: `int x = 1;`, `char c = 'A';`, `int xs[3];`, `char text[4];`
-- assignment: `x = x + 1;`, `xs[0] = x;`, pointer reassignment, and writes through pointer/indexed pointer lvalues
+- assignment statements and assignment expressions for scalar, array-index, and dereferenced pointer lvalues, such as `x = x + 1;`, `y = (x = 4);`, `xs[0] = (xs[1] = 7);`, and `*p = value;`
 - one-dimensional `int`/`char` arrays with indexed reads/writes
 - scalar pointers such as `int *p = &x;`, `*p`, and `*p = value;`
 - pointer parameters with array/string decay, pointer indexing (`p[i]`), and array-element addresses such as `&values[1]`
@@ -193,7 +193,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and [docs/v0.1.md](docs/v0.1.
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
 - Next language design: decide whether the v0.1+ subset should support `void`/`return;` and document the semantics before implementation.
 - Product quality: add a root `LICENSE` file once the project-owner confirms the intended license.
-- Longer term: consider structs/unions/enums, prototypes/declarations, multiple pointer levels, assignment expressions, preprocessor support, standard-library calls, and floating-point values.
+- Longer term: consider structs/unions/enums, prototypes/declarations, multiple pointer levels, preprocessor support, standard-library calls, and floating-point values.
 
 ## License
 

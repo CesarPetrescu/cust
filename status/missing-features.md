@@ -21,6 +21,7 @@ Prioritized backlog for autonomous implementation.
 - [x] `for` loops
 - [x] `break` and `continue`
 - [x] Empty statements and expression statements
+- [x] Assignment expressions for scalar, array-index, and dereferenced pointer lvalues, including right-associative chained assignment and C compiler-oracle coverage
 
 ## P2 — data types
 

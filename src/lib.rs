@@ -86,12 +86,37 @@ enum Expr {
     Number(i64),
     StringLiteral(Vec<i64>),
     Var(String),
-    ArrayGet { name: String, index: Box<Expr> },
-    StringGet { values: Vec<i64>, index: Box<Expr> },
+    ArrayGet {
+        name: String,
+        index: Box<Expr>,
+    },
+    StringGet {
+        values: Vec<i64>,
+        index: Box<Expr>,
+    },
     AddressOf(String),
-    AddressOfArray { name: String, index: Box<Expr> },
+    AddressOfArray {
+        name: String,
+        index: Box<Expr>,
+    },
     Deref(Box<Expr>),
-    Call { name: String, args: Vec<Expr> },
+    Assign {
+        name: String,
+        value: Box<Expr>,
+    },
+    ArraySet {
+        name: String,
+        index: Box<Expr>,
+        value: Box<Expr>,
+    },
+    DerefSet {
+        pointer: Box<Expr>,
+        value: Box<Expr>,
+    },
+    Call {
+        name: String,
+        args: Vec<Expr>,
+    },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
     LogicalNot(Box<Expr>),
@@ -874,7 +899,7 @@ impl Parser {
     fn parse_assign_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         let name = self.expect_ident()?;
         if self.matches(&Token::LBracket) {
-            let index = self.parse_expr()?;
+            let index = self.parse_index_expr()?;
             self.expect_closing_bracket_after("array index")?;
             self.expect_assign_after("assignment")?;
             let value = self.parse_expr()?;
@@ -1008,7 +1033,40 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> CustResult<Expr> {
+        self.parse_assignment_expr()
+    }
+
+    fn parse_index_expr(&mut self) -> CustResult<Expr> {
         self.parse_logical_or()
+    }
+
+    fn parse_assignment_expr(&mut self) -> CustResult<Expr> {
+        let target = self.parse_logical_or()?;
+        if self.check(&Token::Assign) {
+            let equals = self.advance();
+            let value = self.parse_assignment_expr()?;
+            match target {
+                Expr::Var(name) => Ok(Expr::Assign {
+                    name,
+                    value: Box::new(value),
+                }),
+                Expr::ArrayGet { name, index } => Ok(Expr::ArraySet {
+                    name,
+                    index,
+                    value: Box::new(value),
+                }),
+                Expr::Deref(pointer) => Ok(Expr::DerefSet {
+                    pointer,
+                    value: Box::new(value),
+                }),
+                _ => Err(Self::error_at(
+                    "invalid assignment target".to_string(),
+                    &equals,
+                )),
+            }
+        } else {
+            Ok(target)
+        }
     }
 
     fn parse_logical_or(&mut self) -> CustResult<Expr> {
@@ -1113,7 +1171,7 @@ impl Parser {
             match found.kind.clone() {
                 Token::Ident(name) => {
                     if self.matches(&Token::LBracket) {
-                        let index = self.parse_expr()?;
+                        let index = self.parse_index_expr()?;
                         self.expect_closing_bracket_after("array index")?;
                         Ok(Expr::AddressOfArray {
                             name,
@@ -1139,7 +1197,7 @@ impl Parser {
             Token::Number(value) => Ok(Expr::Number(value)),
             Token::StringLiteral(values) => {
                 if self.matches(&Token::LBracket) {
-                    let index = self.parse_expr()?;
+                    let index = self.parse_index_expr()?;
                     self.expect_closing_bracket_after("string literal index")?;
                     Ok(Expr::StringGet {
                         values,
@@ -1155,7 +1213,7 @@ impl Parser {
                     self.expect_closing_paren_after("function call arguments")?;
                     Ok(Expr::Call { name, args })
                 } else if self.matches(&Token::LBracket) {
-                    let index = self.parse_expr()?;
+                    let index = self.parse_index_expr()?;
                     self.expect_closing_bracket_after("array index")?;
                     Ok(Expr::ArrayGet {
                         name,
@@ -1884,6 +1942,24 @@ impl Interpreter {
                 array: Rc::new(RefCell::new(ArrayValue::read_only(values.clone()))),
                 source_name: None,
             }),
+            Expr::Assign { name, value } => match self.find_variable(name).cloned() {
+                Some(Value::Pointer(_)) => {
+                    let pointer = self.eval_pointer(value)?;
+                    if let Some(Value::Pointer(slot)) = self.find_variable_mut(name) {
+                        *slot = pointer.clone();
+                    }
+                    Ok(pointer)
+                }
+                Some(Value::Scalar(_)) => Err(CustError::new(format!(
+                    "variable '{name}' is not a pointer"
+                ))),
+                Some(Value::Array(_)) => Err(CustError::new(format!(
+                    "array '{name}' requires indexed address-of"
+                ))),
+                None => Err(CustError::new(format!(
+                    "assignment to undeclared variable '{name}'"
+                ))),
+            },
             Expr::Var(name) => match self.find_variable(name) {
                 Some(Value::Pointer(pointer)) => Ok(pointer.clone()),
                 Some(Value::Array(array)) => Ok(PointerValue::ArrayBase {
@@ -2143,20 +2219,52 @@ impl Interpreter {
             Expr::AddressOf(_) | Expr::AddressOfArray { .. } | Expr::StringLiteral(_) => {
                 Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
             }
+            Expr::Assign { name, .. } => match self.find_variable(name).cloned() {
+                Some(Value::Pointer(_)) => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
+                Some(Value::Scalar(_)) => Ok(self.eval(expr)? != 0),
+                Some(Value::Array(_)) => Err(CustError::new(format!(
+                    "array '{name}' requires indexed assignment"
+                ))),
+                None => Err(CustError::new(format!(
+                    "assignment to undeclared variable '{name}'"
+                ))),
+            },
             Expr::Var(name) => match self.find_variable(name).cloned() {
                 Some(Value::Pointer(pointer)) => Ok(Self::pointer_truthy(&pointer)),
                 Some(Value::Array(array)) => Ok(!array.borrow().elements.is_empty()),
                 Some(Value::Scalar(value)) => Ok(value != 0),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
-            Expr::Deref(_) | Expr::ArrayGet { .. } | Expr::StringGet { .. } | Expr::Call { .. } => {
-                Ok(self.eval(expr)? != 0)
-            }
+            Expr::Deref(_)
+            | Expr::DerefSet { .. }
+            | Expr::ArrayGet { .. }
+            | Expr::ArraySet { .. }
+            | Expr::StringGet { .. }
+            | Expr::Call { .. } => Ok(self.eval(expr)? != 0),
             Expr::Number(value) => Ok(*value != 0),
             Expr::UnaryPlus(_)
             | Expr::UnaryMinus(_)
             | Expr::LogicalNot(_)
             | Expr::Binary(_, _, _) => Ok(self.eval(expr)? != 0),
+        }
+    }
+
+    fn eval_assignment_expr(&mut self, name: &str, value: &Expr) -> CustResult<i64> {
+        match self.find_variable(name).cloned() {
+            Some(Value::Scalar(_)) => {
+                let value = self.eval(value)?;
+                if let Some(Value::Scalar(slot)) = self.find_variable_mut(name) {
+                    *slot = value;
+                }
+                Ok(value)
+            }
+            Some(Value::Pointer(_)) => Err(CustError::new("pointer value used as scalar")),
+            Some(Value::Array(_)) => Err(CustError::new(format!(
+                "array '{name}' requires indexed assignment"
+            ))),
+            None => Err(CustError::new(format!(
+                "assignment to undeclared variable '{name}'"
+            ))),
         }
     }
 
@@ -2387,6 +2495,33 @@ impl Interpreter {
             Expr::Var(name) => self.find_scalar(name),
             Expr::AddressOf(_) | Expr::AddressOfArray { .. } => {
                 Err(CustError::new("pointer value used as scalar"))
+            }
+            Expr::Assign { name, value } => self.eval_assignment_expr(name, value),
+            Expr::ArraySet { name, index, value } => {
+                let value = self.eval(value)?;
+                match self.find_variable(name).cloned() {
+                    Some(Value::Pointer(pointer)) => {
+                        let index_value = self.eval(index)?;
+                        self.assign_pointer_index(&pointer, index_value, value)?;
+                    }
+                    Some(_) | None => {
+                        let (array, index) = self.checked_array_index(name, index)?;
+                        let mut array = array.borrow_mut();
+                        if array.read_only {
+                            return Err(CustError::new(format!(
+                                "cannot modify read-only array '{name}'"
+                            )));
+                        }
+                        array.elements[index] = value;
+                    }
+                }
+                Ok(value)
+            }
+            Expr::DerefSet { pointer, value } => {
+                let pointer = self.eval_pointer(pointer)?;
+                let value = self.eval(value)?;
+                self.assign_deref_pointer(&pointer, value)?;
+                Ok(value)
             }
             Expr::Deref(pointer) => {
                 let pointer = self.eval_pointer(pointer)?;

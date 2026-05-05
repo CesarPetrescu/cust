@@ -950,6 +950,25 @@ fn supports_pointer_truthiness_and_equality_comparisons() {
 }
 
 #[test]
+fn supports_assignment_expressions_for_scalar_array_and_deref_lvalues() {
+    let program = include_str!("fixtures/valid/assignment_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 29);
+}
+
+#[test]
+fn rejects_non_lvalue_assignment_expressions() {
+    let program = include_str!("fixtures/invalid/non_lvalue_assignment_expression.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "invalid assignment target at line 3, column 20"
+    );
+}
+
+#[test]
 fn reports_array_element_pointer_index_out_of_bounds() {
     let program = include_str!("fixtures/invalid/pointer_array_element_out_of_bounds.c");
 
