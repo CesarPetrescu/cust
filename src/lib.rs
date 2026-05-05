@@ -304,10 +304,10 @@ enum SwitchLabel {
 /// - `name = expression;`
 /// - `return expression;`
 /// - block statements: `{ ... }`
-/// - `if (expression) { ... } else { ... }`
-/// - `while (expression) { ... }`
-/// - `do { ... } while (expression);`
-/// - `for (initializer; condition; increment) { ... }`
+/// - `if (expression) statement else statement` with braced blocks, single-statement bodies, and `else if`
+/// - `while (expression) statement`
+/// - `do statement while (expression);`
+/// - `for (initializer; condition; increment) statement`
 /// - `switch (expression) { case constant: ... default: ... }` with C-style fallthrough
 /// - `break;` and `continue;` inside loops
 /// - empty statements (`;`) and side-effect-free expression statements (`expr;`)
@@ -936,6 +936,14 @@ impl Parser {
         Ok(statements)
     }
 
+    fn parse_control_body_after(&mut self, context: &str) -> CustResult<Vec<Stmt>> {
+        if self.check(&Token::LBrace) {
+            Ok(vec![Stmt::Block(self.parse_block_after(context)?)])
+        } else {
+            Ok(vec![self.parse_stmt()?])
+        }
+    }
+
     fn parse_stmt(&mut self) -> CustResult<Stmt> {
         match self.peek() {
             Token::Semi => self.parse_empty(),
@@ -1168,9 +1176,9 @@ impl Parser {
         self.expect_opening_paren_after("if")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("if condition")?;
-        let then_branch = self.parse_block_after("if condition")?;
+        let then_branch = self.parse_control_body_after("if condition")?;
         let else_branch = if self.matches(&Token::Else) {
-            self.parse_block_after("else")?
+            self.parse_control_body_after("else")?
         } else {
             Vec::new()
         };
@@ -1186,13 +1194,13 @@ impl Parser {
         self.expect_opening_paren_after("while")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("while condition")?;
-        let body = self.parse_block_after("while condition")?;
+        let body = self.parse_control_body_after("while condition")?;
         Ok(Stmt::While { cond, body })
     }
 
     fn parse_do_while(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Do)?;
-        let body = self.parse_block_after("do")?;
+        let body = self.parse_control_body_after("do")?;
         self.expect_keyword_after(&Token::While, "do body")?;
         self.expect_opening_paren_after("do-while")?;
         let cond = self.parse_expr()?;
@@ -1254,7 +1262,7 @@ impl Parser {
         };
         self.expect_closing_paren_after("for clauses")?;
 
-        let body = self.parse_block_after("for clauses")?;
+        let body = self.parse_control_body_after("for clauses")?;
         Ok(Stmt::For {
             init,
             cond,
@@ -2328,6 +2336,14 @@ impl Interpreter {
         Ok(ExecFlow::None)
     }
 
+    fn exec_control_body(&mut self, statements: &[Stmt]) -> CustResult<ExecFlow> {
+        if statements.len() == 1 {
+            self.exec_stmt(&statements[0])
+        } else {
+            self.exec_block(statements)
+        }
+    }
+
     fn push_scope(&mut self) {
         self.push_scope_with_values(HashMap::new());
     }
@@ -3107,9 +3123,9 @@ impl Interpreter {
                 else_branch,
             } => {
                 if self.eval_truthy(cond)? {
-                    self.exec_block(then_branch)
+                    self.exec_control_body(then_branch)
                 } else {
-                    self.exec_block(else_branch)
+                    self.exec_control_body(else_branch)
                 }
             }
             Stmt::While { cond, body } => {
@@ -3120,7 +3136,7 @@ impl Interpreter {
                     if iterations > 1_000_000 {
                         return Err(CustError::new("loop iteration limit exceeded"));
                     }
-                    match self.exec_block(body)? {
+                    match self.exec_control_body(body)? {
                         ExecFlow::None | ExecFlow::Continue => {}
                         ExecFlow::Break => break,
                         ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
@@ -3199,7 +3215,7 @@ impl Interpreter {
                 return Err(CustError::new("loop iteration limit exceeded"));
             }
 
-            match self.exec_block(body)? {
+            match self.exec_control_body(body)? {
                 ExecFlow::None | ExecFlow::Continue => {}
                 ExecFlow::Break => break,
                 ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
@@ -3242,7 +3258,7 @@ impl Interpreter {
                 return Err(CustError::new("loop iteration limit exceeded"));
             }
 
-            match self.exec_block(body)? {
+            match self.exec_control_body(body)? {
                 ExecFlow::None | ExecFlow::Continue => {}
                 ExecFlow::Break => break,
                 ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),

@@ -413,51 +413,32 @@ fn reports_missing_opening_braces_after_function_headers() {
 }
 
 #[test]
-fn reports_missing_opening_braces_after_if_conditions() {
+fn supports_single_statement_if_bodies() {
     let program = "int main() {\nif (1) return 1;\nreturn 0;\n}\n";
 
-    let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "expected '{' after if condition, found Return at line 2, column 8"
-    );
+    assert_eq!(interpret(program).unwrap(), 1);
 }
 
 #[test]
-fn reports_missing_opening_braces_after_else_keywords() {
+fn supports_single_statement_else_bodies() {
     let program = "int main() {\nif (0) { return 0; } else return 1;\n}\n";
 
-    let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "expected '{' after else, found Return at line 2, column 27"
-    );
+    assert_eq!(interpret(program).unwrap(), 1);
 }
 
 #[test]
-fn reports_missing_opening_braces_after_while_conditions() {
-    let program = "int main() {\nwhile (1) return 1;\nreturn 0;\n}\n";
+fn supports_single_statement_while_bodies() {
+    let program = "int main() {\nint x = 0;\nwhile (x < 3) x++;\nreturn x;\n}\n";
 
-    let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "expected '{' after while condition, found Return at line 2, column 11"
-    );
+    assert_eq!(interpret(program).unwrap(), 3);
 }
 
 #[test]
-fn reports_missing_opening_braces_after_for_clauses() {
-    let program = "int main() {\nfor (int i = 0; i < 3; i = i + 1) return i;\nreturn 0;\n}\n";
+fn supports_single_statement_for_bodies() {
+    let program =
+        "int main() {\nint total = 0;\nfor (int i = 0; i < 3; i++) total += i;\nreturn total;\n}\n";
 
-    let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "expected '{' after for clauses, found Return at line 2, column 35"
-    );
+    assert_eq!(interpret(program).unwrap(), 3);
 }
 
 #[test]
@@ -1010,6 +991,13 @@ fn supports_switch_statements_with_cases_default_fallthrough_break_and_continue(
     let program = include_str!("fixtures/valid/switch_statements.c");
 
     assert_eq!(interpret(program).unwrap(), 48);
+}
+
+#[test]
+fn supports_single_statement_control_bodies_else_if_and_dangling_else() {
+    let program = include_str!("fixtures/valid/single_statement_control_bodies.c");
+
+    assert_eq!(interpret(program).unwrap(), 116);
 }
 
 #[test]
