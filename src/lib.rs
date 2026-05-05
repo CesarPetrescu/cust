@@ -1279,6 +1279,8 @@ impl Parser {
         self.expect_opening_brace_after("switch expression")?;
 
         let mut sections = Vec::new();
+        let mut seen_cases = HashSet::new();
+        let mut seen_default = false;
         while !self.check(&Token::RBrace) {
             if self.check(&Token::Eof) {
                 let eof = self.peek_located().clone();
@@ -1289,10 +1291,24 @@ impl Parser {
             }
 
             let label = if self.matches(&Token::Case) {
-                let value = self.parse_switch_case_value()?;
+                let (value, value_token) = self.parse_switch_case_value()?;
+                if !seen_cases.insert(value) {
+                    return Err(Self::error_at(
+                        format!("duplicate switch case label {value}"),
+                        &value_token,
+                    ));
+                }
                 self.expect_colon_after("switch case label")?;
                 SwitchLabel::Case(value)
             } else if self.matches(&Token::Default) {
+                let default_token = self.previous().clone();
+                if seen_default {
+                    return Err(Self::error_at(
+                        "duplicate switch default label".to_string(),
+                        &default_token,
+                    ));
+                }
+                seen_default = true;
                 self.expect_colon_after("switch default label")?;
                 SwitchLabel::Default
             } else {
@@ -1319,11 +1335,11 @@ impl Parser {
         Ok(Stmt::Switch { expr, sections })
     }
 
-    fn parse_switch_case_value(&mut self) -> CustResult<i64> {
+    fn parse_switch_case_value(&mut self) -> CustResult<(i64, LocatedToken)> {
         let sign = if self.matches(&Token::Minus) { -1 } else { 1 };
         let found = self.advance();
         match &found.kind {
-            Token::Number(value) => Ok(sign * *value),
+            Token::Number(value) => Ok((sign * *value, found)),
             token => Err(Self::error_at(
                 format!("expected integer constant after switch case, found {token:?}"),
                 &found,

@@ -1013,6 +1013,30 @@ fn rejects_missing_colon_after_switch_case_label() {
 }
 
 #[test]
+fn rejects_duplicate_switch_case_labels() {
+    let program = include_str!("fixtures/invalid/switch_duplicate_case.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "duplicate switch case label 1 at line 6, column 10"
+    );
+}
+
+#[test]
+fn rejects_duplicate_switch_default_labels() {
+    let program = include_str!("fixtures/invalid/switch_duplicate_default.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "duplicate switch default label at line 8, column 5"
+    );
+}
+
+#[test]
 fn rejects_missing_rhs_after_comma_operator() {
     let program = include_str!("fixtures/invalid/comma_missing_rhs.c");
 
