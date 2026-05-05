@@ -37,6 +37,9 @@ enum Token {
     While,
     Do,
     For,
+    Switch,
+    Case,
+    Default,
     Break,
     Continue,
     Ident(String),
@@ -274,6 +277,22 @@ enum Stmt {
         increment: Option<Box<Stmt>>,
         body: Vec<Stmt>,
     },
+    Switch {
+        expr: Expr,
+        sections: Vec<SwitchSection>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SwitchSection {
+    label: SwitchLabel,
+    statements: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SwitchLabel {
+    Case(i64),
+    Default,
 }
 
 /// Interpret a small, safe C subset and return `main()`'s integer exit value.
@@ -289,6 +308,7 @@ enum Stmt {
 /// - `while (expression) { ... }`
 /// - `do { ... } while (expression);`
 /// - `for (initializer; condition; increment) { ... }`
+/// - `switch (expression) { case constant: ... default: ... }` with C-style fallthrough
 /// - `break;` and `continue;` inside loops
 /// - empty statements (`;`) and side-effect-free expression statements (`expr;`)
 /// - integer, character, and string literals (string literals are read-only NUL-terminated byte arrays)
@@ -553,6 +573,9 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "while" => Token::While,
                     "do" => Token::Do,
                     "for" => Token::For,
+                    "switch" => Token::Switch,
+                    "case" => Token::Case,
+                    "default" => Token::Default,
                     "break" => Token::Break,
                     "continue" => Token::Continue,
                     _ => Token::Ident(text),
@@ -923,8 +946,17 @@ impl Parser {
             Token::While => self.parse_while(),
             Token::Do => self.parse_do_while(),
             Token::For => self.parse_for(),
+            Token::Switch => self.parse_switch(),
             Token::Break => self.parse_break(),
             Token::Continue => self.parse_continue(),
+            Token::Case => Err(Self::error_at(
+                "case label outside switch".to_string(),
+                self.peek_located(),
+            )),
+            Token::Default => Err(Self::error_at(
+                "default label outside switch".to_string(),
+                self.peek_located(),
+            )),
             Token::Star
                 if self.starts_deref_assignment_stmt()
                     || self.starts_missing_deref_assignment_operator_stmt() =>
@@ -1229,6 +1261,66 @@ impl Parser {
             increment,
             body,
         })
+    }
+
+    fn parse_switch(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::Switch)?;
+        self.expect_opening_paren_after("switch")?;
+        let expr = self.parse_expr()?;
+        self.expect_closing_paren_after("switch expression")?;
+        self.expect_opening_brace_after("switch expression")?;
+
+        let mut sections = Vec::new();
+        while !self.check(&Token::RBrace) {
+            if self.check(&Token::Eof) {
+                let eof = self.peek_located().clone();
+                return Err(Self::error_at(
+                    "unterminated block after switch expression".to_string(),
+                    &eof,
+                ));
+            }
+
+            let label = if self.matches(&Token::Case) {
+                let value = self.parse_switch_case_value()?;
+                self.expect_colon_after("switch case label")?;
+                SwitchLabel::Case(value)
+            } else if self.matches(&Token::Default) {
+                self.expect_colon_after("switch default label")?;
+                SwitchLabel::Default
+            } else {
+                return Err(Self::error_at(
+                    format!(
+                        "expected switch case or default label, found {:?}",
+                        self.peek()
+                    ),
+                    self.peek_located(),
+                ));
+            };
+
+            let mut statements = Vec::new();
+            while !matches!(
+                self.peek(),
+                Token::Case | Token::Default | Token::RBrace | Token::Eof
+            ) {
+                statements.push(self.parse_stmt()?);
+            }
+            sections.push(SwitchSection { label, statements });
+        }
+
+        self.expect(Token::RBrace)?;
+        Ok(Stmt::Switch { expr, sections })
+    }
+
+    fn parse_switch_case_value(&mut self) -> CustResult<i64> {
+        let sign = if self.matches(&Token::Minus) { -1 } else { 1 };
+        let found = self.advance();
+        match &found.kind {
+            Token::Number(value) => Ok(sign * *value),
+            token => Err(Self::error_at(
+                format!("expected integer constant after switch case, found {token:?}"),
+                &found,
+            )),
+        }
     }
 
     fn parse_expr(&mut self) -> CustResult<Expr> {
@@ -3043,7 +3135,46 @@ impl Interpreter {
                 increment,
                 body,
             } => self.exec_for(init.as_deref(), cond.as_ref(), increment.as_deref(), body),
+            Stmt::Switch { expr, sections } => self.exec_switch(expr, sections),
         }
+    }
+
+    fn exec_switch(&mut self, expr: &Expr, sections: &[SwitchSection]) -> CustResult<ExecFlow> {
+        let value = self.eval(expr)?;
+        let default_index = sections
+            .iter()
+            .position(|section| matches!(section.label, SwitchLabel::Default));
+        let start_index = sections
+            .iter()
+            .position(|section| matches!(section.label, SwitchLabel::Case(case_value) if case_value == value))
+            .or(default_index);
+
+        let Some(start_index) = start_index else {
+            return Ok(ExecFlow::None);
+        };
+
+        self.push_scope();
+        for section in &sections[start_index..] {
+            for stmt in &section.statements {
+                match self.exec_stmt(stmt) {
+                    Ok(ExecFlow::None) => {}
+                    Ok(ExecFlow::Break) => {
+                        self.pop_scope();
+                        return Ok(ExecFlow::None);
+                    }
+                    Ok(flow) => {
+                        self.pop_scope();
+                        return Ok(flow);
+                    }
+                    Err(error) => {
+                        self.pop_scope();
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        self.pop_scope();
+        Ok(ExecFlow::None)
     }
 
     fn exec_for(

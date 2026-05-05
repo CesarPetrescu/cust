@@ -1006,6 +1006,25 @@ fn supports_comma_operator_with_assignments_pointers_loops_and_call_arguments() 
 }
 
 #[test]
+fn supports_switch_statements_with_cases_default_fallthrough_break_and_continue() {
+    let program = include_str!("fixtures/valid/switch_statements.c");
+
+    assert_eq!(interpret(program).unwrap(), 48);
+}
+
+#[test]
+fn rejects_missing_colon_after_switch_case_label() {
+    let program = include_str!("fixtures/invalid/switch_case_missing_colon.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ':' after switch case label, found Return at line 5, column 9"
+    );
+}
+
+#[test]
 fn rejects_missing_rhs_after_comma_operator() {
     let program = include_str!("fixtures/invalid/comma_missing_rhs.c");
 
