@@ -35,6 +35,7 @@ enum Token {
     If,
     Else,
     While,
+    Do,
     For,
     Break,
     Continue,
@@ -204,6 +205,10 @@ enum Stmt {
         cond: Expr,
         body: Vec<Stmt>,
     },
+    DoWhile {
+        body: Vec<Stmt>,
+        cond: Expr,
+    },
     For {
         init: Option<Box<Stmt>>,
         cond: Option<Expr>,
@@ -223,6 +228,7 @@ enum Stmt {
 /// - block statements: `{ ... }`
 /// - `if (expression) { ... } else { ... }`
 /// - `while (expression) { ... }`
+/// - `do { ... } while (expression);`
 /// - `for (initializer; condition; increment) { ... }`
 /// - `break;` and `continue;` inside loops
 /// - empty statements (`;`) and side-effect-free expression statements (`expr;`)
@@ -486,6 +492,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "if" => Token::If,
                     "else" => Token::Else,
                     "while" => Token::While,
+                    "do" => Token::Do,
                     "for" => Token::For,
                     "break" => Token::Break,
                     "continue" => Token::Continue,
@@ -786,6 +793,7 @@ impl Parser {
             Token::LBrace => Ok(Stmt::Block(self.parse_block_after("block statement")?)),
             Token::If => self.parse_if(),
             Token::While => self.parse_while(),
+            Token::Do => self.parse_do_while(),
             Token::For => self.parse_for(),
             Token::Break => self.parse_break(),
             Token::Continue => self.parse_continue(),
@@ -983,6 +991,17 @@ impl Parser {
         self.expect_closing_paren_after("while condition")?;
         let body = self.parse_block_after("while condition")?;
         Ok(Stmt::While { cond, body })
+    }
+
+    fn parse_do_while(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::Do)?;
+        let body = self.parse_block_after("do")?;
+        self.expect_keyword_after(&Token::While, "do body")?;
+        self.expect_opening_paren_after("do-while")?;
+        let cond = self.parse_expr()?;
+        self.expect_closing_paren_after("do-while condition")?;
+        self.expect_semicolon_after("do-while condition")?;
+        Ok(Stmt::DoWhile { body, cond })
     }
 
     fn parse_for(&mut self) -> CustResult<Stmt> {
@@ -1325,6 +1344,21 @@ impl Parser {
         } else {
             Err(Self::error_at(
                 format!("expected '(' after {context}, found {:?}", found.kind),
+                &found,
+            ))
+        }
+    }
+
+    fn expect_keyword_after(&mut self, expected: &Token, context: &str) -> CustResult<()> {
+        let found = self.advance();
+        if &found.kind == expected {
+            Ok(())
+        } else {
+            Err(Self::error_at(
+                format!(
+                    "expected {expected:?} after {context}, found {:?}",
+                    found.kind
+                ),
                 &found,
             ))
         }
@@ -2473,6 +2507,7 @@ impl Interpreter {
                 }
                 Ok(ExecFlow::None)
             }
+            Stmt::DoWhile { body, cond } => self.exec_do_while(body, cond),
             Stmt::For {
                 init,
                 cond,
@@ -2493,6 +2528,29 @@ impl Interpreter {
         let result = self.exec_for_in_current_scope(init, cond, increment, body);
         self.pop_scope();
         result
+    }
+
+    fn exec_do_while(&mut self, body: &[Stmt], cond: &Expr) -> CustResult<ExecFlow> {
+        let mut iterations = 0usize;
+        loop {
+            self.consume_loop_iteration()?;
+            iterations += 1;
+            if iterations > 1_000_000 {
+                return Err(CustError::new("loop iteration limit exceeded"));
+            }
+
+            match self.exec_block(body)? {
+                ExecFlow::None | ExecFlow::Continue => {}
+                ExecFlow::Break => break,
+                ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
+            }
+
+            if !self.eval_truthy(cond)? {
+                break;
+            }
+        }
+
+        Ok(ExecFlow::None)
     }
 
     fn exec_for_in_current_scope(

@@ -964,6 +964,13 @@ fn supports_conditional_operator_with_short_circuiting_and_pointer_truthiness() 
 }
 
 #[test]
+fn supports_do_while_loops_with_break_continue_and_post_test_execution() {
+    let program = include_str!("fixtures/valid/do_while_loops.c");
+
+    assert_eq!(interpret(program).unwrap(), 18);
+}
+
+#[test]
 fn rejects_non_lvalue_assignment_expressions() {
     let program = include_str!("fixtures/invalid/non_lvalue_assignment_expression.c");
 
@@ -984,6 +991,18 @@ fn reports_missing_colon_in_conditional_operator() {
     assert_eq!(
         err.to_string(),
         "expected ':' after conditional then-expression, found Semi at line 2, column 17"
+    );
+}
+
+#[test]
+fn reports_missing_semicolon_after_do_while_conditions() {
+    let program = include_str!("fixtures/invalid/do_while_missing_semicolon.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ';' after do-while condition, found Return at line 6, column 5"
     );
 }
 
