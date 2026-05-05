@@ -1192,8 +1192,19 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            self.expect_assign_after("pointer declaration")?;
-            let expr = self.parse_expr()?;
+            let expr = if self.matches(&Token::Assign) {
+                self.parse_expr()?
+            } else if self.check(&Token::Semi) {
+                self.advance();
+                return Ok(Stmt::PointerDecl {
+                    name,
+                    ty,
+                    expr: Expr::Number(0),
+                });
+            } else {
+                self.expect_assign_after("pointer declaration")?;
+                unreachable!("expect_assign_after only returns Ok after consuming '='")
+            };
             if require_semi {
                 self.expect_semicolon_after("pointer declaration")?;
             }
@@ -1211,8 +1222,19 @@ impl Parser {
                 len,
             });
         }
-        self.expect_assign_after("variable declaration")?;
-        let expr = self.parse_expr()?;
+        let expr = if self.matches(&Token::Assign) {
+            self.parse_expr()?
+        } else if self.check(&Token::Semi) {
+            self.advance();
+            return Ok(Stmt::VarDecl {
+                name,
+                ty,
+                expr: Expr::Number(0),
+            });
+        } else {
+            self.expect_assign_after("variable declaration")?;
+            unreachable!("expect_assign_after only returns Ok after consuming '='")
+        };
         if require_semi {
             self.expect_semicolon_after("variable declaration")?;
         }

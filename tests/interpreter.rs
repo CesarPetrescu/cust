@@ -98,6 +98,13 @@ fn supports_sizeof_operator_for_types_scalars_arrays_strings_and_pointers() {
 }
 
 #[test]
+fn supports_uninitialized_scalar_and_pointer_declarations() {
+    let program = include_str!("fixtures/valid/uninitialized_declarations.c");
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
 fn rejects_sizeof_void_with_context() {
     let program = include_str!("fixtures/invalid/sizeof_void.c");
 

@@ -35,6 +35,7 @@ Prioritized backlog for autonomous implementation.
 - [x] `void` helper functions and empty `return;` statements, including side-effect-only void calls, int/void return-shape diagnostics, scalar-use diagnostics for void calls, and C compiler-oracle coverage
 - [x] Top-level global variables for scalar `int`/`char`, arrays, and supported pointer globals, initialized before `main()` in a persistent outer scope, mutable from helper functions, with duplicate-global diagnostics and C compiler-oracle coverage
 - [x] `sizeof` over supported types and expressions, with Cust-defined sizes (`int=8`, `char=1`, pointer `=8`), declared scalar/array/pointer element-type tracking, non-evaluating operand semantics, exact `sizeof(void)` diagnostics, interpreter fixtures, and stable C compiler-oracle coverage for char/string/char-array sizes
+- [x] Uninitialized scalar and pointer declarations: `int x;` / `char c;` default to `0`, supported pointer declarations such as `int *p;` default to null, existing array declarations remain zero-initialized, exact missing-`=` diagnostics are preserved for malformed declarations like `int x 1;`, and stable global zero-initialization has C compiler-oracle coverage
 
 ## P2 — data types
 
@@ -61,4 +62,4 @@ Prioritized backlog for autonomous implementation.
 - [x] CLI flag: `--version`
 - [x] Better README examples
 - [x] Release notes and tags (`CHANGELOG.md` and annotated `v0.1` tag)
-- [ ] License file
+- [ ] License file (blocked on project-owner license choice)

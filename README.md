@@ -87,17 +87,17 @@ int main() {
 
 Features:
 
-- `int main() { ... }` plus additional `int` function definitions
+- `int main() { ... }` plus additional `int` and `void` function definitions
 - function calls with integer arguments and local function parameters
 - integer, character, and string literals
-- declarations: `int x = 1;`, `char c = 'A';`, `int xs[3];`, `char text[4];`
+- declarations: initialized or zero/default-initialized `int`/`char` scalars, arrays, and supported pointer variables, such as `int x = 1;`, `int y;`, `char c;`, `int xs[3];`, `char text[4];`, and `int *p;`
 - assignment statements and assignment expressions for scalar, array-index, and dereferenced pointer lvalues, such as `x = x + 1;`, `y = (x = 4);`, `xs[0] = (xs[1] = 7);`, and `*p = value;`
 - one-dimensional `int`/`char` arrays with indexed reads/writes
 - scalar pointers such as `int *p = &x;`, `*p`, and `*p = value;`
 - pointer parameters with array/string decay, pointer indexing (`p[i]`), and array-element addresses such as `&values[1]`
 - array parameters such as `char text[4]`; string literals are read-only NUL-terminated byte arrays and can be passed to matching array or pointer parameters
 - nested block scopes with inner shadowing
-- `return`
+- `return expr;` for `int` functions and `return;` for `void` functions
 - `if` / `else`
 - `while`
 - `for`
@@ -191,7 +191,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and [docs/v0.1.md](docs/v0.1.
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next language design: decide whether the v0.1+ subset should support `void`/`return;` and document the semantics before implementation.
+- Next language design: choose the next larger C-subset area (for example prototypes/declarations, enums, or a deliberately scoped richer pointer milestone) and define acceptance fixtures before implementation.
 - Product quality: add a root `LICENSE` file once the project-owner confirms the intended license.
 - Longer term: consider structs/unions/enums, prototypes/declarations, multiple pointer levels, preprocessor support, standard-library calls, and floating-point values.
 
