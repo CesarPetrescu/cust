@@ -104,7 +104,7 @@ fn ast_flag_prints_parsed_ast_without_interpreting_source() {
         concat!(
             "function main\n",
             "  params: []\n",
-            "  body: [Return(Binary(Number(1), Div, Number(0)))]\n",
+            "  body: [Return(Some(Binary(Number(1), Div, Number(0))))]\n",
         )
     );
 }

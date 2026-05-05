@@ -36,8 +36,8 @@ Last updated: 2026-05-05
 
 ## Supported language subset
 
-- `int main() { ... }` plus additional `int name(...) { ... }` function definitions
-- function calls as expressions with integer arguments, local parameter scopes, direct/mutual recursion support, arity diagnostics, undefined-function diagnostics, and a 64-call-depth safety limit with function-name context
+- `int main() { ... }` plus additional `int name(...) { ... }` and `void name(...) { ... }` function definitions
+- function calls as expressions with integer arguments for `int` functions, side-effect-only expression statements for `void` functions, local parameter scopes, direct/mutual recursion support, arity diagnostics, undefined-function diagnostics, empty `return;` support for `void` functions, diagnostics for value returns from `void` functions / empty returns from `int` functions / scalar use of `void` calls, and a 64-call-depth safety limit with function-name context
 - integer literals, character literals, string literals, variables, and one-dimensional `int`/`char` arrays
 - declarations: `int x = expr;`, `char x = expr;`, `int xs[N];`, or `char cs[N];`
 - `int` and `char` function parameters (stored as integer values in the current interpreter model)
@@ -88,7 +88,9 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after the 2026-05-05 autonomous block-comment run. This run added lexer support for C-style `/* ... */` block comments as whitespace across lines and inline token boundaries, plus source-line/caret diagnostics for unterminated block comments. Regression coverage includes valid/invalid interpreter fixtures and a native C compiler-oracle fixture. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-05 autonomous void-function run. This run added lexer/parser/interpreter support for `void` helper functions, `return;`, side-effect-only void call statements, and diagnostics for returning a value from a void function, returning no value from an int function, and using a void function call as a scalar expression. Regression coverage includes valid/invalid interpreter fixtures and a native C compiler-oracle fixture. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous verified state: all passed after the 2026-05-05 autonomous block-comment run. This run added lexer support for C-style `/* ... */` block comments as whitespace across lines and inline token boundaries, plus source-line/caret diagnostics for unterminated block comments. Regression coverage includes valid/invalid interpreter fixtures and a native C compiler-oracle fixture. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Previous verified state: all passed after the 2026-05-05 autonomous duplicate-switch-label diagnostic run. This run added parser validation for duplicate `case` constants and duplicate `default` labels inside a `switch`, reporting exact source locations before interpretation. Regression coverage includes focused exact-output interpreter tests plus invalid fixtures for duplicate case/default labels. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 

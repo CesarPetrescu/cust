@@ -31,6 +31,7 @@ impl Error for CustError {}
 enum Token {
     Int,
     Char,
+    Void,
     Return,
     If,
     Else,
@@ -178,8 +179,15 @@ struct Program {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Function {
+    return_type: ReturnType,
     params: Vec<Param>,
     body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReturnType {
+    Int,
+    Void,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -254,7 +262,7 @@ enum Stmt {
         value: Expr,
     },
     Expr(Expr),
-    Return(Expr),
+    Return(Option<Expr>),
     Break,
     Continue,
     Block(Vec<Stmt>),
@@ -594,6 +602,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 let kind = match text.as_str() {
                     "int" => Token::Int,
                     "char" => Token::Char,
+                    "void" => Token::Void,
                     "return" => Token::Return,
                     "if" => Token::If,
                     "else" => Token::Else,
@@ -863,7 +872,7 @@ impl Parser {
     }
 
     fn parse_function(&mut self) -> CustResult<(String, Function)> {
-        self.expect(Token::Int)?;
+        let return_type = self.parse_function_return_type()?;
         if self.check(&Token::Star) {
             return Err(Self::error_at(
                 "pointer return types are not supported".to_string(),
@@ -875,7 +884,26 @@ impl Parser {
         let params = self.parse_params()?;
         self.expect_closing_paren_after("function parameters")?;
         let body = self.parse_block_after("function header")?;
-        Ok((name, Function { params, body }))
+        Ok((
+            name,
+            Function {
+                return_type,
+                params,
+                body,
+            },
+        ))
+    }
+
+    fn parse_function_return_type(&mut self) -> CustResult<ReturnType> {
+        let found = self.advance();
+        match &found.kind {
+            Token::Int => Ok(ReturnType::Int),
+            Token::Void => Ok(ReturnType::Void),
+            token => Err(Self::error_at(
+                format!("expected Int, found {token:?}"),
+                &found,
+            )),
+        }
     }
 
     fn parse_params(&mut self) -> CustResult<Vec<Param>> {
@@ -1181,9 +1209,12 @@ impl Parser {
 
     fn parse_return(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Return)?;
+        if self.matches(&Token::Semi) {
+            return Ok(Stmt::Return(None));
+        }
         let expr = self.parse_expr()?;
         self.expect_semicolon_after("return statement")?;
-        Ok(Stmt::Return(expr))
+        Ok(Stmt::Return(Some(expr)))
     }
 
     fn parse_break(&mut self) -> CustResult<Stmt> {
@@ -2055,7 +2086,9 @@ impl Parser {
             return false;
         }
 
-        if Self::is_primary_assignment_value_start(self.peek_next()) {
+        if self.peek_next() != &Token::LParen
+            && Self::is_primary_assignment_value_start(self.peek_next())
+        {
             return true;
         }
 
@@ -2201,7 +2234,7 @@ struct Scope {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ExecFlow {
     None,
-    Return(i64),
+    Return(Option<i64>),
     Break,
     Continue,
 }
@@ -2268,10 +2301,15 @@ impl Interpreter {
 
     fn run(&mut self, program: &Program) -> CustResult<i64> {
         self.functions = program.functions.clone();
-        self.call_function("main", &[])
+        match self.call_function("main", &[])? {
+            Some(value) => Ok(value),
+            None => Err(CustError::new(
+                "int function 'main' returned without a value",
+            )),
+        }
     }
 
-    fn call_function(&mut self, name: &str, arg_exprs: &[Expr]) -> CustResult<i64> {
+    fn call_function(&mut self, name: &str, arg_exprs: &[Expr]) -> CustResult<Option<i64>> {
         let function = self
             .functions
             .get(name)
@@ -2312,10 +2350,22 @@ impl Interpreter {
         self.call_depth += 1;
         self.push_scope_with_values(param_scope);
         let result = match self.exec_block(&function.body) {
-            Ok(ExecFlow::Return(value)) => Ok(value),
-            Ok(ExecFlow::None) => Err(CustError::new(format!(
-                "function '{name}' finished without return"
-            ))),
+            Ok(ExecFlow::Return(value)) => match (function.return_type, value) {
+                (ReturnType::Int, Some(value)) => Ok(Some(value)),
+                (ReturnType::Int, None) => Err(CustError::new(format!(
+                    "int function '{name}' returned without a value"
+                ))),
+                (ReturnType::Void, Some(_)) => Err(CustError::new(format!(
+                    "void function '{name}' returned a value"
+                ))),
+                (ReturnType::Void, None) => Ok(None),
+            },
+            Ok(ExecFlow::None) => match function.return_type {
+                ReturnType::Int => Err(CustError::new(format!(
+                    "function '{name}' finished without return"
+                ))),
+                ReturnType::Void => Ok(None),
+            },
             Ok(ExecFlow::Break) => Err(CustError::new("break outside loop")),
             Ok(ExecFlow::Continue) => Err(CustError::new("continue outside loop")),
             Err(error) => Err(error),
@@ -2830,6 +2880,10 @@ impl Interpreter {
     }
 
     fn eval_discard(&mut self, expr: &Expr) -> CustResult<()> {
+        if let Expr::Call { name, args } = expr {
+            self.call_function(name, args)?;
+            return Ok(());
+        }
         match self.eval(expr) {
             Ok(_) => Ok(()),
             Err(error) if error.to_string() == "pointer value used as scalar" => {
@@ -3153,10 +3207,12 @@ impl Interpreter {
                 Ok(ExecFlow::None)
             }
             Stmt::Expr(expr) => {
-                self.eval(expr)?;
+                self.eval_discard(expr)?;
                 Ok(ExecFlow::None)
             }
-            Stmt::Return(expr) => Ok(ExecFlow::Return(self.eval(expr)?)),
+            Stmt::Return(expr) => Ok(ExecFlow::Return(
+                expr.as_ref().map(|expr| self.eval(expr)).transpose()?,
+            )),
             Stmt::Break => Ok(ExecFlow::Break),
             Stmt::Continue => Ok(ExecFlow::Continue),
             Stmt::Block(statements) => self.exec_block(statements),
@@ -3399,7 +3455,9 @@ impl Interpreter {
                     ))
                 })
             }
-            Expr::Call { name, args } => self.call_function(name, args),
+            Expr::Call { name, args } => self.call_function(name, args)?.ok_or_else(|| {
+                CustError::new(format!("void function '{name}' used as scalar expression"))
+            }),
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::BitwiseNot(inner) => Ok(!self.eval(inner)?),

@@ -97,13 +97,13 @@ fn reports_source_context_for_unterminated_block_comments() {
 
 #[test]
 fn reports_line_and_column_for_parser_expression_errors() {
-    let program = "int main() {\nreturn ;\n}\n";
+    let program = "int main() {\nreturn +;\n}\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "expected expression, found Semi at line 2, column 8"
+        "expected expression, found Semi at line 2, column 9"
     );
 }
 
@@ -870,6 +870,46 @@ fn supports_function_definitions_calls_and_parameters() {
     let program = include_str!("fixtures/valid/functions_and_parameters.c");
 
     assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn supports_void_functions_and_empty_returns_for_side_effects() {
+    let program = include_str!("fixtures/valid/void_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 22);
+}
+
+#[test]
+fn rejects_return_values_from_void_functions() {
+    let program = include_str!("fixtures/invalid/void_function_returns_value.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "void function 'bad' returned a value");
+}
+
+#[test]
+fn rejects_void_function_calls_used_as_scalar_expressions() {
+    let program = include_str!("fixtures/invalid/void_function_used_as_expression.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "void function 'noop' used as scalar expression"
+    );
+}
+
+#[test]
+fn rejects_empty_returns_from_int_functions() {
+    let program = include_str!("fixtures/invalid/int_function_empty_return.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "int function 'main' returned without a value"
+    );
 }
 
 #[test]
