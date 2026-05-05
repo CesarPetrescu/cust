@@ -706,7 +706,10 @@ impl Parser {
         while !self.check(&Token::RBrace) {
             if self.check(&Token::Eof) {
                 let eof = self.peek_located().clone();
-                return Err(Self::error_at("unterminated block".to_string(), &eof));
+                return Err(Self::error_at(
+                    format!("unterminated block after {context}"),
+                    &eof,
+                ));
             }
             statements.push(self.parse_stmt()?);
         }
@@ -807,8 +810,12 @@ impl Parser {
         match &found.kind {
             Token::Number(value) if *value > 0 => usize::try_from(*value)
                 .map_err(|_| Self::error_at("array length is too large".to_string(), &found)),
-            Token::Number(_) => Err(Self::error_at(
+            Token::Number(_) | Token::Minus => Err(Self::error_at(
                 "array length must be positive".to_string(),
+                &found,
+            )),
+            Token::RBracket => Err(Self::error_at(
+                "expected array length before ']'".to_string(),
                 &found,
             )),
             token => Err(Self::error_at(

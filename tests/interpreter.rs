@@ -89,6 +89,42 @@ fn reports_line_and_column_for_parser_expression_errors() {
 }
 
 #[test]
+fn reports_context_for_unterminated_function_blocks() {
+    let program = "int main() {\nreturn 0;\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unterminated block after function header at line 3, column 1"
+    );
+}
+
+#[test]
+fn reports_context_for_unterminated_nested_blocks() {
+    let program = "int main() {\n{\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unterminated block after function header at line 5, column 1"
+    );
+}
+
+#[test]
+fn reports_context_for_unterminated_control_flow_blocks() {
+    let program = "int main() {\nif (1) {\nreturn 1;\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unterminated block after if condition at line 4, column 1"
+    );
+}
+
+#[test]
 fn reports_missing_commas_in_function_parameter_lists() {
     let program = "int add(int a int b) { return a + b; }\nint main() { return add(1, 2); }\n";
 
@@ -145,6 +181,54 @@ fn reports_missing_closing_brackets_after_array_lengths() {
     assert_eq!(
         err.to_string(),
         "expected ']' after array length, found Semi at line 2, column 13"
+    );
+}
+
+#[test]
+fn reports_missing_array_lengths() {
+    let program = "int main() {\nint values[];\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected array length before ']' at line 2, column 12"
+    );
+}
+
+#[test]
+fn reports_negative_array_lengths() {
+    let program = "int main() {\nint values[-1];\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array length must be positive at line 2, column 12"
+    );
+}
+
+#[test]
+fn reports_missing_array_parameter_lengths() {
+    let program = "int first(int values[]) { return values[0]; }\nint main() { int xs[1]; return first(xs); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected array length before ']' at line 1, column 22"
+    );
+}
+
+#[test]
+fn reports_negative_array_parameter_lengths() {
+    let program = "int first(int values[-1]) { return values[0]; }\nint main() { int xs[1]; return first(xs); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array length must be positive at line 1, column 22"
     );
 }
 

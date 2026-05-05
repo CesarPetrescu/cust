@@ -1,6 +1,9 @@
 use std::fs;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static TEMP_SOURCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn version_flag_prints_package_version_without_requiring_a_source_file() {
@@ -200,7 +203,11 @@ fn write_temp_source(source: &str) -> String {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after Unix epoch")
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("cust-cli-{}-{nanos}.c", std::process::id()));
+    let unique_id = TEMP_SOURCE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "cust-cli-{}-{nanos}-{unique_id}.c",
+        std::process::id()
+    ));
     fs::write(&path, source).expect("temporary source should be writable");
     path.to_string_lossy().into_owned()
 }
