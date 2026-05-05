@@ -37,6 +37,8 @@ Prioritized backlog for autonomous implementation.
 - [x] `sizeof` over supported types and expressions, with Cust-defined sizes (`int=8`, `char=1`, pointer `=8`), declared scalar/array/pointer element-type tracking, non-evaluating operand semantics, exact `sizeof(void)` diagnostics, interpreter fixtures, and stable C compiler-oracle coverage for char/string/char-array sizes
 - [x] Uninitialized scalar and pointer declarations: `int x;` / `char c;` default to `0`, supported pointer declarations such as `int *p;` default to null, existing array declarations remain zero-initialized, exact missing-`=` diagnostics are preserved for malformed declarations like `int x 1;`, and stable global zero-initialization has C compiler-oracle coverage
 
+- [x] Enum constant declarations: `enum Tag { A = 1, B, C = -1 };` at top level and inside blocks, optional tags, implicit incrementing values, trailing commas, scoped/shadowable integer constants, read-only assignment diagnostics for enum constants, malformed-value diagnostics, and C compiler-oracle coverage
+
 ## P2 — data types
 
 - [x] `char` literals, declarations, and function parameters

@@ -36,6 +36,7 @@ enum Token {
     Int,
     Char,
     Void,
+    Enum,
     Sizeof,
     Return,
     If,
@@ -299,6 +300,9 @@ enum Stmt {
         elem_type: CType,
         len: usize,
     },
+    EnumDecl {
+        constants: Vec<EnumConstant>,
+    },
     Assign(String, Expr),
     DerefAssign {
         pointer: Expr,
@@ -349,6 +353,12 @@ struct SwitchSection {
 enum SwitchLabel {
     Case(i64),
     Default,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EnumConstant {
+    name: String,
+    value: i64,
 }
 
 /// Interpret a small, safe C subset and return `main()`'s integer exit value.
@@ -655,6 +665,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "int" => Token::Int,
                     "char" => Token::Char,
                     "void" => Token::Void,
+                    "enum" => Token::Enum,
                     "sizeof" => Token::Sizeof,
                     "return" => Token::Return,
                     "if" => Token::If,
@@ -923,6 +934,8 @@ impl Parser {
                 }
             } else if matches!(self.peek(), Token::Int | Token::Char) {
                 globals.push(self.parse_var_decl()?);
+            } else if self.check(&Token::Enum) {
+                globals.push(self.parse_enum_decl()?);
             } else {
                 let found = self.peek_located().clone();
                 return Err(Self::error_at(
@@ -1106,6 +1119,7 @@ impl Parser {
         match self.peek() {
             Token::Semi => self.parse_empty(),
             Token::Int | Token::Char => self.parse_var_decl(),
+            Token::Enum => self.parse_enum_decl(),
             Token::Return => self.parse_return(),
             Token::LBrace => Ok(Stmt::Block(self.parse_block_after("block statement")?)),
             Token::If => self.parse_if(),
@@ -1239,6 +1253,83 @@ impl Parser {
             self.expect_semicolon_after("variable declaration")?;
         }
         Ok(Stmt::VarDecl { name, ty, expr })
+    }
+
+    fn parse_enum_decl(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::Enum)?;
+        if matches!(self.peek(), Token::Ident(_)) {
+            self.advance();
+        }
+        self.expect_opening_brace_after("enum")?;
+
+        let mut constants = Vec::new();
+        let mut names = HashSet::new();
+        let mut next_value = 0;
+        while !self.check(&Token::RBrace) {
+            if self.check(&Token::Eof) {
+                let eof = self.peek_located().clone();
+                return Err(Self::error_at(
+                    "unterminated enum declaration".to_string(),
+                    &eof,
+                ));
+            }
+
+            let name_token = self.advance();
+            let name = match name_token.kind.clone() {
+                Token::Ident(name) => name,
+                token => {
+                    return Err(Self::error_at(
+                        format!("expected enum constant name, found {token:?}"),
+                        &name_token,
+                    ));
+                }
+            };
+            if !names.insert(name.clone()) {
+                return Err(Self::error_at(
+                    format!("duplicate enum constant '{name}'"),
+                    &name_token,
+                ));
+            }
+
+            let value = if self.matches(&Token::Assign) {
+                self.parse_enum_constant_value()?
+            } else {
+                next_value
+            };
+            next_value = value + 1;
+            constants.push(EnumConstant { name, value });
+
+            if self.matches(&Token::Comma) {
+                if self.check(&Token::RBrace) {
+                    break;
+                }
+            } else if self.check(&Token::RBrace) {
+                break;
+            } else {
+                return Err(Self::error_at(
+                    format!(
+                        "expected ',' or '}}' after enum constant, found {:?}",
+                        self.peek()
+                    ),
+                    self.peek_located(),
+                ));
+            }
+        }
+        self.expect(Token::RBrace)?;
+        self.expect_semicolon_after("enum declaration")?;
+        Ok(Stmt::EnumDecl { constants })
+    }
+
+    fn parse_enum_constant_value(&mut self) -> CustResult<i64> {
+        let sign = if self.matches(&Token::Minus) { -1 } else { 1 };
+        let found = self.advance();
+        match &found.kind {
+            Token::Number(value) => Ok(sign * *value),
+            token => Err(Self::error_at(
+                format!("expected integer constant after enum constant '=', found {token:?}"),
+                &found,
+            )),
+        }
     }
 
     fn expect_array_len(&mut self) -> CustResult<usize> {
@@ -2396,6 +2487,7 @@ struct Interpreter {
 struct Scope {
     id: usize,
     values: HashMap<String, Value>,
+    enum_constants: HashMap<String, i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2633,7 +2725,11 @@ impl Interpreter {
         let id = self.next_scope_id;
         self.next_scope_id += 1;
         self.live_scope_ids.insert(id);
-        self.scopes.push(Scope { id, values });
+        self.scopes.push(Scope {
+            id,
+            values,
+            enum_constants: HashMap::new(),
+        });
     }
 
     fn pop_scope(&mut self) {
@@ -2648,6 +2744,41 @@ impl Interpreter {
             .last_mut()
             .expect("exec_block always creates a current scope")
             .values
+    }
+
+    fn current_scope_has_identifier(&self, name: &str) -> bool {
+        self.scopes
+            .last()
+            .expect("exec_block always creates a current scope")
+            .values
+            .contains_key(name)
+            || self
+                .scopes
+                .last()
+                .expect("exec_block always creates a current scope")
+                .enum_constants
+                .contains_key(name)
+    }
+
+    fn insert_enum_constant(&mut self, name: String, value: i64) -> CustResult<()> {
+        if self.current_scope_has_identifier(&name) {
+            return Err(CustError::new(format!(
+                "variable '{name}' already declared in this scope"
+            )));
+        }
+        self.scopes
+            .last_mut()
+            .expect("exec_block always creates a current scope")
+            .enum_constants
+            .insert(name, value);
+        Ok(())
+    }
+
+    fn find_enum_constant(&self, name: &str) -> Option<i64> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.enum_constants.get(name).copied())
     }
 
     fn find_variable(&self, name: &str) -> Option<&Value> {
@@ -2671,7 +2802,9 @@ impl Interpreter {
             Some(Value::Pointer { .. }) => {
                 Err(CustError::new(format!("pointer '{name}' used as scalar")))
             }
-            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            None => self
+                .find_enum_constant(name)
+                .ok_or_else(|| CustError::new(format!("undefined variable '{name}'"))),
         }
     }
 
@@ -3046,7 +3179,10 @@ impl Interpreter {
                 Some(Value::Pointer { pointer, .. }) => Ok(Self::pointer_truthy(&pointer)),
                 Some(Value::Array(array)) => Ok(!array.borrow().elements.is_empty()),
                 Some(Value::Scalar { value, .. }) => Ok(value != 0),
-                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+                None => self
+                    .find_enum_constant(name)
+                    .map(|value| value != 0)
+                    .ok_or_else(|| CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::Deref(_)
             | Expr::DerefSet { .. }
@@ -3097,6 +3233,9 @@ impl Interpreter {
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
             ))),
+            None if self.find_enum_constant(name).is_some() => Err(CustError::new(format!(
+                "cannot assign to enum constant '{name}'"
+            ))),
             None => Err(CustError::new(format!(
                 "assignment to undeclared variable '{name}'"
             ))),
@@ -3121,6 +3260,9 @@ impl Interpreter {
             Some(Value::Pointer { .. }) => Err(Self::pointer_compound_error(op)),
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
+            ))),
+            None if self.find_enum_constant(name).is_some() => Err(CustError::new(format!(
+                "cannot assign to enum constant '{name}'"
             ))),
             None => Err(CustError::new(format!(
                 "assignment to undeclared variable '{name}'"
@@ -3240,6 +3382,9 @@ impl Interpreter {
             Some(Value::Pointer { .. }) => Ok(POINTER_SIZE),
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
+            ))),
+            None if self.find_enum_constant(name).is_some() => Err(CustError::new(format!(
+                "cannot assign to enum constant '{name}'"
             ))),
             None => Err(CustError::new(format!(
                 "assignment to undeclared variable '{name}'"
@@ -3403,23 +3548,23 @@ impl Interpreter {
             Stmt::Empty => Ok(ExecFlow::None),
             Stmt::VarDecl { name, ty, expr } => {
                 let value = self.eval(expr)?;
-                let scope = self.current_scope_mut();
-                if scope.contains_key(name) {
+                if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
                         "variable '{name}' already declared in this scope"
                     )));
                 }
+                let scope = self.current_scope_mut();
                 scope.insert(name.clone(), Value::Scalar { value, ty: *ty });
                 Ok(ExecFlow::None)
             }
             Stmt::PointerDecl { name, ty, expr } => {
                 let pointer = self.eval_pointer(expr)?;
-                let scope = self.current_scope_mut();
-                if scope.contains_key(name) {
+                if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
                         "variable '{name}' already declared in this scope"
                     )));
                 }
+                let scope = self.current_scope_mut();
                 scope.insert(name.clone(), Value::Pointer { pointer, ty: *ty });
                 Ok(ExecFlow::None)
             }
@@ -3428,18 +3573,24 @@ impl Interpreter {
                 elem_type,
                 len,
             } => {
-                let scope = self.current_scope_mut();
-                if scope.contains_key(name) {
+                if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
                         "variable '{name}' already declared in this scope"
                     )));
                 }
+                let scope = self.current_scope_mut();
                 scope.insert(
                     name.clone(),
                     Value::Array(Rc::new(RefCell::new(ArrayValue::mutable_zeroed(
                         *len, *elem_type,
                     )))),
                 );
+                Ok(ExecFlow::None)
+            }
+            Stmt::EnumDecl { constants } => {
+                for constant in constants {
+                    self.insert_enum_constant(constant.name.clone(), constant.value)?;
+                }
                 Ok(ExecFlow::None)
             }
             Stmt::Assign(name, expr) => {
@@ -3466,6 +3617,9 @@ impl Interpreter {
                     Some(Value::Array(_)) => Err(CustError::new(format!(
                         "array '{name}' requires indexed assignment"
                     ))),
+                    None if self.find_enum_constant(name).is_some() => Err(CustError::new(
+                        format!("cannot assign to enum constant '{name}'"),
+                    )),
                     None => Err(CustError::new(format!(
                         "assignment to undeclared variable '{name}'"
                     ))),

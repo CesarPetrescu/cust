@@ -105,6 +105,34 @@ fn supports_uninitialized_scalar_and_pointer_declarations() {
 }
 
 #[test]
+fn supports_enum_constants_with_implicit_values_and_block_scope() {
+    let program = include_str!("fixtures/valid/enums.c");
+
+    assert_eq!(interpret(program).unwrap(), 33);
+}
+
+#[test]
+fn rejects_assignment_to_enum_constants() {
+    let program = include_str!("fixtures/invalid/enum_constant_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot assign to enum constant 'READY'");
+}
+
+#[test]
+fn rejects_missing_enum_constant_values_with_context() {
+    let program = include_str!("fixtures/invalid/enum_missing_value.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected integer constant after enum constant '=', found RBrace at line 2, column 36"
+    );
+}
+
+#[test]
 fn rejects_sizeof_void_with_context() {
     let program = include_str!("fixtures/invalid/sizeof_void.c");
 
