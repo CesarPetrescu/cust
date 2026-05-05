@@ -992,6 +992,13 @@ fn supports_bitwise_and_shift_operators_with_c_precedence() {
 }
 
 #[test]
+fn supports_bitwise_compound_assignments_for_scalar_indexed_and_deref_lvalues() {
+    let program = include_str!("fixtures/valid/bitwise_compound_assignments.c");
+
+    assert_eq!(interpret(program).unwrap(), 131);
+}
+
+#[test]
 fn rejects_pointer_bitwise_operations() {
     let program = include_str!("fixtures/invalid/pointer_bitwise_operation.c");
 
@@ -1000,6 +1007,33 @@ fn rejects_pointer_bitwise_operations() {
     assert_eq!(
         err.to_string(),
         "pointer bitwise operations are not supported"
+    );
+}
+
+#[test]
+fn rejects_pointer_bitwise_compound_assignments() {
+    let program = include_str!("fixtures/invalid/pointer_bitwise_compound_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer bitwise operations are not supported"
+    );
+}
+
+#[test]
+fn reports_invalid_shift_counts() {
+    let negative = include_str!("fixtures/invalid/negative_shift_count.c");
+    let too_large = include_str!("fixtures/invalid/shift_count_too_large.c");
+
+    assert_eq!(
+        interpret(negative).unwrap_err().to_string(),
+        "shift count must be non-negative"
+    );
+    assert_eq!(
+        interpret(too_large).unwrap_err().to_string(),
+        "shift count too large"
     );
 }
 

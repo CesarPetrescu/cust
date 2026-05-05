@@ -48,6 +48,11 @@ enum Token {
     MinusMinus,
     PlusAssign,
     MinusAssign,
+    AmpAssign,
+    PipeAssign,
+    CaretAssign,
+    ShiftLeftAssign,
+    ShiftRightAssign,
     Star,
     Slash,
     Percent,
@@ -212,6 +217,11 @@ enum BinaryOp {
 enum CompoundOp {
     Add,
     Sub,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -593,6 +603,11 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 advance_position('&', &mut line, &mut column, &mut i);
                 advance_position('&', &mut line, &mut column, &mut i);
             }
+            '&' if chars.get(i + 1) == Some(&'=') => {
+                push_token(&mut tokens, Token::AmpAssign, line, column);
+                advance_position('&', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
+            }
             '&' => {
                 push_token(&mut tokens, Token::Amp, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
@@ -602,9 +617,19 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 advance_position('|', &mut line, &mut column, &mut i);
                 advance_position('|', &mut line, &mut column, &mut i);
             }
+            '|' if chars.get(i + 1) == Some(&'=') => {
+                push_token(&mut tokens, Token::PipeAssign, line, column);
+                advance_position('|', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
+            }
             '|' => {
                 push_token(&mut tokens, Token::Pipe, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
+            }
+            '^' if chars.get(i + 1) == Some(&'=') => {
+                push_token(&mut tokens, Token::CaretAssign, line, column);
+                advance_position('^', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
             }
             '^' => {
                 push_token(&mut tokens, Token::Caret, line, column);
@@ -668,6 +693,12 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 push_token(&mut tokens, Token::Bang, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
+            '<' if chars.get(i + 1) == Some(&'<') && chars.get(i + 2) == Some(&'=') => {
+                push_token(&mut tokens, Token::ShiftLeftAssign, line, column);
+                advance_position('<', &mut line, &mut column, &mut i);
+                advance_position('<', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
+            }
             '<' if chars.get(i + 1) == Some(&'<') => {
                 push_token(&mut tokens, Token::ShiftLeft, line, column);
                 advance_position('<', &mut line, &mut column, &mut i);
@@ -676,6 +707,12 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
             '<' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::Le, line, column);
                 advance_position('<', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
+            }
+            '>' if chars.get(i + 1) == Some(&'>') && chars.get(i + 2) == Some(&'=') => {
+                push_token(&mut tokens, Token::ShiftRightAssign, line, column);
+                advance_position('>', &mut line, &mut column, &mut i);
+                advance_position('>', &mut line, &mut column, &mut i);
                 advance_position('=', &mut line, &mut column, &mut i);
             }
             '>' if chars.get(i + 1) == Some(&'>') => {
@@ -1737,6 +1774,11 @@ impl Parser {
         match self.peek() {
             Token::PlusAssign => Some(CompoundOp::Add),
             Token::MinusAssign => Some(CompoundOp::Sub),
+            Token::AmpAssign => Some(CompoundOp::BitAnd),
+            Token::PipeAssign => Some(CompoundOp::BitOr),
+            Token::CaretAssign => Some(CompoundOp::BitXor),
+            Token::ShiftLeftAssign => Some(CompoundOp::ShiftLeft),
+            Token::ShiftRightAssign => Some(CompoundOp::ShiftRight),
             _ => None,
         }
     }
@@ -1744,7 +1786,14 @@ impl Parser {
     fn is_assignment_operator(token: &Token) -> bool {
         matches!(
             token,
-            Token::Assign | Token::PlusAssign | Token::MinusAssign
+            Token::Assign
+                | Token::PlusAssign
+                | Token::MinusAssign
+                | Token::AmpAssign
+                | Token::PipeAssign
+                | Token::CaretAssign
+                | Token::ShiftLeftAssign
+                | Token::ShiftRightAssign
         )
     }
 
@@ -2639,13 +2688,13 @@ impl Interpreter {
         match self.find_variable(name).cloned() {
             Some(Value::Scalar(current)) => {
                 let rhs = self.eval(value)?;
-                let result = Self::apply_compound_op(current, op, rhs);
+                let result = Self::apply_compound_op(current, op, rhs)?;
                 if let Some(Value::Scalar(slot)) = self.find_variable_mut(name) {
                     *slot = result;
                 }
                 Ok(result)
             }
-            Some(Value::Pointer(_)) => Err(CustError::new("pointer arithmetic is not supported")),
+            Some(Value::Pointer(_)) => Err(Self::pointer_compound_error(op)),
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
             ))),
@@ -2655,10 +2704,30 @@ impl Interpreter {
         }
     }
 
-    fn apply_compound_op(lhs: i64, op: CompoundOp, rhs: i64) -> i64 {
+    fn apply_compound_op(lhs: i64, op: CompoundOp, rhs: i64) -> CustResult<i64> {
         match op {
-            CompoundOp::Add => lhs + rhs,
-            CompoundOp::Sub => lhs - rhs,
+            CompoundOp::Add => Ok(lhs + rhs),
+            CompoundOp::Sub => Ok(lhs - rhs),
+            CompoundOp::BitAnd => Ok(lhs & rhs),
+            CompoundOp::BitOr => Ok(lhs | rhs),
+            CompoundOp::BitXor => Ok(lhs ^ rhs),
+            CompoundOp::ShiftLeft => Self::checked_shift_left(lhs, rhs),
+            CompoundOp::ShiftRight => Self::checked_shift_right(lhs, rhs),
+        }
+    }
+
+    fn pointer_compound_error(op: CompoundOp) -> CustError {
+        match op {
+            CompoundOp::Add | CompoundOp::Sub => {
+                CustError::new("pointer arithmetic is not supported")
+            }
+            CompoundOp::BitAnd
+            | CompoundOp::BitOr
+            | CompoundOp::BitXor
+            | CompoundOp::ShiftLeft
+            | CompoundOp::ShiftRight => {
+                CustError::new("pointer bitwise operations are not supported")
+            }
         }
     }
 
@@ -2764,7 +2833,7 @@ impl Interpreter {
         };
         let current = array.borrow().elements[index];
         let rhs = self.eval(value)?;
-        let result = Self::apply_compound_op(current, op, rhs);
+        let result = Self::apply_compound_op(current, op, rhs)?;
         let mut array = array.borrow_mut();
         if array.read_only {
             return Err(CustError::new(format!(
@@ -2784,7 +2853,7 @@ impl Interpreter {
         let pointer = self.eval_pointer(pointer)?;
         let current = self.deref_pointer(&pointer)?;
         let rhs = self.eval(value)?;
-        let result = Self::apply_compound_op(current, op, rhs);
+        let result = Self::apply_compound_op(current, op, rhs)?;
         self.assign_deref_pointer(&pointer, result)?;
         Ok(result)
     }

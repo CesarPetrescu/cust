@@ -27,6 +27,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Increment/decrement operators (`++`/`--`) or compound assignment (`+=`, `-=`) once selected with precise parser/interpreter acceptance fixtures and C compiler-oracle coverage
 - [x] Increment/decrement operators (`++`/`--`) with prefix/postfix semantics for scalar, indexed array/pointer, and dereferenced pointer lvalues plus `for` clause use, non-lvalue diagnostics, and C compiler-oracle coverage
 - [x] Bitwise and shift operators: unary `~`, binary `&`, `^`, `|`, `<<`, and `>>` with C precedence, interpreter diagnostics for pointer operands, and C compiler-oracle coverage
+- [x] Bitwise/shift compound assignments: `&=`, `|=`, `^=`, `<<=`, and `>>=` as right-associative assignment-precedence expressions/statements for scalar, indexed array/pointer, and dereferenced pointer lvalues, with invalid pointer diagnostics and C compiler-oracle coverage
 
 ## P2 — data types
 
