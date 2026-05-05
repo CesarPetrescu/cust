@@ -44,6 +44,8 @@ enum Token {
     StringLiteral(Vec<i64>),
     Plus,
     Minus,
+    PlusAssign,
+    MinusAssign,
     Star,
     Slash,
     Percent,
@@ -116,6 +118,22 @@ enum Expr {
         pointer: Box<Expr>,
         value: Box<Expr>,
     },
+    CompoundAssign {
+        name: String,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
+    ArrayCompoundSet {
+        name: String,
+        index: Box<Expr>,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
+    DerefCompoundSet {
+        pointer: Box<Expr>,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
     Call {
         name: String,
         args: Vec<Expr>,
@@ -170,6 +188,12 @@ enum BinaryOp {
     Ge,
     LogicalAnd,
     LogicalOr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompoundOp {
+    Add,
+    Sub,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -500,9 +524,19 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 };
                 tokens.push(LocatedToken::new(kind, start_line, start_column));
             }
+            '+' if chars.get(i + 1) == Some(&'=') => {
+                push_token(&mut tokens, Token::PlusAssign, line, column);
+                advance_position('+', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
+            }
             '+' => {
                 push_token(&mut tokens, Token::Plus, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
+            }
+            '-' if chars.get(i + 1) == Some(&'=') => {
+                push_token(&mut tokens, Token::MinusAssign, line, column);
+                advance_position('-', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
             }
             '-' => {
                 push_token(&mut tokens, Token::Minus, line, column);
@@ -913,6 +947,16 @@ impl Parser {
     fn parse_deref_assign(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Star)?;
         let pointer = self.parse_unary()?;
+        if let Some(op) = self.compound_assignment_op() {
+            self.advance();
+            let value = self.parse_expr()?;
+            self.expect_semicolon_after("assignment")?;
+            return Ok(Stmt::Expr(Expr::DerefCompoundSet {
+                pointer: Box::new(pointer),
+                op,
+                value: Box::new(value),
+            }));
+        }
         self.expect_assign_after("assignment")?;
         let value = self.parse_expr()?;
         self.expect_semicolon_after("assignment")?;
@@ -924,12 +968,37 @@ impl Parser {
         if self.matches(&Token::LBracket) {
             let index = self.parse_index_expr()?;
             self.expect_closing_bracket_after("array index")?;
+            if let Some(op) = self.compound_assignment_op() {
+                self.advance();
+                let value = self.parse_expr()?;
+                if require_semi {
+                    self.expect_semicolon_after("assignment")?;
+                }
+                return Ok(Stmt::Expr(Expr::ArrayCompoundSet {
+                    name,
+                    index: Box::new(index),
+                    op,
+                    value: Box::new(value),
+                }));
+            }
             self.expect_assign_after("assignment")?;
             let value = self.parse_expr()?;
             if require_semi {
                 self.expect_semicolon_after("assignment")?;
             }
             return Ok(Stmt::ArrayAssign { name, index, value });
+        }
+        if let Some(op) = self.compound_assignment_op() {
+            self.advance();
+            let value = self.parse_expr()?;
+            if require_semi {
+                self.expect_semicolon_after("assignment")?;
+            }
+            return Ok(Stmt::Expr(Expr::CompoundAssign {
+                name,
+                op,
+                value: Box::new(value),
+            }));
         }
         self.expect_assign_after("assignment")?;
         let expr = self.parse_expr()?;
@@ -1076,7 +1145,32 @@ impl Parser {
 
     fn parse_assignment_expr(&mut self) -> CustResult<Expr> {
         let target = self.parse_conditional_expr()?;
-        if self.check(&Token::Assign) {
+        if let Some(op) = self.compound_assignment_op() {
+            let operator = self.advance();
+            let value = self.parse_assignment_expr()?;
+            match target {
+                Expr::Var(name) => Ok(Expr::CompoundAssign {
+                    name,
+                    op,
+                    value: Box::new(value),
+                }),
+                Expr::ArrayGet { name, index } => Ok(Expr::ArrayCompoundSet {
+                    name,
+                    index,
+                    op,
+                    value: Box::new(value),
+                }),
+                Expr::Deref(pointer) => Ok(Expr::DerefCompoundSet {
+                    pointer,
+                    op,
+                    value: Box::new(value),
+                }),
+                _ => Err(Self::error_at(
+                    "invalid compound assignment target".to_string(),
+                    &operator,
+                )),
+            }
+        } else if self.check(&Token::Assign) {
             let equals = self.advance();
             let value = self.parse_assignment_expr()?;
             match target {
@@ -1493,6 +1587,21 @@ impl Parser {
         self.peek() == expected
     }
 
+    fn compound_assignment_op(&self) -> Option<CompoundOp> {
+        match self.peek() {
+            Token::PlusAssign => Some(CompoundOp::Add),
+            Token::MinusAssign => Some(CompoundOp::Sub),
+            _ => None,
+        }
+    }
+
+    fn is_assignment_operator(token: &Token) -> bool {
+        matches!(
+            token,
+            Token::Assign | Token::PlusAssign | Token::MinusAssign
+        )
+    }
+
     fn peek(&self) -> &Token {
         &self.peek_located().kind
     }
@@ -1546,7 +1655,13 @@ impl Parser {
                 Token::RParen => paren_depth = paren_depth.saturating_sub(1),
                 Token::LBracket => bracket_depth += 1,
                 Token::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
-                Token::Assign if paren_depth == 0 && bracket_depth == 0 => return true,
+                token
+                    if paren_depth == 0
+                        && bracket_depth == 0
+                        && Self::is_assignment_operator(token) =>
+                {
+                    return true;
+                }
                 Token::Semi | Token::Eof if paren_depth == 0 && bracket_depth == 0 => return false,
                 _ => {}
             }
@@ -1559,7 +1674,7 @@ impl Parser {
         if !matches!(self.peek(), Token::Ident(_)) {
             return false;
         }
-        if self.peek_next() == &Token::Assign {
+        if Self::is_assignment_operator(self.peek_next()) {
             return true;
         }
         if self.peek_next() != &Token::LBracket {
@@ -1573,10 +1688,9 @@ impl Parser {
                 Token::RBracket => {
                     depth = depth.saturating_sub(1);
                     if depth == 0 {
-                        return self
-                            .tokens
-                            .get(index + 1)
-                            .is_some_and(|candidate| candidate.kind == Token::Assign);
+                        return self.tokens.get(index + 1).is_some_and(|candidate| {
+                            Self::is_assignment_operator(&candidate.kind)
+                        });
                     }
                 }
                 Token::Eof if depth > 0 => return false,
@@ -2325,14 +2439,17 @@ impl Interpreter {
             },
             Expr::Deref(_)
             | Expr::DerefSet { .. }
+            | Expr::DerefCompoundSet { .. }
             | Expr::ArrayGet { .. }
             | Expr::ArraySet { .. }
+            | Expr::ArrayCompoundSet { .. }
             | Expr::StringGet { .. }
             | Expr::Call { .. } => Ok(self.eval(expr)? != 0),
             Expr::Number(value) => Ok(*value != 0),
             Expr::UnaryPlus(_)
             | Expr::UnaryMinus(_)
             | Expr::LogicalNot(_)
+            | Expr::CompoundAssign { .. }
             | Expr::Conditional { .. }
             | Expr::Binary(_, _, _) => Ok(self.eval(expr)? != 0),
         }
@@ -2355,6 +2472,80 @@ impl Interpreter {
                 "assignment to undeclared variable '{name}'"
             ))),
         }
+    }
+
+    fn eval_compound_assignment_expr(
+        &mut self,
+        name: &str,
+        op: CompoundOp,
+        value: &Expr,
+    ) -> CustResult<i64> {
+        match self.find_variable(name).cloned() {
+            Some(Value::Scalar(current)) => {
+                let rhs = self.eval(value)?;
+                let result = Self::apply_compound_op(current, op, rhs);
+                if let Some(Value::Scalar(slot)) = self.find_variable_mut(name) {
+                    *slot = result;
+                }
+                Ok(result)
+            }
+            Some(Value::Pointer(_)) => Err(CustError::new("pointer arithmetic is not supported")),
+            Some(Value::Array(_)) => Err(CustError::new(format!(
+                "array '{name}' requires indexed assignment"
+            ))),
+            None => Err(CustError::new(format!(
+                "assignment to undeclared variable '{name}'"
+            ))),
+        }
+    }
+
+    fn apply_compound_op(lhs: i64, op: CompoundOp, rhs: i64) -> i64 {
+        match op {
+            CompoundOp::Add => lhs + rhs,
+            CompoundOp::Sub => lhs - rhs,
+        }
+    }
+
+    fn eval_array_compound_set(
+        &mut self,
+        name: &str,
+        index: &Expr,
+        op: CompoundOp,
+        value: &Expr,
+    ) -> CustResult<i64> {
+        let (array, index) = match self.find_variable(name).cloned() {
+            Some(Value::Pointer(pointer)) => {
+                let index_value = self.eval(index)?;
+                let (array, _, index) = self.checked_pointer_value_index(&pointer, index_value)?;
+                (array, index)
+            }
+            Some(_) | None => self.checked_array_index(name, index)?,
+        };
+        let current = array.borrow().elements[index];
+        let rhs = self.eval(value)?;
+        let result = Self::apply_compound_op(current, op, rhs);
+        let mut array = array.borrow_mut();
+        if array.read_only {
+            return Err(CustError::new(format!(
+                "cannot modify read-only array '{name}'"
+            )));
+        }
+        array.elements[index] = result;
+        Ok(result)
+    }
+
+    fn eval_deref_compound_set(
+        &mut self,
+        pointer: &Expr,
+        op: CompoundOp,
+        value: &Expr,
+    ) -> CustResult<i64> {
+        let pointer = self.eval_pointer(pointer)?;
+        let current = self.deref_pointer(&pointer)?;
+        let rhs = self.eval(value)?;
+        let result = Self::apply_compound_op(current, op, rhs);
+        self.assign_deref_pointer(&pointer, result)?;
+        Ok(result)
     }
 
     fn eval_equality(&mut self, left: &Expr, op: &BinaryOp, right: &Expr) -> CustResult<i64> {
@@ -2610,6 +2801,9 @@ impl Interpreter {
                 Err(CustError::new("pointer value used as scalar"))
             }
             Expr::Assign { name, value } => self.eval_assignment_expr(name, value),
+            Expr::CompoundAssign { name, op, value } => {
+                self.eval_compound_assignment_expr(name, *op, value)
+            }
             Expr::ArraySet { name, index, value } => {
                 let value = self.eval(value)?;
                 match self.find_variable(name).cloned() {
@@ -2630,11 +2824,20 @@ impl Interpreter {
                 }
                 Ok(value)
             }
+            Expr::ArrayCompoundSet {
+                name,
+                index,
+                op,
+                value,
+            } => self.eval_array_compound_set(name, index, *op, value),
             Expr::DerefSet { pointer, value } => {
                 let pointer = self.eval_pointer(pointer)?;
                 let value = self.eval(value)?;
                 self.assign_deref_pointer(&pointer, value)?;
                 Ok(value)
+            }
+            Expr::DerefCompoundSet { pointer, op, value } => {
+                self.eval_deref_compound_set(pointer, *op, value)
             }
             Expr::Deref(pointer) => {
                 let pointer = self.eval_pointer(pointer)?;

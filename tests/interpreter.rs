@@ -971,6 +971,13 @@ fn supports_do_while_loops_with_break_continue_and_post_test_execution() {
 }
 
 #[test]
+fn supports_compound_assignment_expressions_for_scalar_array_and_deref_lvalues() {
+    let program = include_str!("fixtures/valid/compound_assignments.c");
+
+    assert_eq!(interpret(program).unwrap(), 39);
+}
+
+#[test]
 fn rejects_non_lvalue_assignment_expressions() {
     let program = include_str!("fixtures/invalid/non_lvalue_assignment_expression.c");
 
@@ -979,6 +986,18 @@ fn rejects_non_lvalue_assignment_expressions() {
     assert_eq!(
         err.to_string(),
         "invalid assignment target at line 3, column 20"
+    );
+}
+
+#[test]
+fn rejects_non_lvalue_compound_assignment_expressions() {
+    let program = include_str!("fixtures/invalid/non_lvalue_compound_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "invalid compound assignment target at line 3, column 20"
     );
 }
 
