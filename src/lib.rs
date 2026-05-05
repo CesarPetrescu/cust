@@ -164,6 +164,7 @@ enum Expr {
         then_expr: Box<Expr>,
         else_expr: Box<Expr>,
     },
+    Comma(Box<Expr>, Box<Expr>),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
 }
 
@@ -1231,7 +1232,16 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> CustResult<Expr> {
-        self.parse_assignment_expr()
+        self.parse_comma_expr()
+    }
+
+    fn parse_comma_expr(&mut self) -> CustResult<Expr> {
+        let mut expr = self.parse_assignment_expr()?;
+        while self.matches(&Token::Comma) {
+            let rhs = self.parse_assignment_expr()?;
+            expr = Expr::Comma(Box::new(expr), Box::new(rhs));
+        }
+        Ok(expr)
     }
 
     fn parse_index_expr(&mut self) -> CustResult<Expr> {
@@ -1569,7 +1579,7 @@ impl Parser {
         }
 
         loop {
-            args.push(self.parse_expr()?);
+            args.push(self.parse_assignment_expr()?);
 
             if self.matches(&Token::Comma) {
                 if matches!(
@@ -2323,6 +2333,10 @@ impl Interpreter {
                     self.eval_pointer(else_expr)
                 }
             }
+            Expr::Comma(left, right) => {
+                self.eval_discard(left)?;
+                self.eval_pointer(right)
+            }
             Expr::AddressOf(name) => self.address_of_scalar(name),
             Expr::AddressOfArray { name, index } => {
                 if let Some(Value::Pointer(pointer)) = self.find_variable(name).cloned() {
@@ -2621,6 +2635,10 @@ impl Interpreter {
 
     fn eval_truthy(&mut self, expr: &Expr) -> CustResult<bool> {
         match expr {
+            Expr::Comma(left, right) => {
+                self.eval_discard(left)?;
+                self.eval_truthy(right)
+            }
             Expr::AddressOf(_) | Expr::AddressOfArray { .. } | Expr::StringLiteral(_) => {
                 Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
             }
@@ -2657,6 +2675,16 @@ impl Interpreter {
             | Expr::Increment { .. }
             | Expr::Conditional { .. }
             | Expr::Binary(_, _, _) => Ok(self.eval(expr)? != 0),
+        }
+    }
+
+    fn eval_discard(&mut self, expr: &Expr) -> CustResult<()> {
+        match self.eval(expr) {
+            Ok(_) => Ok(()),
+            Err(error) if error.to_string() == "pointer value used as scalar" => {
+                self.eval_pointer(expr).map(|_| ())
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -3196,6 +3224,10 @@ impl Interpreter {
                 } else {
                     self.eval(else_expr)
                 }
+            }
+            Expr::Comma(left, right) => {
+                self.eval_discard(left)?;
+                self.eval(right)
             }
             Expr::Binary(left, op, right) => match op {
                 BinaryOp::LogicalAnd => {

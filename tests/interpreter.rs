@@ -999,6 +999,25 @@ fn supports_bitwise_compound_assignments_for_scalar_indexed_and_deref_lvalues() 
 }
 
 #[test]
+fn supports_comma_operator_with_assignments_pointers_loops_and_call_arguments() {
+    let program = include_str!("fixtures/valid/comma_operator.c");
+
+    assert_eq!(interpret(program).unwrap(), 233);
+}
+
+#[test]
+fn rejects_missing_rhs_after_comma_operator() {
+    let program = include_str!("fixtures/invalid/comma_missing_rhs.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected expression, found RParen at line 3, column 19"
+    );
+}
+
+#[test]
 fn rejects_pointer_bitwise_operations() {
     let program = include_str!("fixtures/invalid/pointer_bitwise_operation.c");
 
