@@ -7,7 +7,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Parser errors with source spans: line, column, token context
 - [x] Add token context snippets to lexer errors
 - [x] Block scoping rules for variables inside `{ ... }`
-- [ ] Better parser recovery/error messages (broad track largely expanded; missing-`=` diagnostics, missing-name/type diagnostics, context-aware unterminated-block diagnostics, array length edge diagnostics, pointer-parameter malformed-list coverage, and explicit unsupported pointer-return/pointer-array diagnostics are covered; remaining work should be driven by newly discovered malformed programs beyond current exact-error coverage)
+- [ ] Better parser recovery/error messages (broad track largely expanded; missing-`=` diagnostics, missing-name/type diagnostics, context-aware unterminated-block diagnostics, array length edge diagnostics, pointer-parameter malformed-list coverage, explicit unsupported pointer-return/pointer-array/pointer-to-pointer diagnostics, and delimiter-aware parameter/call trailing-comma diagnostics are covered; remaining work should be driven by newly discovered malformed programs beyond current exact-error coverage)
 - [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 

@@ -4,7 +4,7 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
-1. Continue parser recovery/error-message expansion only for newly discovered malformed programs not already covered by the exact-error suite; acceptance: add focused exact-output parser tests before implementation for unsupported pointer-to-pointer forms, additional delimiter/list boundary errors, or other malformed programs that still fall through to generic messages.
+1. Continue parser recovery/error-message expansion only for newly discovered malformed programs not already covered by the exact-error suite; acceptance: add focused exact-output parser tests before implementation for remaining delimiter/list boundary errors, unsupported near-future C forms, or other malformed programs that still fall through to generic messages.
 2. Add a `LICENSE` file after confirming the project-owner's intended license; acceptance: repository root includes the chosen license text and README license section points to it.
 3. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
 

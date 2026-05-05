@@ -605,6 +605,30 @@ fn reports_missing_pointer_parameter_names_after_stars() {
 }
 
 #[test]
+fn rejects_pointer_to_pointer_parameters_with_context() {
+    let program = "int load(int **value) { return **value; }\nint main() { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer-to-pointer parameters are not supported at line 1, column 15"
+    );
+}
+
+#[test]
+fn rejects_pointer_to_pointer_declarations_with_context() {
+    let program = "int main() {\nint x = 1;\nint **value = &x;\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer-to-pointer declarations are not supported at line 3, column 6"
+    );
+}
+
+#[test]
 fn reports_missing_commas_after_pointer_parameters() {
     let program =
         "int sum(int *values int count) { return values[0] + count; }\nint main() { return 0; }\n";
@@ -626,6 +650,30 @@ fn reports_trailing_commas_after_pointer_parameters() {
     assert_eq!(
         err.to_string(),
         "expected function parameter after ',', found RParen at line 1, column 23"
+    );
+}
+
+#[test]
+fn reports_function_parameter_after_comma_before_function_body() {
+    let program = "int first(int value, { return value; }\nint main() { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected function parameter after ',', found LBrace at line 1, column 22"
+    );
+}
+
+#[test]
+fn reports_function_call_argument_after_comma_before_semicolon() {
+    let program = "int first(int value) { return value; }\nint main() { return first(1,; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected function call argument after ',', found Semi at line 2, column 29"
     );
 }
 

@@ -662,6 +662,12 @@ impl Parser {
         loop {
             self.expect_type_after("parameter type")?;
             let is_pointer = self.matches(&Token::Star);
+            if is_pointer && self.check(&Token::Star) {
+                return Err(Self::error_at(
+                    "pointer-to-pointer parameters are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let name = if is_pointer {
                 self.expect_ident_after("parameter name after '*'")?
             } else {
@@ -685,7 +691,10 @@ impl Parser {
             params.push(Param { name, kind });
 
             if self.matches(&Token::Comma) {
-                if self.check(&Token::RParen) {
+                if matches!(
+                    self.peek(),
+                    Token::RParen | Token::Semi | Token::LBrace | Token::RBrace | Token::Eof
+                ) {
                     return Err(Self::error_at(
                         format!(
                             "expected function parameter after ',', found {:?}",
@@ -788,6 +797,12 @@ impl Parser {
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         self.expect_type()?;
         let is_pointer = self.matches(&Token::Star);
+        if is_pointer && self.check(&Token::Star) {
+            return Err(Self::error_at(
+                "pointer-to-pointer declarations are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
         let name = if is_pointer {
             self.expect_ident_after("pointer name after '*'")?
         } else {
@@ -1172,7 +1187,10 @@ impl Parser {
             args.push(self.parse_expr()?);
 
             if self.matches(&Token::Comma) {
-                if self.check(&Token::RParen) {
+                if matches!(
+                    self.peek(),
+                    Token::RParen | Token::Semi | Token::LBrace | Token::RBrace | Token::Eof
+                ) {
                     return Err(Self::error_at(
                         format!(
                             "expected function call argument after ',', found {:?}",
