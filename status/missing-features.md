@@ -25,7 +25,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Conditional operator `?:` with C-style truthiness, right-associative nesting, branch short-circuiting, assignment-expression operands, pointer-truthiness conditions, and compiler-oracle coverage
 - [x] `do { ... } while (condition);` loops with guaranteed first body execution, C-style truthiness, `break`/`continue` handling, loop-step budgeting, exact missing-semicolon diagnostics, and compiler-oracle coverage
 - [x] Increment/decrement operators (`++`/`--`) or compound assignment (`+=`, `-=`) once selected with precise parser/interpreter acceptance fixtures and C compiler-oracle coverage
-- [ ] Increment/decrement operators (`++`/`--`) with prefix/postfix semantics once selected with precise parser/interpreter acceptance fixtures and C compiler-oracle coverage
+- [x] Increment/decrement operators (`++`/`--`) with prefix/postfix semantics for scalar, indexed array/pointer, and dereferenced pointer lvalues plus `for` clause use, non-lvalue diagnostics, and C compiler-oracle coverage
 
 ## P2 — data types
 

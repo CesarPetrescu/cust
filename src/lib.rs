@@ -44,6 +44,8 @@ enum Token {
     StringLiteral(Vec<i64>),
     Plus,
     Minus,
+    PlusPlus,
+    MinusMinus,
     PlusAssign,
     MinusAssign,
     Star,
@@ -134,6 +136,11 @@ enum Expr {
         op: CompoundOp,
         value: Box<Expr>,
     },
+    Increment {
+        target: Box<Expr>,
+        op: IncrementOp,
+        prefix: bool,
+    },
     Call {
         name: String,
         args: Vec<Expr>,
@@ -194,6 +201,12 @@ enum BinaryOp {
 enum CompoundOp {
     Add,
     Sub,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IncrementOp {
+    Inc,
+    Dec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -524,6 +537,11 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 };
                 tokens.push(LocatedToken::new(kind, start_line, start_column));
             }
+            '+' if chars.get(i + 1) == Some(&'+') => {
+                push_token(&mut tokens, Token::PlusPlus, line, column);
+                advance_position('+', &mut line, &mut column, &mut i);
+                advance_position('+', &mut line, &mut column, &mut i);
+            }
             '+' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::PlusAssign, line, column);
                 advance_position('+', &mut line, &mut column, &mut i);
@@ -532,6 +550,11 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
             '+' => {
                 push_token(&mut tokens, Token::Plus, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
+            }
+            '-' if chars.get(i + 1) == Some(&'-') => {
+                push_token(&mut tokens, Token::MinusMinus, line, column);
+                advance_position('-', &mut line, &mut column, &mut i);
+                advance_position('-', &mut line, &mut column, &mut i);
             }
             '-' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::MinusAssign, line, column);
@@ -848,6 +871,8 @@ impl Parser {
             | Token::StringLiteral(_)
             | Token::Plus
             | Token::Minus
+            | Token::PlusPlus
+            | Token::MinusMinus
             | Token::Bang
             | Token::Star
             | Token::Amp
@@ -1302,7 +1327,15 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> CustResult<Expr> {
-        if self.matches(&Token::Plus) {
+        if self.matches(&Token::PlusPlus) {
+            let operator = self.previous().clone();
+            let target = self.parse_unary()?;
+            Self::increment_expr(target, IncrementOp::Inc, true, &operator)
+        } else if self.matches(&Token::MinusMinus) {
+            let operator = self.previous().clone();
+            let target = self.parse_unary()?;
+            Self::increment_expr(target, IncrementOp::Dec, true, &operator)
+        } else if self.matches(&Token::Plus) {
             Ok(Expr::UnaryPlus(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Minus) {
             Ok(Expr::UnaryMinus(Box::new(self.parse_unary()?)))
@@ -1331,7 +1364,42 @@ impl Parser {
                 )),
             }
         } else {
-            self.parse_primary()
+            self.parse_postfix()
+        }
+    }
+
+    fn parse_postfix(&mut self) -> CustResult<Expr> {
+        let mut expr = self.parse_primary()?;
+        loop {
+            if self.matches(&Token::PlusPlus) {
+                let operator = self.previous().clone();
+                expr = Self::increment_expr(expr, IncrementOp::Inc, false, &operator)?;
+            } else if self.matches(&Token::MinusMinus) {
+                let operator = self.previous().clone();
+                expr = Self::increment_expr(expr, IncrementOp::Dec, false, &operator)?;
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    fn increment_expr(
+        target: Expr,
+        op: IncrementOp,
+        prefix: bool,
+        operator: &LocatedToken,
+    ) -> CustResult<Expr> {
+        match target {
+            Expr::Var(_) | Expr::ArrayGet { .. } | Expr::Deref(_) => Ok(Expr::Increment {
+                target: Box::new(target),
+                op,
+                prefix,
+            }),
+            _ => Err(Self::error_at(
+                "invalid increment/decrement target".to_string(),
+                operator,
+            )),
         }
     }
 
@@ -1626,6 +1694,8 @@ impl Parser {
                 | Token::StringLiteral(_)
                 | Token::Plus
                 | Token::Minus
+                | Token::PlusPlus
+                | Token::MinusMinus
                 | Token::Bang
                 | Token::Star
                 | Token::Amp
@@ -1806,6 +1876,12 @@ impl Parser {
         self.tokens
             .get(self.pos)
             .expect("lexer always appends an EOF token")
+    }
+
+    fn previous(&self) -> &LocatedToken {
+        self.tokens
+            .get(self.pos.saturating_sub(1))
+            .expect("previous token exists after a successful match")
     }
 
     fn advance(&mut self) -> LocatedToken {
@@ -2450,6 +2526,7 @@ impl Interpreter {
             | Expr::UnaryMinus(_)
             | Expr::LogicalNot(_)
             | Expr::CompoundAssign { .. }
+            | Expr::Increment { .. }
             | Expr::Conditional { .. }
             | Expr::Binary(_, _, _) => Ok(self.eval(expr)? != 0),
         }
@@ -2503,6 +2580,72 @@ impl Interpreter {
         match op {
             CompoundOp::Add => lhs + rhs,
             CompoundOp::Sub => lhs - rhs,
+        }
+    }
+
+    fn apply_increment_op(current: i64, op: IncrementOp) -> i64 {
+        match op {
+            IncrementOp::Inc => current + 1,
+            IncrementOp::Dec => current - 1,
+        }
+    }
+
+    fn increment_result(current: i64, updated: i64, prefix: bool) -> i64 {
+        if prefix { updated } else { current }
+    }
+
+    fn eval_increment_expr(
+        &mut self,
+        target: &Expr,
+        op: IncrementOp,
+        prefix: bool,
+    ) -> CustResult<i64> {
+        match target {
+            Expr::Var(name) => match self.find_variable(name).cloned() {
+                Some(Value::Scalar(current)) => {
+                    let updated = Self::apply_increment_op(current, op);
+                    if let Some(Value::Scalar(slot)) = self.find_variable_mut(name) {
+                        *slot = updated;
+                    }
+                    Ok(Self::increment_result(current, updated, prefix))
+                }
+                Some(Value::Pointer(_)) => {
+                    Err(CustError::new("pointer arithmetic is not supported"))
+                }
+                Some(Value::Array(_)) => Err(CustError::new(format!(
+                    "array '{name}' requires indexed assignment"
+                ))),
+                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            Expr::ArrayGet { name, index } => {
+                let (array, index) = match self.find_variable(name).cloned() {
+                    Some(Value::Pointer(pointer)) => {
+                        let index_value = self.eval(index)?;
+                        let (array, _, index) =
+                            self.checked_pointer_value_index(&pointer, index_value)?;
+                        (array, index)
+                    }
+                    Some(_) | None => self.checked_array_index(name, index)?,
+                };
+                let current = array.borrow().elements[index];
+                let updated = Self::apply_increment_op(current, op);
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new(format!(
+                        "cannot modify read-only array '{name}'"
+                    )));
+                }
+                array.elements[index] = updated;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
+            Expr::Deref(pointer) => {
+                let pointer = self.eval_pointer(pointer)?;
+                let current = self.deref_pointer(&pointer)?;
+                let updated = Self::apply_increment_op(current, op);
+                self.assign_deref_pointer(&pointer, updated)?;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
+            _ => Err(CustError::new("invalid increment/decrement target")),
         }
     }
 
@@ -2803,6 +2946,9 @@ impl Interpreter {
             Expr::Assign { name, value } => self.eval_assignment_expr(name, value),
             Expr::CompoundAssign { name, op, value } => {
                 self.eval_compound_assignment_expr(name, *op, value)
+            }
+            Expr::Increment { target, op, prefix } => {
+                self.eval_increment_expr(target, *op, *prefix)
             }
             Expr::ArraySet { name, index, value } => {
                 let value = self.eval(value)?;

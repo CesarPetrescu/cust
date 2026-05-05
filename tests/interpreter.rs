@@ -978,6 +978,25 @@ fn supports_compound_assignment_expressions_for_scalar_array_and_deref_lvalues()
 }
 
 #[test]
+fn supports_increment_decrement_for_scalar_indexed_and_deref_lvalues() {
+    let program = include_str!("fixtures/valid/increment_decrement.c");
+
+    assert_eq!(interpret(program).unwrap(), 89);
+}
+
+#[test]
+fn rejects_non_lvalue_increment_decrement_expressions() {
+    let program = include_str!("fixtures/invalid/non_lvalue_increment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "invalid increment/decrement target at line 3, column 12"
+    );
+}
+
+#[test]
 fn rejects_non_lvalue_assignment_expressions() {
     let program = include_str!("fixtures/invalid/non_lvalue_assignment_expression.c");
 
