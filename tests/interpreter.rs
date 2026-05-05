@@ -84,6 +84,25 @@ fn supports_c_style_block_comments_as_whitespace() {
 }
 
 #[test]
+fn supports_global_scalar_array_and_pointer_variables() {
+    let program = include_str!("fixtures/valid/global_variables.c");
+
+    assert_eq!(interpret(program).unwrap(), 22);
+}
+
+#[test]
+fn reports_duplicate_global_variables() {
+    let program = include_str!("fixtures/invalid/duplicate_global_variable.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "variable 'total' already declared in this scope"
+    );
+}
+
+#[test]
 fn reports_source_context_for_unterminated_block_comments() {
     let program = include_str!("fixtures/invalid/unterminated_block_comment.c");
 

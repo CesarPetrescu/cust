@@ -36,10 +36,10 @@ Last updated: 2026-05-05
 
 ## Supported language subset
 
-- `int main() { ... }` plus additional `int name(...) { ... }` and `void name(...) { ... }` function definitions
+- Top-level `int`/`char` scalar globals, one-dimensional array globals, and pointer globals with supported initializers, plus `int main() { ... }` and additional `int name(...) { ... }` / `void name(...) { ... }` function definitions
 - function calls as expressions with integer arguments for `int` functions, side-effect-only expression statements for `void` functions, local parameter scopes, direct/mutual recursion support, arity diagnostics, undefined-function diagnostics, empty `return;` support for `void` functions, diagnostics for value returns from `void` functions / empty returns from `int` functions / scalar use of `void` calls, and a 64-call-depth safety limit with function-name context
 - integer literals, character literals, string literals, variables, and one-dimensional `int`/`char` arrays
-- declarations: `int x = expr;`, `char x = expr;`, `int xs[N];`, or `char cs[N];`
+- declarations: top-level or local `int x = expr;`, `char x = expr;`, `int xs[N];`, or `char cs[N];`, with globals initialized before `main()` and visible/mutable from helper functions
 - `int` and `char` function parameters (stored as integer values in the current interpreter model)
 - one-dimensional array parameters such as `int values[3]`, passed by reference to the same array storage; string literals can be passed to `char` array parameters as read-only NUL-terminated byte arrays
 - First-pass scalar pointer support from `docs/plans/pointer-model.md`: `int *p = &x;`, `char *p = &c;`, `p = &y;`, `p = 0;`, `*p` reads, and `*p = expr;` writes through interpreter-owned scalar references. Null dereferences report `null pointer dereference`; pointers to scalar variables whose block/function scope has ended report `pointer to out-of-scope variable '<name>'`.
@@ -88,7 +88,9 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after the 2026-05-05 autonomous void-function run. This run added lexer/parser/interpreter support for `void` helper functions, `return;`, side-effect-only void call statements, and diagnostics for returning a value from a void function, returning no value from an int function, and using a void function call as a scalar expression. Regression coverage includes valid/invalid interpreter fixtures and a native C compiler-oracle fixture. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-05 autonomous global-variable run. This run added parser/interpreter support for top-level `int`/`char` scalar globals, array globals, and pointer globals; globals are initialized in a persistent outer scope before `main()` and can be read/written by helper functions. Regression coverage includes a valid interpreter fixture, duplicate-global invalid fixture, and native C compiler-oracle fixture. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous verified state: all passed after the 2026-05-05 autonomous void-function run. This run added lexer/parser/interpreter support for `void` helper functions, `return;`, side-effect-only void call statements, and diagnostics for returning a value from a void function, returning no value from an int function, and using a void function call as a scalar expression. Regression coverage includes valid/invalid interpreter fixtures and a native C compiler-oracle fixture. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Previous verified state: all passed after the 2026-05-05 autonomous block-comment run. This run added lexer support for C-style `/* ... */` block comments as whitespace across lines and inline token boundaries, plus source-line/caret diagnostics for unterminated block comments. Regression coverage includes valid/invalid interpreter fixtures and a native C compiler-oracle fixture. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 

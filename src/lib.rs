@@ -174,6 +174,7 @@ enum Expr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Program {
+    globals: Vec<Stmt>,
     functions: HashMap<String, Function>,
 }
 
@@ -307,6 +308,7 @@ enum SwitchLabel {
 ///
 /// Supported v0.1 syntax:
 /// - `int main() { ... }`
+/// - top-level `int`/`char` scalar, array, and pointer globals initialized before `main()`
 /// - `int name(int param, char param, ...) { ... }` function definitions and calls, including bounded recursion
 /// - `int name = expression;` and `char name = expression;`
 /// - `name = expression;`
@@ -370,6 +372,9 @@ pub fn format_ast(source: &str) -> CustResult<String> {
     names.sort();
 
     let mut output = String::new();
+    if !program.globals.is_empty() {
+        output.push_str(&format!("globals: {:?}\n", program.globals));
+    }
     for name in names {
         let function = &program.functions[name];
         output.push_str(&format!("function {name}\n"));
@@ -851,6 +856,7 @@ impl Parser {
     }
 
     fn parse_program(&mut self) -> CustResult<Program> {
+        let mut globals = Vec::new();
         let mut functions = HashMap::new();
         while !self.check(&Token::Eof) {
             if self.check(&Token::RBrace) {
@@ -859,16 +865,65 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let (name, function) = self.parse_function()?;
-            if functions.insert(name.clone(), function).is_some() {
-                return Err(CustError::new(format!("function '{name}' already defined")));
+            if self.starts_function_definition()
+                || self.starts_malformed_function_definition()
+                || self.check(&Token::Void)
+            {
+                let (name, function) = self.parse_function()?;
+                if functions.insert(name.clone(), function).is_some() {
+                    return Err(CustError::new(format!("function '{name}' already defined")));
+                }
+            } else if matches!(self.peek(), Token::Int | Token::Char) {
+                globals.push(self.parse_var_decl()?);
+            } else {
+                let found = self.peek_located().clone();
+                return Err(Self::error_at(
+                    format!("unexpected token at top level: {:?}", found.kind),
+                    &found,
+                ));
             }
         }
         self.expect(Token::Eof)?;
         if !functions.contains_key("main") {
             return Err(CustError::new("missing main() function"));
         }
-        Ok(Program { functions })
+        Ok(Program { globals, functions })
+    }
+
+    fn starts_function_definition(&self) -> bool {
+        if !matches!(self.peek(), Token::Int | Token::Void) {
+            return false;
+        }
+
+        let mut index = self.pos + 1;
+        if matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Star)
+        ) {
+            index += 1;
+        }
+
+        matches!(
+            (
+                self.tokens.get(index).map(|token| &token.kind),
+                self.tokens.get(index + 1).map(|token| &token.kind)
+            ),
+            (Some(Token::Ident(_)), Some(Token::LParen))
+        )
+    }
+
+    fn starts_malformed_function_definition(&self) -> bool {
+        if !self.check(&Token::Int) {
+            return false;
+        }
+
+        matches!(
+            (
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                self.tokens.get(self.pos + 2).map(|token| &token.kind)
+            ),
+            (Some(Token::LParen), _) | (Some(Token::Ident(_)), Some(Token::LBrace))
+        )
     }
 
     fn parse_function(&mut self) -> CustResult<(String, Function)> {
@@ -2301,12 +2356,24 @@ impl Interpreter {
 
     fn run(&mut self, program: &Program) -> CustResult<i64> {
         self.functions = program.functions.clone();
-        match self.call_function("main", &[])? {
+        self.push_scope();
+        for global in &program.globals {
+            match self.exec_stmt(global)? {
+                ExecFlow::None => {}
+                ExecFlow::Return(_) => return Err(CustError::new("return outside function")),
+                ExecFlow::Break => return Err(CustError::new("break outside loop")),
+                ExecFlow::Continue => return Err(CustError::new("continue outside loop")),
+            }
+        }
+
+        let result = match self.call_function("main", &[])? {
             Some(value) => Ok(value),
             None => Err(CustError::new(
                 "int function 'main' returned without a value",
             )),
-        }
+        };
+        self.pop_scope();
+        result
     }
 
     fn call_function(&mut self, name: &str, arg_exprs: &[Expr]) -> CustResult<Option<i64>> {
