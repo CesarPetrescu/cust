@@ -957,6 +957,13 @@ fn supports_assignment_expressions_for_scalar_array_and_deref_lvalues() {
 }
 
 #[test]
+fn supports_conditional_operator_with_short_circuiting_and_pointer_truthiness() {
+    let program = include_str!("fixtures/valid/conditional_operator.c");
+
+    assert_eq!(interpret(program).unwrap(), 96);
+}
+
+#[test]
 fn rejects_non_lvalue_assignment_expressions() {
     let program = include_str!("fixtures/invalid/non_lvalue_assignment_expression.c");
 
@@ -965,6 +972,18 @@ fn rejects_non_lvalue_assignment_expressions() {
     assert_eq!(
         err.to_string(),
         "invalid assignment target at line 3, column 20"
+    );
+}
+
+#[test]
+fn reports_missing_colon_in_conditional_operator() {
+    let program = include_str!("fixtures/invalid/conditional_missing_colon.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected ':' after conditional then-expression, found Semi at line 2, column 17"
     );
 }
 

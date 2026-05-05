@@ -65,6 +65,8 @@ enum Token {
     RBrace,
     Comma,
     Semi,
+    Question,
+    Colon,
     Eof,
 }
 
@@ -120,6 +122,11 @@ enum Expr {
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
     LogicalNot(Box<Expr>),
+    Conditional {
+        cond: Box<Expr>,
+        then_expr: Box<Expr>,
+        else_expr: Box<Expr>,
+    },
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
 }
 
@@ -550,6 +557,14 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
             }
             ';' => {
                 push_token(&mut tokens, Token::Semi, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
+            }
+            '?' => {
+                push_token(&mut tokens, Token::Question, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
+            }
+            ':' => {
+                push_token(&mut tokens, Token::Colon, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '=' if chars.get(i + 1) == Some(&'=') => {
@@ -1041,7 +1056,7 @@ impl Parser {
     }
 
     fn parse_assignment_expr(&mut self) -> CustResult<Expr> {
-        let target = self.parse_logical_or()?;
+        let target = self.parse_conditional_expr()?;
         if self.check(&Token::Assign) {
             let equals = self.advance();
             let value = self.parse_assignment_expr()?;
@@ -1066,6 +1081,22 @@ impl Parser {
             }
         } else {
             Ok(target)
+        }
+    }
+
+    fn parse_conditional_expr(&mut self) -> CustResult<Expr> {
+        let cond = self.parse_logical_or()?;
+        if self.matches(&Token::Question) {
+            let then_expr = self.parse_expr()?;
+            self.expect_colon_after("conditional then-expression")?;
+            let else_expr = self.parse_conditional_expr()?;
+            Ok(Expr::Conditional {
+                cond: Box::new(cond),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
+            })
+        } else {
+            Ok(cond)
         }
     }
 
@@ -1354,6 +1385,18 @@ impl Parser {
         } else {
             Err(Self::error_at(
                 format!("expected '=' after {context}, found {:?}", found.kind),
+                &found,
+            ))
+        }
+    }
+
+    fn expect_colon_after(&mut self, context: &str) -> CustResult<()> {
+        let found = self.advance();
+        if found.kind == Token::Colon {
+            Ok(())
+        } else {
+            Err(Self::error_at(
+                format!("expected ':' after {context}, found {:?}", found.kind),
                 &found,
             ))
         }
@@ -1918,6 +1961,17 @@ impl Interpreter {
     fn eval_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
         match expr {
             Expr::Number(0) => Ok(PointerValue::Null),
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                if self.eval_truthy(cond)? {
+                    self.eval_pointer(then_expr)
+                } else {
+                    self.eval_pointer(else_expr)
+                }
+            }
             Expr::AddressOf(name) => self.address_of_scalar(name),
             Expr::AddressOfArray { name, index } => {
                 if let Some(Value::Pointer(pointer)) = self.find_variable(name).cloned() {
@@ -2245,6 +2299,7 @@ impl Interpreter {
             Expr::UnaryPlus(_)
             | Expr::UnaryMinus(_)
             | Expr::LogicalNot(_)
+            | Expr::Conditional { .. }
             | Expr::Binary(_, _, _) => Ok(self.eval(expr)? != 0),
         }
     }
@@ -2556,6 +2611,17 @@ impl Interpreter {
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::LogicalNot(inner) => Ok((!self.eval_truthy(inner)?) as i64),
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                if self.eval_truthy(cond)? {
+                    self.eval(then_expr)
+                } else {
+                    self.eval(else_expr)
+                }
+            }
             Expr::Binary(left, op, right) => match op {
                 BinaryOp::LogicalAnd => {
                     if !self.eval_truthy(left)? {

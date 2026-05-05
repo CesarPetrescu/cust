@@ -22,6 +22,7 @@ Prioritized backlog for autonomous implementation.
 - [x] `break` and `continue`
 - [x] Empty statements and expression statements
 - [x] Assignment expressions for scalar, array-index, and dereferenced pointer lvalues, including right-associative chained assignment and C compiler-oracle coverage
+- [x] Conditional operator `?:` with C-style truthiness, right-associative nesting, branch short-circuiting, assignment-expression operands, pointer-truthiness conditions, and compiler-oracle coverage
 
 ## P2 — data types
 
