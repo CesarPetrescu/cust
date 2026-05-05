@@ -985,6 +985,25 @@ fn supports_increment_decrement_for_scalar_indexed_and_deref_lvalues() {
 }
 
 #[test]
+fn supports_bitwise_and_shift_operators_with_c_precedence() {
+    let program = include_str!("fixtures/valid/bitwise_operators.c");
+
+    assert_eq!(interpret(program).unwrap(), 188);
+}
+
+#[test]
+fn rejects_pointer_bitwise_operations() {
+    let program = include_str!("fixtures/invalid/pointer_bitwise_operation.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer bitwise operations are not supported"
+    );
+}
+
+#[test]
 fn rejects_non_lvalue_increment_decrement_expressions() {
     let program = include_str!("fixtures/invalid/non_lvalue_increment.c");
 

@@ -103,7 +103,7 @@ Features:
 - `for`
 - `break` / `continue`
 - empty statements (`;`) and expression statements (`expr;`)
-- arithmetic: `+ - * / %`
+- arithmetic and bitwise operators: `+ - * / %`, unary `~`, binary `& ^ |`, and shifts `<< >>`
 - comparisons: `== != < <= > >=`
 - logical operators with C-style truth values and short-circuiting: `&& || !`
 - unary plus: `+expr`

@@ -53,15 +53,20 @@ enum Token {
     Percent,
     Amp,
     AndAnd,
+    Pipe,
     OrOr,
+    Caret,
+    Tilde,
     Bang,
     Assign,
     Eq,
     Ne,
     Lt,
     Le,
+    ShiftLeft,
     Gt,
     Ge,
+    ShiftRight,
     LParen,
     RParen,
     LBracket,
@@ -147,6 +152,7 @@ enum Expr {
     },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
+    BitwiseNot(Box<Expr>),
     LogicalNot(Box<Expr>),
     Conditional {
         cond: Box<Expr>,
@@ -187,12 +193,17 @@ enum BinaryOp {
     Mul,
     Div,
     Rem,
+    ShiftLeft,
+    ShiftRight,
     Eq,
     Ne,
     Lt,
     Le,
     Gt,
     Ge,
+    BitAnd,
+    BitXor,
+    BitOr,
     LogicalAnd,
     LogicalOr,
 }
@@ -591,6 +602,18 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 advance_position('|', &mut line, &mut column, &mut i);
                 advance_position('|', &mut line, &mut column, &mut i);
             }
+            '|' => {
+                push_token(&mut tokens, Token::Pipe, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
+            }
+            '^' => {
+                push_token(&mut tokens, Token::Caret, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
+            }
+            '~' => {
+                push_token(&mut tokens, Token::Tilde, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
+            }
             '(' => {
                 push_token(&mut tokens, Token::LParen, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
@@ -645,10 +668,20 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 push_token(&mut tokens, Token::Bang, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
+            '<' if chars.get(i + 1) == Some(&'<') => {
+                push_token(&mut tokens, Token::ShiftLeft, line, column);
+                advance_position('<', &mut line, &mut column, &mut i);
+                advance_position('<', &mut line, &mut column, &mut i);
+            }
             '<' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::Le, line, column);
                 advance_position('<', &mut line, &mut column, &mut i);
                 advance_position('=', &mut line, &mut column, &mut i);
+            }
+            '>' if chars.get(i + 1) == Some(&'>') => {
+                push_token(&mut tokens, Token::ShiftRight, line, column);
+                advance_position('>', &mut line, &mut column, &mut i);
+                advance_position('>', &mut line, &mut column, &mut i);
             }
             '>' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::Ge, line, column);
@@ -1248,10 +1281,37 @@ impl Parser {
     }
 
     fn parse_logical_and(&mut self) -> CustResult<Expr> {
-        let mut expr = self.parse_equality()?;
+        let mut expr = self.parse_bitwise_or()?;
         while self.matches(&Token::AndAnd) {
-            let rhs = self.parse_equality()?;
+            let rhs = self.parse_bitwise_or()?;
             expr = Expr::Binary(Box::new(expr), BinaryOp::LogicalAnd, Box::new(rhs));
+        }
+        Ok(expr)
+    }
+
+    fn parse_bitwise_or(&mut self) -> CustResult<Expr> {
+        let mut expr = self.parse_bitwise_xor()?;
+        while self.matches(&Token::Pipe) {
+            let rhs = self.parse_bitwise_xor()?;
+            expr = Expr::Binary(Box::new(expr), BinaryOp::BitOr, Box::new(rhs));
+        }
+        Ok(expr)
+    }
+
+    fn parse_bitwise_xor(&mut self) -> CustResult<Expr> {
+        let mut expr = self.parse_bitwise_and()?;
+        while self.matches(&Token::Caret) {
+            let rhs = self.parse_bitwise_and()?;
+            expr = Expr::Binary(Box::new(expr), BinaryOp::BitXor, Box::new(rhs));
+        }
+        Ok(expr)
+    }
+
+    fn parse_bitwise_and(&mut self) -> CustResult<Expr> {
+        let mut expr = self.parse_equality()?;
+        while self.matches(&Token::Amp) {
+            let rhs = self.parse_equality()?;
+            expr = Expr::Binary(Box::new(expr), BinaryOp::BitAnd, Box::new(rhs));
         }
         Ok(expr)
     }
@@ -1273,7 +1333,7 @@ impl Parser {
     }
 
     fn parse_comparison(&mut self) -> CustResult<Expr> {
-        let mut expr = self.parse_term()?;
+        let mut expr = self.parse_shift()?;
         loop {
             let op = if self.matches(&Token::Lt) {
                 BinaryOp::Lt
@@ -1283,6 +1343,22 @@ impl Parser {
                 BinaryOp::Gt
             } else if self.matches(&Token::Ge) {
                 BinaryOp::Ge
+            } else {
+                break;
+            };
+            let rhs = self.parse_shift()?;
+            expr = Expr::Binary(Box::new(expr), op, Box::new(rhs));
+        }
+        Ok(expr)
+    }
+
+    fn parse_shift(&mut self) -> CustResult<Expr> {
+        let mut expr = self.parse_term()?;
+        loop {
+            let op = if self.matches(&Token::ShiftLeft) {
+                BinaryOp::ShiftLeft
+            } else if self.matches(&Token::ShiftRight) {
+                BinaryOp::ShiftRight
             } else {
                 break;
             };
@@ -1339,6 +1415,8 @@ impl Parser {
             Ok(Expr::UnaryPlus(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Minus) {
             Ok(Expr::UnaryMinus(Box::new(self.parse_unary()?)))
+        } else if self.matches(&Token::Tilde) {
+            Ok(Expr::BitwiseNot(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Bang) {
             Ok(Expr::LogicalNot(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Star) {
@@ -2524,6 +2602,7 @@ impl Interpreter {
             Expr::Number(value) => Ok(*value != 0),
             Expr::UnaryPlus(_)
             | Expr::UnaryMinus(_)
+            | Expr::BitwiseNot(_)
             | Expr::LogicalNot(_)
             | Expr::CompoundAssign { .. }
             | Expr::Increment { .. }
@@ -2592,6 +2671,25 @@ impl Interpreter {
 
     fn increment_result(current: i64, updated: i64, prefix: bool) -> i64 {
         if prefix { updated } else { current }
+    }
+
+    fn checked_shift_left(lhs: i64, rhs: i64) -> CustResult<i64> {
+        let shift = Self::checked_shift_count(rhs)?;
+        lhs.checked_shl(shift)
+            .ok_or_else(|| CustError::new("shift count too large"))
+    }
+
+    fn checked_shift_right(lhs: i64, rhs: i64) -> CustResult<i64> {
+        let shift = Self::checked_shift_count(rhs)?;
+        lhs.checked_shr(shift)
+            .ok_or_else(|| CustError::new("shift count too large"))
+    }
+
+    fn checked_shift_count(rhs: i64) -> CustResult<u32> {
+        if rhs < 0 {
+            return Err(CustError::new("shift count must be non-negative"));
+        }
+        u32::try_from(rhs).map_err(|_| CustError::new("shift count too large"))
     }
 
     fn eval_increment_expr(
@@ -3017,6 +3115,7 @@ impl Interpreter {
             Expr::Call { name, args } => self.call_function(name, args),
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
+            Expr::BitwiseNot(inner) => Ok(!self.eval(inner)?),
             Expr::LogicalNot(inner) => Ok((!self.eval_truthy(inner)?) as i64),
             Expr::Conditional {
                 cond,
@@ -3071,6 +3170,27 @@ impl Interpreter {
                         BinaryOp::Gt => Ok((lhs > rhs) as i64),
                         BinaryOp::Ge => Ok((lhs >= rhs) as i64),
                         _ => unreachable!("only ordering operators handled in this branch"),
+                    }
+                }
+                BinaryOp::ShiftLeft
+                | BinaryOp::ShiftRight
+                | BinaryOp::BitAnd
+                | BinaryOp::BitXor
+                | BinaryOp::BitOr => {
+                    if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
+                        return Err(CustError::new(
+                            "pointer bitwise operations are not supported",
+                        ));
+                    }
+                    let lhs = self.eval(left)?;
+                    let rhs = self.eval(right)?;
+                    match op {
+                        BinaryOp::BitAnd => Ok(lhs & rhs),
+                        BinaryOp::BitXor => Ok(lhs ^ rhs),
+                        BinaryOp::BitOr => Ok(lhs | rhs),
+                        BinaryOp::ShiftLeft => Self::checked_shift_left(lhs, rhs),
+                        BinaryOp::ShiftRight => Self::checked_shift_right(lhs, rhs),
+                        _ => unreachable!("only bitwise operators handled in this branch"),
                     }
                 }
                 BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem => {

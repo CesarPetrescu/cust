@@ -26,6 +26,7 @@ Prioritized backlog for autonomous implementation.
 - [x] `do { ... } while (condition);` loops with guaranteed first body execution, C-style truthiness, `break`/`continue` handling, loop-step budgeting, exact missing-semicolon diagnostics, and compiler-oracle coverage
 - [x] Increment/decrement operators (`++`/`--`) or compound assignment (`+=`, `-=`) once selected with precise parser/interpreter acceptance fixtures and C compiler-oracle coverage
 - [x] Increment/decrement operators (`++`/`--`) with prefix/postfix semantics for scalar, indexed array/pointer, and dereferenced pointer lvalues plus `for` clause use, non-lvalue diagnostics, and C compiler-oracle coverage
+- [x] Bitwise and shift operators: unary `~`, binary `&`, `^`, `|`, `<<`, and `>>` with C precedence, interpreter diagnostics for pointer operands, and C compiler-oracle coverage
 
 ## P2 — data types
 
