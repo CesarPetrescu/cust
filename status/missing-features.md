@@ -46,5 +46,5 @@ Prioritized backlog for autonomous implementation.
 - [x] CLI flag: `--max-steps`
 - [x] CLI flag: `--version`
 - [x] Better README examples
-- [ ] Release notes and tags
+- [x] Release notes and tags (`CHANGELOG.md` and annotated `v0.1` tag)
 - [ ] License file

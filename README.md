@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.1** — minimal, tested, Dockerized foundation.
+> Status: **v0.1** — tested, Dockerized C-subset interpreter foundation.
 
 ## Why Cust?
 
@@ -186,14 +186,14 @@ docker compose run --rm cust
 
 Cust is not a full C implementation yet. Missing features include richer pointer support, structs, preprocessor support, includes, standard library calls, floating-point values, and many richer C-subset compatibility rules. Cust is an interpreter: it executes user programs itself. Native compilers such as GCC/Clang may be used only as an optional test oracle to compare expected behavior for supported fixtures, never as Cust's execution path or as an implementation shortcut.
 
-See [docs/v0.1.md](docs/v0.1.md) for implementation details and safety notes.
+See [CHANGELOG.md](CHANGELOG.md) for release notes and [docs/v0.1.md](docs/v0.1.md) for implementation details and safety notes.
 
 ## Roadmap
 
-- v0.2: better diagnostics with source spans and expanded test fixtures
-- v0.3: recursive calls with an explicit bounded-depth regression suite
-- v0.4: arrays and strings
-- v0.5: richer C-subset conformance tests, including optional compiler-oracle comparisons for supported fixtures
+- Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
+- Next language design: decide whether the v0.1+ subset should support `void`/`return;` and document the semantics before implementation.
+- Product quality: add a root `LICENSE` file once the project-owner confirms the intended license.
+- Longer term: consider structs/unions/enums, prototypes/declarations, multiple pointer levels, assignment expressions, preprocessor support, standard-library calls, and floating-point values.
 
 ## License
 
