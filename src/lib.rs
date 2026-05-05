@@ -639,7 +639,7 @@ impl Parser {
 
     fn parse_function(&mut self) -> CustResult<(String, Function)> {
         self.expect(Token::Int)?;
-        let name = self.expect_ident()?;
+        let name = self.expect_ident_after("function name after return type")?;
         self.expect_opening_paren_after("function name")?;
         let params = self.parse_params()?;
         self.expect_closing_paren_after("function parameters")?;
@@ -654,9 +654,13 @@ impl Parser {
         }
 
         loop {
-            self.expect_type()?;
+            self.expect_type_after("parameter type")?;
             let is_pointer = self.matches(&Token::Star);
-            let name = self.expect_ident()?;
+            let name = if is_pointer {
+                self.expect_ident_after("parameter name after '*'")?
+            } else {
+                self.expect_ident_after("parameter name after type")?
+            };
             let kind = if is_pointer {
                 ParamKind::Pointer
             } else if self.matches(&Token::LBracket) {
@@ -769,7 +773,11 @@ impl Parser {
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         self.expect_type()?;
         let is_pointer = self.matches(&Token::Star);
-        let name = self.expect_ident()?;
+        let name = if is_pointer {
+            self.expect_ident_after("pointer name after '*'")?
+        } else {
+            self.expect_ident_after("variable name after type")?
+        };
         if is_pointer {
             self.expect_assign_after("pointer declaration")?;
             let expr = self.parse_expr()?;
@@ -1261,12 +1269,34 @@ impl Parser {
         }
     }
 
+    fn expect_ident_after(&mut self, context: &str) -> CustResult<String> {
+        let found = self.advance();
+        match found.kind.clone() {
+            Token::Ident(name) => Ok(name),
+            token => Err(Self::error_at(
+                format!("expected {context}, found {token:?}"),
+                &found,
+            )),
+        }
+    }
+
     fn expect_type(&mut self) -> CustResult<()> {
         let found = self.advance();
         match &found.kind {
             Token::Int | Token::Char => Ok(()),
             token => Err(Self::error_at(
                 format!("expected type, found {token:?}"),
+                &found,
+            )),
+        }
+    }
+
+    fn expect_type_after(&mut self, context: &str) -> CustResult<()> {
+        let found = self.advance();
+        match &found.kind {
+            Token::Int | Token::Char => Ok(()),
+            token => Err(Self::error_at(
+                format!("expected {context}, found {token:?}"),
                 &found,
             )),
         }

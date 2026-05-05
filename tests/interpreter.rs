@@ -413,6 +413,66 @@ fn reports_unmatched_closing_braces_at_top_level() {
 }
 
 #[test]
+fn reports_missing_function_names_after_return_types() {
+    let program = "int () { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected function name after return type, found LParen at line 1, column 5"
+    );
+}
+
+#[test]
+fn reports_missing_variable_names_after_declaration_types() {
+    let program = "int main() {\nint = 1;\nreturn 0;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected variable name after type, found Assign at line 2, column 5"
+    );
+}
+
+#[test]
+fn reports_missing_pointer_names_after_pointer_declaration_stars() {
+    let program = "int main() {\nint x = 1;\nint * = &x;\nreturn x;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected pointer name after '*', found Assign at line 3, column 7"
+    );
+}
+
+#[test]
+fn reports_missing_parameter_names_after_parameter_types() {
+    let program = "int identity(int) { return 0; }\nint main() { return identity(1); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected parameter name after type, found RParen at line 1, column 17"
+    );
+}
+
+#[test]
+fn reports_missing_parameter_types_before_parameter_names() {
+    let program = "int identity(value) { return value; }\nint main() { return identity(1); }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected parameter type, found Ident(\"value\") at line 1, column 14"
+    );
+}
+
+#[test]
 fn reports_missing_assignment_operator_after_variable_declarations() {
     let program = "int main() {\nint x 1;\nreturn x;\n}\n";
 
