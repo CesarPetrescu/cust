@@ -314,6 +314,7 @@ enum SwitchLabel {
 /// - integer, character, and string literals (string literals are read-only NUL-terminated byte arrays)
 /// - integer arithmetic/comparisons/logical operators: `+ - * / % == != < <= > >= && || !`
 /// - pointer truthiness and pointer equality/inequality for null, scalar pointers, and array-backed pointers
+/// - line comments (`// ...`) and C-style block comments (`/* ... */`)
 pub fn interpret(source: &str) -> CustResult<i64> {
     interpret_with_options(source, InterpretOptions::default())
 }
@@ -386,6 +387,32 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 advance_position('/', &mut line, &mut column, &mut i);
                 while i < chars.len() && chars[i] != '\n' {
                     advance_position(chars[i], &mut line, &mut column, &mut i);
+                }
+            }
+            '/' if chars.get(i + 1) == Some(&'*') => {
+                let start_line = line;
+                let start_column = column;
+                advance_position('/', &mut line, &mut column, &mut i);
+                advance_position('*', &mut line, &mut column, &mut i);
+
+                let mut closed = false;
+                while i < chars.len() {
+                    if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                        advance_position('*', &mut line, &mut column, &mut i);
+                        advance_position('/', &mut line, &mut column, &mut i);
+                        closed = true;
+                        break;
+                    }
+                    advance_position(chars[i], &mut line, &mut column, &mut i);
+                }
+
+                if !closed {
+                    return Err(lexer_error_with_context(
+                        "unterminated block comment",
+                        source,
+                        start_line,
+                        start_column,
+                    ));
                 }
             }
             '0'..='9' => {

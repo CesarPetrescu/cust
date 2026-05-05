@@ -107,7 +107,7 @@ Features:
 - comparisons: `== != < <= > >=`
 - logical operators with C-style truth values and short-circuiting: `&& || !`
 - unary plus: `+expr`
-- `//` comments
+- comments: `// line comments` and `/* block comments */`
 
 ## CLI
 

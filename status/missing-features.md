@@ -31,6 +31,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Comma operator `left, right` with lowest-precedence parsing, side-effecting left-expression evaluation, right-expression result propagation, pointer/truthiness support, call-argument separator preservation, exact malformed-RHS diagnostic, and C compiler-oracle coverage
 - [x] Switch statements with integer/character `case` labels, `default`, C-style fallthrough, `break` consumption, `continue` propagation to enclosing loops, exact missing-colon diagnostics, and C compiler-oracle coverage
 - [x] Single-statement control-flow bodies and `else if` chains for `if`/`else`/`while`/`do`/`for`, including nearest-`if` dangling-`else` binding, loop control propagation, and C compiler-oracle coverage
+- [x] C-style block comments `/* ... */` treated as lexer whitespace across lines/inline token boundaries, with source-line/caret diagnostics for unterminated block comments and C compiler-oracle coverage
 
 ## P2 — data types
 

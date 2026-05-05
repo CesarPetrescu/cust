@@ -8,6 +8,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/assignment_expressions.c",
     "tests/fixtures/compat/valid/bitwise_compound_assignments.c",
     "tests/fixtures/compat/valid/bitwise_operators.c",
+    "tests/fixtures/compat/valid/block_comments.c",
     "tests/fixtures/compat/valid/comma_operator.c",
     "tests/fixtures/compat/valid/compound_assignments.c",
     "tests/fixtures/compat/valid/conditional_operator.c",

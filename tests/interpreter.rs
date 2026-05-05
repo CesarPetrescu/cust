@@ -77,6 +77,25 @@ fn reports_source_context_for_out_of_range_integer_literal() {
 }
 
 #[test]
+fn supports_c_style_block_comments_as_whitespace() {
+    let program = include_str!("fixtures/valid/block_comments.c");
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn reports_source_context_for_unterminated_block_comments() {
+    let program = include_str!("fixtures/invalid/unterminated_block_comment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unterminated block comment at line 3, column 5\n    /* unterminated block comment\n    ^"
+    );
+}
+
+#[test]
 fn reports_line_and_column_for_parser_expression_errors() {
     let program = "int main() {\nreturn ;\n}\n";
 
