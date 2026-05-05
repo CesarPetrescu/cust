@@ -413,6 +413,66 @@ fn reports_unmatched_closing_braces_at_top_level() {
 }
 
 #[test]
+fn reports_missing_assignment_operator_after_variable_declarations() {
+    let program = "int main() {\nint x 1;\nreturn x;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '=' after variable declaration, found Number(1) at line 2, column 7"
+    );
+}
+
+#[test]
+fn reports_missing_assignment_operator_after_pointer_declarations() {
+    let program = "int main() {\nint x = 1;\nint *p &x;\nreturn *p;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '=' after pointer declaration, found Amp at line 3, column 8"
+    );
+}
+
+#[test]
+fn reports_missing_assignment_operator_after_scalar_assignments() {
+    let program = "int main() {\nint x = 1;\nx 2;\nreturn x;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '=' after assignment, found Number(2) at line 3, column 3"
+    );
+}
+
+#[test]
+fn reports_missing_assignment_operator_after_array_assignments() {
+    let program = "int main() {\nint values[2];\nvalues[0] 3;\nreturn values[0];\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '=' after assignment, found Number(3) at line 3, column 11"
+    );
+}
+
+#[test]
+fn reports_missing_assignment_operator_after_dereference_assignments() {
+    let program = "int main() {\nint x = 1;\nint *p = &x;\n*p 3;\nreturn x;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '=' after assignment, found Number(3) at line 4, column 4"
+    );
+}
+
+#[test]
 fn reports_missing_semicolon_after_variable_declarations() {
     let program = "int main() {\nint x = 1\nreturn x;\n}\n";
 

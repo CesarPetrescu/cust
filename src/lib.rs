@@ -721,8 +721,18 @@ impl Parser {
             Token::For => self.parse_for(),
             Token::Break => self.parse_break(),
             Token::Continue => self.parse_continue(),
-            Token::Star if self.starts_deref_assignment_stmt() => self.parse_deref_assign(),
-            Token::Ident(_) if self.starts_assignment_stmt() => self.parse_assign(),
+            Token::Star
+                if self.starts_deref_assignment_stmt()
+                    || self.starts_missing_deref_assignment_operator_stmt() =>
+            {
+                self.parse_deref_assign()
+            }
+            Token::Ident(_)
+                if self.starts_assignment_stmt()
+                    || self.starts_missing_assignment_operator_stmt() =>
+            {
+                self.parse_assign()
+            }
             Token::Ident(_)
             | Token::Number(_)
             | Token::StringLiteral(_)
@@ -761,7 +771,7 @@ impl Parser {
         let is_pointer = self.matches(&Token::Star);
         let name = self.expect_ident()?;
         if is_pointer {
-            self.expect(Token::Assign)?;
+            self.expect_assign_after("pointer declaration")?;
             let expr = self.parse_expr()?;
             if require_semi {
                 self.expect_semicolon_after("pointer declaration")?;
@@ -776,7 +786,7 @@ impl Parser {
             }
             return Ok(Stmt::ArrayDecl { name, len });
         }
-        self.expect(Token::Assign)?;
+        self.expect_assign_after("variable declaration")?;
         let expr = self.parse_expr()?;
         if require_semi {
             self.expect_semicolon_after("variable declaration")?;
@@ -807,7 +817,7 @@ impl Parser {
     fn parse_deref_assign(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Star)?;
         let pointer = self.parse_unary()?;
-        self.expect(Token::Assign)?;
+        self.expect_assign_after("assignment")?;
         let value = self.parse_expr()?;
         self.expect_semicolon_after("assignment")?;
         Ok(Stmt::DerefAssign { pointer, value })
@@ -818,14 +828,14 @@ impl Parser {
         if self.matches(&Token::LBracket) {
             let index = self.parse_expr()?;
             self.expect_closing_bracket_after("array index")?;
-            self.expect(Token::Assign)?;
+            self.expect_assign_after("assignment")?;
             let value = self.parse_expr()?;
             if require_semi {
                 self.expect_semicolon_after("assignment")?;
             }
             return Ok(Stmt::ArrayAssign { name, index, value });
         }
-        self.expect(Token::Assign)?;
+        self.expect_assign_after("assignment")?;
         let expr = self.parse_expr()?;
         if require_semi {
             self.expect_semicolon_after("assignment")?;
@@ -1228,6 +1238,18 @@ impl Parser {
         }
     }
 
+    fn expect_assign_after(&mut self, context: &str) -> CustResult<()> {
+        let found = self.advance();
+        if found.kind == Token::Assign {
+            Ok(())
+        } else {
+            Err(Self::error_at(
+                format!("expected '=' after {context}, found {:?}", found.kind),
+                &found,
+            ))
+        }
+    }
+
     fn expect_ident(&mut self) -> CustResult<String> {
         let found = self.advance();
         match found.kind.clone() {
@@ -1276,14 +1298,30 @@ impl Parser {
     }
 
     fn starts_expr(&self) -> bool {
+        Self::is_expr_start_token(self.peek())
+    }
+
+    fn is_expr_start_token(token: &Token) -> bool {
         matches!(
-            self.peek(),
+            token,
             Token::Ident(_)
                 | Token::Number(_)
                 | Token::StringLiteral(_)
                 | Token::Plus
                 | Token::Minus
                 | Token::Bang
+                | Token::Star
+                | Token::Amp
+                | Token::LParen
+        )
+    }
+
+    fn is_primary_assignment_value_start(token: &Token) -> bool {
+        matches!(
+            token,
+            Token::Ident(_)
+                | Token::Number(_)
+                | Token::StringLiteral(_)
                 | Token::Star
                 | Token::Amp
                 | Token::LParen
@@ -1338,6 +1376,100 @@ impl Parser {
             }
         }
         false
+    }
+
+    fn starts_missing_assignment_operator_stmt(&self) -> bool {
+        if !matches!(self.peek(), Token::Ident(_)) {
+            return false;
+        }
+
+        if Self::is_primary_assignment_value_start(self.peek_next()) {
+            return true;
+        }
+
+        if self.peek_next() != &Token::LBracket {
+            return false;
+        }
+
+        let mut depth = 0usize;
+        for index in (self.pos + 1)..self.tokens.len() {
+            match &self.tokens[index].kind {
+                Token::LBracket => depth += 1,
+                Token::RBracket => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return self.tokens.get(index + 1).is_some_and(|candidate| {
+                            Self::is_primary_assignment_value_start(&candidate.kind)
+                        });
+                    }
+                }
+                Token::Semi | Token::Eof if depth == 0 => return false,
+                Token::Eof if depth > 0 => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn starts_missing_deref_assignment_operator_stmt(&self) -> bool {
+        match self.tokens.get(self.pos + 1).map(|token| &token.kind) {
+            Some(Token::Ident(_)) => {
+                let after_target = if self
+                    .tokens
+                    .get(self.pos + 2)
+                    .is_some_and(|token| token.kind == Token::LBracket)
+                {
+                    self.index_after_balanced_brackets(self.pos + 2)
+                        .map(|index| index + 1)
+                } else {
+                    Some(self.pos + 2)
+                };
+                after_target
+                    .and_then(|index| self.tokens.get(index))
+                    .is_some_and(|token| Self::is_primary_assignment_value_start(&token.kind))
+            }
+            Some(Token::LParen) => self
+                .index_after_balanced_parens(self.pos + 1)
+                .and_then(|index| self.tokens.get(index + 1))
+                .is_some_and(|token| Self::is_primary_assignment_value_start(&token.kind)),
+            _ => false,
+        }
+    }
+
+    fn index_after_balanced_brackets(&self, start: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        for index in start..self.tokens.len() {
+            match &self.tokens[index].kind {
+                Token::LBracket => depth += 1,
+                Token::RBracket => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(index);
+                    }
+                }
+                Token::Eof => return None,
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn index_after_balanced_parens(&self, start: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        for index in start..self.tokens.len() {
+            match &self.tokens[index].kind {
+                Token::LParen => depth += 1,
+                Token::RParen => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(index);
+                    }
+                }
+                Token::Eof => return None,
+                _ => {}
+            }
+        }
+        None
     }
 
     fn loop_control_keyword(&self) -> &'static str {
