@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-05 autonomous mixed conformance and `--ast` CLI run after local and Docker verification passed for `&p[i]` array-backed pointer address-of support, a mixed pointer/string/array native-compiler oracle fixture, and AST inspection mode. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-05-05 autonomous `--max-steps` CLI run after local and Docker verification passed for explicit CLI loop-iteration budgeting. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 

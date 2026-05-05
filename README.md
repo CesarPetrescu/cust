@@ -113,12 +113,13 @@ Features:
 
 ```bash
 cust <file.c>
+cust --max-steps N <file.c>
 cust --tokens <file.c>
 cust --ast <file.c>
 cust --version
 ```
 
-Default output is the integer returned from `main()`. `--tokens` prints the lexer token stream with source locations, and `--ast` prints the parsed syntax tree without interpreting the program, which is useful for inspecting parse results even when the program would fail at runtime.
+Default output is the integer returned from `main()`. `--max-steps N` runs the program with an explicit total loop-iteration budget, which is useful for bounding runaway programs from the CLI without changing the library default. `--tokens` prints the lexer token stream with source locations, and `--ast` prints the parsed syntax tree without interpreting the program, which is useful for inspecting parse results even when the program would fail at runtime.
 
 Example:
 

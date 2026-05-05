@@ -43,7 +43,7 @@ Prioritized backlog for autonomous implementation.
 
 - [x] CLI flag: `--tokens`
 - [x] CLI flag: `--ast`
-- [ ] CLI flag: `--max-steps`
+- [x] CLI flag: `--max-steps`
 - [x] CLI flag: `--version`
 - [x] Better README examples
 - [ ] Release notes and tags

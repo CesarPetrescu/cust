@@ -22,6 +22,7 @@ Last updated: 2026-05-05
 - CLI supports `cust --version`, printing the Cargo package version without requiring a source file.
 - CLI supports `cust --tokens <file.c>`, printing the lexer token stream with 1-based line/column locations without evaluating the program.
 - CLI supports `cust --ast <file.c>`, printing a deterministic parsed AST view without evaluating the program.
+- CLI supports `cust --max-steps N <file.c>`, running with an explicit total loop-iteration budget so runaway programs can be bounded from the CLI without changing library defaults.
 - Example: `examples/sum.c`
 - Docs:
   - `README.md`
@@ -82,7 +83,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after the 2026-05-05 autonomous mixed conformance and `--ast` CLI run. The suite includes `tests/c_compat.rs`, which compiles supported fixtures with a native C compiler only as an oracle and compares native exit codes to Cust interpreted results, including pointer scalar, pointer parameter, array-decay, array-element pointer, and mixed pointer/string/array fixtures. It also includes deterministic fuzz/property-style safety tests for generated malformed source and arbitrary bytes decoded lossily to UTF-8. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-05 autonomous `--max-steps` CLI run. The CLI now has an explicit total loop-iteration budget flag, covered by tests for runaway `while` rejection, in-budget `for` execution, and non-positive-limit diagnostics. The suite includes `tests/c_compat.rs`, which compiles supported fixtures with a native C compiler only as an oracle and compares native exit codes to Cust interpreted results, including pointer scalar, pointer parameter, array-decay, array-element pointer, and mixed pointer/string/array fixtures. It also includes deterministic fuzz/property-style safety tests for generated malformed source and arbitrary bytes decoded lossily to UTF-8. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

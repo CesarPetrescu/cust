@@ -128,6 +128,73 @@ fn ast_flag_reports_parser_errors_without_interpreting_source() {
     );
 }
 
+#[test]
+fn max_steps_flag_limits_total_loop_iterations() {
+    let path =
+        write_temp_source("int main() {\nint i = 0;\nwhile (1) {\ni = i + 1;\n}\nreturn i;\n}\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--max-steps")
+        .arg("3")
+        .arg(&path)
+        .output()
+        .expect("cust binary should run");
+
+    fs::remove_file(&path).expect("temporary source should be removable");
+    assert!(
+        !output.status.success(),
+        "runaway program should be bounded"
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "cust: execution step limit exceeded after 3 loop iterations\n"
+    );
+}
+
+#[test]
+fn max_steps_flag_allows_programs_within_the_loop_iteration_budget() {
+    let path = write_temp_source(
+        "int main() {\nint total = 0;\nfor (int i = 0; i < 4; i = i + 1) {\ntotal = total + i;\n}\nreturn total;\n}\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--max-steps")
+        .arg("4")
+        .arg(&path)
+        .output()
+        .expect("cust binary should run");
+
+    fs::remove_file(&path).expect("temporary source should be removable");
+    assert!(
+        output.status.success(),
+        "program within max-step budget should run, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "6\n");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[test]
+fn max_steps_flag_rejects_non_positive_limits() {
+    let path = write_temp_source("int main() { return 0; }\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--max-steps")
+        .arg("0")
+        .arg(&path)
+        .output()
+        .expect("cust binary should run");
+
+    fs::remove_file(&path).expect("temporary source should be removable");
+    assert!(!output.status.success(), "zero max-step limit should fail");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "cust: --max-steps requires a positive integer\n"
+    );
+}
+
 fn write_temp_source(source: &str) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)

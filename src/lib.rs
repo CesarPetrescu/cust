@@ -197,14 +197,25 @@ enum Stmt {
 /// - integer, character, and string literals (string literals are read-only NUL-terminated byte arrays)
 /// - integer arithmetic/comparisons/logical operators: `+ - * / % == != < <= > >= && || !`
 pub fn interpret(source: &str) -> CustResult<i64> {
+    interpret_with_options(source, InterpretOptions::default())
+}
+
+/// Execution options for interpreting a Cust source program.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InterpretOptions {
+    pub max_loop_iterations: Option<usize>,
+}
+
+/// Interpret a Cust source program with explicit execution options.
+pub fn interpret_with_options(source: &str, options: InterpretOptions) -> CustResult<i64> {
     let tokens = lex(source)?;
     let mut parser = Parser::new(tokens);
     let program = parser.parse_program()?;
-    let mut interpreter = Interpreter::default();
+    let mut interpreter = Interpreter::new(options);
     interpreter.run(&program)
 }
 
-/// Format the lexer token stream with 1-based source locations.
+/// Format the lexer token stream for a Cust source program.
 ///
 /// This powers the `cust --tokens <file.c>` CLI inspection mode. It intentionally
 /// stops after lexing, so runtime errors such as division by zero are not
@@ -1360,13 +1371,14 @@ impl Parser {
 
 const MAX_CALL_DEPTH: usize = 64;
 
-#[derive(Default)]
 struct Interpreter {
     scopes: Vec<Scope>,
     live_scope_ids: HashSet<usize>,
     next_scope_id: usize,
     functions: HashMap<String, Function>,
     call_depth: usize,
+    max_loop_iterations: Option<usize>,
+    loop_iterations: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1431,6 +1443,18 @@ impl ArrayValue {
 }
 
 impl Interpreter {
+    fn new(options: InterpretOptions) -> Self {
+        Self {
+            scopes: Vec::new(),
+            live_scope_ids: HashSet::new(),
+            next_scope_id: 0,
+            functions: HashMap::new(),
+            call_depth: 0,
+            max_loop_iterations: options.max_loop_iterations,
+            loop_iterations: 0,
+        }
+    }
+
     fn run(&mut self, program: &Program) -> CustResult<i64> {
         self.functions = program.functions.clone();
         self.call_function("main", &[])
@@ -1834,6 +1858,19 @@ impl Interpreter {
         Ok((array, index))
     }
 
+    fn consume_loop_iteration(&mut self) -> CustResult<()> {
+        match self.max_loop_iterations {
+            Some(max) if self.loop_iterations >= max => {
+                return Err(CustError::new(format!(
+                    "execution step limit exceeded after {max} loop iterations"
+                )));
+            }
+            Some(_) | None => {}
+        }
+        self.loop_iterations += 1;
+        Ok(())
+    }
+
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
         match stmt {
             Stmt::Empty => Ok(ExecFlow::None),
@@ -1945,6 +1982,7 @@ impl Interpreter {
             Stmt::While { cond, body } => {
                 let mut iterations = 0usize;
                 while self.eval(cond)? != 0 {
+                    self.consume_loop_iteration()?;
                     iterations += 1;
                     if iterations > 1_000_000 {
                         return Err(CustError::new("loop iteration limit exceeded"));
@@ -2002,6 +2040,7 @@ impl Interpreter {
                 Some(_) | None => {}
             }
 
+            self.consume_loop_iteration()?;
             iterations += 1;
             if iterations > 1_000_000 {
                 return Err(CustError::new("loop iteration limit exceeded"));

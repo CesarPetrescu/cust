@@ -4,10 +4,11 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
-1. Add more conformance fixtures with explicit expected results and optional compiler-oracle comparisons where supported; acceptance: continue expanding mixed supported-subset fixtures as new features land, especially negative pointer-index diagnostics and any future pointer semantics. This run added a mixed pointer/string/array compiler-oracle fixture plus `&p[i]` support for array-backed pointer parameters.
-2. Add `--max-steps` or another execution-limit CLI control after deciding whether it should govern loop iterations, function calls, or both; acceptance: CLI tests prove the flag bounds runaway programs without changing library defaults.
-3. Continue parser recovery/error-message expansion only for newly discovered malformed programs not already covered by the exact-error suite (remaining examples: nested block brace diagnostics where useful and other delimiter-list boundary errors).
-4. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
+1. Add more conformance fixtures with explicit expected results and optional compiler-oracle comparisons where supported; acceptance: continue expanding mixed supported-subset fixtures as new features land, especially negative pointer-index diagnostics and any future pointer semantics. Recent runs added mixed pointer/string/array compiler-oracle coverage plus `&p[i]` support for array-backed pointer parameters.
+2. Continue parser recovery/error-message expansion only for newly discovered malformed programs not already covered by the exact-error suite (remaining examples: nested block brace diagnostics where useful and other delimiter-list boundary errors).
+3. Add release notes/tags once the current v0.1 surface is judged ready; acceptance: changelog/release notes summarize CLI flags, diagnostics, arrays/strings/pointers, conformance fixtures, and Docker verification.
+4. Add a `LICENSE` file after confirming the project-owner's intended license; acceptance: repository root includes the chosen license text and README license section points to it.
+5. Add `return;`/void design notes only after deciding whether the v0.1 subset should support `void` functions.
 
 ## Every-run checklist
 
