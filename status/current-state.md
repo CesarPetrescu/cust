@@ -21,6 +21,7 @@ Last updated: 2026-05-05
 - CLI command shape: `cust <file.c>`
 - CLI supports `cust --version`, printing the Cargo package version without requiring a source file.
 - CLI supports `cust --tokens <file.c>`, printing the lexer token stream with 1-based line/column locations without evaluating the program.
+- CLI supports `cust --ast <file.c>`, printing a deterministic parsed AST view without evaluating the program.
 - Example: `examples/sum.c`
 - Docs:
   - `README.md`
@@ -40,7 +41,7 @@ Last updated: 2026-05-05
 - `int` and `char` function parameters (stored as integer values in the current interpreter model)
 - one-dimensional array parameters such as `int values[3]`, passed by reference to the same array storage; string literals can be passed to `char` array parameters as read-only NUL-terminated byte arrays
 - First-pass scalar pointer support from `docs/plans/pointer-model.md`: `int *p = &x;`, `char *p = &c;`, `p = &y;`, `p = 0;`, `*p` reads, and `*p = expr;` writes through interpreter-owned scalar references. Null dereferences report `null pointer dereference`; pointers to scalar variables whose block/function scope has ended report `pointer to out-of-scope variable '<name>'`.
-- Pointer parameters are supported for scalar addresses (`inc(&x)`), array-to-pointer decay (`sum(values)` for `int *`/`char *` parameters), string-literal decay to read-only `char *` arguments, and array-element pointers (`&values[1]`). Pointer indexing `p[i]` reads/writes array-base and array-element pointer storage with deterministic null/read-only/out-of-bounds diagnostics; array-element pointer indexing is relative to the addressed element.
+- Pointer parameters are supported for scalar addresses (`inc(&x)`), array-to-pointer decay (`sum(values)` for `int *`/`char *` parameters), string-literal decay to read-only `char *` arguments, and array-element pointers (`&values[1]` and `&p[1]` when `p` is an array-backed pointer). Pointer indexing `p[i]` reads/writes array-base and array-element pointer storage with deterministic null/read-only/out-of-bounds diagnostics; array-element pointer indexing is relative to the addressed element.
 - assignments: `x = expr;`, `xs[index] = expr;`, pointer reassignment (`p = &x;`/`p = 0;`/`p = &xs[index];`), scalar/array-element dereference assignment (`*p = expr;`), and grouped dereference assignment such as `*(&xs[1]) = expr;`
 - array indexing expressions `xs[index]`, pointer indexing expressions `p[index]` for array-base or array-element pointers, string literal indexing expressions `"text"[index]`, and scalar/array-element pointer dereference expressions `*p` with runtime negative/out-of-bounds/null/out-of-scope/read-only diagnostics as applicable
 - `return expr;`
@@ -81,7 +82,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after the 2026-05-05 autonomous lexer-safety and `--tokens` CLI run. The suite includes `tests/c_compat.rs`, which compiles supported fixtures with a native C compiler only as an oracle and compares native exit codes to Cust interpreted results, including pointer scalar, pointer parameter, array-decay, and array-element pointer fixtures. It also includes deterministic fuzz/property-style safety tests for generated malformed source and arbitrary bytes decoded lossily to UTF-8. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-05 autonomous mixed conformance and `--ast` CLI run. The suite includes `tests/c_compat.rs`, which compiles supported fixtures with a native C compiler only as an oracle and compares native exit codes to Cust interpreted results, including pointer scalar, pointer parameter, array-decay, array-element pointer, and mixed pointer/string/array fixtures. It also includes deterministic fuzz/property-style safety tests for generated malformed source and arbitrary bytes decoded lossily to UTF-8. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 ## Operating rule for autonomous agent
 

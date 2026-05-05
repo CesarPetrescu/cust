@@ -5,7 +5,7 @@ use std::process;
 fn main() {
     let mut args = env::args().skip(1);
     let Some(first_arg) = args.next() else {
-        eprintln!("Usage: cust [--tokens] <file.c>");
+        eprintln!("Usage: cust [--tokens|--ast] <file.c>");
         process::exit(64);
     };
 
@@ -16,16 +16,22 @@ fn main() {
 
     let (mode, path) = if first_arg == "--tokens" {
         let Some(path) = args.next() else {
-            eprintln!("Usage: cust [--tokens] <file.c>");
+            eprintln!("Usage: cust [--tokens|--ast] <file.c>");
             process::exit(64);
         };
         (Mode::Tokens, path)
+    } else if first_arg == "--ast" {
+        let Some(path) = args.next() else {
+            eprintln!("Usage: cust [--tokens|--ast] <file.c>");
+            process::exit(64);
+        };
+        (Mode::Ast, path)
     } else {
         (Mode::Run, first_arg)
     };
 
     if args.next().is_some() {
-        eprintln!("Usage: cust [--tokens] <file.c>");
+        eprintln!("Usage: cust [--tokens|--ast] <file.c>");
         process::exit(64);
     }
 
@@ -51,6 +57,7 @@ fn main() {
 enum Mode {
     Run,
     Tokens,
+    Ast,
 }
 
 impl Mode {
@@ -58,6 +65,7 @@ impl Mode {
         match self {
             Self::Run => cust::interpret(source).map(|value| format!("{value}\n")),
             Self::Tokens => cust::format_tokens(source),
+            Self::Ast => cust::format_ast(source),
         }
     }
 }

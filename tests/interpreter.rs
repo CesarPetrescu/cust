@@ -611,6 +611,13 @@ fn supports_array_element_address_of_and_pointer_reads_writes() {
 }
 
 #[test]
+fn supports_mixed_pointer_string_array_conformance_fixture() {
+    let program = include_str!("fixtures/compat/valid/mixed_pointer_string_array_conformance.c");
+
+    assert_eq!(interpret(program).unwrap(), 143);
+}
+
+#[test]
 fn reports_array_element_pointer_index_out_of_bounds() {
     let program = include_str!("fixtures/invalid/pointer_array_element_out_of_bounds.c");
 

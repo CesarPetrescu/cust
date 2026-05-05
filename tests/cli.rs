@@ -79,6 +79,55 @@ fn tokens_flag_reports_lexer_errors_with_context() {
     );
 }
 
+#[test]
+fn ast_flag_prints_parsed_ast_without_interpreting_source() {
+    let path = write_temp_source("int main() { return 1 / 0; }\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--ast")
+        .arg(&path)
+        .output()
+        .expect("cust binary should run");
+
+    fs::remove_file(&path).expect("temporary source should be removable");
+    assert!(
+        output.status.success(),
+        "--ast should parse without interpreting, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        concat!(
+            "function main\n",
+            "  params: []\n",
+            "  body: [Return(Binary(Number(1), Div, Number(0)))]\n",
+        )
+    );
+}
+
+#[test]
+fn ast_flag_reports_parser_errors_without_interpreting_source() {
+    let path = write_temp_source("int main() {\nreturn (1 + 2;\n}\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--ast")
+        .arg(&path)
+        .output()
+        .expect("cust binary should run");
+
+    fs::remove_file(&path).expect("temporary source should be removable");
+    assert!(
+        !output.status.success(),
+        "--ast should reject parser errors"
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "cust: expected ')' after grouped expression, found Semi at line 2, column 14\n"
+    );
+}
+
 fn write_temp_source(source: &str) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)

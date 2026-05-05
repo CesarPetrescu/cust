@@ -219,6 +219,28 @@ pub fn format_tokens(source: &str) -> CustResult<String> {
         + "\n")
 }
 
+/// Format the parsed AST with deterministic function ordering.
+///
+/// This powers the `cust --ast <file.c>` CLI inspection mode. It intentionally
+/// stops after parsing, so runtime errors such as division by zero are not
+/// evaluated while inspecting the syntax tree.
+pub fn format_ast(source: &str) -> CustResult<String> {
+    let tokens = lex(source)?;
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse_program()?;
+    let mut names = program.functions.keys().collect::<Vec<_>>();
+    names.sort();
+
+    let mut output = String::new();
+    for name in names {
+        let function = &program.functions[name];
+        output.push_str(&format!("function {name}\n"));
+        output.push_str(&format!("  params: {:?}\n", function.params));
+        output.push_str(&format!("  body: {:?}\n", function.body));
+    }
+    Ok(output)
+}
+
 fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
     let chars: Vec<char> = source.chars().collect();
     let mut tokens = Vec::new();
@@ -1610,12 +1632,23 @@ impl Interpreter {
             Expr::Number(0) => Ok(PointerValue::Null),
             Expr::AddressOf(name) => self.address_of_scalar(name),
             Expr::AddressOfArray { name, index } => {
-                let (array, index) = self.checked_array_index(name, index)?;
-                Ok(PointerValue::ArrayElement {
-                    array,
-                    source_name: Some(name.clone()),
-                    index,
-                })
+                if let Some(Value::Pointer(pointer)) = self.find_variable(name).cloned() {
+                    let index_value = self.eval(index)?;
+                    let (array, source_name, index) =
+                        self.checked_pointer_value_index(&pointer, index_value)?;
+                    Ok(PointerValue::ArrayElement {
+                        array,
+                        source_name,
+                        index,
+                    })
+                } else {
+                    let (array, index) = self.checked_array_index(name, index)?;
+                    Ok(PointerValue::ArrayElement {
+                        array,
+                        source_name: Some(name.clone()),
+                        index,
+                    })
+                }
             }
             Expr::StringLiteral(values) => Ok(PointerValue::ArrayBase {
                 array: Rc::new(RefCell::new(ArrayValue::read_only(values.clone()))),

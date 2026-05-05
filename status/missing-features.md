@@ -42,8 +42,9 @@ Prioritized backlog for autonomous implementation.
 ## P4 — product quality
 
 - [x] CLI flag: `--tokens`
-- [ ] CLI flags: `--ast`, `--max-steps`
+- [x] CLI flag: `--ast`
+- [ ] CLI flag: `--max-steps`
 - [x] CLI flag: `--version`
-- [ ] Better README examples
+- [x] Better README examples
 - [ ] Release notes and tags
 - [ ] License file

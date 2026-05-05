@@ -91,9 +91,11 @@ Features:
 - function calls with integer arguments and local function parameters
 - integer, character, and string literals
 - declarations: `int x = 1;`, `char c = 'A';`, `int xs[3];`, `char text[4];`
-- assignment: `x = x + 1;` and `xs[0] = x;`
+- assignment: `x = x + 1;`, `xs[0] = x;`, pointer reassignment, and writes through pointer/indexed pointer lvalues
 - one-dimensional `int`/`char` arrays with indexed reads/writes
-- array parameters such as `char text[4]`; string literals are read-only NUL-terminated byte arrays and can be passed to matching array parameters
+- scalar pointers such as `int *p = &x;`, `*p`, and `*p = value;`
+- pointer parameters with array/string decay, pointer indexing (`p[i]`), and array-element addresses such as `&values[1]`
+- array parameters such as `char text[4]`; string literals are read-only NUL-terminated byte arrays and can be passed to matching array or pointer parameters
 - nested block scopes with inner shadowing
 - `return`
 - `if` / `else`
@@ -111,9 +113,12 @@ Features:
 
 ```bash
 cust <file.c>
+cust --tokens <file.c>
+cust --ast <file.c>
+cust --version
 ```
 
-Output is the integer returned from `main()`.
+Default output is the integer returned from `main()`. `--tokens` prints the lexer token stream with source locations, and `--ast` prints the parsed syntax tree without interpreting the program, which is useful for inspecting parse results even when the program would fail at runtime.
 
 Example:
 
