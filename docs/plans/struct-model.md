@@ -6,7 +6,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 
 - Top-level struct type declarations with scalar fields only:
   - `struct Point { int x; char y; };`
-  - Fields may be `int` or `char`.
+  - Fields may be `int`, `char`, `const int`, or `const char`.
   - Duplicate field names are rejected during parsing.
   - Re-declaring a struct type name is rejected.
 - Struct variables at top level and block scope:
@@ -50,16 +50,21 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - `const struct Point p;` / `const Point p;` after a struct typedef create zero-initialized read-only struct variables.
   - `int f(const struct Point p)` copies the argument by value into a read-only parameter binding.
   - Direct struct copy assignment and field writes to const struct bindings report `cannot assign to const variable '<name>'`.
+- Const-qualified scalar fields inside struct definitions:
+  - `struct Config { const int magic; const char marker; int value; };` records field-level read-only metadata while preserving deterministic zero initialization and Cust field sizes.
+  - Reads of const fields use ordinary `p.field` / `ptr->field` syntax.
+  - Direct field writes, field assignment expressions, field compound assignments, and field increment/decrement against const fields report `cannot assign to const struct field '<field>'`.
+  - Whole-struct copy assignment into a struct type containing const fields reports `cannot assign to struct '<Type>' with const fields`.
 
 ## Intentional limitations before later milestones
 
-- No nested structs, arrays in structs, pointer fields, bit-fields, anonymous structs, unions, or const-qualified fields inside struct definitions.
+- No nested structs, arrays in structs, pointer fields, bit-fields, anonymous structs, unions, or non-scalar const-qualified fields inside struct definitions.
 - No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic sizes.
 
 ## Implementation model
 
 - Parser records top-level struct type definitions in `Program::struct_types`.
-- Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store scalar values plus declared `CType`.
+- Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store scalar values plus declared `CType` and field-level const metadata.
 - Struct fields are scoped as members of their owning value, not as independent variables.
 - Member access is scalar expression syntax backed by field lvalue evaluation helpers for simple assignment, compound assignment, and increment/decrement expressions.
 - Function signatures include struct parameter type names, so prototypes and later definitions must agree on the exact struct type.
@@ -70,6 +75,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Struct pointer dereference checks live scope IDs before field access, preserving the same out-of-scope safety used by scalar pointers.
 - Const struct variables/parameters reuse scope `const_variables` metadata; struct field writes and copy assignment check the owning struct binding before mutation.
 - Const struct pointer declarations/parameters use the existing `points_to_const` pointer metadata, and direct pointer writes also check whether the referenced struct target binding is const.
+- Const struct fields are stored on each field value so cloned by-value parameters/returns preserve field-level read-only semantics.
 - `->` parses as postfix pointer field access, and `(*p).x` is represented as field access through a dereferenced pointer expression.
 
 ## Acceptance fixtures
@@ -115,7 +121,13 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - compares supported const struct pointer reads and const-preserving parameter/declaration behavior with native C while avoiding ABI-sensitive layout checks.
 - Invalid fixtures: `tests/fixtures/invalid/const_struct_field_assignment.c`, `tests/fixtures/invalid/const_struct_pointer_write.c`, and `tests/fixtures/invalid/const_struct_pointer_discard.c`
   - verify direct const struct field-write rejection, write-through-const-struct-pointer rejection, and const-discard struct pointer conversion diagnostics.
+- Valid interpreter fixture: `tests/fixtures/valid/const_struct_fields.c`
+  - covers `const int`/`const char` fields, ordinary reads, writes to mutable sibling fields, by-value parameter clones, and pointer reads.
+- Valid compiler-oracle fixture: `tests/fixtures/compat/valid/const_struct_fields.c`
+  - compares stable global zero-initialized const-field reads and mutable sibling writes against native C without relying on native struct layout.
+- Invalid fixtures: `tests/fixtures/invalid/const_struct_member_assignment.c`, `tests/fixtures/invalid/const_struct_member_pointer_write.c`, and `tests/fixtures/invalid/const_struct_member_copy_assignment.c`
+  - verify field-level const diagnostics for direct writes, pointer writes, and whole-struct copy assignment into a struct with const fields.
 
 ## Next struct work
 
-1. Keep nested/aggregate fields and const-qualified struct fields as later separate milestones.
+1. Consider nested/aggregate fields only as separate milestones with explicit storage/layout design; do not rely on native ABI padding.

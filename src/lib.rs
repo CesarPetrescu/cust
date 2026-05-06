@@ -245,6 +245,7 @@ struct StructTypeDef {
 struct StructFieldDef {
     name: String,
     ty: CType,
+    is_const: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1832,7 +1833,9 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let ty = match self.parse_decl_type("struct field type")? {
+            let (is_const, decl_type) =
+                self.parse_const_qualified_decl_type("struct field type")?;
+            let ty = match decl_type {
                 DeclType::Scalar(ty) => ty,
                 DeclType::Struct(_) => {
                     return Err(Self::error_at(
@@ -1855,7 +1858,7 @@ impl Parser {
                 ));
             }
             self.expect_semicolon_after("struct field declaration")?;
-            fields.push(StructFieldDef { name, ty });
+            fields.push(StructFieldDef { name, ty, is_const });
         }
         self.expect(Token::RBrace)?;
         self.expect_semicolon_after("struct declaration")?;
@@ -3286,6 +3289,7 @@ enum Value {
 struct StructFieldValue {
     value: i64,
     ty: CType,
+    is_const: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3856,6 +3860,7 @@ impl Interpreter {
                     StructFieldValue {
                         value: 0,
                         ty: field.ty,
+                        is_const: field.is_const,
                     },
                 )
             })
@@ -3886,6 +3891,11 @@ impl Interpreter {
                 let field_value = fields.get_mut(field).ok_or_else(|| {
                     CustError::new(format!("struct '{type_name}' has no field '{field}'"))
                 })?;
+                if field_value.is_const {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{field}'"
+                    )));
+                }
                 field_value.value = value;
                 Ok(())
             }
@@ -3969,6 +3979,11 @@ impl Interpreter {
         let field_value = fields.get_mut(field).ok_or_else(|| {
             CustError::new(format!("struct '{type_name}' has no field '{field}'"))
         })?;
+        if field_value.is_const {
+            return Err(CustError::new(format!(
+                "cannot assign to const struct field '{field}'"
+            )));
+        }
         field_value.value = value;
         Ok(())
     }
@@ -4013,6 +4028,11 @@ impl Interpreter {
 
         match self.find_variable_mut(name) {
             Some(Value::Struct { type_name, fields }) if *type_name == rhs_type => {
+                if fields.values().any(|field| field.is_const) {
+                    return Err(CustError::new(format!(
+                        "cannot assign to struct '{type_name}' with const fields"
+                    )));
+                }
                 *fields = rhs_fields;
                 Ok(())
             }

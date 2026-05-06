@@ -16,6 +16,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/const_pointer_conversions.c",
     "tests/fixtures/compat/valid/const_pointer_qualifiers.c",
     "tests/fixtures/compat/valid/const_struct_qualifiers.c",
+    "tests/fixtures/compat/valid/const_struct_fields.c",
     "tests/fixtures/compat/valid/compound_assignments.c",
     "tests/fixtures/compat/valid/conditional_operator.c",
     "tests/fixtures/compat/valid/do_while_loops.c",

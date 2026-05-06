@@ -140,6 +140,49 @@ fn supports_const_qualified_structs_and_struct_pointers() {
 }
 
 #[test]
+fn supports_const_qualified_struct_fields() {
+    let program = include_str!("fixtures/valid/const_struct_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 77);
+}
+
+#[test]
+fn rejects_assignment_to_const_struct_fields() {
+    let program = include_str!("fixtures/invalid/const_struct_member_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'magic'"
+    );
+}
+
+#[test]
+fn rejects_pointer_writes_to_const_struct_fields() {
+    let program = include_str!("fixtures/invalid/const_struct_member_pointer_write.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'magic'"
+    );
+}
+
+#[test]
+fn rejects_copy_assignment_to_structs_with_const_fields() {
+    let program = include_str!("fixtures/invalid/const_struct_member_copy_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to struct 'Config' with const fields"
+    );
+}
+
+#[test]
 fn rejects_direct_field_assignment_to_const_structs() {
     let program = include_str!("fixtures/invalid/const_struct_field_assignment.c");
 
