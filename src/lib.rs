@@ -466,6 +466,7 @@ enum Stmt {
     StructVarDecl {
         type_name: String,
         name: String,
+        init: Vec<Expr>,
         is_const: bool,
     },
     EnumDecl {
@@ -1804,12 +1805,14 @@ impl Parser {
             });
         }
         if matches!(decl_type, DeclType::Struct(_)) {
-            if self.matches(&Token::Assign) {
-                return Err(Self::error_at(
-                    "struct variable initializers are not supported".to_string(),
-                    self.previous(),
-                ));
-            }
+            let init = if self.matches(&Token::Assign) {
+                let DeclType::Struct(type_name) = &decl_type else {
+                    unreachable!("struct declarations return above")
+                };
+                self.parse_struct_initializer(type_name)?
+            } else {
+                Vec::new()
+            };
             if require_semi {
                 self.expect_semicolon_after("struct variable declaration")?;
             }
@@ -1817,6 +1820,7 @@ impl Parser {
                 return Ok(Stmt::StructVarDecl {
                     type_name,
                     name,
+                    init,
                     is_const: leading_const,
                 });
             }
@@ -1891,6 +1895,38 @@ impl Parser {
                 continue;
             }
             self.expect_closing_brace_after("array initializer")?;
+        }
+        Ok(values)
+    }
+
+    fn parse_struct_initializer(&mut self, type_name: &str) -> CustResult<Vec<Expr>> {
+        let field_count = self
+            .struct_types
+            .get(type_name)
+            .map(|struct_type| struct_type.fields.len())
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        self.expect_opening_brace_after("struct initializer")?;
+        let mut values = Vec::new();
+        if self.matches(&Token::RBrace) {
+            return Ok(values);
+        }
+        loop {
+            if values.len() == field_count {
+                return Err(CustError::new(format!(
+                    "too many initializers for struct '{type_name}'"
+                )));
+            }
+            values.push(self.parse_assignment_expr()?);
+            if self.matches(&Token::RBrace) {
+                break;
+            }
+            if self.matches(&Token::Comma) {
+                if self.matches(&Token::RBrace) {
+                    break;
+                }
+                continue;
+            }
+            self.expect_closing_brace_after("struct initializer")?;
         }
         Ok(values)
     }
@@ -1978,10 +2014,16 @@ impl Parser {
             });
         }
         let name = self.expect_ident_after("struct variable name")?;
+        let init = if self.matches(&Token::Assign) {
+            self.parse_struct_initializer(&type_name)?
+        } else {
+            Vec::new()
+        };
         self.expect_semicolon_after("struct variable declaration")?;
         Ok(Stmt::StructVarDecl {
             type_name,
             name,
+            init,
             is_const: false,
         })
     }
@@ -3984,25 +4026,28 @@ impl Interpreter {
         Ok(Value::Array(Rc::new(RefCell::new(array))))
     }
 
-    fn make_struct_value(&self, type_name: &str) -> CustResult<Value> {
+    fn make_struct_value(&mut self, type_name: &str, init: &[Expr]) -> CustResult<Value> {
         let struct_type = self
             .struct_types
             .get(type_name)
+            .cloned()
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
-        let fields = struct_type
-            .fields
-            .iter()
-            .map(|field| {
-                (
-                    field.name.clone(),
-                    StructFieldValue {
-                        value: 0,
-                        ty: field.ty,
-                        is_const: field.is_const,
-                    },
-                )
-            })
-            .collect();
+        let mut fields = HashMap::new();
+        for (index, field) in struct_type.fields.iter().enumerate() {
+            let value = if let Some(expr) = init.get(index) {
+                self.eval(expr)?
+            } else {
+                0
+            };
+            fields.insert(
+                field.name.clone(),
+                StructFieldValue {
+                    value,
+                    ty: field.ty,
+                    is_const: field.is_const,
+                },
+            );
+        }
         Ok(Value::Struct {
             type_name: type_name.to_string(),
             fields,
@@ -5377,7 +5422,9 @@ impl Interpreter {
                 is_const,
                 ..
             } => self.make_array_value(*len, *elem_type, init, *is_const),
-            Stmt::StructVarDecl { type_name, .. } => self.make_struct_value(type_name),
+            Stmt::StructVarDecl {
+                type_name, init, ..
+            } => self.make_struct_value(type_name, init),
             _ => Err(CustError::new(
                 "static local declarations must declare variables",
             )),
@@ -5487,6 +5534,7 @@ impl Interpreter {
             Stmt::StructVarDecl {
                 type_name,
                 name,
+                init,
                 is_const,
             } => {
                 if self.current_scope_has_identifier(name) {
@@ -5494,7 +5542,7 @@ impl Interpreter {
                         "variable '{name}' already declared in this scope"
                     )));
                 }
-                let value = self.make_struct_value(type_name)?;
+                let value = self.make_struct_value(type_name, init)?;
                 self.current_scope_mut().insert(name.clone(), value);
                 if *is_const {
                     self.mark_current_variable_const(name);

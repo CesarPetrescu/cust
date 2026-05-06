@@ -12,6 +12,8 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Struct variables at top level and block scope:
   - `struct Point p;`
   - Fields are deterministic Cust values initialized to `0`.
+  - Scalar brace initializers such as `struct Point p = {1, 2};` initialize fields in declaration order, evaluate initializer expressions left-to-right, zero-fill omitted trailing fields, and reject excess initializers.
+  - Const fields can be initialized in a struct initializer but remain read-only after declaration.
   - Normal block/global scope rules apply; inner variables may shadow outer variables.
 - Member access and member assignment:
   - `p.x` reads a scalar field.
@@ -65,6 +67,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 
 - Parser records top-level struct type definitions in `Program::struct_types`.
 - Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store scalar values plus declared `CType` and field-level const metadata.
+- Struct initializers are parsed as assignment-precedence expressions separated by top-level commas and applied to fields in declaration order before const field metadata prevents later writes.
 - Struct fields are scoped as members of their owning value, not as independent variables.
 - Member access is scalar expression syntax backed by field lvalue evaluation helpers for simple assignment, compound assignment, and increment/decrement expressions.
 - Function signatures include struct parameter type names, so prototypes and later definitions must agree on the exact struct type.
@@ -127,6 +130,13 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - compares stable global zero-initialized const-field reads and mutable sibling writes against native C without relying on native struct layout.
 - Invalid fixtures: `tests/fixtures/invalid/const_struct_member_assignment.c`, `tests/fixtures/invalid/const_struct_member_pointer_write.c`, and `tests/fixtures/invalid/const_struct_member_copy_assignment.c`
   - verify field-level const diagnostics for direct writes, pointer writes, and whole-struct copy assignment into a struct with const fields.
+
+- Valid interpreter fixture: `tests/fixtures/valid/struct_initializers.c`
+  - covers top-level/local/static-local/const struct brace initializers, expression entries, declaration-order field assignment, zero-filled omitted trailing fields, and initialized const fields.
+- Valid compiler-oracle fixture: `tests/fixtures/compat/valid/struct_initializers.c`
+  - compares the supported scalar struct initializer subset with native C while avoiding ABI-sensitive layout checks and `-Wmissing-field-initializers` warnings.
+- Invalid fixture: `tests/fixtures/invalid/struct_initializer_too_long.c`
+  - verifies excess initializer entries report `too many initializers for struct '<Type>'`.
 
 ## Next struct work
 
