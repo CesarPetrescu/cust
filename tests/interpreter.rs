@@ -154,6 +154,31 @@ fn supports_struct_return_functions_and_prototypes() {
 }
 
 #[test]
+fn supports_struct_pointers_arrow_and_deref_field_access() {
+    let program = include_str!("fixtures/valid/struct_pointers.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_null_struct_pointer_field_access() {
+    let program = include_str!("fixtures/invalid/struct_pointer_null_dereference.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "null pointer dereference");
+}
+
+#[test]
+fn rejects_out_of_scope_struct_pointer_field_access() {
+    let program = include_str!("fixtures/invalid/struct_pointer_out_of_scope.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "pointer to out-of-scope variable 'point'");
+}
+
+#[test]
 fn rejects_mismatched_struct_return_values() {
     let program = include_str!("fixtures/invalid/struct_return_type_mismatch.c");
 

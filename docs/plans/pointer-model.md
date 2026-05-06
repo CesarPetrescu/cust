@@ -9,10 +9,8 @@ Add a small, safe pointer subset that fits Cust's interpreter architecture witho
 ## Non-goals for the first pointer milestone
 
 - No raw host addresses.
-- No pointer arithmetic beyond the explicitly supported array-index interaction described below.
-- No structs, function pointers, `sizeof`, casts, `malloc`, or standard-library calls.
-- No declarations without initialization unless/until Cust has a broader uninitialized-value model.
-- No `void *` or `void` functions in the first milestone.
+- No function pointers, casts, `malloc`, or standard-library calls.
+- No `void *`.
 
 ## Syntax subset
 
@@ -25,7 +23,9 @@ int *p = &x;
 char *p = &c;
 int *p = values;
 char *p = "abc";
+struct Point *p = &point;
 int first(int *values) { return values[0]; }
+void set_x(struct Point *p, int x) { p->x = x; }
 ```
 
 Recommended initial parser representation:
@@ -52,6 +52,7 @@ Add:
 - Address-of: `&name` and `&array[index]`
 - Dereference: `*ptr`
 - Pointer indexing: `ptr[index]`
+- Struct pointer field access: `ptr->field` and `(*ptr).field` for scalar fields on supported struct pointers
 - Null literal: use integer `0` as the only null pointer literal in pointer initializers/assignments and pointer arguments.
 
 `&` should be parsed as a unary operator with precedence matching the existing unary operators. `*` remains multiplication in binary position and becomes dereference in unary position. Parser context already distinguishes unary/binary `-`; apply the same approach for unary `*`.

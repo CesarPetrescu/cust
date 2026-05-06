@@ -39,10 +39,15 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - Struct-returning calls can be assigned to same-type struct variables, e.g. `p = make_point(1);`.
   - Mismatched struct return values report `struct function '<name>' expected return struct '<Expected>', got struct '<Actual>'`.
   - Empty returns from struct functions report `struct function '<name>' returned without a value`.
+- Struct pointers:
+  - Local/global declarations and function parameters may use one pointer level to a prior struct type, e.g. `struct Point *p = &point;`, `struct Point *p;`, and `void set(struct Point *p);`.
+  - `&point` produces an interpreter-owned pointer to the struct variable; null struct pointers use the existing `0` literal.
+  - `p->x` and `(*p).x` read scalar fields through a struct pointer.
+  - Struct pointer field lvalue expressions support simple assignment, compound assignment, and prefix/postfix increment/decrement for scalar fields.
+  - Null struct pointer field access reports `null pointer dereference`; pointers to ended block/function scopes report `pointer to out-of-scope variable '<name>'`.
 
 ## Intentional limitations before later milestones
 
-- No pointers to structs and no address-of/member pointer access yet.
 - No nested structs, arrays in structs, pointer fields, bit-fields, anonymous structs, unions, typedefs, or `const`.
 - No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic sizes.
 
@@ -56,6 +61,9 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Struct parameter binding clones the struct value into the function parameter scope, preserving by-value behavior without host/native addresses.
 - Function signatures also include struct return type names, so prototypes and definitions must agree on the exact return struct type.
 - Return flow carries either scalar values or cloned struct field maps; callers receive by-value struct results without borrowing callee stack storage.
+- Struct pointers extend the existing interpreter-owned pointer model with `PointerValue::Struct { scope_id, name }`, never host addresses.
+- Struct pointer dereference checks live scope IDs before field access, preserving the same out-of-scope safety used by scalar pointers.
+- `->` parses as postfix pointer field access, and `(*p).x` is represented as field access through a dereferenced pointer expression.
 
 ## Acceptance fixtures
 
@@ -88,8 +96,13 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - compares supported struct return behavior with native C without relying on native ABI struct layout.
 - Invalid fixtures: `tests/fixtures/invalid/struct_return_type_mismatch.c` and `tests/fixtures/invalid/struct_function_empty_return.c`
   - verify targeted diagnostics for mismatched and empty struct returns.
+- Valid interpreter fixture: `tests/fixtures/valid/struct_pointers.c`
+  - covers `struct Point *` declarations, function parameters/prototypes, `&point`, `p->x`, `(*p).x`, pointer equality with `&point`, field assignment, compound assignment, and increment through pointers.
+- Valid compiler-oracle fixture: `tests/fixtures/compat/valid/struct_pointers.c`
+  - compares the supported struct pointer subset with native C without relying on native struct layout.
+- Invalid fixtures: `tests/fixtures/invalid/struct_pointer_null_dereference.c` and `tests/fixtures/invalid/struct_pointer_out_of_scope.c`
+  - verify null and ended-scope struct pointer diagnostics.
 
 ## Next struct work
 
-1. Consider pointers to structs and `->` as a separate pointer-model extension now that by-value struct returns are covered.
-2. Keep nested/aggregate fields, typedefs, and const as later separate milestones.
+1. Keep nested/aggregate fields, typedefs, and const as later separate milestones.

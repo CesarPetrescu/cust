@@ -92,6 +92,7 @@ enum Token {
     Comma,
     Semi,
     Dot,
+    Arrow,
     Question,
     Colon,
     Eof,
@@ -119,6 +120,10 @@ enum Expr {
     Var(String),
     StructGet {
         name: String,
+        field: String,
+    },
+    StructPtrGet {
+        pointer: Box<Expr>,
         field: String,
     },
     ArrayGet {
@@ -153,6 +158,11 @@ enum Expr {
         field: String,
         value: Box<Expr>,
     },
+    StructPtrSet {
+        pointer: Box<Expr>,
+        field: String,
+        value: Box<Expr>,
+    },
     CompoundAssign {
         name: String,
         op: CompoundOp,
@@ -171,6 +181,12 @@ enum Expr {
     },
     StructCompoundSet {
         name: String,
+        field: String,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
+    StructPtrCompoundSet {
+        pointer: Box<Expr>,
         field: String,
         op: CompoundOp,
         value: Box<Expr>,
@@ -283,6 +299,18 @@ impl CType {
     }
 }
 
+impl PointeeType {
+    fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
+        match self {
+            PointeeType::Scalar(ty) => Ok(ty.size()),
+            PointeeType::Struct(type_name) => struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.fields.iter().map(|field| field.ty.size()).sum())
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SizeOfType {
     Scalar(CType),
@@ -307,6 +335,12 @@ struct Param {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ParamType {
+    Scalar(CType),
+    Struct(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PointeeType {
     Scalar(CType),
     Struct(String),
 }
@@ -387,7 +421,7 @@ enum Stmt {
     },
     PointerDecl {
         name: String,
-        ty: CType,
+        ty: PointeeType,
         expr: Expr,
     },
     ArrayDecl {
@@ -805,6 +839,11 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 push_token(&mut tokens, Token::MinusMinus, line, column);
                 advance_position('-', &mut line, &mut column, &mut i);
                 advance_position('-', &mut line, &mut column, &mut i);
+            }
+            '-' if chars.get(i + 1) == Some(&'>') => {
+                push_token(&mut tokens, Token::Arrow, line, column);
+                advance_position('-', &mut line, &mut column, &mut i);
+                advance_position('>', &mut line, &mut column, &mut i);
             }
             '-' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::MinusAssign, line, column);
@@ -1241,8 +1280,18 @@ impl Parser {
                         "undefined struct type '{type_name}'"
                     )));
                 }
-                let name = self.expect_ident_after("struct parameter name after type")?;
-                (ParamType::Struct(type_name), name, ParamKind::Struct)
+                let is_pointer = self.matches(&Token::Star);
+                let name = if is_pointer {
+                    self.expect_ident_after("struct pointer parameter name after '*'")?
+                } else {
+                    self.expect_ident_after("struct parameter name after type")?
+                };
+                let kind = if is_pointer {
+                    ParamKind::Pointer
+                } else {
+                    ParamKind::Struct
+                };
+                (ParamType::Struct(type_name), name, kind)
             } else {
                 let ty = self.expect_type_after("parameter type")?;
                 let is_pointer = self.matches(&Token::Star);
@@ -1430,7 +1479,7 @@ impl Parser {
                 self.advance();
                 return Ok(Stmt::PointerDecl {
                     name,
-                    ty,
+                    ty: PointeeType::Scalar(ty),
                     expr: Expr::Number(0),
                 });
             } else {
@@ -1440,7 +1489,11 @@ impl Parser {
             if require_semi {
                 self.expect_semicolon_after("pointer declaration")?;
             }
-            return Ok(Stmt::PointerDecl { name, ty, expr });
+            return Ok(Stmt::PointerDecl {
+                name,
+                ty: PointeeType::Scalar(ty),
+                expr,
+            });
         }
         if self.matches(&Token::LBracket) {
             let len = self.expect_array_len()?;
@@ -1514,6 +1567,28 @@ impl Parser {
     fn parse_struct_var_decl(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Struct)?;
         let type_name = self.expect_ident_after("struct type name")?;
+        if !self.struct_types.contains_key(&type_name) {
+            return Err(CustError::new(format!(
+                "undefined struct type '{type_name}'"
+            )));
+        }
+        if self.matches(&Token::Star) {
+            let name = self.expect_ident_after("struct pointer name after '*'")?;
+            let expr = if self.matches(&Token::Assign) {
+                self.parse_expr()?
+            } else if self.check(&Token::Semi) {
+                Expr::Number(0)
+            } else {
+                self.expect_assign_after("struct pointer declaration")?;
+                unreachable!("expect_assign_after only returns Ok after consuming '='")
+            };
+            self.expect_semicolon_after("struct pointer declaration")?;
+            return Ok(Stmt::PointerDecl {
+                name,
+                ty: PointeeType::Struct(type_name),
+                expr,
+            });
+        }
         let name = self.expect_ident_after("struct variable name")?;
         self.expect_semicolon_after("struct variable declaration")?;
         Ok(Stmt::StructVarDecl { type_name, name })
@@ -1957,6 +2032,12 @@ impl Parser {
                     op,
                     value: Box::new(value),
                 }),
+                Expr::StructPtrGet { pointer, field } => Ok(Expr::StructPtrCompoundSet {
+                    pointer,
+                    field,
+                    op,
+                    value: Box::new(value),
+                }),
                 _ => Err(Self::error_at(
                     "invalid compound assignment target".to_string(),
                     &operator,
@@ -1981,6 +2062,11 @@ impl Parser {
                 }),
                 Expr::StructGet { name, field } => Ok(Expr::StructSet {
                     name,
+                    field,
+                    value: Box::new(value),
+                }),
+                Expr::StructPtrGet { pointer, field } => Ok(Expr::StructPtrSet {
+                    pointer,
                     field,
                     value: Box::new(value),
                 }),
@@ -2222,7 +2308,25 @@ impl Parser {
     fn parse_postfix(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_primary()?;
         loop {
-            if self.matches(&Token::PlusPlus) {
+            if self.matches(&Token::Dot) {
+                let field = self.expect_ident_after("struct field name after '.'")?;
+                expr = match expr {
+                    Expr::Var(name) => Expr::StructGet { name, field },
+                    Expr::Deref(pointer) => Expr::StructPtrGet { pointer, field },
+                    _ => {
+                        return Err(Self::error_at(
+                            "invalid struct field access target".to_string(),
+                            self.previous(),
+                        ));
+                    }
+                };
+            } else if self.matches(&Token::Arrow) {
+                let field = self.expect_ident_after("struct field name after '->'")?;
+                expr = Expr::StructPtrGet {
+                    pointer: Box::new(expr),
+                    field,
+                };
+            } else if self.matches(&Token::PlusPlus) {
                 let operator = self.previous().clone();
                 expr = Self::increment_expr(expr, IncrementOp::Inc, false, &operator)?;
             } else if self.matches(&Token::MinusMinus) {
@@ -2242,13 +2346,15 @@ impl Parser {
         operator: &LocatedToken,
     ) -> CustResult<Expr> {
         match target {
-            Expr::Var(_) | Expr::ArrayGet { .. } | Expr::Deref(_) | Expr::StructGet { .. } => {
-                Ok(Expr::Increment {
-                    target: Box::new(target),
-                    op,
-                    prefix,
-                })
-            }
+            Expr::Var(_)
+            | Expr::ArrayGet { .. }
+            | Expr::Deref(_)
+            | Expr::StructGet { .. }
+            | Expr::StructPtrGet { .. } => Ok(Expr::Increment {
+                target: Box::new(target),
+                op,
+                prefix,
+            }),
             _ => Err(Self::error_at(
                 "invalid increment/decrement target".to_string(),
                 operator,
@@ -2826,7 +2932,7 @@ enum Value {
     Array(Rc<RefCell<ArrayValue>>),
     Pointer {
         pointer: PointerValue,
-        ty: CType,
+        ty: PointeeType,
     },
     Struct {
         type_name: String,
@@ -2844,6 +2950,10 @@ struct StructFieldValue {
 enum PointerValue {
     Null,
     Scalar {
+        scope_id: usize,
+        name: String,
+    },
+    Struct {
         scope_id: usize,
         name: String,
     },
@@ -2962,10 +3072,10 @@ impl Interpreter {
                     self.eval_array_argument(name, &param.name, expected_len, arg_expr)?
                 }
                 ParamKind::Pointer => {
-                    let ParamType::Scalar(ty) = &param.ty else {
-                        return Err(CustError::new("internal pointer parameter type mismatch"));
+                    let ty = match &param.ty {
+                        ParamType::Scalar(ty) => PointeeType::Scalar(*ty),
+                        ParamType::Struct(type_name) => PointeeType::Struct(type_name.clone()),
                     };
-                    let ty = *ty;
                     Value::Pointer {
                         pointer: self.eval_pointer(arg_expr)?,
                         ty,
@@ -3300,6 +3410,111 @@ impl Interpreter {
         }
     }
 
+    fn find_struct_pointer_fields(
+        &self,
+        pointer: &PointerValue,
+    ) -> CustResult<(String, &HashMap<String, StructFieldValue>)> {
+        match pointer {
+            PointerValue::Null => Err(CustError::new("null pointer dereference")),
+            PointerValue::Struct { scope_id, name } => {
+                if !self.live_scope_ids.contains(scope_id) {
+                    return Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    )));
+                }
+                let value = self
+                    .scopes
+                    .iter()
+                    .find(|scope| scope.id == *scope_id)
+                    .and_then(|scope| scope.values.get(name));
+                match value {
+                    Some(Value::Struct { type_name, fields }) => Ok((type_name.clone(), fields)),
+                    _ => Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    ))),
+                }
+            }
+            _ => Err(CustError::new("pointer does not reference a struct")),
+        }
+    }
+
+    fn find_struct_pointer_fields_mut(
+        &mut self,
+        pointer: &PointerValue,
+    ) -> CustResult<(String, &mut HashMap<String, StructFieldValue>)> {
+        match pointer {
+            PointerValue::Null => Err(CustError::new("null pointer dereference")),
+            PointerValue::Struct { scope_id, name } => {
+                if !self.live_scope_ids.contains(scope_id) {
+                    return Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    )));
+                }
+                let value = self
+                    .scopes
+                    .iter_mut()
+                    .find(|scope| scope.id == *scope_id)
+                    .and_then(|scope| scope.values.get_mut(name));
+                match value {
+                    Some(Value::Struct { type_name, fields }) => Ok((type_name.clone(), fields)),
+                    _ => Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    ))),
+                }
+            }
+            _ => Err(CustError::new("pointer does not reference a struct")),
+        }
+    }
+
+    fn read_struct_pointer_field(&self, pointer: &PointerValue, field: &str) -> CustResult<i64> {
+        let (type_name, fields) = self.find_struct_pointer_fields(pointer)?;
+        fields
+            .get(field)
+            .map(|field_value| field_value.value)
+            .ok_or_else(|| CustError::new(format!("struct '{type_name}' has no field '{field}'")))
+    }
+
+    fn assign_struct_pointer_field(
+        &mut self,
+        pointer: &PointerValue,
+        field: &str,
+        value: i64,
+    ) -> CustResult<()> {
+        let (type_name, fields) = self.find_struct_pointer_fields_mut(pointer)?;
+        let field_value = fields.get_mut(field).ok_or_else(|| {
+            CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+        })?;
+        field_value.value = value;
+        Ok(())
+    }
+
+    fn eval_struct_ptr_set(
+        &mut self,
+        pointer: &Expr,
+        field: &str,
+        value: &Expr,
+    ) -> CustResult<i64> {
+        let pointer = self.eval_pointer(pointer)?;
+        let value = self.eval(value)?;
+        self.assign_struct_pointer_field(&pointer, field, value)?;
+        Ok(value)
+    }
+
+    fn eval_struct_ptr_compound_set(
+        &mut self,
+        pointer: &Expr,
+        field: &str,
+        op: CompoundOp,
+        value: &Expr,
+    ) -> CustResult<i64> {
+        let pointer = self.eval_pointer(pointer)?;
+        let current = self.read_struct_pointer_field(&pointer, field)?;
+        let rhs = self.eval(value)?;
+        let result = Self::apply_compound_op(current, op, rhs)?;
+        self.assign_struct_pointer_field(&pointer, field, result)?;
+        Ok(result)
+    }
+
     fn assign_struct_copy(&mut self, name: &str, rhs: &Expr) -> CustResult<()> {
         let (rhs_type, rhs_fields) = match self.eval_struct_expr(rhs)? {
             ReturnValue::Struct { type_name, fields } => (type_name, fields),
@@ -3355,9 +3570,10 @@ impl Interpreter {
                     Value::Pointer { .. } => Err(CustError::new(format!(
                         "pointer '{name}' cannot be addressed in this pointer milestone"
                     ))),
-                    Value::Struct { .. } => Err(CustError::new(format!(
-                        "struct variable '{name}' cannot be addressed in this pointer milestone"
-                    ))),
+                    Value::Struct { .. } => Ok(PointerValue::Struct {
+                        scope_id: scope.id,
+                        name: name.to_string(),
+                    }),
                 };
             }
         }
@@ -3547,7 +3763,7 @@ impl Interpreter {
     ) -> CustResult<PointerValue> {
         match pointer {
             PointerValue::Null => Err(CustError::new("null pointer arithmetic is not supported")),
-            PointerValue::Scalar { .. } => {
+            PointerValue::Scalar { .. } | PointerValue::Struct { .. } => {
                 Err(CustError::new("scalar pointer arithmetic is not supported"))
             }
             PointerValue::ArrayBase { array, source_name } => {
@@ -3606,6 +3822,7 @@ impl Interpreter {
                     ))),
                 }
             }
+            PointerValue::Struct { .. } => Err(CustError::new("struct pointer used as scalar")),
             PointerValue::ArrayBase { array, .. } => {
                 let array = array.borrow();
                 array.elements.first().copied().ok_or_else(|| {
@@ -3643,6 +3860,7 @@ impl Interpreter {
             PointerValue::ArrayBase { .. } | PointerValue::ArrayElement { .. } => {
                 self.assign_pointer_index(pointer, 0, value)
             }
+            PointerValue::Struct { .. } => Err(CustError::new("struct pointer used as scalar")),
         }
     }
 
@@ -3680,6 +3898,7 @@ impl Interpreter {
         match pointer {
             PointerValue::Null => Err(CustError::new("null pointer dereference")),
             PointerValue::Scalar { .. } => Err(CustError::new("scalar pointer is not indexable")),
+            PointerValue::Struct { .. } => Err(CustError::new("struct pointer is not indexable")),
             PointerValue::ArrayBase { array, source_name } => {
                 let len = array.borrow().elements.len();
                 let Ok(index) = usize::try_from(index_value) else {
@@ -3791,6 +4010,16 @@ impl Interpreter {
                 },
             ) => left_scope == right_scope && left_name == right_name,
             (
+                PointerValue::Struct {
+                    scope_id: left_scope,
+                    name: left_name,
+                },
+                PointerValue::Struct {
+                    scope_id: right_scope,
+                    name: right_name,
+                },
+            ) => left_scope == right_scope && left_name == right_name,
+            (
                 PointerValue::ArrayBase { array: left, .. },
                 PointerValue::ArrayBase { array: right, .. },
             ) => Rc::ptr_eq(left, right),
@@ -3824,8 +4053,14 @@ impl Interpreter {
             ) => left_index == right_index && Rc::ptr_eq(left, right),
             (PointerValue::Scalar { .. }, PointerValue::ArrayBase { .. })
             | (PointerValue::Scalar { .. }, PointerValue::ArrayElement { .. })
+            | (PointerValue::Scalar { .. }, PointerValue::Struct { .. })
             | (PointerValue::ArrayBase { .. }, PointerValue::Scalar { .. })
-            | (PointerValue::ArrayElement { .. }, PointerValue::Scalar { .. }) => false,
+            | (PointerValue::ArrayElement { .. }, PointerValue::Scalar { .. })
+            | (PointerValue::ArrayBase { .. }, PointerValue::Struct { .. })
+            | (PointerValue::ArrayElement { .. }, PointerValue::Struct { .. })
+            | (PointerValue::Struct { .. }, PointerValue::Scalar { .. })
+            | (PointerValue::Struct { .. }, PointerValue::ArrayBase { .. })
+            | (PointerValue::Struct { .. }, PointerValue::ArrayElement { .. }) => false,
         }
     }
 
@@ -3834,7 +4069,7 @@ impl Interpreter {
             PointerValue::ArrayBase { array, .. } => Ok((array, 0)),
             PointerValue::ArrayElement { array, index, .. } => Ok((array, *index as i64)),
             PointerValue::Null => Err(CustError::new("null pointer arithmetic is not supported")),
-            PointerValue::Scalar { .. } => {
+            PointerValue::Scalar { .. } | PointerValue::Struct { .. } => {
                 Err(CustError::new("scalar pointer arithmetic is not supported"))
             }
         }
@@ -3894,6 +4129,9 @@ impl Interpreter {
             | Expr::StructGet { .. }
             | Expr::StructSet { .. }
             | Expr::StructCompoundSet { .. }
+            | Expr::StructPtrGet { .. }
+            | Expr::StructPtrSet { .. }
+            | Expr::StructPtrCompoundSet { .. }
             | Expr::StringGet { .. }
             | Expr::Call { .. } => Ok(self.eval(expr)? != 0),
             Expr::Number(value) => Ok(*value != 0),
@@ -4061,6 +4299,9 @@ impl Interpreter {
             Expr::SizeOfType(_) | Expr::SizeOfValue(_) => Ok(INT_SIZE),
             Expr::Var(name) => self.sizeof_variable(name),
             Expr::StructGet { name, field } => self.sizeof_struct_field(name, field),
+            Expr::StructPtrGet { pointer, field } => {
+                self.sizeof_struct_pointer_field(pointer, field)
+            }
             Expr::ArrayGet { name, .. } => self.sizeof_indexed_value(name),
             Expr::StringGet { .. } => Ok(CHAR_SIZE),
             Expr::AddressOf(_) | Expr::AddressOfArray { .. } => Ok(POINTER_SIZE),
@@ -4076,6 +4317,10 @@ impl Interpreter {
             }
             Expr::StructSet { name, field, .. } | Expr::StructCompoundSet { name, field, .. } => {
                 self.sizeof_struct_field(name, field)
+            }
+            Expr::StructPtrSet { pointer, field, .. }
+            | Expr::StructPtrCompoundSet { pointer, field, .. } => {
+                self.sizeof_struct_pointer_field(pointer, field)
             }
             Expr::Increment { target, .. } => self.sizeof_expr(target),
             Expr::Call { name, .. } => match self.functions.get(name) {
@@ -4125,6 +4370,31 @@ impl Interpreter {
         }
     }
 
+    fn sizeof_struct_pointer_field(&self, pointer: &Expr, field: &str) -> CustResult<i64> {
+        let pointer = self.clone_for_sizeof_pointer(pointer)?;
+        let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
+        fields
+            .get(field)
+            .map(|field_value| field_value.ty.size())
+            .ok_or_else(|| CustError::new(format!("struct '{type_name}' has no field '{field}'")))
+    }
+
+    fn clone_for_sizeof_pointer(&self, pointer: &Expr) -> CustResult<PointerValue> {
+        match pointer {
+            Expr::Var(name) => match self.find_variable(name) {
+                Some(Value::Pointer { pointer, .. }) => Ok(pointer.clone()),
+                Some(Value::Struct { .. }) => self.address_of_scalar(name),
+                Some(_) => Err(CustError::new(format!(
+                    "variable '{name}' is not a pointer"
+                ))),
+                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            Expr::AddressOf(name) => self.address_of_scalar(name),
+            Expr::Deref(inner) => self.clone_for_sizeof_pointer(inner),
+            _ => Err(CustError::new("expected pointer expression")),
+        }
+    }
+
     fn sizeof_assignment_result(&self, name: &str) -> CustResult<i64> {
         match self.find_variable(name) {
             Some(Value::Scalar { ty, .. }) => Ok(ty.size()),
@@ -4147,7 +4417,7 @@ impl Interpreter {
     fn sizeof_indexed_value(&self, name: &str) -> CustResult<i64> {
         match self.find_variable(name) {
             Some(Value::Array(array)) => Ok(array.borrow().elem_type.size()),
-            Some(Value::Pointer { ty, .. }) => Ok(ty.size()),
+            Some(Value::Pointer { ty, .. }) => Ok(ty.size(&self.struct_types)?),
             Some(Value::Scalar { .. }) => {
                 Err(CustError::new(format!("variable '{name}' is not an array")))
             }
@@ -4161,7 +4431,7 @@ impl Interpreter {
     fn sizeof_deref(&self, pointer: &Expr) -> CustResult<i64> {
         match pointer {
             Expr::Var(name) => match self.find_variable(name) {
-                Some(Value::Pointer { ty, .. }) => Ok(ty.size()),
+                Some(Value::Pointer { ty, .. }) => Ok(ty.size(&self.struct_types)?),
                 Some(Value::Array(array)) => Ok(array.borrow().elem_type.size()),
                 Some(Value::Scalar { .. }) => Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
@@ -4229,6 +4499,13 @@ impl Interpreter {
                 let current = self.read_struct_field(name, field)?;
                 let updated = Self::apply_increment_op(current, op);
                 self.assign_struct_field(name, field, updated)?;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
+            Expr::StructPtrGet { pointer, field } => {
+                let pointer = self.eval_pointer(pointer)?;
+                let current = self.read_struct_pointer_field(&pointer, field)?;
+                let updated = Self::apply_increment_op(current, op);
+                self.assign_struct_pointer_field(&pointer, field, updated)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::Deref(pointer) => {
@@ -4361,7 +4638,13 @@ impl Interpreter {
                     )));
                 }
                 let scope = self.current_scope_mut();
-                scope.insert(name.clone(), Value::Pointer { pointer, ty: *ty });
+                scope.insert(
+                    name.clone(),
+                    Value::Pointer {
+                        pointer,
+                        ty: ty.clone(),
+                    },
+                );
                 Ok(ExecFlow::None)
             }
             Stmt::ArrayDecl {
@@ -4639,6 +4922,10 @@ impl Interpreter {
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
             Expr::StructGet { name, field } => self.read_struct_field(name, field),
+            Expr::StructPtrGet { pointer, field } => {
+                let pointer = self.eval_pointer(pointer)?;
+                self.read_struct_pointer_field(&pointer, field)
+            }
             Expr::SizeOfType(sizeof_type) => Ok(sizeof_type.size()),
             Expr::SizeOfValue(expr) => self.sizeof_expr(expr),
             Expr::Var(name) => self.find_scalar(name),
@@ -4688,12 +4975,23 @@ impl Interpreter {
                 self.eval_deref_compound_set(pointer, *op, value)
             }
             Expr::StructSet { name, field, value } => self.eval_struct_set(name, field, value),
+            Expr::StructPtrSet {
+                pointer,
+                field,
+                value,
+            } => self.eval_struct_ptr_set(pointer, field, value),
             Expr::StructCompoundSet {
                 name,
                 field,
                 op,
                 value,
             } => self.eval_struct_compound_set(name, field, *op, value),
+            Expr::StructPtrCompoundSet {
+                pointer,
+                field,
+                op,
+                value,
+            } => self.eval_struct_ptr_compound_set(pointer, field, *op, value),
             Expr::Deref(pointer) => {
                 let pointer = self.eval_pointer(pointer)?;
                 self.deref_pointer(&pointer)
