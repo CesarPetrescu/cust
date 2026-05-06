@@ -147,6 +147,37 @@ fn supports_struct_by_value_function_parameters() {
 }
 
 #[test]
+fn supports_struct_return_functions_and_prototypes() {
+    let program = include_str!("fixtures/valid/struct_return_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 31);
+}
+
+#[test]
+fn rejects_mismatched_struct_return_values() {
+    let program = include_str!("fixtures/invalid/struct_return_type_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "struct function 'bad' expected return struct 'Point', got struct 'Pair'"
+    );
+}
+
+#[test]
+fn rejects_empty_returns_from_struct_functions() {
+    let program = include_str!("fixtures/invalid/struct_function_empty_return.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "struct function 'bad' returned without a value"
+    );
+}
+
+#[test]
 fn rejects_mismatched_struct_function_arguments() {
     let program = include_str!("fixtures/invalid/struct_parameter_type_mismatch.c");
 

@@ -240,24 +240,29 @@ enum TopLevelFunction {
     Prototype(FunctionSignature),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ReturnType {
     Scalar(CType),
+    Struct(String),
     Void,
 }
 
 impl ReturnType {
-    fn value_return_label(self) -> &'static str {
+    fn value_return_label(&self) -> &'static str {
         match self {
             ReturnType::Scalar(CType::Int) => "int",
             ReturnType::Scalar(CType::Char) => "char",
+            ReturnType::Struct(_) => "struct",
             ReturnType::Void => "void",
         }
     }
 
-    fn size(self) -> Option<i64> {
+    fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> Option<i64> {
         match self {
             ReturnType::Scalar(ty) => Some(ty.size()),
+            ReturnType::Struct(type_name) => struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.fields.iter().map(|field| field.ty.size()).sum()),
             ReturnType::Void => None,
         }
     }
@@ -329,7 +334,7 @@ impl FunctionSignature {
     }
 
     fn from_function(function: &Function) -> Self {
-        Self::new(function.return_type, &function.params)
+        Self::new(function.return_type.clone(), &function.params)
     }
 }
 
@@ -1035,6 +1040,7 @@ impl Parser {
                 ));
             }
             if self.starts_function_definition()
+                || self.starts_struct_function_declaration()
                 || self.starts_malformed_function_definition()
                 || self.check(&Token::Void)
             {
@@ -1117,6 +1123,23 @@ impl Parser {
         )
     }
 
+    fn starts_struct_function_declaration(&self) -> bool {
+        matches!(
+            (
+                self.peek(),
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                self.tokens.get(self.pos + 2).map(|token| &token.kind),
+                self.tokens.get(self.pos + 3).map(|token| &token.kind)
+            ),
+            (
+                Token::Struct,
+                Some(Token::Ident(_)),
+                Some(Token::Ident(_)),
+                Some(Token::LParen)
+            )
+        )
+    }
+
     fn starts_function_definition(&self) -> bool {
         if !matches!(self.peek(), Token::Int | Token::Char | Token::Void) {
             return false;
@@ -1188,6 +1211,15 @@ impl Parser {
             Token::Int => Ok(ReturnType::Scalar(CType::Int)),
             Token::Char => Ok(ReturnType::Scalar(CType::Char)),
             Token::Void => Ok(ReturnType::Void),
+            Token::Struct => {
+                let type_name = self.expect_ident_after("struct return type name")?;
+                if !self.struct_types.contains_key(&type_name) {
+                    return Err(CustError::new(format!(
+                        "undefined struct type '{type_name}'"
+                    )));
+                }
+                Ok(ReturnType::Struct(type_name))
+            }
             token => Err(Self::error_at(
                 format!("expected Int, found {token:?}"),
                 &found,
@@ -2756,6 +2788,7 @@ struct Interpreter {
     functions: HashMap<String, Function>,
     struct_types: HashMap<String, StructTypeDef>,
     call_depth: usize,
+    return_type_stack: Vec<ReturnType>,
     max_loop_iterations: Option<usize>,
     loop_iterations: usize,
 }
@@ -2770,9 +2803,18 @@ struct Scope {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ExecFlow {
     None,
-    Return(Option<i64>),
+    Return(Option<ReturnValue>),
     Break,
     Continue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReturnValue {
+    Scalar(i64),
+    Struct {
+        type_name: String,
+        fields: HashMap<String, StructFieldValue>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2850,6 +2892,7 @@ impl Interpreter {
             functions: HashMap::new(),
             struct_types: HashMap::new(),
             call_depth: 0,
+            return_type_stack: Vec::new(),
             max_loop_iterations: options.max_loop_iterations,
             loop_iterations: 0,
         }
@@ -2869,7 +2912,10 @@ impl Interpreter {
         }
 
         let result = match self.call_function("main", &[])? {
-            Some(value) => Ok(value),
+            Some(ReturnValue::Scalar(value)) => Ok(value),
+            Some(ReturnValue::Struct { .. }) => Err(CustError::new(
+                "struct function 'main' used as program entry point",
+            )),
             None => Err(CustError::new(
                 "int function 'main' returned without a value",
             )),
@@ -2878,7 +2924,7 @@ impl Interpreter {
         result
     }
 
-    fn call_function(&mut self, name: &str, arg_exprs: &[Expr]) -> CustResult<Option<i64>> {
+    fn call_function(&mut self, name: &str, arg_exprs: &[Expr]) -> CustResult<Option<ReturnValue>> {
         let function = self
             .functions
             .get(name)
@@ -2941,21 +2987,17 @@ impl Interpreter {
         }
 
         self.call_depth += 1;
+        self.return_type_stack.push(function.return_type.clone());
         self.push_scope_with_values(param_scope);
         let result = match self.exec_block(&function.body) {
-            Ok(ExecFlow::Return(value)) => match (function.return_type, value) {
-                (ReturnType::Scalar(_), Some(value)) => Ok(Some(value)),
-                (ReturnType::Scalar(return_type), None) => Err(CustError::new(format!(
-                    "{} function '{name}' returned without a value",
-                    ReturnType::Scalar(return_type).value_return_label()
-                ))),
-                (ReturnType::Void, Some(_)) => Err(CustError::new(format!(
-                    "void function '{name}' returned a value"
-                ))),
-                (ReturnType::Void, None) => Ok(None),
-            },
-            Ok(ExecFlow::None) => match function.return_type {
+            Ok(ExecFlow::Return(value)) => {
+                self.validate_return_value(name, &function.return_type, value)
+            }
+            Ok(ExecFlow::None) => match &function.return_type {
                 ReturnType::Scalar(_) => Err(CustError::new(format!(
+                    "function '{name}' finished without return"
+                ))),
+                ReturnType::Struct(_) => Err(CustError::new(format!(
                     "function '{name}' finished without return"
                 ))),
                 ReturnType::Void => Ok(None),
@@ -2965,8 +3007,48 @@ impl Interpreter {
             Err(error) => Err(error),
         };
         self.pop_scope();
+        self.return_type_stack.pop();
         self.call_depth -= 1;
         result
+    }
+
+    fn validate_return_value(
+        &self,
+        function_name: &str,
+        return_type: &ReturnType,
+        value: Option<ReturnValue>,
+    ) -> CustResult<Option<ReturnValue>> {
+        match (return_type, value) {
+            (ReturnType::Scalar(_), Some(ReturnValue::Scalar(value))) => {
+                Ok(Some(ReturnValue::Scalar(value)))
+            }
+            (ReturnType::Scalar(return_type), None) => Err(CustError::new(format!(
+                "{} function '{function_name}' returned without a value",
+                ReturnType::Scalar(*return_type).value_return_label()
+            ))),
+            (ReturnType::Scalar(_), Some(ReturnValue::Struct { .. })) => Err(CustError::new(
+                format!("struct value returned from scalar function '{function_name}'"),
+            )),
+            (
+                ReturnType::Struct(expected_type),
+                Some(ReturnValue::Struct { type_name, fields }),
+            ) if &type_name == expected_type => Ok(Some(ReturnValue::Struct { type_name, fields })),
+            (ReturnType::Struct(expected_type), Some(ReturnValue::Struct { type_name, .. })) => {
+                Err(CustError::new(format!(
+                    "struct function '{function_name}' expected return struct '{expected_type}', got struct '{type_name}'"
+                )))
+            }
+            (ReturnType::Struct(_), Some(ReturnValue::Scalar(_))) => Err(CustError::new(format!(
+                "struct function '{function_name}' requires a struct return value"
+            ))),
+            (ReturnType::Struct(_), None) => Err(CustError::new(format!(
+                "struct function '{function_name}' returned without a value"
+            ))),
+            (ReturnType::Void, Some(_)) => Err(CustError::new(format!(
+                "void function '{function_name}' returned a value"
+            ))),
+            (ReturnType::Void, None) => Ok(None),
+        }
     }
 
     fn eval_array_argument(
@@ -3219,17 +3301,11 @@ impl Interpreter {
     }
 
     fn assign_struct_copy(&mut self, name: &str, rhs: &Expr) -> CustResult<()> {
-        let (rhs_type, rhs_fields) = match rhs {
-            Expr::Var(rhs_name) => match self.find_variable(rhs_name).cloned() {
-                Some(Value::Struct { type_name, fields }) => (type_name, fields),
-                Some(_) => {
-                    return Err(CustError::new(format!(
-                        "variable '{rhs_name}' is not a struct"
-                    )));
-                }
-                None => return Err(CustError::new(format!("undefined variable '{rhs_name}'"))),
-            },
-            _ => return Err(CustError::new("struct assignment requires struct variable")),
+        let (rhs_type, rhs_fields) = match self.eval_struct_expr(rhs)? {
+            ReturnValue::Struct { type_name, fields } => (type_name, fields),
+            ReturnValue::Scalar(_) => {
+                return Err(CustError::new("struct assignment requires struct value"));
+            }
         };
 
         match self.find_variable_mut(name) {
@@ -4003,9 +4079,12 @@ impl Interpreter {
             }
             Expr::Increment { target, .. } => self.sizeof_expr(target),
             Expr::Call { name, .. } => match self.functions.get(name) {
-                Some(function) => function.return_type.size().ok_or_else(|| {
-                    CustError::new(format!("void function '{name}' used as scalar expression"))
-                }),
+                Some(function) => function
+                    .return_type
+                    .size(&self.struct_types)
+                    .ok_or_else(|| {
+                        CustError::new(format!("void function '{name}' used as scalar expression"))
+                    }),
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },
             Expr::UnaryPlus(_)
@@ -4231,6 +4310,35 @@ impl Interpreter {
         }
     }
 
+    fn eval_struct_expr(&mut self, expr: &Expr) -> CustResult<ReturnValue> {
+        match expr {
+            Expr::Var(name) => match self.find_variable(name).cloned() {
+                Some(Value::Struct { type_name, fields }) => {
+                    Ok(ReturnValue::Struct { type_name, fields })
+                }
+                Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            Expr::Call { name, args } => self.call_function(name, args)?.ok_or_else(|| {
+                CustError::new(format!("void function '{name}' used as struct expression"))
+            }),
+            _ => Err(CustError::new("expected struct expression")),
+        }
+    }
+
+    fn eval_return_value(&mut self, expr: Option<&Expr>) -> CustResult<Option<ReturnValue>> {
+        let Some(expr) = expr else {
+            return Ok(None);
+        };
+        match self.return_type_stack.last().cloned() {
+            Some(ReturnType::Struct(_)) => Ok(Some(self.eval_struct_expr(expr)?)),
+            Some(ReturnType::Scalar(_)) | Some(ReturnType::Void) => {
+                Ok(Some(ReturnValue::Scalar(self.eval(expr)?)))
+            }
+            None => Ok(Some(ReturnValue::Scalar(self.eval(expr)?))),
+        }
+    }
+
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
         match stmt {
             Stmt::Empty => Ok(ExecFlow::None),
@@ -4362,9 +4470,7 @@ impl Interpreter {
                 self.eval_discard(expr)?;
                 Ok(ExecFlow::None)
             }
-            Stmt::Return(expr) => Ok(ExecFlow::Return(
-                expr.as_ref().map(|expr| self.eval(expr)).transpose()?,
-            )),
+            Stmt::Return(expr) => Ok(ExecFlow::Return(self.eval_return_value(expr.as_ref())?)),
             Stmt::Break => Ok(ExecFlow::Break),
             Stmt::Continue => Ok(ExecFlow::Continue),
             Stmt::Block(statements) => self.exec_block(statements),
@@ -4617,9 +4723,15 @@ impl Interpreter {
                     ))
                 })
             }
-            Expr::Call { name, args } => self.call_function(name, args)?.ok_or_else(|| {
-                CustError::new(format!("void function '{name}' used as scalar expression"))
-            }),
+            Expr::Call { name, args } => match self.call_function(name, args)? {
+                Some(ReturnValue::Scalar(value)) => Ok(value),
+                Some(ReturnValue::Struct { .. }) => Err(CustError::new(format!(
+                    "struct function '{name}' used as scalar expression"
+                ))),
+                None => Err(CustError::new(format!(
+                    "void function '{name}' used as scalar expression"
+                ))),
+            },
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::BitwiseNot(inner) => Ok(!self.eval(inner)?),

@@ -33,10 +33,15 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - Writes to fields on the callee's copy do not mutate the caller's struct variable.
   - Mismatched struct arguments report `function '<name>' struct parameter '<param>' expected struct '<Expected>', got struct '<Actual>'`.
   - Non-struct arguments report `function '<name>' struct parameter '<param>' requires a struct argument`.
+- Struct return types:
+  - Function definitions and prototypes may return a prior struct type, such as `struct Point make_point(int x);`.
+  - `return p;` clones the returned struct value so local return variables remain valid after the callee exits.
+  - Struct-returning calls can be assigned to same-type struct variables, e.g. `p = make_point(1);`.
+  - Mismatched struct return values report `struct function '<name>' expected return struct '<Expected>', got struct '<Actual>'`.
+  - Empty returns from struct functions report `struct function '<name>' returned without a value`.
 
 ## Intentional limitations before later milestones
 
-- No struct return types yet.
 - No pointers to structs and no address-of/member pointer access yet.
 - No nested structs, arrays in structs, pointer fields, bit-fields, anonymous structs, unions, typedefs, or `const`.
 - No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic sizes.
@@ -49,6 +54,8 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Member access is scalar expression syntax backed by field lvalue evaluation helpers for simple assignment, compound assignment, and increment/decrement expressions.
 - Function signatures include struct parameter type names, so prototypes and later definitions must agree on the exact struct type.
 - Struct parameter binding clones the struct value into the function parameter scope, preserving by-value behavior without host/native addresses.
+- Function signatures also include struct return type names, so prototypes and definitions must agree on the exact return struct type.
+- Return flow carries either scalar values or cloned struct field maps; callers receive by-value struct results without borrowing callee stack storage.
 
 ## Acceptance fixtures
 
@@ -75,9 +82,14 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - compares supported by-value struct parameter behavior with native C.
 - Invalid fixtures: `tests/fixtures/invalid/struct_parameter_type_mismatch.c` and `tests/fixtures/invalid/struct_parameter_non_struct_argument.c`
   - verify targeted diagnostics for mismatched and non-struct arguments.
+- Valid interpreter fixture: `tests/fixtures/valid/struct_return_functions.c`
+  - covers struct-returning definitions/prototypes, returning local structs by value, assigning call results to struct variables, preserving by-value mutation isolation, and Cust deterministic `sizeof` for struct-returning calls.
+- Valid compiler-oracle fixture: `tests/fixtures/compat/valid/struct_return_functions.c`
+  - compares supported struct return behavior with native C without relying on native ABI struct layout.
+- Invalid fixtures: `tests/fixtures/invalid/struct_return_type_mismatch.c` and `tests/fixtures/invalid/struct_function_empty_return.c`
+  - verify targeted diagnostics for mismatched and empty struct returns.
 
 ## Next struct work
 
-1. Add struct return types now that by-value parameter semantics are verified.
-2. Consider pointers to structs and `->` as a separate pointer-model extension after return-value behavior is covered.
-3. Keep nested/aggregate fields, typedefs, and const as later separate milestones.
+1. Consider pointers to structs and `->` as a separate pointer-model extension now that by-value struct returns are covered.
+2. Keep nested/aggregate fields, typedefs, and const as later separate milestones.
