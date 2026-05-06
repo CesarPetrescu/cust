@@ -50,6 +50,7 @@ Prioritized backlog for autonomous implementation.
 - [x] first scalar pointer milestone: pointer declarations, scalar address-of/dereference, dereference assignment, reassignment, null diagnostics, and out-of-scope scalar diagnostics
 - [x] pointer parameters, array/string decay to pointer arguments, and pointer indexing for array-base pointers
 - [x] `&array[index]` array-element pointers and dereference assignment/read support
+- [x] Scoped array-backed pointer arithmetic: `p + n`, `n + p`, `p - n`, same-storage pointer difference, `p += n`, `p -= n`, and pointer-variable `++`/`--` with scalar/null/out-of-bounds diagnostics plus interpreter and C compiler-oracle fixtures
 
 ## P3 — C-subset conformance tooling
 

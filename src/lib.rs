@@ -3012,8 +3012,137 @@ impl Interpreter {
                 ))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
+            Expr::CompoundAssign { name, op, value } => {
+                let pointer = match self.find_variable(name).cloned() {
+                    Some(Value::Pointer { pointer, .. }) => pointer,
+                    Some(Value::Scalar { .. }) => {
+                        return Err(CustError::new(format!(
+                            "variable '{name}' is not a pointer"
+                        )));
+                    }
+                    Some(Value::Array(_)) => {
+                        return Err(CustError::new(format!("array '{name}' is not a pointer")));
+                    }
+                    None => return Err(CustError::new(format!("undefined variable '{name}'"))),
+                };
+                let offset = self.eval(value)?;
+                let pointer = match op {
+                    CompoundOp::Add => self.offset_array_pointer(&pointer, offset)?,
+                    CompoundOp::Sub => self.offset_array_pointer(&pointer, -offset)?,
+                    CompoundOp::BitAnd
+                    | CompoundOp::BitOr
+                    | CompoundOp::BitXor
+                    | CompoundOp::ShiftLeft
+                    | CompoundOp::ShiftRight => return Err(Self::pointer_compound_error(*op)),
+                };
+                if let Some(Value::Pointer { pointer: slot, .. }) = self.find_variable_mut(name) {
+                    *slot = pointer.clone();
+                }
+                Ok(pointer)
+            }
+            Expr::Increment { target, op, prefix } => match target.as_ref() {
+                Expr::Var(name) => {
+                    let pointer = match self.find_variable(name).cloned() {
+                        Some(Value::Pointer { pointer, .. }) => pointer,
+                        Some(Value::Scalar { .. }) => {
+                            return Err(CustError::new(format!(
+                                "variable '{name}' is not a pointer"
+                            )));
+                        }
+                        Some(Value::Array(_)) => {
+                            return Err(CustError::new(format!("array '{name}' is not a pointer")));
+                        }
+                        None => return Err(CustError::new(format!("undefined variable '{name}'"))),
+                    };
+                    let offset = match op {
+                        IncrementOp::Inc => 1,
+                        IncrementOp::Dec => -1,
+                    };
+                    let updated = self.offset_array_pointer(&pointer, offset)?;
+                    if let Some(Value::Pointer { pointer: slot, .. }) = self.find_variable_mut(name)
+                    {
+                        *slot = updated.clone();
+                    }
+                    if *prefix { Ok(updated) } else { Ok(pointer) }
+                }
+                _ => Err(CustError::new("invalid increment/decrement target")),
+            },
+            Expr::Binary(left, op @ (BinaryOp::Add | BinaryOp::Sub), right) => {
+                self.eval_pointer_arithmetic(left, *op, right)
+            }
             _ => Err(CustError::new("expected pointer expression")),
         }
+    }
+
+    fn eval_pointer_arithmetic(
+        &mut self,
+        left: &Expr,
+        op: BinaryOp,
+        right: &Expr,
+    ) -> CustResult<PointerValue> {
+        match (self.eval_pointer(left), self.eval_pointer(right)) {
+            (Ok(pointer), Err(_)) => {
+                let offset = self.eval(right)?;
+                match op {
+                    BinaryOp::Add => self.offset_array_pointer(&pointer, offset),
+                    BinaryOp::Sub => self.offset_array_pointer(&pointer, -offset),
+                    _ => unreachable!("only pointer add/sub reach pointer arithmetic"),
+                }
+            }
+            (Err(_), Ok(pointer)) if op == BinaryOp::Add => {
+                let offset = self.eval(left)?;
+                self.offset_array_pointer(&pointer, offset)
+            }
+            (Ok(_), Ok(_)) if op == BinaryOp::Add => Err(CustError::new("cannot add two pointers")),
+            (Ok(_), Ok(_)) | (Err(_), Ok(_)) | (Err(_), Err(_)) => {
+                Err(CustError::new("expected pointer expression"))
+            }
+        }
+    }
+
+    fn offset_array_pointer(
+        &self,
+        pointer: &PointerValue,
+        offset: i64,
+    ) -> CustResult<PointerValue> {
+        match pointer {
+            PointerValue::Null => Err(CustError::new("null pointer arithmetic is not supported")),
+            PointerValue::Scalar { .. } => {
+                Err(CustError::new("scalar pointer arithmetic is not supported"))
+            }
+            PointerValue::ArrayBase { array, source_name } => {
+                self.array_pointer_at(array, source_name.clone(), offset)
+            }
+            PointerValue::ArrayElement {
+                array,
+                source_name,
+                index,
+            } => self.array_pointer_at(array, source_name.clone(), *index as i64 + offset),
+        }
+    }
+
+    fn array_pointer_at(
+        &self,
+        array: &Rc<RefCell<ArrayValue>>,
+        source_name: Option<String>,
+        index: i64,
+    ) -> CustResult<PointerValue> {
+        let len = array.borrow().elements.len();
+        let Ok(index_usize) = usize::try_from(index) else {
+            return Err(CustError::new(format!(
+                "array pointer index {index} out of bounds for length {len}"
+            )));
+        };
+        if index_usize >= len {
+            return Err(CustError::new(format!(
+                "array pointer index {index} out of bounds for length {len}"
+            )));
+        }
+        Ok(PointerValue::ArrayElement {
+            array: Rc::clone(array),
+            source_name,
+            index: index_usize,
+        })
     }
 
     fn deref_pointer(&self, pointer: &PointerValue) -> CustResult<i64> {
@@ -3255,6 +3384,28 @@ impl Interpreter {
         }
     }
 
+    fn array_pointer_index(pointer: &PointerValue) -> CustResult<(&Rc<RefCell<ArrayValue>>, i64)> {
+        match pointer {
+            PointerValue::ArrayBase { array, .. } => Ok((array, 0)),
+            PointerValue::ArrayElement { array, index, .. } => Ok((array, *index as i64)),
+            PointerValue::Null => Err(CustError::new("null pointer arithmetic is not supported")),
+            PointerValue::Scalar { .. } => {
+                Err(CustError::new("scalar pointer arithmetic is not supported"))
+            }
+        }
+    }
+
+    fn pointer_difference(left: &PointerValue, right: &PointerValue) -> CustResult<i64> {
+        let (left_array, left_index) = Self::array_pointer_index(left)?;
+        let (right_array, right_index) = Self::array_pointer_index(right)?;
+        if !Rc::ptr_eq(left_array, right_array) {
+            return Err(CustError::new(
+                "cannot subtract pointers to different arrays",
+            ));
+        }
+        Ok(left_index - right_index)
+    }
+
     fn eval_truthy(&mut self, expr: &Expr) -> CustResult<bool> {
         match expr {
             Expr::Comma(left, right) => {
@@ -3292,6 +3443,13 @@ impl Interpreter {
             | Expr::StringGet { .. }
             | Expr::Call { .. } => Ok(self.eval(expr)? != 0),
             Expr::Number(value) => Ok(*value != 0),
+            Expr::Binary(_, BinaryOp::Add | BinaryOp::Sub, _) => match self.eval_pointer(expr) {
+                Ok(pointer) => Ok(Self::pointer_truthy(&pointer)),
+                Err(error) if error.to_string() == "expected pointer expression" => {
+                    Ok(self.eval(expr)? != 0)
+                }
+                Err(error) => Err(error),
+            },
             Expr::UnaryPlus(_)
             | Expr::UnaryMinus(_)
             | Expr::BitwiseNot(_)
@@ -3308,6 +3466,16 @@ impl Interpreter {
     fn eval_discard(&mut self, expr: &Expr) -> CustResult<()> {
         if let Expr::Call { name, args } = expr {
             self.call_function(name, args)?;
+            return Ok(());
+        }
+        if matches!(
+            expr,
+            Expr::CompoundAssign {
+                op: CompoundOp::Add | CompoundOp::Sub,
+                ..
+            } | Expr::Increment { .. }
+        ) && self.eval_pointer(expr).is_ok()
+        {
             return Ok(());
         }
         match self.eval(expr) {
@@ -4039,8 +4207,17 @@ impl Interpreter {
                 }
                 BinaryOp::Eq | BinaryOp::Ne => self.eval_equality(left, op, right),
                 BinaryOp::Add | BinaryOp::Sub => {
-                    if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
-                        return Err(CustError::new("pointer arithmetic is not supported"));
+                    match (self.eval_pointer(left), self.eval_pointer(right)) {
+                        (Ok(left_pointer), Ok(right_pointer)) if *op == BinaryOp::Sub => {
+                            return Self::pointer_difference(&left_pointer, &right_pointer);
+                        }
+                        (Ok(_), Ok(_)) if *op == BinaryOp::Add => {
+                            return Err(CustError::new("cannot add two pointers"));
+                        }
+                        (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
+                            return Err(CustError::new("pointer value used as scalar"));
+                        }
+                        (Err(_), Err(_)) | (Ok(_), Ok(_)) => {}
                     }
                     let lhs = self.eval(left)?;
                     let rhs = self.eval(right)?;

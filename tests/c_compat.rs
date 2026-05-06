@@ -21,6 +21,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/increment_decrement.c",
     "tests/fixtures/compat/valid/mixed_pointer_string_array_conformance.c",
     "tests/fixtures/compat/valid/pointer_array_elements.c",
+    "tests/fixtures/compat/valid/pointer_arithmetic.c",
     "tests/fixtures/compat/valid/pointer_parameters_and_arrays.c",
     "tests/fixtures/compat/valid/pointer_truthiness_and_equality.c",
     "tests/fixtures/compat/valid/pointers_scalars.c",

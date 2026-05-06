@@ -1101,6 +1101,13 @@ fn supports_pointer_truthiness_and_equality_comparisons() {
 }
 
 #[test]
+fn supports_array_backed_pointer_arithmetic_and_difference() {
+    let program = include_str!("fixtures/valid/pointer_arithmetic.c");
+
+    assert_eq!(interpret(program).unwrap(), 70);
+}
+
+#[test]
 fn supports_assignment_expressions_for_scalar_array_and_deref_lvalues() {
     let program = include_str!("fixtures/valid/assignment_expressions.c");
 
@@ -1366,12 +1373,27 @@ fn rejects_pointer_comparison_with_nonzero_integer() {
 }
 
 #[test]
-fn rejects_pointer_arithmetic() {
-    let program = include_str!("fixtures/invalid/pointer_arithmetic.c");
+fn rejects_scalar_pointer_arithmetic() {
+    let program = include_str!("fixtures/invalid/scalar_pointer_arithmetic.c");
 
     let err = interpret(program).unwrap_err();
 
-    assert_eq!(err.to_string(), "pointer arithmetic is not supported");
+    assert_eq!(
+        err.to_string(),
+        "scalar pointer arithmetic is not supported"
+    );
+}
+
+#[test]
+fn reports_pointer_arithmetic_out_of_bounds() {
+    let program = include_str!("fixtures/invalid/pointer_arithmetic_out_of_bounds.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array pointer index 3 out of bounds for length 2"
+    );
 }
 
 #[test]
