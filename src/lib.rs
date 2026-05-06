@@ -123,11 +123,11 @@ enum Expr {
     Var(String),
     StructGet {
         name: String,
-        field: String,
+        fields: Vec<String>,
     },
     StructPtrGet {
         pointer: Box<Expr>,
-        field: String,
+        fields: Vec<String>,
     },
     ArrayGet {
         name: String,
@@ -158,12 +158,12 @@ enum Expr {
     },
     StructSet {
         name: String,
-        field: String,
+        fields: Vec<String>,
         value: Box<Expr>,
     },
     StructPtrSet {
         pointer: Box<Expr>,
-        field: String,
+        fields: Vec<String>,
         value: Box<Expr>,
     },
     CompoundAssign {
@@ -184,13 +184,13 @@ enum Expr {
     },
     StructCompoundSet {
         name: String,
-        field: String,
+        fields: Vec<String>,
         op: CompoundOp,
         value: Box<Expr>,
     },
     StructPtrCompoundSet {
         pointer: Box<Expr>,
-        field: String,
+        fields: Vec<String>,
         op: CompoundOp,
         value: Box<Expr>,
     },
@@ -245,8 +245,36 @@ struct StructTypeDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StructFieldDef {
     name: String,
-    ty: CType,
+    ty: StructFieldType,
     is_const: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StructFieldType {
+    Scalar(CType),
+    Struct(String),
+}
+
+impl StructFieldType {
+    fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
+        match self {
+            StructFieldType::Scalar(ty) => Ok(ty.size()),
+            StructFieldType::Struct(type_name) => struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.size(struct_types))
+                .transpose()?
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+        }
+    }
+}
+
+impl StructTypeDef {
+    fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
+        self.fields
+            .iter()
+            .map(|field| field.ty.size(struct_types))
+            .try_fold(0, |sum, size| size.map(|size| sum + size))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -296,7 +324,10 @@ impl ReturnType {
             ReturnType::Scalar(ty) => Some(ty.size()),
             ReturnType::Struct(type_name) => struct_types
                 .get(type_name)
-                .map(|struct_type| struct_type.fields.iter().map(|field| field.ty.size()).sum()),
+                .map(|struct_type| struct_type.size(struct_types))
+                .transpose()
+                .ok()
+                .flatten(),
             ReturnType::Void => None,
         }
     }
@@ -323,7 +354,8 @@ impl PointeeType {
             PointeeType::Scalar(ty) => Ok(ty.size()),
             PointeeType::Struct(type_name) => struct_types
                 .get(type_name)
-                .map(|struct_type| struct_type.fields.iter().map(|field| field.ty.size()).sum())
+                .map(|struct_type| struct_type.size(struct_types))
+                .transpose()?
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
         }
     }
@@ -342,7 +374,8 @@ impl SizeOfType {
             SizeOfType::Scalar(ty) => Ok(ty.size()),
             SizeOfType::Struct(type_name) => struct_types
                 .get(type_name)
-                .map(|struct_type| struct_type.fields.iter().map(|field| field.ty.size()).sum())
+                .map(|struct_type| struct_type.size(struct_types))
+                .transpose()?
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
             SizeOfType::Pointer => Ok(POINTER_SIZE),
         }
@@ -484,7 +517,7 @@ enum Stmt {
     },
     StructAssign {
         name: String,
-        field: String,
+        fields: Vec<String>,
         value: Expr,
     },
     Expr(Expr),
@@ -1947,13 +1980,8 @@ impl Parser {
             let (is_const, decl_type) =
                 self.parse_const_qualified_decl_type("struct field type")?;
             let ty = match decl_type {
-                DeclType::Scalar(ty) => ty,
-                DeclType::Struct(_) => {
-                    return Err(Self::error_at(
-                        "nested struct fields are not supported".to_string(),
-                        self.previous(),
-                    ));
-                }
+                DeclType::Scalar(ty) => StructFieldType::Scalar(ty),
+                DeclType::Struct(type_name) => StructFieldType::Struct(type_name),
                 DeclType::Pointer(_) => {
                     return Err(Self::error_at(
                         "pointer struct fields are not supported".to_string(),
@@ -2168,7 +2196,10 @@ impl Parser {
     fn parse_assign_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         let name = self.expect_ident()?;
         if self.matches(&Token::Dot) {
-            let field = self.expect_ident_after("struct field name after '.'")?;
+            let mut fields = vec![self.expect_ident_after("struct field name after '.'")?];
+            while self.matches(&Token::Dot) {
+                fields.push(self.expect_ident_after("struct field name after '.'")?);
+            }
             if let Some(op) = self.compound_assignment_op() {
                 self.advance();
                 let value = self.parse_expr()?;
@@ -2177,7 +2208,7 @@ impl Parser {
                 }
                 return Ok(Stmt::Expr(Expr::StructCompoundSet {
                     name,
-                    field,
+                    fields,
                     op,
                     value: Box::new(value),
                 }));
@@ -2187,7 +2218,11 @@ impl Parser {
             if require_semi {
                 self.expect_semicolon_after("assignment")?;
             }
-            return Ok(Stmt::StructAssign { name, field, value });
+            return Ok(Stmt::StructAssign {
+                name,
+                fields,
+                value,
+            });
         }
         if self.matches(&Token::LBracket) {
             let index = self.parse_index_expr()?;
@@ -2479,15 +2514,15 @@ impl Parser {
                     op,
                     value: Box::new(value),
                 }),
-                Expr::StructGet { name, field } => Ok(Expr::StructCompoundSet {
+                Expr::StructGet { name, fields } => Ok(Expr::StructCompoundSet {
                     name,
-                    field,
+                    fields,
                     op,
                     value: Box::new(value),
                 }),
-                Expr::StructPtrGet { pointer, field } => Ok(Expr::StructPtrCompoundSet {
+                Expr::StructPtrGet { pointer, fields } => Ok(Expr::StructPtrCompoundSet {
                     pointer,
-                    field,
+                    fields,
                     op,
                     value: Box::new(value),
                 }),
@@ -2513,14 +2548,14 @@ impl Parser {
                     pointer,
                     value: Box::new(value),
                 }),
-                Expr::StructGet { name, field } => Ok(Expr::StructSet {
+                Expr::StructGet { name, fields } => Ok(Expr::StructSet {
                     name,
-                    field,
+                    fields,
                     value: Box::new(value),
                 }),
-                Expr::StructPtrGet { pointer, field } => Ok(Expr::StructPtrSet {
+                Expr::StructPtrGet { pointer, fields } => Ok(Expr::StructPtrSet {
                     pointer,
-                    field,
+                    fields,
                     value: Box::new(value),
                 }),
                 _ => Err(Self::error_at(
@@ -2795,8 +2830,25 @@ impl Parser {
             if self.matches(&Token::Dot) {
                 let field = self.expect_ident_after("struct field name after '.'")?;
                 expr = match expr {
-                    Expr::Var(name) => Expr::StructGet { name, field },
-                    Expr::Deref(pointer) => Expr::StructPtrGet { pointer, field },
+                    Expr::Var(name) => Expr::StructGet {
+                        name,
+                        fields: vec![field],
+                    },
+                    Expr::StructGet { name, mut fields } => {
+                        fields.push(field);
+                        Expr::StructGet { name, fields }
+                    }
+                    Expr::Deref(pointer) => Expr::StructPtrGet {
+                        pointer,
+                        fields: vec![field],
+                    },
+                    Expr::StructPtrGet {
+                        pointer,
+                        mut fields,
+                    } => {
+                        fields.push(field);
+                        Expr::StructPtrGet { pointer, fields }
+                    }
                     _ => {
                         return Err(Self::error_at(
                             "invalid struct field access target".to_string(),
@@ -2808,7 +2860,7 @@ impl Parser {
                 let field = self.expect_ident_after("struct field name after '->'")?;
                 expr = Expr::StructPtrGet {
                     pointer: Box::new(expr),
-                    field,
+                    fields: vec![field],
                 };
             } else if self.matches(&Token::PlusPlus) {
                 let operator = self.previous().clone();
@@ -2876,7 +2928,10 @@ impl Parser {
                     })
                 } else if self.matches(&Token::Dot) {
                     let field = self.expect_ident_after("struct field name after '.'")?;
-                    Ok(Expr::StructGet { name, field })
+                    Ok(Expr::StructGet {
+                        name,
+                        fields: vec![field],
+                    })
                 } else {
                     Ok(Expr::Var(name))
                 }
@@ -3194,9 +3249,24 @@ impl Parser {
             return false;
         }
         if self.peek_next() == &Token::Dot {
+            let mut index = self.pos + 1;
+            while self
+                .tokens
+                .get(index)
+                .is_some_and(|token| token.kind == Token::Dot)
+            {
+                if !self
+                    .tokens
+                    .get(index + 1)
+                    .is_some_and(|token| matches!(token.kind, Token::Ident(_)))
+                {
+                    return false;
+                }
+                index += 2;
+            }
             return self
                 .tokens
-                .get(self.pos + 3)
+                .get(index)
                 .is_some_and(|token| Self::is_assignment_operator(&token.kind));
         }
         if Self::is_assignment_operator(self.peek_next()) {
@@ -3425,10 +3495,26 @@ enum Value {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct StructFieldValue {
-    value: i64,
-    ty: CType,
-    is_const: bool,
+enum StructFieldValue {
+    Scalar {
+        value: i64,
+        ty: CType,
+        is_const: bool,
+    },
+    Struct {
+        type_name: String,
+        fields: HashMap<String, StructFieldValue>,
+        is_const: bool,
+    },
+}
+
+impl StructFieldValue {
+    fn is_const(&self) -> bool {
+        match self {
+            StructFieldValue::Scalar { is_const, .. }
+            | StructFieldValue::Struct { is_const, .. } => *is_const,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3698,20 +3784,36 @@ impl Interpreter {
         expected_type: &str,
         arg_expr: &Expr,
     ) -> CustResult<Value> {
-        match arg_expr {
+        let struct_value = match arg_expr {
             Expr::Var(arg_name) => match self.find_variable(arg_name).cloned() {
-                Some(Value::Struct { type_name, fields }) if type_name == expected_type => {
-                    Ok(Value::Struct { type_name, fields })
-                }
-                Some(Value::Struct { type_name, .. }) => Err(CustError::new(format!(
-                    "function '{function_name}' struct parameter '{param_name}' expected struct '{expected_type}', got struct '{type_name}'"
-                ))),
-                Some(_) => Err(CustError::new(format!(
-                    "function '{function_name}' struct parameter '{param_name}' requires a struct argument"
-                ))),
-                None => Err(CustError::new(format!("undefined variable '{arg_name}'"))),
+                Some(Value::Struct { type_name, fields }) => Some((type_name, fields)),
+                Some(_) => None,
+                None => return Err(CustError::new(format!("undefined variable '{arg_name}'"))),
             },
-            _ => Err(CustError::new(format!(
+            Expr::StructGet { name, fields: path } => match self.find_variable(name).cloned() {
+                Some(Value::Struct { type_name, fields }) => {
+                    let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
+                    match field_value {
+                        StructFieldValue::Struct {
+                            type_name, fields, ..
+                        } => Some((type_name.clone(), fields.clone())),
+                        StructFieldValue::Scalar { .. } => None,
+                    }
+                }
+                Some(_) => None,
+                None => return Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            _ => None,
+        };
+
+        match struct_value {
+            Some((type_name, fields)) if type_name == expected_type => {
+                Ok(Value::Struct { type_name, fields })
+            }
+            Some((type_name, _)) => Err(CustError::new(format!(
+                "function '{function_name}' struct parameter '{param_name}' expected struct '{expected_type}', got struct '{type_name}'"
+            ))),
+            None => Err(CustError::new(format!(
                 "function '{function_name}' struct parameter '{param_name}' requires a struct argument"
             ))),
         }
@@ -4027,6 +4129,18 @@ impl Interpreter {
     }
 
     fn make_struct_value(&mut self, type_name: &str, init: &[Expr]) -> CustResult<Value> {
+        let fields = self.make_struct_fields(type_name, init)?;
+        Ok(Value::Struct {
+            type_name: type_name.to_string(),
+            fields,
+        })
+    }
+
+    fn make_struct_fields(
+        &mut self,
+        type_name: &str,
+        init: &[Expr],
+    ) -> CustResult<HashMap<String, StructFieldValue>> {
         let struct_type = self
             .struct_types
             .get(type_name)
@@ -4034,53 +4148,130 @@ impl Interpreter {
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
         let mut fields = HashMap::new();
         for (index, field) in struct_type.fields.iter().enumerate() {
-            let value = if let Some(expr) = init.get(index) {
-                self.eval(expr)?
-            } else {
-                0
+            let field_value = match &field.ty {
+                StructFieldType::Scalar(ty) => {
+                    let value = if let Some(expr) = init.get(index) {
+                        self.eval(expr)?
+                    } else {
+                        0
+                    };
+                    StructFieldValue::Scalar {
+                        value,
+                        ty: *ty,
+                        is_const: field.is_const,
+                    }
+                }
+                StructFieldType::Struct(nested_type) => {
+                    let fields = if init.get(index).is_some() {
+                        return Err(CustError::new(format!(
+                            "nested struct initializer for field '{}' is not supported",
+                            field.name
+                        )));
+                    } else {
+                        self.make_struct_fields(nested_type, &[])?
+                    };
+                    StructFieldValue::Struct {
+                        type_name: nested_type.clone(),
+                        fields,
+                        is_const: field.is_const,
+                    }
+                }
             };
-            fields.insert(
-                field.name.clone(),
-                StructFieldValue {
-                    value,
-                    ty: field.ty,
-                    is_const: field.is_const,
-                },
-            );
+            fields.insert(field.name.clone(), field_value);
         }
-        Ok(Value::Struct {
-            type_name: type_name.to_string(),
-            fields,
-        })
+        Ok(fields)
     }
 
-    fn read_struct_field(&self, name: &str, field: &str) -> CustResult<i64> {
+    fn field_path_label(fields: &[String]) -> &str {
+        fields.last().map(String::as_str).unwrap_or("<missing>")
+    }
+
+    fn nested_field_value<'a>(
+        type_name: &'a str,
+        fields_map: &'a HashMap<String, StructFieldValue>,
+        path: &[String],
+    ) -> CustResult<(&'a str, &'a StructFieldValue)> {
+        let Some((field, rest)) = path.split_first() else {
+            return Err(CustError::new("expected struct field"));
+        };
+        let value = fields_map.get(field).ok_or_else(|| {
+            CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+        })?;
+        if rest.is_empty() {
+            return Ok((type_name, value));
+        }
+        match value {
+            StructFieldValue::Struct {
+                type_name, fields, ..
+            } => Self::nested_field_value(type_name, fields, rest),
+            StructFieldValue::Scalar { .. } => Err(CustError::new(format!(
+                "struct field '{field}' is not a struct"
+            ))),
+        }
+    }
+
+    fn nested_field_value_mut<'a>(
+        type_name: &'a str,
+        fields_map: &'a mut HashMap<String, StructFieldValue>,
+        path: &[String],
+    ) -> CustResult<(&'a str, &'a mut StructFieldValue)> {
+        let Some((field, rest)) = path.split_first() else {
+            return Err(CustError::new("expected struct field"));
+        };
+        let value = fields_map.get_mut(field).ok_or_else(|| {
+            CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+        })?;
+        if rest.is_empty() {
+            return Ok((type_name, value));
+        }
+        match value {
+            StructFieldValue::Struct {
+                type_name, fields, ..
+            } => Self::nested_field_value_mut(type_name, fields, rest),
+            StructFieldValue::Scalar { .. } => Err(CustError::new(format!(
+                "struct field '{field}' is not a struct"
+            ))),
+        }
+    }
+
+    fn read_struct_field(&self, name: &str, path: &[String]) -> CustResult<i64> {
         match self.find_variable(name) {
-            Some(Value::Struct { type_name, fields }) => fields
-                .get(field)
-                .map(|field_value| field_value.value)
-                .ok_or_else(|| {
-                    CustError::new(format!("struct '{type_name}' has no field '{field}'"))
-                }),
+            Some(Value::Struct { type_name, fields }) => {
+                let (_, field_value) = Self::nested_field_value(type_name, fields, path)?;
+                match field_value {
+                    StructFieldValue::Scalar { value, .. } => Ok(*value),
+                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                        "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(path)
+                    ))),
+                }
+            }
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
 
-    fn assign_struct_field(&mut self, name: &str, field: &str, value: i64) -> CustResult<()> {
+    fn assign_struct_field(&mut self, name: &str, path: &[String], value: i64) -> CustResult<()> {
         self.ensure_variable_mutable(name)?;
         match self.find_variable_mut(name) {
             Some(Value::Struct { type_name, fields }) => {
-                let field_value = fields.get_mut(field).ok_or_else(|| {
-                    CustError::new(format!("struct '{type_name}' has no field '{field}'"))
-                })?;
-                if field_value.is_const {
+                let (_, field_value) = Self::nested_field_value_mut(type_name, fields, path)?;
+                if field_value.is_const() {
                     return Err(CustError::new(format!(
-                        "cannot assign to const struct field '{field}'"
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(path)
                     )));
                 }
-                field_value.value = value;
-                Ok(())
+                match field_value {
+                    StructFieldValue::Scalar { value: slot, .. } => {
+                        *slot = value;
+                        Ok(())
+                    }
+                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                        "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(path)
+                    ))),
+                }
             }
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
@@ -4161,60 +4352,75 @@ impl Interpreter {
         }
     }
 
-    fn read_struct_pointer_field(&self, pointer: &PointerValue, field: &str) -> CustResult<i64> {
+    fn read_struct_pointer_field(
+        &self,
+        pointer: &PointerValue,
+        path: &[String],
+    ) -> CustResult<i64> {
         let (type_name, fields) = self.find_struct_pointer_fields(pointer)?;
-        fields
-            .get(field)
-            .map(|field_value| field_value.value)
-            .ok_or_else(|| CustError::new(format!("struct '{type_name}' has no field '{field}'")))
+        let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
+        match field_value {
+            StructFieldValue::Scalar { value, .. } => Ok(*value),
+            StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                "struct field '{}' is a struct '{type_name}'",
+                Self::field_path_label(path)
+            ))),
+        }
     }
 
     fn assign_struct_pointer_field(
         &mut self,
         pointer: &PointerValue,
-        field: &str,
+        path: &[String],
         value: i64,
     ) -> CustResult<()> {
         self.ensure_struct_pointer_target_mutable(pointer)?;
         let (type_name, fields) = self.find_struct_pointer_fields_mut(pointer)?;
-        let field_value = fields.get_mut(field).ok_or_else(|| {
-            CustError::new(format!("struct '{type_name}' has no field '{field}'"))
-        })?;
-        if field_value.is_const {
+        let (_, field_value) = Self::nested_field_value_mut(&type_name, fields, path)?;
+        if field_value.is_const() {
             return Err(CustError::new(format!(
-                "cannot assign to const struct field '{field}'"
+                "cannot assign to const struct field '{}'",
+                Self::field_path_label(path)
             )));
         }
-        field_value.value = value;
-        Ok(())
+        match field_value {
+            StructFieldValue::Scalar { value: slot, .. } => {
+                *slot = value;
+                Ok(())
+            }
+            StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                "struct field '{}' is a struct '{type_name}'",
+                Self::field_path_label(path)
+            ))),
+        }
     }
 
     fn eval_struct_ptr_set(
         &mut self,
         pointer: &Expr,
-        field: &str,
+        path: &[String],
         value: &Expr,
     ) -> CustResult<i64> {
         self.ensure_pointer_expr_pointee_mutable(pointer)?;
         let pointer = self.eval_pointer(pointer)?;
         let value = self.eval(value)?;
-        self.assign_struct_pointer_field(&pointer, field, value)?;
+        self.assign_struct_pointer_field(&pointer, path, value)?;
         Ok(value)
     }
 
     fn eval_struct_ptr_compound_set(
         &mut self,
         pointer: &Expr,
-        field: &str,
+        path: &[String],
         op: CompoundOp,
         value: &Expr,
     ) -> CustResult<i64> {
         self.ensure_pointer_expr_pointee_mutable(pointer)?;
         let pointer = self.eval_pointer(pointer)?;
-        let current = self.read_struct_pointer_field(&pointer, field)?;
+        let current = self.read_struct_pointer_field(&pointer, path)?;
         let rhs = self.eval(value)?;
         let result = Self::apply_compound_op(current, op, rhs)?;
-        self.assign_struct_pointer_field(&pointer, field, result)?;
+        self.assign_struct_pointer_field(&pointer, path, result)?;
         Ok(result)
     }
 
@@ -4229,7 +4435,7 @@ impl Interpreter {
 
         match self.find_variable_mut(name) {
             Some(Value::Struct { type_name, fields }) if *type_name == rhs_type => {
-                if fields.values().any(|field| field.is_const) {
+                if fields.values().any(StructFieldValue::is_const) {
                     return Err(CustError::new(format!(
                         "cannot assign to struct '{type_name}' with const fields"
                     )));
@@ -4245,23 +4451,23 @@ impl Interpreter {
         }
     }
 
-    fn eval_struct_set(&mut self, name: &str, field: &str, value: &Expr) -> CustResult<i64> {
+    fn eval_struct_set(&mut self, name: &str, fields: &[String], value: &Expr) -> CustResult<i64> {
         let value = self.eval(value)?;
-        self.assign_struct_field(name, field, value)?;
+        self.assign_struct_field(name, fields, value)?;
         Ok(value)
     }
 
     fn eval_struct_compound_set(
         &mut self,
         name: &str,
-        field: &str,
+        fields: &[String],
         op: CompoundOp,
         value: &Expr,
     ) -> CustResult<i64> {
-        let current = self.read_struct_field(name, field)?;
+        let current = self.read_struct_field(name, fields)?;
         let rhs = self.eval(value)?;
         let result = Self::apply_compound_op(current, op, rhs)?;
-        self.assign_struct_field(name, field, result)?;
+        self.assign_struct_field(name, fields, result)?;
         Ok(result)
     }
 
@@ -5060,9 +5266,9 @@ impl Interpreter {
             Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
             Expr::SizeOfType(_) | Expr::SizeOfValue(_) => Ok(INT_SIZE),
             Expr::Var(name) => self.sizeof_variable(name),
-            Expr::StructGet { name, field } => self.sizeof_struct_field(name, field),
-            Expr::StructPtrGet { pointer, field } => {
-                self.sizeof_struct_pointer_field(pointer, field)
+            Expr::StructGet { name, fields } => self.sizeof_struct_field(name, fields),
+            Expr::StructPtrGet { pointer, fields } => {
+                self.sizeof_struct_pointer_field(pointer, fields)
             }
             Expr::ArrayGet { name, .. } => self.sizeof_indexed_value(name),
             Expr::StringGet { .. } => Ok(CHAR_SIZE),
@@ -5077,13 +5283,15 @@ impl Interpreter {
             Expr::DerefSet { pointer, .. } | Expr::DerefCompoundSet { pointer, .. } => {
                 self.sizeof_deref(pointer)
             }
-            Expr::StructSet { name, field, .. } | Expr::StructCompoundSet { name, field, .. } => {
-                self.sizeof_struct_field(name, field)
+            Expr::StructSet { name, fields, .. } | Expr::StructCompoundSet { name, fields, .. } => {
+                self.sizeof_struct_field(name, fields)
             }
-            Expr::StructPtrSet { pointer, field, .. }
-            | Expr::StructPtrCompoundSet { pointer, field, .. } => {
-                self.sizeof_struct_pointer_field(pointer, field)
+            Expr::StructPtrSet {
+                pointer, fields, ..
             }
+            | Expr::StructPtrCompoundSet {
+                pointer, fields, ..
+            } => self.sizeof_struct_pointer_field(pointer, fields),
             Expr::Increment { target, .. } => self.sizeof_expr(target),
             Expr::Call { name, .. } => match self.functions.get(name) {
                 Some(function) => function
@@ -5104,6 +5312,18 @@ impl Interpreter {
         }
     }
 
+    fn struct_field_value_size(&self, field_value: &StructFieldValue) -> CustResult<i64> {
+        match field_value {
+            StructFieldValue::Scalar { ty, .. } => Ok(ty.size()),
+            StructFieldValue::Struct { type_name, .. } => self
+                .struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.size(&self.struct_types))
+                .transpose()?
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+        }
+    }
+
     fn sizeof_variable(&self, name: &str) -> CustResult<i64> {
         match self.find_variable(name) {
             Some(Value::Scalar { ty, .. }) => Ok(ty.size()),
@@ -5112,33 +5332,32 @@ impl Interpreter {
                 Ok(array.elements.len() as i64 * array.elem_type.size())
             }
             Some(Value::Pointer { .. }) => Ok(POINTER_SIZE),
-            Some(Value::Struct { fields, .. }) => {
-                Ok(fields.values().map(|field| field.ty.size()).sum())
-            }
+            Some(Value::Struct { type_name, .. }) => self
+                .struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.size(&self.struct_types))
+                .transpose()?
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
 
-    fn sizeof_struct_field(&self, name: &str, field: &str) -> CustResult<i64> {
+    fn sizeof_struct_field(&self, name: &str, path: &[String]) -> CustResult<i64> {
         match self.find_variable(name) {
-            Some(Value::Struct { type_name, fields }) => fields
-                .get(field)
-                .map(|field_value| field_value.ty.size())
-                .ok_or_else(|| {
-                    CustError::new(format!("struct '{type_name}' has no field '{field}'"))
-                }),
+            Some(Value::Struct { type_name, fields }) => {
+                let (_, field_value) = Self::nested_field_value(type_name, fields, path)?;
+                self.struct_field_value_size(field_value)
+            }
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
 
-    fn sizeof_struct_pointer_field(&self, pointer: &Expr, field: &str) -> CustResult<i64> {
+    fn sizeof_struct_pointer_field(&self, pointer: &Expr, path: &[String]) -> CustResult<i64> {
         let pointer = self.clone_for_sizeof_pointer(pointer)?;
         let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
-        fields
-            .get(field)
-            .map(|field_value| field_value.ty.size())
-            .ok_or_else(|| CustError::new(format!("struct '{type_name}' has no field '{field}'")))
+        let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
+        self.struct_field_value_size(field_value)
     }
 
     fn clone_for_sizeof_pointer(&self, pointer: &Expr) -> CustResult<PointerValue> {
@@ -5259,18 +5478,18 @@ impl Interpreter {
                 array.elements[index] = updated;
                 Ok(Self::increment_result(current, updated, prefix))
             }
-            Expr::StructGet { name, field } => {
-                let current = self.read_struct_field(name, field)?;
+            Expr::StructGet { name, fields } => {
+                let current = self.read_struct_field(name, fields)?;
                 let updated = Self::apply_increment_op(current, op);
-                self.assign_struct_field(name, field, updated)?;
+                self.assign_struct_field(name, fields, updated)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
-            Expr::StructPtrGet { pointer, field } => {
+            Expr::StructPtrGet { pointer, fields } => {
                 self.ensure_pointer_expr_pointee_mutable(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;
-                let current = self.read_struct_pointer_field(&pointer, field)?;
+                let current = self.read_struct_pointer_field(&pointer, fields)?;
                 let updated = Self::apply_increment_op(current, op);
-                self.assign_struct_pointer_field(&pointer, field, updated)?;
+                self.assign_struct_pointer_field(&pointer, fields, updated)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::Deref(pointer) => {
@@ -5360,6 +5579,24 @@ impl Interpreter {
             Expr::Var(name) => match self.find_variable(name).cloned() {
                 Some(Value::Struct { type_name, fields }) => {
                     Ok(ReturnValue::Struct { type_name, fields })
+                }
+                Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            Expr::StructGet { name, fields: path } => match self.find_variable(name).cloned() {
+                Some(Value::Struct { type_name, fields }) => {
+                    let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
+                    match field_value {
+                        StructFieldValue::Struct {
+                            type_name, fields, ..
+                        } => Ok(ReturnValue::Struct {
+                            type_name: type_name.clone(),
+                            fields: fields.clone(),
+                        }),
+                        StructFieldValue::Scalar { .. } => {
+                            Err(CustError::new("expected struct expression"))
+                        }
+                    }
                 }
                 Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
@@ -5624,9 +5861,13 @@ impl Interpreter {
                 }
                 Ok(ExecFlow::None)
             }
-            Stmt::StructAssign { name, field, value } => {
+            Stmt::StructAssign {
+                name,
+                fields,
+                value,
+            } => {
                 let value = self.eval(value)?;
-                self.assign_struct_field(name, field, value)?;
+                self.assign_struct_field(name, fields, value)?;
                 Ok(ExecFlow::None)
             }
             Stmt::Expr(expr) => {
@@ -5801,10 +6042,10 @@ impl Interpreter {
         match expr {
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
-            Expr::StructGet { name, field } => self.read_struct_field(name, field),
-            Expr::StructPtrGet { pointer, field } => {
+            Expr::StructGet { name, fields } => self.read_struct_field(name, fields),
+            Expr::StructPtrGet { pointer, fields } => {
                 let pointer = self.eval_pointer(pointer)?;
-                self.read_struct_pointer_field(&pointer, field)
+                self.read_struct_pointer_field(&pointer, fields)
             }
             Expr::SizeOfType(sizeof_type) => Ok(sizeof_type.size(&self.struct_types)?),
             Expr::SizeOfValue(expr) => self.sizeof_expr(expr),
@@ -5856,24 +6097,28 @@ impl Interpreter {
             Expr::DerefCompoundSet { pointer, op, value } => {
                 self.eval_deref_compound_set(pointer, *op, value)
             }
-            Expr::StructSet { name, field, value } => self.eval_struct_set(name, field, value),
+            Expr::StructSet {
+                name,
+                fields,
+                value,
+            } => self.eval_struct_set(name, fields, value),
             Expr::StructPtrSet {
                 pointer,
-                field,
+                fields,
                 value,
-            } => self.eval_struct_ptr_set(pointer, field, value),
+            } => self.eval_struct_ptr_set(pointer, fields, value),
             Expr::StructCompoundSet {
                 name,
-                field,
+                fields,
                 op,
                 value,
-            } => self.eval_struct_compound_set(name, field, *op, value),
+            } => self.eval_struct_compound_set(name, fields, *op, value),
             Expr::StructPtrCompoundSet {
                 pointer,
-                field,
+                fields,
                 op,
                 value,
-            } => self.eval_struct_ptr_compound_set(pointer, field, *op, value),
+            } => self.eval_struct_ptr_compound_set(pointer, fields, *op, value),
             Expr::Deref(pointer) => {
                 let pointer = self.eval_pointer(pointer)?;
                 self.deref_pointer(&pointer)

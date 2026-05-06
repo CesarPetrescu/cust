@@ -58,6 +58,8 @@ Prioritized backlog for autonomous implementation.
 - [x] Scalar brace initializers for one-dimensional arrays; acceptance: `int values[3] = {1, 2};`, `char bytes[4] = {1, 0, 2};`, `static int seen[3] = {4, 5};`, and `const int table[2] = {8, 9};` initialize declared elements left-to-right, zero-fill omitted trailing elements, preserve read-only const arrays and persistent static storage, accept trailing commas, reject excess initializers with `too many initializers for array '<name>'`, and include interpreter plus C compiler-oracle coverage
 - [x] Scalar brace initializers for supported structs; acceptance: `struct Point p = {1, 2};`, `const struct Config c = {7, 8};`, and `static struct Point saved = {3, 4};` initialize scalar fields in declaration order, evaluate initializer expressions, zero-fill omitted trailing fields, preserve const-field/const-struct read-only enforcement after initialization, reject excess entries with `too many initializers for struct '<Type>'`, and include interpreter plus C compiler-oracle coverage
 
+- [x] Nested struct fields for prior named struct types; acceptance: `struct Rect { struct Point origin; int width; };` stores nested field maps, `rect.origin.x` reads/writes scalar nested fields, nested fields can be copied/passed by value as same-type struct values, `sizeof(rect.origin)` uses deterministic recursive Cust sizes without native ABI padding, unknown nested fields report the innermost `struct '<Type>' has no field '<field>'` diagnostic, and interpreter plus C compiler-oracle fixtures cover the supported subset
+
 ## P2 — data types
 
 - [x] `char` literals, declarations, and function parameters

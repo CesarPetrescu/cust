@@ -4,9 +4,10 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 
 ## Supported milestones
 
-- Top-level struct type declarations with scalar fields only:
+- Top-level struct type declarations with scalar and nested struct fields:
   - `struct Point { int x; char y; };`
-  - Fields may be `int`, `char`, `const int`, or `const char`.
+  - `struct Rect { struct Point origin; int width; };` after `Point` is declared.
+  - Fields may be `int`, `char`, `const int`, `const char`, or a prior named struct type.
   - Duplicate field names are rejected during parsing.
   - Re-declaring a struct type name is rejected.
 - Struct variables at top level and block scope:
@@ -17,10 +18,11 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - Normal block/global scope rules apply; inner variables may shadow outer variables.
 - Member access and member assignment:
   - `p.x` reads a scalar field.
-  - `p.x = expr;` assigns a scalar field.
-  - Unknown fields report `struct '<Type>' has no field '<field>'`.
-  - `sizeof(p)` sums Cust field sizes (`int = 8`, `char = 1`) without native ABI padding.
-  - `sizeof(p.x)` uses the declared field type size.
+  - `rect.origin.x` reads nested scalar fields through a struct-valued field path.
+  - `p.x = expr;` and `rect.origin.x = expr;` assign scalar fields.
+  - Unknown fields report `struct '<Type>' has no field '<field>'` at the innermost type where lookup fails.
+  - `sizeof(p)` sums Cust field sizes recursively (`int = 8`, `char = 1`) without native ABI padding.
+  - `sizeof(p.x)` uses the declared field type size; `sizeof(rect.origin)` uses the deterministic Cust size of the nested struct field.
 - Same-type struct copy assignment:
   - `b = a;` copies field values from one same-type struct variable to another.
   - The copy is value semantics: later writes to `a.x` do not mutate `b.x`.
@@ -60,16 +62,17 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 
 ## Intentional limitations before later milestones
 
-- No nested structs, arrays in structs, pointer fields, bit-fields, anonymous structs, unions, or non-scalar const-qualified fields inside struct definitions.
-- No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic sizes.
+- No arrays in structs, pointer fields, bit-fields, anonymous structs, unions, or const-qualified nested struct fields inside struct definitions.
+- Nested struct brace initializer entries such as `struct Rect r = {{1, 2}, 3};` are not yet supported; nested struct fields are zero-initialized and then assigned through field paths in this milestone.
+- No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic recursive sizes.
 
 ## Implementation model
 
 - Parser records top-level struct type definitions in `Program::struct_types`.
-- Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store scalar values plus declared `CType` and field-level const metadata.
-- Struct initializers are parsed as assignment-precedence expressions separated by top-level commas and applied to fields in declaration order before const field metadata prevents later writes.
+- Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store either scalar values plus declared `CType`/field-level const metadata or nested struct field maps with the nested type name.
+- Struct initializers are parsed as assignment-precedence expressions separated by top-level commas and applied to scalar fields in declaration order before const field metadata prevents later writes; nested struct fields are currently zero-initialized rather than brace-initialized.
 - Struct fields are scoped as members of their owning value, not as independent variables.
-- Member access is scalar expression syntax backed by field lvalue evaluation helpers for simple assignment, compound assignment, and increment/decrement expressions.
+- Member access is scalar expression syntax backed by field-path lvalue evaluation helpers for simple assignment, compound assignment, and increment/decrement expressions.
 - Function signatures include struct parameter type names, so prototypes and later definitions must agree on the exact struct type.
 - Struct parameter binding clones the struct value into the function parameter scope, preserving by-value behavior without host/native addresses.
 - Function signatures also include struct return type names, so prototypes and definitions must agree on the exact return struct type.
@@ -138,6 +141,13 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Invalid fixture: `tests/fixtures/invalid/struct_initializer_too_long.c`
   - verifies excess initializer entries report `too many initializers for struct '<Type>'`.
 
+- Valid interpreter fixture: `tests/fixtures/valid/nested_struct_fields.c`
+  - covers nested struct fields, `rect.origin.x` field-path reads/writes, passing `rect.origin` as a by-value struct argument, copying a nested struct field into a same-type variable, and deterministic Cust `sizeof(rect.origin)`.
+- Valid compiler-oracle fixture: `tests/fixtures/compat/valid/nested_struct_fields.c`
+  - compares nested struct field-path reads/writes, by-value nested field arguments, and nested-field copy assignment with native C while avoiding native `sizeof(struct)` layout checks.
+- Invalid fixture: `tests/fixtures/invalid/nested_struct_unknown_field.c`
+  - verifies missing nested fields report the targeted innermost struct type diagnostic.
+
 ## Next struct work
 
-1. Consider nested/aggregate fields only as separate milestones with explicit storage/layout design; do not rely on native ABI padding.
+1. Consider arrays-in-structs, pointer fields, or nested aggregate brace initializers only as separate milestones with explicit storage/layout design; do not rely on native ABI padding.

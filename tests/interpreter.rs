@@ -126,6 +126,21 @@ fn supports_scalar_struct_initializers() {
 }
 
 #[test]
+fn supports_nested_struct_fields() {
+    let program = include_str!("fixtures/valid/nested_struct_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 54);
+}
+
+#[test]
+fn rejects_unknown_nested_struct_fields() {
+    let program = include_str!("fixtures/invalid/nested_struct_unknown_field.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "struct 'Point' has no field 'z'");
+}
+
+#[test]
 fn rejects_array_initializers_longer_than_declared_length() {
     let program = include_str!("fixtures/invalid/array_initializer_too_long.c");
 
