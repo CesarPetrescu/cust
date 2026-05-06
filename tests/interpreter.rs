@@ -133,6 +133,43 @@ fn supports_pointer_const_preserving_conversions() {
 }
 
 #[test]
+fn supports_const_qualified_structs_and_struct_pointers() {
+    let program = include_str!("fixtures/valid/const_struct_qualifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 41);
+}
+
+#[test]
+fn rejects_direct_field_assignment_to_const_structs() {
+    let program = include_str!("fixtures/invalid/const_struct_field_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot assign to const variable 'point'");
+}
+
+#[test]
+fn rejects_field_writes_through_const_struct_pointers() {
+    let program = include_str!("fixtures/invalid/const_struct_pointer_write.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
+}
+
+#[test]
+fn rejects_struct_pointer_declarations_that_discard_const_pointee() {
+    let program = include_str!("fixtures/invalid/const_struct_pointer_discard.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
 fn rejects_pointer_declarations_that_discard_const_pointee() {
     let program = include_str!("fixtures/invalid/const_pointer_discard_decl.c");
 

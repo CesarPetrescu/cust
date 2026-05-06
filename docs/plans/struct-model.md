@@ -40,15 +40,20 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - Mismatched struct return values report `struct function '<name>' expected return struct '<Expected>', got struct '<Actual>'`.
   - Empty returns from struct functions report `struct function '<name>' returned without a value`.
 - Struct pointers:
-  - Local/global declarations and function parameters may use one pointer level to a prior struct type, e.g. `struct Point *p = &point;`, `struct Point *p;`, and `void set(struct Point *p);`.
+  - Local/global declarations and function parameters may use one pointer level to a prior struct type, e.g. `struct Point *p = &point;`, `struct Point *p;`, `struct Point * const stable = &point;`, `const struct Point *view = &point;`, and `void set(struct Point *p);`.
   - `&point` produces an interpreter-owned pointer to the struct variable; null struct pointers use the existing `0` literal.
   - `p->x` and `(*p).x` read scalar fields through a struct pointer.
-  - Struct pointer field lvalue expressions support simple assignment, compound assignment, and prefix/postfix increment/decrement for scalar fields.
+  - Struct pointer field lvalue expressions support simple assignment, compound assignment, and prefix/postfix increment/decrement for scalar fields when the pointer target is mutable.
+  - `const struct Point *p` and direct pointers to `const struct Point` variables are read-only views: writes through `p->field` / `(*p).field`, field compound assignment, and field increment/decrement report `cannot assign through pointer to const`.
   - Null struct pointer field access reports `null pointer dereference`; pointers to ended block/function scopes report `pointer to out-of-scope variable '<name>'`.
+- Const-qualified struct variables and by-value parameters:
+  - `const struct Point p;` / `const Point p;` after a struct typedef create zero-initialized read-only struct variables.
+  - `int f(const struct Point p)` copies the argument by value into a read-only parameter binding.
+  - Direct struct copy assignment and field writes to const struct bindings report `cannot assign to const variable '<name>'`.
 
 ## Intentional limitations before later milestones
 
-- No nested structs, arrays in structs, pointer fields, bit-fields, anonymous structs, unions, typedefs, or `const`.
+- No nested structs, arrays in structs, pointer fields, bit-fields, anonymous structs, unions, or const-qualified fields inside struct definitions.
 - No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic sizes.
 
 ## Implementation model
@@ -63,6 +68,8 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Return flow carries either scalar values or cloned struct field maps; callers receive by-value struct results without borrowing callee stack storage.
 - Struct pointers extend the existing interpreter-owned pointer model with `PointerValue::Struct { scope_id, name }`, never host addresses.
 - Struct pointer dereference checks live scope IDs before field access, preserving the same out-of-scope safety used by scalar pointers.
+- Const struct variables/parameters reuse scope `const_variables` metadata; struct field writes and copy assignment check the owning struct binding before mutation.
+- Const struct pointer declarations/parameters use the existing `points_to_const` pointer metadata, and direct pointer writes also check whether the referenced struct target binding is const.
 - `->` parses as postfix pointer field access, and `(*p).x` is represented as field access through a dereferenced pointer expression.
 
 ## Acceptance fixtures
@@ -102,7 +109,13 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - compares the supported struct pointer subset with native C without relying on native struct layout.
 - Invalid fixtures: `tests/fixtures/invalid/struct_pointer_null_dereference.c` and `tests/fixtures/invalid/struct_pointer_out_of_scope.c`
   - verify null and ended-scope struct pointer diagnostics.
+- Valid interpreter fixture: `tests/fixtures/valid/const_struct_qualifiers.c`
+  - covers const struct variables, const by-value struct parameters, const struct pointer read-only views, and const struct pointer slots.
+- Valid compiler-oracle fixture: `tests/fixtures/compat/valid/const_struct_qualifiers.c`
+  - compares supported const struct pointer reads and const-preserving parameter/declaration behavior with native C while avoiding ABI-sensitive layout checks.
+- Invalid fixtures: `tests/fixtures/invalid/const_struct_field_assignment.c`, `tests/fixtures/invalid/const_struct_pointer_write.c`, and `tests/fixtures/invalid/const_struct_pointer_discard.c`
+  - verify direct const struct field-write rejection, write-through-const-struct-pointer rejection, and const-discard struct pointer conversion diagnostics.
 
 ## Next struct work
 
-1. Keep nested/aggregate fields, typedefs, and const as later separate milestones.
+1. Keep nested/aggregate fields and const-qualified struct fields as later separate milestones.

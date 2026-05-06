@@ -1880,6 +1880,7 @@ impl Parser {
             )));
         }
         if self.matches(&Token::Star) {
+            let is_const = self.matches(&Token::Const);
             let name = self.expect_ident_after("struct pointer name after '*'")?;
             let expr = if self.matches(&Token::Assign) {
                 self.parse_expr()?
@@ -1894,7 +1895,7 @@ impl Parser {
                 name,
                 ty: PointeeType::Struct(type_name),
                 expr,
-                is_const: false,
+                is_const,
                 points_to_const: false,
             });
         }
@@ -3731,6 +3732,21 @@ impl Interpreter {
         }
     }
 
+    fn ensure_struct_pointer_target_mutable(&self, pointer: &PointerValue) -> CustResult<()> {
+        match pointer {
+            PointerValue::Struct { scope_id, name }
+                if self
+                    .scopes
+                    .iter()
+                    .find(|scope| scope.id == *scope_id)
+                    .is_some_and(|scope| scope.const_variables.contains(name)) =>
+            {
+                Err(CustError::new("cannot assign through pointer to const"))
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn pop_scope(&mut self) {
         if let Some(scope) = self.scopes.pop() {
             self.live_scope_ids.remove(&scope.id);
@@ -3948,6 +3964,7 @@ impl Interpreter {
         field: &str,
         value: i64,
     ) -> CustResult<()> {
+        self.ensure_struct_pointer_target_mutable(pointer)?;
         let (type_name, fields) = self.find_struct_pointer_fields_mut(pointer)?;
         let field_value = fields.get_mut(field).ok_or_else(|| {
             CustError::new(format!("struct '{type_name}' has no field '{field}'"))
@@ -3962,6 +3979,7 @@ impl Interpreter {
         field: &str,
         value: &Expr,
     ) -> CustResult<i64> {
+        self.ensure_pointer_expr_pointee_mutable(pointer)?;
         let pointer = self.eval_pointer(pointer)?;
         let value = self.eval(value)?;
         self.assign_struct_pointer_field(&pointer, field, value)?;
@@ -3975,6 +3993,7 @@ impl Interpreter {
         op: CompoundOp,
         value: &Expr,
     ) -> CustResult<i64> {
+        self.ensure_pointer_expr_pointee_mutable(pointer)?;
         let pointer = self.eval_pointer(pointer)?;
         let current = self.read_struct_pointer_field(&pointer, field)?;
         let rhs = self.eval(value)?;
@@ -4987,6 +5006,7 @@ impl Interpreter {
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::StructPtrGet { pointer, field } => {
+                self.ensure_pointer_expr_pointee_mutable(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;
                 let current = self.read_struct_pointer_field(&pointer, field)?;
                 let updated = Self::apply_increment_op(current, op);
