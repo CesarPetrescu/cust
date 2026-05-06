@@ -119,6 +119,25 @@ fn supports_function_prototypes_before_definitions() {
 }
 
 #[test]
+fn supports_char_return_functions_and_prototypes() {
+    let program = include_str!("fixtures/valid/char_return_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 3);
+}
+
+#[test]
+fn rejects_empty_returns_from_char_functions() {
+    let program = include_str!("fixtures/invalid/char_function_empty_return.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "char function 'bad' returned without a value"
+    );
+}
+
+#[test]
 fn rejects_conflicting_function_prototypes() {
     let program = include_str!("fixtures/invalid/conflicting_function_prototype.c");
 

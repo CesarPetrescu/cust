@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-06 autonomous function-prototype run after local and Docker verification passed. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-05-06 autonomous char-return-function run after local and Docker verification passed. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 

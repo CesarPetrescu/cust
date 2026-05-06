@@ -213,8 +213,25 @@ enum TopLevelFunction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReturnType {
-    Int,
+    Scalar(CType),
     Void,
+}
+
+impl ReturnType {
+    fn value_return_label(self) -> &'static str {
+        match self {
+            ReturnType::Scalar(CType::Int) => "int",
+            ReturnType::Scalar(CType::Char) => "char",
+            ReturnType::Void => "void",
+        }
+    }
+
+    fn size(self) -> Option<i64> {
+        match self {
+            ReturnType::Scalar(ty) => Some(ty.size()),
+            ReturnType::Void => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1026,7 +1043,7 @@ impl Parser {
     }
 
     fn starts_function_definition(&self) -> bool {
-        if !matches!(self.peek(), Token::Int | Token::Void) {
+        if !matches!(self.peek(), Token::Int | Token::Char | Token::Void) {
             return false;
         }
 
@@ -1048,7 +1065,7 @@ impl Parser {
     }
 
     fn starts_malformed_function_definition(&self) -> bool {
-        if !self.check(&Token::Int) {
+        if !matches!(self.peek(), Token::Int | Token::Char) {
             return false;
         }
 
@@ -1093,7 +1110,8 @@ impl Parser {
     fn parse_function_return_type(&mut self) -> CustResult<ReturnType> {
         let found = self.advance();
         match &found.kind {
-            Token::Int => Ok(ReturnType::Int),
+            Token::Int => Ok(ReturnType::Scalar(CType::Int)),
+            Token::Char => Ok(ReturnType::Scalar(CType::Char)),
             Token::Void => Ok(ReturnType::Void),
             token => Err(Self::error_at(
                 format!("expected Int, found {token:?}"),
@@ -2711,9 +2729,10 @@ impl Interpreter {
         self.push_scope_with_values(param_scope);
         let result = match self.exec_block(&function.body) {
             Ok(ExecFlow::Return(value)) => match (function.return_type, value) {
-                (ReturnType::Int, Some(value)) => Ok(Some(value)),
-                (ReturnType::Int, None) => Err(CustError::new(format!(
-                    "int function '{name}' returned without a value"
+                (ReturnType::Scalar(_), Some(value)) => Ok(Some(value)),
+                (ReturnType::Scalar(return_type), None) => Err(CustError::new(format!(
+                    "{} function '{name}' returned without a value",
+                    ReturnType::Scalar(return_type).value_return_label()
                 ))),
                 (ReturnType::Void, Some(_)) => Err(CustError::new(format!(
                     "void function '{name}' returned a value"
@@ -2721,7 +2740,7 @@ impl Interpreter {
                 (ReturnType::Void, None) => Ok(None),
             },
             Ok(ExecFlow::None) => match function.return_type {
-                ReturnType::Int => Err(CustError::new(format!(
+                ReturnType::Scalar(_) => Err(CustError::new(format!(
                     "function '{name}' finished without return"
                 ))),
                 ReturnType::Void => Ok(None),
@@ -3428,10 +3447,9 @@ impl Interpreter {
             }
             Expr::Increment { target, .. } => self.sizeof_expr(target),
             Expr::Call { name, .. } => match self.functions.get(name) {
-                Some(function) if function.return_type == ReturnType::Int => Ok(INT_SIZE),
-                Some(_) => Err(CustError::new(format!(
-                    "void function '{name}' used as scalar expression"
-                ))),
+                Some(function) => function.return_type.size().ok_or_else(|| {
+                    CustError::new(format!("void function '{name}' used as scalar expression"))
+                }),
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },
             Expr::UnaryPlus(_)
