@@ -37,6 +37,7 @@ enum Token {
     Char,
     Void,
     Enum,
+    Struct,
     Sizeof,
     Return,
     If,
@@ -90,6 +91,7 @@ enum Token {
     RBrace,
     Comma,
     Semi,
+    Dot,
     Question,
     Colon,
     Eof,
@@ -115,6 +117,10 @@ enum Expr {
     SizeOfType(SizeOfType),
     SizeOfValue(Box<Expr>),
     Var(String),
+    StructGet {
+        name: String,
+        field: String,
+    },
     ArrayGet {
         name: String,
         index: Box<Expr>,
@@ -184,6 +190,18 @@ enum Expr {
 struct Program {
     globals: Vec<Stmt>,
     functions: HashMap<String, Function>,
+    struct_types: HashMap<String, StructTypeDef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StructTypeDef {
+    fields: Vec<StructFieldDef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StructFieldDef {
+    name: String,
+    ty: CType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -354,6 +372,10 @@ enum Stmt {
         elem_type: CType,
         len: usize,
     },
+    StructVarDecl {
+        type_name: String,
+        name: String,
+    },
     EnumDecl {
         constants: Vec<EnumConstant>,
     },
@@ -365,6 +387,11 @@ enum Stmt {
     ArrayAssign {
         name: String,
         index: Expr,
+        value: Expr,
+    },
+    StructAssign {
+        name: String,
+        field: String,
         value: Expr,
     },
     Expr(Expr),
@@ -720,6 +747,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "char" => Token::Char,
                     "void" => Token::Void,
                     "enum" => Token::Enum,
+                    "struct" => Token::Struct,
                     "sizeof" => Token::Sizeof,
                     "return" => Token::Return,
                     "if" => Token::If,
@@ -849,6 +877,10 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 push_token(&mut tokens, Token::Semi, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
+            '.' => {
+                push_token(&mut tokens, Token::Dot, line, column);
+                advance_position(c, &mut line, &mut column, &mut i);
+            }
             '?' => {
                 push_token(&mut tokens, Token::Question, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
@@ -961,11 +993,16 @@ fn advance_position(c: char, line: &mut usize, column: &mut usize, i: &mut usize
 struct Parser {
     tokens: Vec<LocatedToken>,
     pos: usize,
+    struct_types: HashMap<String, StructTypeDef>,
 }
 
 impl Parser {
     fn new(tokens: Vec<LocatedToken>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            struct_types: HashMap::new(),
+        }
     }
 
     fn parse_program(&mut self) -> CustResult<Program> {
@@ -1027,6 +1064,12 @@ impl Parser {
                 globals.push(self.parse_var_decl()?);
             } else if self.check(&Token::Enum) {
                 globals.push(self.parse_enum_decl()?);
+            } else if self.check(&Token::Struct) {
+                if self.is_struct_definition() {
+                    self.parse_struct_definition()?;
+                } else {
+                    globals.push(self.parse_struct_var_decl()?);
+                }
             } else {
                 let found = self.peek_located().clone();
                 return Err(Self::error_at(
@@ -1039,7 +1082,21 @@ impl Parser {
         if !functions.contains_key("main") {
             return Err(CustError::new("missing main() function"));
         }
-        Ok(Program { globals, functions })
+        Ok(Program {
+            globals,
+            functions,
+            struct_types: self.struct_types.clone(),
+        })
+    }
+
+    fn is_struct_definition(&self) -> bool {
+        matches!(
+            (
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                self.tokens.get(self.pos + 2).map(|token| &token.kind)
+            ),
+            (Some(Token::Ident(_)), Some(Token::LBrace))
+        )
     }
 
     fn starts_function_definition(&self) -> bool {
@@ -1218,6 +1275,7 @@ impl Parser {
             Token::Semi => self.parse_empty(),
             Token::Int | Token::Char => self.parse_var_decl(),
             Token::Enum => self.parse_enum_decl(),
+            Token::Struct => self.parse_struct_var_decl(),
             Token::Return => self.parse_return(),
             Token::LBrace => Ok(Stmt::Block(self.parse_block_after("block statement")?)),
             Token::If => self.parse_if(),
@@ -1353,6 +1411,52 @@ impl Parser {
         Ok(Stmt::VarDecl { name, ty, expr })
     }
 
+    fn parse_struct_definition(&mut self) -> CustResult<()> {
+        self.expect(Token::Struct)?;
+        let type_name = self.expect_ident_after("struct name")?;
+        self.expect_opening_brace_after("struct name")?;
+        let mut fields = Vec::new();
+        let mut names = HashSet::new();
+        while !self.check(&Token::RBrace) {
+            if self.check(&Token::Eof) {
+                return Err(Self::error_at(
+                    format!("unterminated struct declaration for '{type_name}'"),
+                    self.peek_located(),
+                ));
+            }
+            let ty = self.expect_type_after("struct field type")?;
+            let name = self.expect_ident_after("struct field name after type")?;
+            if !names.insert(name.clone()) {
+                return Err(Self::error_at(
+                    format!("duplicate struct field '{name}'"),
+                    self.previous(),
+                ));
+            }
+            self.expect_semicolon_after("struct field declaration")?;
+            fields.push(StructFieldDef { name, ty });
+        }
+        self.expect(Token::RBrace)?;
+        self.expect_semicolon_after("struct declaration")?;
+        if self
+            .struct_types
+            .insert(type_name.clone(), StructTypeDef { fields })
+            .is_some()
+        {
+            return Err(CustError::new(format!(
+                "struct '{type_name}' already declared"
+            )));
+        }
+        Ok(())
+    }
+
+    fn parse_struct_var_decl(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::Struct)?;
+        let type_name = self.expect_ident_after("struct type name")?;
+        let name = self.expect_ident_after("struct variable name")?;
+        self.expect_semicolon_after("struct variable declaration")?;
+        Ok(Stmt::StructVarDecl { type_name, name })
+    }
+
     fn parse_enum_decl(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Enum)?;
         if matches!(self.peek(), Token::Ident(_)) {
@@ -1475,6 +1579,15 @@ impl Parser {
 
     fn parse_assign_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         let name = self.expect_ident()?;
+        if self.matches(&Token::Dot) {
+            let field = self.expect_ident_after("struct field name after '.'")?;
+            self.expect_assign_after("struct field assignment")?;
+            let value = self.parse_expr()?;
+            if require_semi {
+                self.expect_semicolon_after("assignment")?;
+            }
+            return Ok(Stmt::StructAssign { name, field, value });
+        }
         if self.matches(&Token::LBracket) {
             let index = self.parse_index_expr()?;
             self.expect_closing_bracket_after("array index")?;
@@ -2083,6 +2196,9 @@ impl Parser {
                         name,
                         index: Box::new(index),
                     })
+                } else if self.matches(&Token::Dot) {
+                    let field = self.expect_ident_after("struct field name after '.'")?;
+                    Ok(Expr::StructGet { name, field })
                 } else {
                     Ok(Expr::Var(name))
                 }
@@ -2411,6 +2527,12 @@ impl Parser {
         if !matches!(self.peek(), Token::Ident(_)) {
             return false;
         }
+        if self.peek_next() == &Token::Dot {
+            return self
+                .tokens
+                .get(self.pos + 3)
+                .is_some_and(|token| Self::is_assignment_operator(&token.kind));
+        }
         if Self::is_assignment_operator(self.peek_next()) {
             return true;
         }
@@ -2576,6 +2698,7 @@ struct Interpreter {
     live_scope_ids: HashSet<usize>,
     next_scope_id: usize,
     functions: HashMap<String, Function>,
+    struct_types: HashMap<String, StructTypeDef>,
     call_depth: usize,
     max_loop_iterations: Option<usize>,
     loop_iterations: usize,
@@ -2598,9 +2721,25 @@ enum ExecFlow {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Value {
-    Scalar { value: i64, ty: CType },
+    Scalar {
+        value: i64,
+        ty: CType,
+    },
     Array(Rc<RefCell<ArrayValue>>),
-    Pointer { pointer: PointerValue, ty: CType },
+    Pointer {
+        pointer: PointerValue,
+        ty: CType,
+    },
+    Struct {
+        type_name: String,
+        fields: HashMap<String, StructFieldValue>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StructFieldValue {
+    value: i64,
+    ty: CType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2653,6 +2792,7 @@ impl Interpreter {
             live_scope_ids: HashSet::new(),
             next_scope_id: 0,
             functions: HashMap::new(),
+            struct_types: HashMap::new(),
             call_depth: 0,
             max_loop_iterations: options.max_loop_iterations,
             loop_iterations: 0,
@@ -2661,6 +2801,7 @@ impl Interpreter {
 
     fn run(&mut self, program: &Program) -> CustResult<i64> {
         self.functions = program.functions.clone();
+        self.struct_types = program.struct_types.clone();
         self.push_scope();
         for global in &program.globals {
             match self.exec_stmt(global)? {
@@ -2901,6 +3042,9 @@ impl Interpreter {
             Some(Value::Pointer { .. }) => {
                 Err(CustError::new(format!("pointer '{name}' used as scalar")))
             }
+            Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                "struct variable '{name}' used as scalar"
+            ))),
             None => self
                 .find_enum_constant(name)
                 .ok_or_else(|| CustError::new(format!("undefined variable '{name}'"))),
@@ -2916,6 +3060,60 @@ impl Interpreter {
             Some(Value::Pointer { .. }) => {
                 Err(CustError::new(format!("pointer '{name}' is not an array")))
             }
+            Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                "struct variable '{name}' is not an array"
+            ))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn make_struct_value(&self, type_name: &str) -> CustResult<Value> {
+        let struct_type = self
+            .struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        let fields = struct_type
+            .fields
+            .iter()
+            .map(|field| {
+                (
+                    field.name.clone(),
+                    StructFieldValue {
+                        value: 0,
+                        ty: field.ty,
+                    },
+                )
+            })
+            .collect();
+        Ok(Value::Struct {
+            type_name: type_name.to_string(),
+            fields,
+        })
+    }
+
+    fn read_struct_field(&self, name: &str, field: &str) -> CustResult<i64> {
+        match self.find_variable(name) {
+            Some(Value::Struct { type_name, fields }) => fields
+                .get(field)
+                .map(|field_value| field_value.value)
+                .ok_or_else(|| {
+                    CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+                }),
+            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn assign_struct_field(&mut self, name: &str, field: &str, value: i64) -> CustResult<()> {
+        match self.find_variable_mut(name) {
+            Some(Value::Struct { type_name, fields }) => {
+                let field_value = fields.get_mut(field).ok_or_else(|| {
+                    CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+                })?;
+                field_value.value = value;
+                Ok(())
+            }
+            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
@@ -2933,6 +3131,9 @@ impl Interpreter {
                     ))),
                     Value::Pointer { .. } => Err(CustError::new(format!(
                         "pointer '{name}' cannot be addressed in this pointer milestone"
+                    ))),
+                    Value::Struct { .. } => Err(CustError::new(format!(
+                        "struct variable '{name}' cannot be addressed in this pointer milestone"
                     ))),
                 };
             }
@@ -2997,6 +3198,9 @@ impl Interpreter {
                 Some(Value::Array(_)) => Err(CustError::new(format!(
                     "array '{name}' requires indexed address-of"
                 ))),
+                Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                    "struct variable '{name}' used as pointer"
+                ))),
                 None => Err(CustError::new(format!(
                     "assignment to undeclared variable '{name}'"
                 ))),
@@ -3010,6 +3214,9 @@ impl Interpreter {
                 Some(Value::Scalar { .. }) => Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
                 ))),
+                Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                    "struct variable '{name}' used as pointer"
+                ))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::CompoundAssign { name, op, value } => {
@@ -3022,6 +3229,11 @@ impl Interpreter {
                     }
                     Some(Value::Array(_)) => {
                         return Err(CustError::new(format!("array '{name}' is not a pointer")));
+                    }
+                    Some(Value::Struct { .. }) => {
+                        return Err(CustError::new(format!(
+                            "struct variable '{name}' used as pointer"
+                        )));
                     }
                     None => return Err(CustError::new(format!("undefined variable '{name}'"))),
                 };
@@ -3051,6 +3263,11 @@ impl Interpreter {
                         }
                         Some(Value::Array(_)) => {
                             return Err(CustError::new(format!("array '{name}' is not a pointer")));
+                        }
+                        Some(Value::Struct { .. }) => {
+                            return Err(CustError::new(format!(
+                                "struct variable '{name}' used as pointer"
+                            )));
                         }
                         None => return Err(CustError::new(format!("undefined variable '{name}'"))),
                     };
@@ -3221,6 +3438,11 @@ impl Interpreter {
             }
             Some(Value::Array(_)) => {
                 return Err(CustError::new(format!("array '{name}' is not a pointer")));
+            }
+            Some(Value::Struct { .. }) => {
+                return Err(CustError::new(format!(
+                    "struct variable '{name}' used as pointer"
+                )));
             }
             None => return Err(CustError::new(format!("undefined variable '{name}'"))),
         };
@@ -3421,6 +3643,9 @@ impl Interpreter {
                 Some(Value::Array(_)) => Err(CustError::new(format!(
                     "array '{name}' requires indexed assignment"
                 ))),
+                Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                    "struct variable '{name}' used as scalar"
+                ))),
                 None => Err(CustError::new(format!(
                     "assignment to undeclared variable '{name}'"
                 ))),
@@ -3429,6 +3654,9 @@ impl Interpreter {
                 Some(Value::Pointer { pointer, .. }) => Ok(Self::pointer_truthy(&pointer)),
                 Some(Value::Array(array)) => Ok(!array.borrow().elements.is_empty()),
                 Some(Value::Scalar { value, .. }) => Ok(value != 0),
+                Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                    "struct variable '{name}' used as scalar"
+                ))),
                 None => self
                     .find_enum_constant(name)
                     .map(|value| value != 0)
@@ -3440,6 +3668,7 @@ impl Interpreter {
             | Expr::ArrayGet { .. }
             | Expr::ArraySet { .. }
             | Expr::ArrayCompoundSet { .. }
+            | Expr::StructGet { .. }
             | Expr::StringGet { .. }
             | Expr::Call { .. } => Ok(self.eval(expr)? != 0),
             Expr::Number(value) => Ok(*value != 0),
@@ -3500,6 +3729,9 @@ impl Interpreter {
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
             ))),
+            Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                "struct variable '{name}' assignment is not supported"
+            ))),
             None if self.find_enum_constant(name).is_some() => Err(CustError::new(format!(
                 "cannot assign to enum constant '{name}'"
             ))),
@@ -3527,6 +3759,9 @@ impl Interpreter {
             Some(Value::Pointer { .. }) => Err(Self::pointer_compound_error(op)),
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
+            ))),
+            Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                "struct variable '{name}' assignment is not supported"
             ))),
             None if self.find_enum_constant(name).is_some() => Err(CustError::new(format!(
                 "cannot assign to enum constant '{name}'"
@@ -3600,6 +3835,7 @@ impl Interpreter {
             Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
             Expr::SizeOfType(_) | Expr::SizeOfValue(_) => Ok(INT_SIZE),
             Expr::Var(name) => self.sizeof_variable(name),
+            Expr::StructGet { name, field } => self.sizeof_struct_field(name, field),
             Expr::ArrayGet { name, .. } => self.sizeof_indexed_value(name),
             Expr::StringGet { .. } => Ok(CHAR_SIZE),
             Expr::AddressOf(_) | Expr::AddressOfArray { .. } => Ok(POINTER_SIZE),
@@ -3638,6 +3874,22 @@ impl Interpreter {
                 Ok(array.elements.len() as i64 * array.elem_type.size())
             }
             Some(Value::Pointer { .. }) => Ok(POINTER_SIZE),
+            Some(Value::Struct { fields, .. }) => {
+                Ok(fields.values().map(|field| field.ty.size()).sum())
+            }
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn sizeof_struct_field(&self, name: &str, field: &str) -> CustResult<i64> {
+        match self.find_variable(name) {
+            Some(Value::Struct { type_name, fields }) => fields
+                .get(field)
+                .map(|field_value| field_value.ty.size())
+                .ok_or_else(|| {
+                    CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+                }),
+            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
@@ -3648,6 +3900,9 @@ impl Interpreter {
             Some(Value::Pointer { .. }) => Ok(POINTER_SIZE),
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
+            ))),
+            Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                "struct variable '{name}' assignment is not supported"
             ))),
             None if self.find_enum_constant(name).is_some() => Err(CustError::new(format!(
                 "cannot assign to enum constant '{name}'"
@@ -3665,6 +3920,9 @@ impl Interpreter {
             Some(Value::Scalar { .. }) => {
                 Err(CustError::new(format!("variable '{name}' is not an array")))
             }
+            Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                "struct variable '{name}' is not an array"
+            ))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
@@ -3676,6 +3934,9 @@ impl Interpreter {
                 Some(Value::Array(array)) => Ok(array.borrow().elem_type.size()),
                 Some(Value::Scalar { .. }) => Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
+                ))),
+                Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                    "struct variable '{name}' used as pointer"
                 ))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
@@ -3706,6 +3967,9 @@ impl Interpreter {
                 }
                 Some(Value::Array(_)) => Err(CustError::new(format!(
                     "array '{name}' requires indexed assignment"
+                ))),
+                Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                    "struct variable '{name}' assignment is not supported"
                 ))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
@@ -3853,6 +4117,16 @@ impl Interpreter {
                 );
                 Ok(ExecFlow::None)
             }
+            Stmt::StructVarDecl { type_name, name } => {
+                if self.current_scope_has_identifier(name) {
+                    return Err(CustError::new(format!(
+                        "variable '{name}' already declared in this scope"
+                    )));
+                }
+                let value = self.make_struct_value(type_name)?;
+                self.current_scope_mut().insert(name.clone(), value);
+                Ok(ExecFlow::None)
+            }
             Stmt::EnumDecl { constants } => {
                 for constant in constants {
                     self.insert_enum_constant(constant.name.clone(), constant.value)?;
@@ -3882,6 +4156,9 @@ impl Interpreter {
                     }
                     Some(Value::Array(_)) => Err(CustError::new(format!(
                         "array '{name}' requires indexed assignment"
+                    ))),
+                    Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                        "struct variable '{name}' assignment is not supported"
                     ))),
                     None if self.find_enum_constant(name).is_some() => Err(CustError::new(
                         format!("cannot assign to enum constant '{name}'"),
@@ -3915,6 +4192,11 @@ impl Interpreter {
                         array.elements[index] = value;
                     }
                 }
+                Ok(ExecFlow::None)
+            }
+            Stmt::StructAssign { name, field, value } => {
+                let value = self.eval(value)?;
+                self.assign_struct_field(name, field, value)?;
                 Ok(ExecFlow::None)
             }
             Stmt::Expr(expr) => {
@@ -4091,6 +4373,7 @@ impl Interpreter {
         match expr {
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
+            Expr::StructGet { name, field } => self.read_struct_field(name, field),
             Expr::SizeOfType(sizeof_type) => Ok(sizeof_type.size()),
             Expr::SizeOfValue(expr) => self.sizeof_expr(expr),
             Expr::Var(name) => self.find_scalar(name),

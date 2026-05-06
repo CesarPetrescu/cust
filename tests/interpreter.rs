@@ -126,6 +126,22 @@ fn supports_char_return_functions_and_prototypes() {
 }
 
 #[test]
+fn supports_struct_declarations_and_member_access() {
+    let program = include_str!("fixtures/valid/structs.c");
+
+    assert_eq!(interpret(program).unwrap(), 20);
+}
+
+#[test]
+fn rejects_unknown_struct_fields() {
+    let program = include_str!("fixtures/invalid/unknown_struct_field.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "struct 'Point' has no field 'y'");
+}
+
+#[test]
 fn rejects_empty_returns_from_char_functions() {
     let program = include_str!("fixtures/invalid/char_function_empty_return.c");
 
