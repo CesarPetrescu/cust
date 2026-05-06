@@ -255,6 +255,12 @@ enum StructFieldType {
     Struct(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StructInitializer {
+    Expr(Expr),
+    Struct(Vec<StructInitializer>),
+}
+
 impl StructFieldType {
     fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
         match self {
@@ -499,7 +505,7 @@ enum Stmt {
     StructVarDecl {
         type_name: String,
         name: String,
-        init: Vec<Expr>,
+        init: Vec<StructInitializer>,
         is_const: bool,
     },
     EnumDecl {
@@ -1932,11 +1938,11 @@ impl Parser {
         Ok(values)
     }
 
-    fn parse_struct_initializer(&mut self, type_name: &str) -> CustResult<Vec<Expr>> {
-        let field_count = self
+    fn parse_struct_initializer(&mut self, type_name: &str) -> CustResult<Vec<StructInitializer>> {
+        let fields = self
             .struct_types
             .get(type_name)
-            .map(|struct_type| struct_type.fields.len())
+            .map(|struct_type| struct_type.fields.clone())
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
         self.expect_opening_brace_after("struct initializer")?;
         let mut values = Vec::new();
@@ -1944,12 +1950,19 @@ impl Parser {
             return Ok(values);
         }
         loop {
-            if values.len() == field_count {
+            if values.len() == fields.len() {
                 return Err(CustError::new(format!(
                     "too many initializers for struct '{type_name}'"
                 )));
             }
-            values.push(self.parse_assignment_expr()?);
+            let field = &fields[values.len()];
+            let value = match &field.ty {
+                StructFieldType::Struct(nested_type) if self.check(&Token::LBrace) => {
+                    StructInitializer::Struct(self.parse_struct_initializer(nested_type)?)
+                }
+                _ => StructInitializer::Expr(self.parse_assignment_expr()?),
+            };
+            values.push(value);
             if self.matches(&Token::RBrace) {
                 break;
             }
@@ -4128,7 +4141,11 @@ impl Interpreter {
         Ok(Value::Array(Rc::new(RefCell::new(array))))
     }
 
-    fn make_struct_value(&mut self, type_name: &str, init: &[Expr]) -> CustResult<Value> {
+    fn make_struct_value(
+        &mut self,
+        type_name: &str,
+        init: &[StructInitializer],
+    ) -> CustResult<Value> {
         let fields = self.make_struct_fields(type_name, init)?;
         Ok(Value::Struct {
             type_name: type_name.to_string(),
@@ -4139,7 +4156,7 @@ impl Interpreter {
     fn make_struct_fields(
         &mut self,
         type_name: &str,
-        init: &[Expr],
+        init: &[StructInitializer],
     ) -> CustResult<HashMap<String, StructFieldValue>> {
         let struct_type = self
             .struct_types
@@ -4151,7 +4168,15 @@ impl Interpreter {
             let field_value = match &field.ty {
                 StructFieldType::Scalar(ty) => {
                     let value = if let Some(expr) = init.get(index) {
-                        self.eval(expr)?
+                        match expr {
+                            StructInitializer::Expr(expr) => self.eval(expr)?,
+                            StructInitializer::Struct(_) => {
+                                return Err(CustError::new(format!(
+                                    "nested initializer for scalar field '{}' is not supported",
+                                    field.name
+                                )));
+                            }
+                        }
                     } else {
                         0
                     };
@@ -4162,13 +4187,29 @@ impl Interpreter {
                     }
                 }
                 StructFieldType::Struct(nested_type) => {
-                    let fields = if init.get(index).is_some() {
-                        return Err(CustError::new(format!(
-                            "nested struct initializer for field '{}' is not supported",
-                            field.name
-                        )));
-                    } else {
-                        self.make_struct_fields(nested_type, &[])?
+                    let fields = match init.get(index) {
+                        Some(StructInitializer::Struct(init)) => {
+                            self.make_struct_fields(nested_type, init)?
+                        }
+                        Some(StructInitializer::Expr(expr)) => {
+                            match self.eval_struct_expr(expr)? {
+                                ReturnValue::Struct { type_name, fields }
+                                    if type_name == *nested_type =>
+                                {
+                                    fields
+                                }
+                                ReturnValue::Struct { type_name, .. } => {
+                                    return Err(CustError::new(format!(
+                                        "cannot initialize struct field '{}' of type '{}' with struct '{}'",
+                                        field.name, nested_type, type_name
+                                    )));
+                                }
+                                ReturnValue::Scalar(_) => unreachable!(
+                                    "eval_struct_expr only returns struct values or errors"
+                                ),
+                            }
+                        }
+                        None => self.make_struct_fields(nested_type, &[])?,
                     };
                     StructFieldValue::Struct {
                         type_name: nested_type.clone(),

@@ -52,7 +52,7 @@ This means aliases do not create distinct types: `Count` behaves exactly like `i
 - Pointer-returning functions remain unsupported even when the return type is spelled through a pointer typedef alias.
 - Anonymous struct typedefs such as `typedef struct { int x; } Point;` are not supported.
 - Anonymous enum typedefs such as `typedef enum { READY } Status;` and enum-typed variables without a typedef alias are not supported.
-- Function pointer typedefs, array typedefs, declaration-level type qualifiers (`const` outside the already supported `sizeof(const alias)` type context), and aggregate/nested struct fields remain future work.
+- Function pointer typedefs, array typedefs, and unsupported declaration-level type qualifier combinations remain future work; aggregate typedef use now follows the implemented struct/enum alias and nested-struct-field subset.
 
 ## Acceptance coverage
 

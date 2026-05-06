@@ -14,6 +14,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - `struct Point p;`
   - Fields are deterministic Cust values initialized to `0`.
   - Scalar brace initializers such as `struct Point p = {1, 2};` initialize fields in declaration order, evaluate initializer expressions left-to-right, zero-fill omitted trailing fields, and reject excess initializers.
+  - Nested struct brace initializers such as `struct Rect r = {{1, 2}, 3};` recursively initialize prior named struct fields, including zero-filled omitted nested fields and excess-initializer diagnostics at the nested struct type.
   - Const fields can be initialized in a struct initializer but remain read-only after declaration.
   - Normal block/global scope rules apply; inner variables may shadow outer variables.
 - Member access and member assignment:
@@ -63,14 +64,13 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 ## Intentional limitations before later milestones
 
 - No arrays in structs, pointer fields, bit-fields, anonymous structs, unions, or const-qualified nested struct fields inside struct definitions.
-- Nested struct brace initializer entries such as `struct Rect r = {{1, 2}, 3};` are not yet supported; nested struct fields are zero-initialized and then assigned through field paths in this milestone.
 - No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic recursive sizes.
 
 ## Implementation model
 
 - Parser records top-level struct type definitions in `Program::struct_types`.
 - Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store either scalar values plus declared `CType`/field-level const metadata or nested struct field maps with the nested type name.
-- Struct initializers are parsed as assignment-precedence expressions separated by top-level commas and applied to scalar fields in declaration order before const field metadata prevents later writes; nested struct fields are currently zero-initialized rather than brace-initialized.
+- Struct initializers are parsed as field-aware entries: scalar fields consume assignment-precedence expressions, while nested struct fields may consume recursive brace initializer lists or same-type struct expressions. Entries are applied in declaration order before const field metadata prevents later writes; omitted nested fields are recursively zero-initialized.
 - Struct fields are scoped as members of their owning value, not as independent variables.
 - Member access is scalar expression syntax backed by field-path lvalue evaluation helpers for simple assignment, compound assignment, and increment/decrement expressions.
 - Function signatures include struct parameter type names, so prototypes and later definitions must agree on the exact struct type.
@@ -147,7 +147,13 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - compares nested struct field-path reads/writes, by-value nested field arguments, and nested-field copy assignment with native C while avoiding native `sizeof(struct)` layout checks.
 - Invalid fixture: `tests/fixtures/invalid/nested_struct_unknown_field.c`
   - verifies missing nested fields report the targeted innermost struct type diagnostic.
+- Valid interpreter fixture: `tests/fixtures/valid/nested_struct_initializers.c`
+  - covers recursive brace initialization of nested struct fields in global, local, static, and const declarations, including omitted nested-field zero-fill and deterministic `sizeof`.
+- Valid compiler-oracle fixture: `tests/fixtures/compat/valid/nested_struct_initializers.c`
+  - compares fully spelled nested aggregate initializers with native C while avoiding native struct layout checks.
+- Invalid fixture: `tests/fixtures/invalid/nested_struct_initializer_too_long.c`
+  - verifies excess initializer entries inside a nested struct initializer report the nested struct type diagnostic.
 
 ## Next struct work
 
-1. Consider arrays-in-structs, pointer fields, or nested aggregate brace initializers only as separate milestones with explicit storage/layout design; do not rely on native ABI padding.
+1. Consider arrays-in-structs or pointer fields as separate milestones with explicit storage/layout design; do not rely on native ABI padding.
