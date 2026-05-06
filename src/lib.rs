@@ -3418,6 +3418,10 @@ impl Interpreter {
                         ParamType::Scalar(ty) => PointeeType::Scalar(*ty),
                         ParamType::Struct(type_name) => PointeeType::Struct(type_name.clone()),
                     };
+                    self.ensure_pointer_conversion_preserves_const(
+                        param.points_to_const,
+                        arg_expr,
+                    )?;
                     Value::Pointer {
                         pointer: self.eval_pointer(arg_expr)?,
                         ty,
@@ -3672,9 +3676,50 @@ impl Interpreter {
     fn pointer_expr_points_to_const(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Var(name) => self.pointer_variable_points_to_const(name),
+            Expr::AddressOf(name) => self.is_const_variable(name),
+            Expr::AddressOfArray { name, .. } => match self.find_variable(name) {
+                Some(Value::Array(array)) => array.borrow().read_only,
+                Some(Value::Pointer {
+                    points_to_const, ..
+                }) => *points_to_const,
+                _ => false,
+            },
             Expr::Comma(_, right) => self.pointer_expr_points_to_const(right),
-            Expr::Conditional { .. } => false,
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.pointer_expr_points_to_const(then_expr)
+                    || self.pointer_expr_points_to_const(else_expr)
+            }
+            Expr::Binary(left, BinaryOp::Add | BinaryOp::Sub, right) => {
+                self.pointer_expr_points_to_const(left) || self.pointer_expr_points_to_const(right)
+            }
+            Expr::Assign { name, value } => {
+                self.pointer_variable_points_to_const(name)
+                    || self.pointer_expr_points_to_const(value)
+            }
+            Expr::CompoundAssign { name, .. } => self.pointer_variable_points_to_const(name),
+            Expr::Increment { target, .. } => match target.as_ref() {
+                Expr::Var(name) => self.pointer_variable_points_to_const(name),
+                _ => false,
+            },
             _ => false,
+        }
+    }
+
+    fn ensure_pointer_conversion_preserves_const(
+        &self,
+        target_points_to_const: bool,
+        value: &Expr,
+    ) -> CustResult<()> {
+        if !target_points_to_const && self.pointer_expr_points_to_const(value) {
+            Err(CustError::new(
+                "cannot discard const qualifier from pointer target",
+            ))
+        } else {
+            Ok(())
         }
     }
 
@@ -4047,8 +4092,11 @@ impl Interpreter {
                 source_name: None,
             }),
             Expr::Assign { name, value } => match self.find_variable(name).cloned() {
-                Some(Value::Pointer { .. }) => {
+                Some(Value::Pointer {
+                    points_to_const, ..
+                }) => {
                     self.ensure_variable_mutable(name)?;
+                    self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
                     let pointer = self.eval_pointer(value)?;
                     if let Some(Value::Pointer { pointer: slot, .. }) = self.find_variable_mut(name)
                     {
@@ -5085,6 +5133,7 @@ impl Interpreter {
                 is_const,
                 points_to_const,
             } => {
+                self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
                 if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
@@ -5167,8 +5216,11 @@ impl Interpreter {
                         }
                         Ok(ExecFlow::None)
                     }
-                    Some(Value::Pointer { .. }) => {
+                    Some(Value::Pointer {
+                        points_to_const, ..
+                    }) => {
                         self.ensure_variable_mutable(name)?;
+                        self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
                         let pointer = self.eval_pointer(expr)?;
                         if let Some(Value::Pointer { pointer: slot, .. }) =
                             self.find_variable_mut(name)

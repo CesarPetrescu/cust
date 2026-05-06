@@ -126,6 +126,49 @@ fn supports_const_qualified_pointer_pointees_and_pointer_slots() {
 }
 
 #[test]
+fn supports_pointer_const_preserving_conversions() {
+    let program = include_str!("fixtures/valid/const_pointer_conversions.c");
+
+    assert_eq!(interpret(program).unwrap(), 36);
+}
+
+#[test]
+fn rejects_pointer_declarations_that_discard_const_pointee() {
+    let program = include_str!("fixtures/invalid/const_pointer_discard_decl.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_pointer_assignments_that_discard_const_pointee() {
+    let program = include_str!("fixtures/invalid/const_pointer_discard_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_pointer_arguments_that_discard_const_pointee() {
+    let program = include_str!("fixtures/invalid/const_pointer_discard_argument.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
 fn rejects_writes_through_const_pointer_pointees() {
     let program = include_str!("fixtures/invalid/const_pointer_write.c");
 

@@ -17,16 +17,17 @@ Cust supports a deliberately scoped subset of C const-qualified pointer declarat
   - `is_const`: the pointer variable/parameter binding is read-only.
   - `points_to_const`: writes through that pointer binding are rejected.
 - This is metadata on Cust pointer variables/parameters; pointer targets still use the existing interpreter-owned scalar/array/string/struct storage model.
-- Existing const scalar targets and read-only arrays remain enforced at the target storage level, so `int *p = &const_scalar; *p = ...` and string/const-array writes still fail through the older checks.
+- Existing const scalar targets and read-only arrays remain enforced at the target storage level, so writes through older aliases to const scalars/arrays still fail even when the pointer expression did not carry explicit `points_to_const` metadata.
+- Pointer conversions preserve pointee constness: assigning or passing a pointer-to-const expression to an `int *` / `char *` target reports `cannot discard const qualifier from pointer target`, while assigning mutable pointers to `const int *` / `const char *` targets is allowed.
 
 ## Intentional limits
 
 - Pointer typedef aliases keep C typedef behavior for this milestone: `const IntPtr p` is treated as a const pointer slot, not a pointer-to-const alias.
-- Cust does not yet perform full assignment compatibility checks for discarding pointee constness between pointer variables. Future work may add exact diagnostics for `int *mutable = const_ptr;` if the roadmap needs stricter qualifier conversions.
+- Const conversion tracking is deliberately conservative for syntax-level pointer expressions such as conditionals and pointer arithmetic; if either possible pointer source is const-qualified, Cust requires a const-qualified destination.
 - Struct-field const qualifiers and aggregate/nested const fields remain outside the current supported subset.
 
 ## Acceptance fixtures
 
-- Valid: `tests/fixtures/valid/const_pointer_qualifiers.c`
-- Invalid: `tests/fixtures/invalid/const_pointer_write.c`, `tests/fixtures/invalid/const_pointer_index_write.c`, `tests/fixtures/invalid/const_pointer_reassignment.c`
-- Native C oracle: `tests/fixtures/compat/valid/const_pointer_qualifiers.c`
+- Valid: `tests/fixtures/valid/const_pointer_qualifiers.c`, `tests/fixtures/valid/const_pointer_conversions.c`
+- Invalid: `tests/fixtures/invalid/const_pointer_write.c`, `tests/fixtures/invalid/const_pointer_index_write.c`, `tests/fixtures/invalid/const_pointer_reassignment.c`, `tests/fixtures/invalid/const_pointer_discard_decl.c`, `tests/fixtures/invalid/const_pointer_discard_assignment.c`, `tests/fixtures/invalid/const_pointer_discard_argument.c`
+- Native C oracle: `tests/fixtures/compat/valid/const_pointer_qualifiers.c`, `tests/fixtures/compat/valid/const_pointer_conversions.c`
