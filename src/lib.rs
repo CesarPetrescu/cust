@@ -1075,7 +1075,7 @@ struct Parser {
     tokens: Vec<LocatedToken>,
     pos: usize,
     struct_types: HashMap<String, StructTypeDef>,
-    type_aliases: HashMap<String, TypeAlias>,
+    type_alias_scopes: Vec<HashMap<String, TypeAlias>>,
 }
 
 impl Parser {
@@ -1084,7 +1084,7 @@ impl Parser {
             tokens,
             pos: 0,
             struct_types: HashMap::new(),
-            type_aliases: HashMap::new(),
+            type_alias_scopes: vec![HashMap::new()],
         }
     }
 
@@ -1218,9 +1218,16 @@ impl Parser {
 
     fn current_alias(&self) -> Option<&TypeAlias> {
         match self.peek() {
-            Token::Ident(name) => self.type_aliases.get(name),
+            Token::Ident(name) => self.lookup_type_alias(name),
             _ => None,
         }
+    }
+
+    fn lookup_type_alias(&self, name: &str) -> Option<&TypeAlias> {
+        self.type_alias_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name))
     }
 
     fn parse_decl_type(&mut self, context: &str) -> CustResult<DeclType> {
@@ -1237,7 +1244,7 @@ impl Parser {
                 }
                 Ok(DeclType::Struct(type_name))
             }
-            Token::Ident(name) => match self.type_aliases.get(&name).cloned() {
+            Token::Ident(name) => match self.lookup_type_alias(&name).cloned() {
                 Some(TypeAlias::Scalar(ty)) => Ok(DeclType::Scalar(ty)),
                 Some(TypeAlias::Struct(type_name)) => Ok(DeclType::Struct(type_name)),
                 None => Err(Self::error_at(
@@ -1287,11 +1294,11 @@ impl Parser {
         }
         let alias_name = self.expect_ident_after("typedef alias name after type")?;
         self.expect_semicolon_after("typedef declaration")?;
-        if self
-            .type_aliases
-            .insert(alias_name.clone(), alias)
-            .is_some()
-        {
+        let current_scope = self
+            .type_alias_scopes
+            .last_mut()
+            .expect("parser always has a typedef scope");
+        if current_scope.insert(alias_name.clone(), alias).is_some() {
             return Err(CustError::new(format!(
                 "typedef alias '{alias_name}' already declared"
             )));
@@ -1461,19 +1468,24 @@ impl Parser {
 
     fn parse_block_after(&mut self, context: &str) -> CustResult<Vec<Stmt>> {
         self.expect_opening_brace_after(context)?;
+        self.type_alias_scopes.push(HashMap::new());
         let mut statements = Vec::new();
-        while !self.check(&Token::RBrace) {
-            if self.check(&Token::Eof) {
-                let eof = self.peek_located().clone();
-                return Err(Self::error_at(
-                    format!("unterminated block after {context}"),
-                    &eof,
-                ));
+        let result = (|| {
+            while !self.check(&Token::RBrace) {
+                if self.check(&Token::Eof) {
+                    let eof = self.peek_located().clone();
+                    return Err(Self::error_at(
+                        format!("unterminated block after {context}"),
+                        &eof,
+                    ));
+                }
+                statements.push(self.parse_stmt()?);
             }
-            statements.push(self.parse_stmt()?);
-        }
-        self.expect(Token::RBrace)?;
-        Ok(statements)
+            self.expect(Token::RBrace)?;
+            Ok(statements)
+        })();
+        self.type_alias_scopes.pop();
+        result
     }
 
     fn parse_control_body_after(&mut self, context: &str) -> CustResult<Vec<Stmt>> {

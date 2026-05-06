@@ -168,6 +168,25 @@ fn supports_typedef_aliases_for_scalars_structs_and_pointers() {
 }
 
 #[test]
+fn supports_block_scoped_typedef_aliases_and_shadowing() {
+    let program = include_str!("fixtures/valid/block_scoped_typedefs.c");
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn rejects_block_typedef_aliases_after_scope_exit() {
+    let program = include_str!("fixtures/invalid/block_typedef_alias_out_of_scope.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected '=' after assignment, found Ident(\"leaked\") at line 9, column 11"
+    );
+}
+
+#[test]
 fn rejects_typedefs_without_alias_names() {
     let program = include_str!("fixtures/invalid/typedef_missing_alias_name.c");
 
