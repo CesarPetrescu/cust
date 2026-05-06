@@ -202,6 +202,37 @@ fn supports_typedef_aliases_for_scalars_structs_and_pointers() {
 }
 
 #[test]
+fn supports_pointer_typedef_aliases_for_declarations_params_and_sizeof() {
+    let program = include_str!("fixtures/valid/pointer_typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_pointer_typedef_aliases_to_pointer_aliases() {
+    let program = include_str!("fixtures/invalid/pointer_typedef_to_pointer.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer-to-pointer typedef aliases are not supported at line 2, column 16"
+    );
+}
+
+#[test]
+fn rejects_direct_pointer_to_pointer_typedef_aliases() {
+    let program = include_str!("fixtures/invalid/direct_pointer_to_pointer_typedef.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer-to-pointer typedef aliases are not supported at line 1, column 14"
+    );
+}
+
+#[test]
 fn supports_block_scoped_typedef_aliases_and_shadowing() {
     let program = include_str!("fixtures/valid/block_scoped_typedefs.c");
 
