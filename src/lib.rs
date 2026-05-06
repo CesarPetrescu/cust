@@ -38,6 +38,7 @@ enum Token {
     Void,
     Enum,
     Struct,
+    Typedef,
     Sizeof,
     Return,
     If,
@@ -221,6 +222,18 @@ struct Program {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum TypeAlias {
+    Scalar(CType),
+    Struct(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeclType {
+    Scalar(CType),
+    Struct(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct StructTypeDef {
     fields: Vec<StructFieldDef>,
 }
@@ -311,17 +324,22 @@ impl PointeeType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum SizeOfType {
     Scalar(CType),
+    Struct(String),
     Pointer,
 }
 
 impl SizeOfType {
-    fn size(self) -> i64 {
+    fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
         match self {
-            SizeOfType::Scalar(ty) => ty.size(),
-            SizeOfType::Pointer => POINTER_SIZE,
+            SizeOfType::Scalar(ty) => Ok(ty.size()),
+            SizeOfType::Struct(type_name) => struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.fields.iter().map(|field| field.ty.size()).sum())
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            SizeOfType::Pointer => Ok(POINTER_SIZE),
         }
     }
 }
@@ -805,6 +823,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "void" => Token::Void,
                     "enum" => Token::Enum,
                     "struct" => Token::Struct,
+                    "typedef" => Token::Typedef,
                     "sizeof" => Token::Sizeof,
                     "return" => Token::Return,
                     "if" => Token::If,
@@ -1056,6 +1075,7 @@ struct Parser {
     tokens: Vec<LocatedToken>,
     pos: usize,
     struct_types: HashMap<String, StructTypeDef>,
+    type_aliases: HashMap<String, TypeAlias>,
 }
 
 impl Parser {
@@ -1064,6 +1084,7 @@ impl Parser {
             tokens,
             pos: 0,
             struct_types: HashMap::new(),
+            type_aliases: HashMap::new(),
         }
     }
 
@@ -1080,6 +1101,7 @@ impl Parser {
             }
             if self.starts_function_definition()
                 || self.starts_struct_function_declaration()
+                || self.starts_alias_function_declaration()
                 || self.starts_malformed_function_definition()
                 || self.check(&Token::Void)
             {
@@ -1123,8 +1145,12 @@ impl Parser {
                         }
                     }
                 }
-            } else if matches!(self.peek(), Token::Int | Token::Char) {
+            } else if matches!(self.peek(), Token::Int | Token::Char)
+                || self.current_alias().is_some()
+            {
                 globals.push(self.parse_var_decl()?);
+            } else if self.check(&Token::Typedef) {
+                self.parse_typedef_decl()?;
             } else if self.check(&Token::Enum) {
                 globals.push(self.parse_enum_decl()?);
             } else if self.check(&Token::Struct) {
@@ -1179,8 +1205,104 @@ impl Parser {
         )
     }
 
+    fn starts_alias_function_declaration(&self) -> bool {
+        self.current_alias().is_some()
+            && matches!(
+                (
+                    self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                    self.tokens.get(self.pos + 2).map(|token| &token.kind)
+                ),
+                (Some(Token::Ident(_)), Some(Token::LParen))
+            )
+    }
+
+    fn current_alias(&self) -> Option<&TypeAlias> {
+        match self.peek() {
+            Token::Ident(name) => self.type_aliases.get(name),
+            _ => None,
+        }
+    }
+
+    fn parse_decl_type(&mut self, context: &str) -> CustResult<DeclType> {
+        let found = self.advance();
+        match found.kind.clone() {
+            Token::Int => Ok(DeclType::Scalar(CType::Int)),
+            Token::Char => Ok(DeclType::Scalar(CType::Char)),
+            Token::Struct => {
+                let type_name = self.expect_ident_after(context)?;
+                if !self.struct_types.contains_key(&type_name) {
+                    return Err(CustError::new(format!(
+                        "undefined struct type '{type_name}'"
+                    )));
+                }
+                Ok(DeclType::Struct(type_name))
+            }
+            Token::Ident(name) => match self.type_aliases.get(&name).cloned() {
+                Some(TypeAlias::Scalar(ty)) => Ok(DeclType::Scalar(ty)),
+                Some(TypeAlias::Struct(type_name)) => Ok(DeclType::Struct(type_name)),
+                None => Err(Self::error_at(
+                    format!("expected {context}, found Ident(\"{name}\")"),
+                    &found,
+                )),
+            },
+            token => Err(Self::error_at(
+                format!("expected type, found {token:?}"),
+                &found,
+            )),
+        }
+    }
+
+    fn decl_type_to_return_type(decl_type: DeclType) -> ReturnType {
+        match decl_type {
+            DeclType::Scalar(ty) => ReturnType::Scalar(ty),
+            DeclType::Struct(type_name) => ReturnType::Struct(type_name),
+        }
+    }
+
+    fn decl_type_to_param_type(decl_type: &DeclType) -> ParamType {
+        match decl_type {
+            DeclType::Scalar(ty) => ParamType::Scalar(*ty),
+            DeclType::Struct(type_name) => ParamType::Struct(type_name.clone()),
+        }
+    }
+
+    fn decl_type_to_pointee_type(decl_type: &DeclType) -> PointeeType {
+        match decl_type {
+            DeclType::Scalar(ty) => PointeeType::Scalar(*ty),
+            DeclType::Struct(type_name) => PointeeType::Struct(type_name.clone()),
+        }
+    }
+
+    fn parse_typedef_decl(&mut self) -> CustResult<()> {
+        self.expect(Token::Typedef)?;
+        let alias = match self.parse_decl_type("typedef struct type name")? {
+            DeclType::Scalar(ty) => TypeAlias::Scalar(ty),
+            DeclType::Struct(type_name) => TypeAlias::Struct(type_name),
+        };
+        if self.check(&Token::Star) {
+            return Err(Self::error_at(
+                "typedef pointer aliases are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
+        let alias_name = self.expect_ident_after("typedef alias name after type")?;
+        self.expect_semicolon_after("typedef declaration")?;
+        if self
+            .type_aliases
+            .insert(alias_name.clone(), alias)
+            .is_some()
+        {
+            return Err(CustError::new(format!(
+                "typedef alias '{alias_name}' already declared"
+            )));
+        }
+        Ok(())
+    }
+
     fn starts_function_definition(&self) -> bool {
-        if !matches!(self.peek(), Token::Int | Token::Char | Token::Void) {
+        if !matches!(self.peek(), Token::Int | Token::Char | Token::Void)
+            && self.current_alias().is_none()
+        {
             return false;
         }
 
@@ -1245,25 +1367,12 @@ impl Parser {
     }
 
     fn parse_function_return_type(&mut self) -> CustResult<ReturnType> {
-        let found = self.advance();
-        match &found.kind {
-            Token::Int => Ok(ReturnType::Scalar(CType::Int)),
-            Token::Char => Ok(ReturnType::Scalar(CType::Char)),
-            Token::Void => Ok(ReturnType::Void),
-            Token::Struct => {
-                let type_name = self.expect_ident_after("struct return type name")?;
-                if !self.struct_types.contains_key(&type_name) {
-                    return Err(CustError::new(format!(
-                        "undefined struct type '{type_name}'"
-                    )));
-                }
-                Ok(ReturnType::Struct(type_name))
-            }
-            token => Err(Self::error_at(
-                format!("expected Int, found {token:?}"),
-                &found,
-            )),
+        if self.check(&Token::Void) {
+            self.advance();
+            return Ok(ReturnType::Void);
         }
+        let decl_type = self.parse_decl_type("struct return type name")?;
+        Ok(Self::decl_type_to_return_type(decl_type))
     }
 
     fn parse_params(&mut self) -> CustResult<Vec<Param>> {
@@ -1273,57 +1382,51 @@ impl Parser {
         }
 
         loop {
-            let (ty, name, kind) = if self.matches(&Token::Struct) {
-                let type_name = self.expect_ident_after("struct parameter type name")?;
-                if !self.struct_types.contains_key(&type_name) {
-                    return Err(CustError::new(format!(
-                        "undefined struct type '{type_name}'"
-                    )));
+            let decl_type = self.parse_decl_type("parameter type")?;
+            let is_pointer = self.matches(&Token::Star);
+            if is_pointer && self.check(&Token::Star) {
+                return Err(Self::error_at(
+                    "pointer-to-pointer parameters are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            let name = if is_pointer {
+                match &decl_type {
+                    DeclType::Scalar(_) => self.expect_ident_after("parameter name after '*'")?,
+                    DeclType::Struct(_) => {
+                        self.expect_ident_after("struct pointer parameter name after '*'")?
+                    }
                 }
-                let is_pointer = self.matches(&Token::Star);
-                let name = if is_pointer {
-                    self.expect_ident_after("struct pointer parameter name after '*'")?
-                } else {
-                    self.expect_ident_after("struct parameter name after type")?
-                };
-                let kind = if is_pointer {
-                    ParamKind::Pointer
-                } else {
-                    ParamKind::Struct
-                };
-                (ParamType::Struct(type_name), name, kind)
             } else {
-                let ty = self.expect_type_after("parameter type")?;
-                let is_pointer = self.matches(&Token::Star);
-                if is_pointer && self.check(&Token::Star) {
+                match &decl_type {
+                    DeclType::Scalar(_) => self.expect_ident_after("parameter name after type")?,
+                    DeclType::Struct(_) => {
+                        self.expect_ident_after("struct parameter name after type")?
+                    }
+                }
+            };
+            let kind = if is_pointer {
+                if self.check(&Token::LBracket) {
                     return Err(Self::error_at(
-                        "pointer-to-pointer parameters are not supported".to_string(),
+                        "pointer array parameters are not supported".to_string(),
                         self.peek_located(),
                     ));
                 }
-                let name = if is_pointer {
-                    self.expect_ident_after("parameter name after '*'")?
-                } else {
-                    self.expect_ident_after("parameter name after type")?
-                };
-                let kind = if is_pointer {
-                    if self.check(&Token::LBracket) {
-                        return Err(Self::error_at(
-                            "pointer array parameters are not supported".to_string(),
-                            self.peek_located(),
-                        ));
-                    }
-                    ParamKind::Pointer
-                } else if self.matches(&Token::LBracket) {
-                    let len = self.expect_array_len()?;
-                    self.expect_closing_bracket_after("array parameter length")?;
-                    ParamKind::Array(len)
-                } else {
-                    ParamKind::Scalar
-                };
-                (ParamType::Scalar(ty), name, kind)
+                ParamKind::Pointer
+            } else if matches!(decl_type, DeclType::Struct(_)) {
+                ParamKind::Struct
+            } else if self.matches(&Token::LBracket) {
+                let len = self.expect_array_len()?;
+                self.expect_closing_bracket_after("array parameter length")?;
+                ParamKind::Array(len)
+            } else {
+                ParamKind::Scalar
             };
-            params.push(Param { ty, name, kind });
+            params.push(Param {
+                ty: Self::decl_type_to_param_type(&decl_type),
+                name,
+                kind,
+            });
 
             if self.matches(&Token::Comma) {
                 if matches!(
@@ -1385,6 +1488,11 @@ impl Parser {
         match self.peek() {
             Token::Semi => self.parse_empty(),
             Token::Int | Token::Char => self.parse_var_decl(),
+            Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
+            Token::Typedef => {
+                self.parse_typedef_decl()?;
+                Ok(Stmt::Empty)
+            }
             Token::Enum => self.parse_enum_decl(),
             Token::Struct => self.parse_struct_var_decl(),
             Token::Return => self.parse_return(),
@@ -1453,7 +1561,7 @@ impl Parser {
     }
 
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
-        let ty = self.expect_type()?;
+        let decl_type = self.parse_decl_type("struct type name")?;
         let is_pointer = self.matches(&Token::Star);
         if is_pointer && self.check(&Token::Star) {
             return Err(Self::error_at(
@@ -1462,9 +1570,15 @@ impl Parser {
             ));
         }
         let name = if is_pointer {
-            self.expect_ident_after("pointer name after '*'")?
+            match &decl_type {
+                DeclType::Scalar(_) => self.expect_ident_after("pointer name after '*'")?,
+                DeclType::Struct(_) => self.expect_ident_after("struct pointer name after '*'")?,
+            }
         } else {
-            self.expect_ident_after("variable name after type")?
+            match &decl_type {
+                DeclType::Scalar(_) => self.expect_ident_after("variable name after type")?,
+                DeclType::Struct(_) => self.expect_ident_after("struct variable name")?,
+            }
         };
         if is_pointer {
             if self.check(&Token::LBracket) {
@@ -1479,22 +1593,47 @@ impl Parser {
                 self.advance();
                 return Ok(Stmt::PointerDecl {
                     name,
-                    ty: PointeeType::Scalar(ty),
+                    ty: Self::decl_type_to_pointee_type(&decl_type),
                     expr: Expr::Number(0),
                 });
             } else {
-                self.expect_assign_after("pointer declaration")?;
+                let context = match &decl_type {
+                    DeclType::Scalar(_) => "pointer declaration",
+                    DeclType::Struct(_) => "struct pointer declaration",
+                };
+                self.expect_assign_after(context)?;
                 unreachable!("expect_assign_after only returns Ok after consuming '='")
             };
             if require_semi {
-                self.expect_semicolon_after("pointer declaration")?;
+                let context = match &decl_type {
+                    DeclType::Scalar(_) => "pointer declaration",
+                    DeclType::Struct(_) => "struct pointer declaration",
+                };
+                self.expect_semicolon_after(context)?;
             }
             return Ok(Stmt::PointerDecl {
                 name,
-                ty: PointeeType::Scalar(ty),
+                ty: Self::decl_type_to_pointee_type(&decl_type),
                 expr,
             });
         }
+        if matches!(decl_type, DeclType::Struct(_)) {
+            if self.matches(&Token::Assign) {
+                return Err(Self::error_at(
+                    "struct variable initializers are not supported".to_string(),
+                    self.previous(),
+                ));
+            }
+            if require_semi {
+                self.expect_semicolon_after("struct variable declaration")?;
+            }
+            if let DeclType::Struct(type_name) = decl_type {
+                return Ok(Stmt::StructVarDecl { type_name, name });
+            }
+        }
+        let DeclType::Scalar(ty) = decl_type else {
+            unreachable!("struct declarations return above")
+        };
         if self.matches(&Token::LBracket) {
             let len = self.expect_array_len()?;
             self.expect_closing_bracket_after("array length")?;
@@ -1539,7 +1678,15 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let ty = self.expect_type_after("struct field type")?;
+            let ty = match self.parse_decl_type("struct field type")? {
+                DeclType::Scalar(ty) => ty,
+                DeclType::Struct(_) => {
+                    return Err(Self::error_at(
+                        "nested struct fields are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
+            };
             let name = self.expect_ident_after("struct field name after type")?;
             if !names.insert(name.clone()) {
                 return Err(Self::error_at(
@@ -1855,7 +2002,8 @@ impl Parser {
 
         let init = if self.matches(&Token::Semi) {
             None
-        } else if matches!(self.peek(), Token::Int | Token::Char) {
+        } else if matches!(self.peek(), Token::Int | Token::Char) || self.current_alias().is_some()
+        {
             Some(Box::new(self.parse_var_decl()?))
         } else if self.starts_assignment_stmt() {
             Some(Box::new(self.parse_assign()?))
@@ -2275,23 +2423,32 @@ impl Parser {
 
     fn parse_sizeof(&mut self) -> CustResult<Expr> {
         if self.matches(&Token::LParen) {
-            if matches!(self.peek(), Token::Int | Token::Char | Token::Void) {
-                let type_token = self.advance();
-                if matches!(type_token.kind, Token::Void) {
+            if matches!(self.peek(), Token::Int | Token::Char | Token::Void)
+                || self.current_alias().is_some()
+            {
+                let sizeof_type = if self.check(&Token::Void) {
+                    let type_token = self.advance();
                     return Err(Self::error_at(
                         "sizeof(void) is not supported".to_string(),
                         &type_token,
                     ));
-                }
-                let ty = match type_token.kind {
-                    Token::Int => CType::Int,
-                    Token::Char => CType::Char,
-                    _ => unreachable!("void returned above and parser checked type tokens"),
-                };
-                let sizeof_type = if self.matches(&Token::Star) {
-                    SizeOfType::Pointer
                 } else {
-                    SizeOfType::Scalar(ty)
+                    match self.parse_decl_type("sizeof struct type name")? {
+                        DeclType::Scalar(ty) => {
+                            if self.matches(&Token::Star) {
+                                SizeOfType::Pointer
+                            } else {
+                                SizeOfType::Scalar(ty)
+                            }
+                        }
+                        DeclType::Struct(type_name) => {
+                            if self.matches(&Token::Star) {
+                                SizeOfType::Pointer
+                            } else {
+                                SizeOfType::Struct(type_name)
+                            }
+                        }
+                    }
                 };
                 self.expect_closing_paren_after("sizeof type")?;
                 Ok(Expr::SizeOfType(sizeof_type))
@@ -2575,30 +2732,6 @@ impl Parser {
         let found = self.advance();
         match found.kind.clone() {
             Token::Ident(name) => Ok(name),
-            token => Err(Self::error_at(
-                format!("expected {context}, found {token:?}"),
-                &found,
-            )),
-        }
-    }
-
-    fn expect_type(&mut self) -> CustResult<CType> {
-        let found = self.advance();
-        match &found.kind {
-            Token::Int => Ok(CType::Int),
-            Token::Char => Ok(CType::Char),
-            token => Err(Self::error_at(
-                format!("expected type, found {token:?}"),
-                &found,
-            )),
-        }
-    }
-
-    fn expect_type_after(&mut self, context: &str) -> CustResult<CType> {
-        let found = self.advance();
-        match &found.kind {
-            Token::Int => Ok(CType::Int),
-            Token::Char => Ok(CType::Char),
             token => Err(Self::error_at(
                 format!("expected {context}, found {token:?}"),
                 &found,
@@ -4926,7 +5059,7 @@ impl Interpreter {
                 let pointer = self.eval_pointer(pointer)?;
                 self.read_struct_pointer_field(&pointer, field)
             }
-            Expr::SizeOfType(sizeof_type) => Ok(sizeof_type.size()),
+            Expr::SizeOfType(sizeof_type) => Ok(sizeof_type.size(&self.struct_types)?),
             Expr::SizeOfValue(expr) => self.sizeof_expr(expr),
             Expr::Var(name) => self.find_scalar(name),
             Expr::AddressOf(_) | Expr::AddressOfArray { .. } => {

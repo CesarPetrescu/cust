@@ -161,6 +161,25 @@ fn supports_struct_pointers_arrow_and_deref_field_access() {
 }
 
 #[test]
+fn supports_typedef_aliases_for_scalars_structs_and_pointers() {
+    let program = include_str!("fixtures/valid/typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 28);
+}
+
+#[test]
+fn rejects_typedefs_without_alias_names() {
+    let program = include_str!("fixtures/invalid/typedef_missing_alias_name.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected typedef alias name after type, found Semi at line 2, column 14"
+    );
+}
+
+#[test]
 fn rejects_null_struct_pointer_field_access() {
     let program = include_str!("fixtures/invalid/struct_pointer_null_dereference.c");
 
