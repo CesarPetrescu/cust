@@ -161,6 +161,24 @@ fn supports_persistent_static_local_storage() {
 }
 
 #[test]
+fn supports_void_parameter_lists_for_functions_and_prototypes() {
+    let program = include_str!("fixtures/valid/void_parameter_lists.c");
+
+    assert_eq!(interpret(program).unwrap(), 6);
+}
+
+#[test]
+fn rejects_named_void_parameters() {
+    let program = include_str!("fixtures/invalid/void_parameter_named.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "void parameter lists must be empty at line 1, column 12"
+    );
+}
+
+#[test]
 fn keeps_static_local_names_block_scoped() {
     let program = include_str!("fixtures/invalid/static_local_out_of_scope.c");
 

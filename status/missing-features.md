@@ -54,6 +54,7 @@ Prioritized backlog for autonomous implementation.
 
 - [x] Static storage-class parsing for supported top-level declarations; acceptance: lexer recognizes `static`, parser accepts it before supported global scalar/array/pointer/struct declarations plus function prototypes/definitions, and interpreter treats it as single-file linkage metadata with the same runtime behavior as ordinary globals/functions, with interpreter plus compiler-oracle fixtures covering the supported subset
 - [x] Persistent local `static` storage for supported local declarations; acceptance: block/function-scope `static` scalar, pointer, array, and struct locals initialize once, persist across calls, keep lexical/block visibility, can be addressed safely after the declaring function returns through Cust's interpreter-owned pointer model, preserve const/read-only enforcement where applicable, and interpreter plus compiler-oracle fixtures cover the supported subset
+- [x] Empty `void` parameter lists in function definitions and prototypes; acceptance: `int main(void)`, `int helper(void);`, and `void side_effect(void)` parse as zero-argument signatures, compatible declarations/definitions compare as empty parameter lists, malformed named/extra `void` parameters report a targeted diagnostic, and interpreter plus compiler-oracle fixtures cover the supported subset
 
 ## P2 — data types
 

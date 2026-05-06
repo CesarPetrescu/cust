@@ -87,8 +87,8 @@ int main() {
 
 Features:
 
-- `int main() { ... }` plus additional `int` and `void` function definitions
-- function calls with integer arguments and local function parameters
+- `int main() { ... }` or `int main(void) { ... }` plus additional `int`, `char`, `void`, or supported `struct` function definitions/prototypes
+- function calls with scalar/struct/pointer arguments, local function parameters, and C-style empty `void` parameter lists
 - integer, character, and string literals
 - declarations: initialized or zero/default-initialized `int`/`char` scalars, arrays, supported pointer variables, first-pass `const int` / `const char` scalars and arrays, typedef aliases, structs, and enum constants, such as `int x = 1;`, `int y;`, `char c;`, `const int limit = 5;`, `int xs[3];`, `char text[4];`, `int *p;`, `typedef int Count;`, `struct Point { int x; char y; };`, and `enum State { READY = 1, RUNNING };`
 - assignment statements and assignment expressions for scalar, array-index, and dereferenced pointer lvalues, such as `x = x + 1;`, `y = (x = 4);`, `xs[0] = (xs[1] = 7);`, and `*p = value;`

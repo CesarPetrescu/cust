@@ -536,9 +536,9 @@ struct EnumConstant {
 /// Interpret a small, safe C subset and return `main()`'s integer exit value.
 ///
 /// Supported v0.1 syntax:
-/// - `int main() { ... }`
+/// - `int main() { ... }` or `int main(void) { ... }`
 /// - top-level `int`/`char` scalar, array, and pointer globals initialized before `main()`
-/// - `int name(int param, char param, struct Point param, ...) { ... }` function definitions and calls, including bounded recursion
+/// - `int name(int param, char param, struct Point param, ...) { ... }` plus empty `void` parameter lists for function definitions/prototypes, including bounded recursion
 /// - `int name = expression;` and `char name = expression;`
 /// - `name = expression;`
 /// - `return expression;`
@@ -1469,6 +1469,16 @@ impl Parser {
         let mut params = Vec::new();
         if self.check(&Token::RParen) {
             return Ok(params);
+        }
+        if self.check(&Token::Void) {
+            let void_token = self.advance();
+            if self.check(&Token::RParen) {
+                return Ok(params);
+            }
+            return Err(Self::error_at(
+                "void parameter lists must be empty".to_string(),
+                &void_token,
+            ));
         }
 
         loop {
