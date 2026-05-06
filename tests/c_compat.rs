@@ -28,6 +28,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/single_statement_control_bodies.c",
     "tests/fixtures/compat/valid/sizeof_operator.c",
     "tests/fixtures/compat/valid/structs.c",
+    "tests/fixtures/compat/valid/struct_lvalues_and_copy.c",
     "tests/fixtures/compat/valid/switch_statements.c",
     "tests/fixtures/compat/valid/uninitialized_global_declarations.c",
     "tests/fixtures/compat/valid/void_functions.c",

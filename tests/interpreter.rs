@@ -133,6 +133,25 @@ fn supports_struct_declarations_and_member_access() {
 }
 
 #[test]
+fn supports_struct_copy_and_field_lvalue_expressions() {
+    let program = include_str!("fixtures/valid/struct_lvalues_and_copy.c");
+
+    assert_eq!(interpret(program).unwrap(), 21);
+}
+
+#[test]
+fn rejects_mismatched_struct_copy_assignment() {
+    let program = include_str!("fixtures/invalid/struct_assignment_type_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot assign struct 'Pair' to struct 'Point'"
+    );
+}
+
+#[test]
 fn rejects_unknown_struct_fields() {
     let program = include_str!("fixtures/invalid/unknown_struct_field.c");
 

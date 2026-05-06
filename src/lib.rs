@@ -148,6 +148,11 @@ enum Expr {
         pointer: Box<Expr>,
         value: Box<Expr>,
     },
+    StructSet {
+        name: String,
+        field: String,
+        value: Box<Expr>,
+    },
     CompoundAssign {
         name: String,
         op: CompoundOp,
@@ -161,6 +166,12 @@ enum Expr {
     },
     DerefCompoundSet {
         pointer: Box<Expr>,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
+    StructCompoundSet {
+        name: String,
+        field: String,
         op: CompoundOp,
         value: Box<Expr>,
     },
@@ -1581,6 +1592,19 @@ impl Parser {
         let name = self.expect_ident()?;
         if self.matches(&Token::Dot) {
             let field = self.expect_ident_after("struct field name after '.'")?;
+            if let Some(op) = self.compound_assignment_op() {
+                self.advance();
+                let value = self.parse_expr()?;
+                if require_semi {
+                    self.expect_semicolon_after("assignment")?;
+                }
+                return Ok(Stmt::Expr(Expr::StructCompoundSet {
+                    name,
+                    field,
+                    op,
+                    value: Box::new(value),
+                }));
+            }
             self.expect_assign_after("struct field assignment")?;
             let value = self.parse_expr()?;
             if require_semi {
@@ -1876,6 +1900,12 @@ impl Parser {
                     op,
                     value: Box::new(value),
                 }),
+                Expr::StructGet { name, field } => Ok(Expr::StructCompoundSet {
+                    name,
+                    field,
+                    op,
+                    value: Box::new(value),
+                }),
                 _ => Err(Self::error_at(
                     "invalid compound assignment target".to_string(),
                     &operator,
@@ -1896,6 +1926,11 @@ impl Parser {
                 }),
                 Expr::Deref(pointer) => Ok(Expr::DerefSet {
                     pointer,
+                    value: Box::new(value),
+                }),
+                Expr::StructGet { name, field } => Ok(Expr::StructSet {
+                    name,
+                    field,
                     value: Box::new(value),
                 }),
                 _ => Err(Self::error_at(
@@ -2156,11 +2191,13 @@ impl Parser {
         operator: &LocatedToken,
     ) -> CustResult<Expr> {
         match target {
-            Expr::Var(_) | Expr::ArrayGet { .. } | Expr::Deref(_) => Ok(Expr::Increment {
-                target: Box::new(target),
-                op,
-                prefix,
-            }),
+            Expr::Var(_) | Expr::ArrayGet { .. } | Expr::Deref(_) | Expr::StructGet { .. } => {
+                Ok(Expr::Increment {
+                    target: Box::new(target),
+                    op,
+                    prefix,
+                })
+            }
             _ => Err(Self::error_at(
                 "invalid increment/decrement target".to_string(),
                 operator,
@@ -3118,6 +3155,53 @@ impl Interpreter {
         }
     }
 
+    fn assign_struct_copy(&mut self, name: &str, rhs: &Expr) -> CustResult<()> {
+        let (rhs_type, rhs_fields) = match rhs {
+            Expr::Var(rhs_name) => match self.find_variable(rhs_name).cloned() {
+                Some(Value::Struct { type_name, fields }) => (type_name, fields),
+                Some(_) => {
+                    return Err(CustError::new(format!(
+                        "variable '{rhs_name}' is not a struct"
+                    )));
+                }
+                None => return Err(CustError::new(format!("undefined variable '{rhs_name}'"))),
+            },
+            _ => return Err(CustError::new("struct assignment requires struct variable")),
+        };
+
+        match self.find_variable_mut(name) {
+            Some(Value::Struct { type_name, fields }) if *type_name == rhs_type => {
+                *fields = rhs_fields;
+                Ok(())
+            }
+            Some(Value::Struct { type_name, .. }) => Err(CustError::new(format!(
+                "cannot assign struct '{rhs_type}' to struct '{type_name}'"
+            ))),
+            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn eval_struct_set(&mut self, name: &str, field: &str, value: &Expr) -> CustResult<i64> {
+        let value = self.eval(value)?;
+        self.assign_struct_field(name, field, value)?;
+        Ok(value)
+    }
+
+    fn eval_struct_compound_set(
+        &mut self,
+        name: &str,
+        field: &str,
+        op: CompoundOp,
+        value: &Expr,
+    ) -> CustResult<i64> {
+        let current = self.read_struct_field(name, field)?;
+        let rhs = self.eval(value)?;
+        let result = Self::apply_compound_op(current, op, rhs)?;
+        self.assign_struct_field(name, field, result)?;
+        Ok(result)
+    }
+
     fn address_of_scalar(&self, name: &str) -> CustResult<PointerValue> {
         for scope in self.scopes.iter().rev() {
             if let Some(value) = scope.values.get(name) {
@@ -3669,6 +3753,8 @@ impl Interpreter {
             | Expr::ArraySet { .. }
             | Expr::ArrayCompoundSet { .. }
             | Expr::StructGet { .. }
+            | Expr::StructSet { .. }
+            | Expr::StructCompoundSet { .. }
             | Expr::StringGet { .. }
             | Expr::Call { .. } => Ok(self.eval(expr)? != 0),
             Expr::Number(value) => Ok(*value != 0),
@@ -3849,6 +3935,9 @@ impl Interpreter {
             Expr::DerefSet { pointer, .. } | Expr::DerefCompoundSet { pointer, .. } => {
                 self.sizeof_deref(pointer)
             }
+            Expr::StructSet { name, field, .. } | Expr::StructCompoundSet { name, field, .. } => {
+                self.sizeof_struct_field(name, field)
+            }
             Expr::Increment { target, .. } => self.sizeof_expr(target),
             Expr::Call { name, .. } => match self.functions.get(name) {
                 Some(function) => function.return_type.size().ok_or_else(|| {
@@ -3992,6 +4081,12 @@ impl Interpreter {
                     )));
                 }
                 array.elements[index] = updated;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
+            Expr::StructGet { name, field } => {
+                let current = self.read_struct_field(name, field)?;
+                let updated = Self::apply_increment_op(current, op);
+                self.assign_struct_field(name, field, updated)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::Deref(pointer) => {
@@ -4157,9 +4252,10 @@ impl Interpreter {
                     Some(Value::Array(_)) => Err(CustError::new(format!(
                         "array '{name}' requires indexed assignment"
                     ))),
-                    Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                        "struct variable '{name}' assignment is not supported"
-                    ))),
+                    Some(Value::Struct { .. }) => {
+                        self.assign_struct_copy(name, expr)?;
+                        Ok(ExecFlow::None)
+                    }
                     None if self.find_enum_constant(name).is_some() => Err(CustError::new(
                         format!("cannot assign to enum constant '{name}'"),
                     )),
@@ -4422,6 +4518,13 @@ impl Interpreter {
             Expr::DerefCompoundSet { pointer, op, value } => {
                 self.eval_deref_compound_set(pointer, *op, value)
             }
+            Expr::StructSet { name, field, value } => self.eval_struct_set(name, field, value),
+            Expr::StructCompoundSet {
+                name,
+                field,
+                op,
+                value,
+            } => self.eval_struct_compound_set(name, field, *op, value),
             Expr::Deref(pointer) => {
                 let pointer = self.eval_pointer(pointer)?;
                 self.deref_pointer(&pointer)
