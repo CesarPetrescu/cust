@@ -353,6 +353,7 @@ struct Param {
     name: String,
     kind: ParamKind,
     is_const: bool,
+    points_to_const: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -447,6 +448,7 @@ enum Stmt {
         ty: PointeeType,
         expr: Expr,
         is_const: bool,
+        points_to_const: bool,
     },
     ArrayDecl {
         name: String,
@@ -1460,8 +1462,10 @@ impl Parser {
         }
 
         loop {
-            let (is_const, decl_type) = self.parse_const_qualified_decl_type("parameter type")?;
+            let (leading_const, decl_type) =
+                self.parse_const_qualified_decl_type("parameter type")?;
             let has_explicit_star = self.matches(&Token::Star);
+            let post_star_const = has_explicit_star && self.matches(&Token::Const);
             if matches!(decl_type, DeclType::Pointer(_)) && has_explicit_star {
                 return Err(Self::error_at(
                     "pointer-to-pointer parameters are not supported".to_string(),
@@ -1513,11 +1517,21 @@ impl Parser {
             } else {
                 ParamKind::Scalar
             };
+            let (is_const, points_to_const) = if is_pointer {
+                if has_explicit_star {
+                    (post_star_const, leading_const)
+                } else {
+                    (leading_const, false)
+                }
+            } else {
+                (leading_const, false)
+            };
             params.push(Param {
                 ty: Self::decl_type_to_param_type(&decl_type),
                 name,
                 kind,
                 is_const,
+                points_to_const,
             });
 
             if self.matches(&Token::Comma) {
@@ -1660,8 +1674,10 @@ impl Parser {
     }
 
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
-        let (is_const, decl_type) = self.parse_const_qualified_decl_type("struct type name")?;
+        let (leading_const, decl_type) =
+            self.parse_const_qualified_decl_type("struct type name")?;
         let has_explicit_star = self.matches(&Token::Star);
+        let post_star_const = has_explicit_star && self.matches(&Token::Const);
         if matches!(decl_type, DeclType::Pointer(_)) && has_explicit_star {
             return Err(Self::error_at(
                 "pointer-to-pointer declarations are not supported".to_string(),
@@ -1691,6 +1707,11 @@ impl Parser {
             }
         };
         if is_pointer {
+            let (is_const, points_to_const) = if has_explicit_star {
+                (post_star_const, leading_const)
+            } else {
+                (leading_const, false)
+            };
             if self.check(&Token::LBracket) {
                 return Err(Self::error_at(
                     "pointer array declarations are not supported".to_string(),
@@ -1706,6 +1727,7 @@ impl Parser {
                     ty: Self::decl_type_to_pointee_type(&decl_type),
                     expr: Expr::Number(0),
                     is_const,
+                    points_to_const,
                 });
             } else {
                 let context = match &decl_type {
@@ -1735,6 +1757,7 @@ impl Parser {
                 ty: Self::decl_type_to_pointee_type(&decl_type),
                 expr,
                 is_const,
+                points_to_const,
             });
         }
         if matches!(decl_type, DeclType::Struct(_)) {
@@ -1751,7 +1774,7 @@ impl Parser {
                 return Ok(Stmt::StructVarDecl {
                     type_name,
                     name,
-                    is_const,
+                    is_const: leading_const,
                 });
             }
         }
@@ -1768,7 +1791,7 @@ impl Parser {
                 name,
                 elem_type: ty,
                 len,
-                is_const,
+                is_const: leading_const,
             });
         }
         let expr = if self.matches(&Token::Assign) {
@@ -1779,7 +1802,7 @@ impl Parser {
                 name,
                 ty,
                 expr: Expr::Number(0),
-                is_const,
+                is_const: leading_const,
             });
         } else {
             self.expect_assign_after("variable declaration")?;
@@ -1792,7 +1815,7 @@ impl Parser {
             name,
             ty,
             expr,
-            is_const,
+            is_const: leading_const,
         })
     }
 
@@ -1872,6 +1895,7 @@ impl Parser {
                 ty: PointeeType::Struct(type_name),
                 expr,
                 is_const: false,
+                points_to_const: false,
             });
         }
         let name = self.expect_ident_after("struct variable name")?;
@@ -3249,6 +3273,7 @@ enum Value {
     Pointer {
         pointer: PointerValue,
         ty: PointeeType,
+        points_to_const: bool,
     },
     Struct {
         type_name: String,
@@ -3396,6 +3421,7 @@ impl Interpreter {
                     Value::Pointer {
                         pointer: self.eval_pointer(arg_expr)?,
                         ty,
+                        points_to_const: param.points_to_const,
                     }
                 }
                 ParamKind::Struct => {
@@ -3620,6 +3646,41 @@ impl Interpreter {
             Err(CustError::new(format!(
                 "cannot assign to const variable '{name}'"
             )))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn pointer_variable_points_to_const(&self, name: &str) -> bool {
+        matches!(
+            self.find_variable(name),
+            Some(Value::Pointer {
+                points_to_const: true,
+                ..
+            })
+        )
+    }
+
+    fn ensure_pointer_variable_pointee_mutable(&self, name: &str) -> CustResult<()> {
+        if self.pointer_variable_points_to_const(name) {
+            Err(CustError::new("cannot assign through pointer to const"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn pointer_expr_points_to_const(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Var(name) => self.pointer_variable_points_to_const(name),
+            Expr::Comma(_, right) => self.pointer_expr_points_to_const(right),
+            Expr::Conditional { .. } => false,
+            _ => false,
+        }
+    }
+
+    fn ensure_pointer_expr_pointee_mutable(&self, expr: &Expr) -> CustResult<()> {
+        if self.pointer_expr_points_to_const(expr) {
+            Err(CustError::new("cannot assign through pointer to const"))
         } else {
             Ok(())
         }
@@ -4852,6 +4913,7 @@ impl Interpreter {
             Expr::ArrayGet { name, index } => {
                 let (array, index) = match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => {
+                        self.ensure_pointer_variable_pointee_mutable(name)?;
                         let index_value = self.eval(index)?;
                         let (array, _, index) =
                             self.checked_pointer_value_index(&pointer, index_value)?;
@@ -4884,6 +4946,7 @@ impl Interpreter {
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::Deref(pointer) => {
+                self.ensure_pointer_expr_pointee_mutable(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;
                 let current = self.deref_pointer(&pointer)?;
                 let updated = Self::apply_increment_op(current, op);
@@ -4903,6 +4966,7 @@ impl Interpreter {
     ) -> CustResult<i64> {
         let (array, index) = match self.find_variable(name).cloned() {
             Some(Value::Pointer { pointer, .. }) => {
+                self.ensure_pointer_variable_pointee_mutable(name)?;
                 let index_value = self.eval(index)?;
                 let (array, _, index) = self.checked_pointer_value_index(&pointer, index_value)?;
                 (array, index)
@@ -4928,6 +4992,7 @@ impl Interpreter {
         op: CompoundOp,
         value: &Expr,
     ) -> CustResult<i64> {
+        self.ensure_pointer_expr_pointee_mutable(pointer)?;
         let pointer = self.eval_pointer(pointer)?;
         let current = self.deref_pointer(&pointer)?;
         let rhs = self.eval(value)?;
@@ -5018,6 +5083,7 @@ impl Interpreter {
                 ty,
                 expr,
                 is_const,
+                points_to_const,
             } => {
                 let pointer = self.eval_pointer(expr)?;
                 if self.current_scope_has_identifier(name) {
@@ -5031,6 +5097,7 @@ impl Interpreter {
                     Value::Pointer {
                         pointer,
                         ty: ty.clone(),
+                        points_to_const: *points_to_const,
                     },
                 );
                 if *is_const {
@@ -5126,6 +5193,7 @@ impl Interpreter {
                 }
             }
             Stmt::DerefAssign { pointer, value } => {
+                self.ensure_pointer_expr_pointee_mutable(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;
                 let value = self.eval(value)?;
                 self.assign_deref_pointer(&pointer, value)?;
@@ -5135,6 +5203,7 @@ impl Interpreter {
                 let value = self.eval(value)?;
                 match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => {
+                        self.ensure_pointer_variable_pointee_mutable(name)?;
                         let index_value = self.eval(index)?;
                         self.assign_pointer_index(&pointer, index_value, value)?;
                     }
@@ -5350,6 +5419,7 @@ impl Interpreter {
                 let value = self.eval(value)?;
                 match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => {
+                        self.ensure_pointer_variable_pointee_mutable(name)?;
                         let index_value = self.eval(index)?;
                         self.assign_pointer_index(&pointer, index_value, value)?;
                     }
@@ -5373,6 +5443,7 @@ impl Interpreter {
                 value,
             } => self.eval_array_compound_set(name, index, *op, value),
             Expr::DerefSet { pointer, value } => {
+                self.ensure_pointer_expr_pointee_mutable(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;
                 let value = self.eval(value)?;
                 self.assign_deref_pointer(&pointer, value)?;

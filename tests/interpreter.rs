@@ -119,6 +119,40 @@ fn supports_const_qualified_scalars_arrays_and_parameters() {
 }
 
 #[test]
+fn supports_const_qualified_pointer_pointees_and_pointer_slots() {
+    let program = include_str!("fixtures/valid/const_pointer_qualifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 56);
+}
+
+#[test]
+fn rejects_writes_through_const_pointer_pointees() {
+    let program = include_str!("fixtures/invalid/const_pointer_write.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
+}
+
+#[test]
+fn rejects_index_writes_through_const_pointer_pointees() {
+    let program = include_str!("fixtures/invalid/const_pointer_index_write.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
+}
+
+#[test]
+fn rejects_reassignment_of_const_pointer_slots() {
+    let program = include_str!("fixtures/invalid/const_pointer_reassignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot assign to const variable 'p'");
+}
+
+#[test]
 fn rejects_assignment_to_const_scalars() {
     let program = include_str!("fixtures/invalid/const_assignment.c");
 
