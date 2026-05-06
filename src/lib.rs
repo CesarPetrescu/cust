@@ -439,6 +439,10 @@ enum IncrementOp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Stmt {
     Empty,
+    StaticLocal {
+        id: usize,
+        decl: Box<Stmt>,
+    },
     VarDecl {
         name: String,
         ty: CType,
@@ -1091,6 +1095,7 @@ struct Parser {
     struct_types: HashMap<String, StructTypeDef>,
     enum_type_scopes: Vec<HashSet<String>>,
     type_alias_scopes: Vec<HashMap<String, TypeAlias>>,
+    next_static_local_id: usize,
 }
 
 impl Parser {
@@ -1101,6 +1106,7 @@ impl Parser {
             struct_types: HashMap::new(),
             enum_type_scopes: vec![HashSet::new()],
             type_alias_scopes: vec![HashMap::new()],
+            next_static_local_id: 0,
         }
     }
 
@@ -1604,10 +1610,7 @@ impl Parser {
     fn parse_stmt(&mut self) -> CustResult<Stmt> {
         match self.peek() {
             Token::Semi => self.parse_empty(),
-            Token::Static => Err(Self::error_at(
-                "static local declarations are not supported".to_string(),
-                self.peek_located(),
-            )),
+            Token::Static => self.parse_static_local_decl(),
             Token::Int | Token::Char | Token::Const => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Typedef => {
@@ -1675,6 +1678,27 @@ impl Parser {
     fn parse_empty(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Semi)?;
         Ok(Stmt::Empty)
+    }
+
+    fn parse_static_local_decl(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::Static)?;
+        let id = self.next_static_local_id;
+        self.next_static_local_id += 1;
+        let decl = match self.peek() {
+            Token::Int | Token::Char | Token::Const => self.parse_var_decl()?,
+            Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
+            Token::Struct => self.parse_struct_var_decl()?,
+            token => {
+                return Err(Self::error_at(
+                    format!("expected declaration after static, found {token:?}"),
+                    self.peek_located(),
+                ));
+            }
+        };
+        Ok(Stmt::StaticLocal {
+            id,
+            decl: Box::new(decl),
+        })
     }
 
     fn parse_var_decl(&mut self) -> CustResult<Stmt> {
@@ -3239,6 +3263,7 @@ const MAX_CALL_DEPTH: usize = 64;
 
 struct Interpreter {
     scopes: Vec<Scope>,
+    static_locals: HashMap<usize, StaticLocalStorage>,
     live_scope_ids: HashSet<usize>,
     next_scope_id: usize,
     functions: HashMap<String, Function>,
@@ -3253,8 +3278,17 @@ struct Interpreter {
 struct Scope {
     id: usize,
     values: HashMap<String, Value>,
+    static_local_ids: HashMap<String, usize>,
     enum_constants: HashMap<String, i64>,
     const_variables: HashSet<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StaticLocalStorage {
+    scope_id: usize,
+    name: String,
+    value: Value,
+    is_const: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3350,6 +3384,7 @@ impl Interpreter {
     fn new(options: InterpretOptions) -> Self {
         Self {
             scopes: Vec::new(),
+            static_locals: HashMap::new(),
             live_scope_ids: HashSet::new(),
             next_scope_id: 0,
             functions: HashMap::new(),
@@ -3630,6 +3665,7 @@ impl Interpreter {
         self.scopes.push(Scope {
             id,
             values,
+            static_local_ids: HashMap::new(),
             enum_constants: HashMap::new(),
             const_variables,
         });
@@ -3651,7 +3687,11 @@ impl Interpreter {
                 if scope.values.contains_key(name) {
                     Some(scope.const_variables.contains(name))
                 } else {
-                    None
+                    scope.static_local_ids.get(name).map(|id| {
+                        self.static_locals
+                            .get(id)
+                            .is_some_and(|storage| storage.is_const)
+                    })
                 }
             })
             .unwrap_or(false)
@@ -3750,7 +3790,10 @@ impl Interpreter {
                     .scopes
                     .iter()
                     .find(|scope| scope.id == *scope_id)
-                    .is_some_and(|scope| scope.const_variables.contains(name)) =>
+                    .is_some_and(|scope| scope.const_variables.contains(name))
+                    || self.static_locals.values().any(|storage| {
+                        storage.scope_id == *scope_id && storage.name == *name && storage.is_const
+                    }) =>
             {
                 Err(CustError::new("cannot assign through pointer to const"))
             }
@@ -3773,17 +3816,13 @@ impl Interpreter {
     }
 
     fn current_scope_has_identifier(&self, name: &str) -> bool {
-        self.scopes
+        let scope = self
+            .scopes
             .last()
-            .expect("exec_block always creates a current scope")
-            .values
-            .contains_key(name)
-            || self
-                .scopes
-                .last()
-                .expect("exec_block always creates a current scope")
-                .enum_constants
-                .contains_key(name)
+            .expect("exec_block always creates a current scope");
+        scope.values.contains_key(name)
+            || scope.static_local_ids.contains_key(name)
+            || scope.enum_constants.contains_key(name)
     }
 
     fn insert_enum_constant(&mut self, name: String, value: i64) -> CustResult<()> {
@@ -3808,13 +3847,34 @@ impl Interpreter {
     }
 
     fn find_variable(&self, name: &str) -> Option<&Value> {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|scope| scope.values.get(name))
+        self.scopes.iter().rev().find_map(|scope| {
+            scope.values.get(name).or_else(|| {
+                scope
+                    .static_local_ids
+                    .get(name)
+                    .and_then(|id| self.static_locals.get(id))
+                    .map(|storage| &storage.value)
+            })
+        })
     }
 
     fn find_variable_mut(&mut self, name: &str) -> Option<&mut Value> {
+        let mut static_id = None;
+        for scope in self.scopes.iter().rev() {
+            if scope.values.contains_key(name) {
+                break;
+            }
+            if let Some(id) = scope.static_local_ids.get(name) {
+                static_id = Some(*id);
+                break;
+            }
+        }
+        if let Some(id) = static_id {
+            return self
+                .static_locals
+                .get_mut(&id)
+                .map(|storage| &mut storage.value);
+        }
         self.scopes
             .iter_mut()
             .rev()
@@ -3911,6 +3971,18 @@ impl Interpreter {
         }
     }
 
+    fn static_value_by_scope(&self, scope_id: usize, name: &str) -> Option<&Value> {
+        self.static_locals.values().find_map(|storage| {
+            (storage.scope_id == scope_id && storage.name == name).then_some(&storage.value)
+        })
+    }
+
+    fn static_value_by_scope_mut(&mut self, scope_id: usize, name: &str) -> Option<&mut Value> {
+        self.static_locals.values_mut().find_map(|storage| {
+            (storage.scope_id == scope_id && storage.name == name).then_some(&mut storage.value)
+        })
+    }
+
     fn find_struct_pointer_fields(
         &self,
         pointer: &PointerValue,
@@ -3927,7 +3999,8 @@ impl Interpreter {
                     .scopes
                     .iter()
                     .find(|scope| scope.id == *scope_id)
-                    .and_then(|scope| scope.values.get(name));
+                    .and_then(|scope| scope.values.get(name))
+                    .or_else(|| self.static_value_by_scope(*scope_id, name));
                 match value {
                     Some(Value::Struct { type_name, fields }) => Ok((type_name.clone(), fields)),
                     _ => Err(CustError::new(format!(
@@ -3951,12 +4024,17 @@ impl Interpreter {
                         "pointer to out-of-scope variable '{name}'"
                     )));
                 }
-                let value = self
-                    .scopes
-                    .iter_mut()
-                    .find(|scope| scope.id == *scope_id)
-                    .and_then(|scope| scope.values.get_mut(name));
-                match value {
+                if let Some(pos) = self.scopes.iter().position(|scope| scope.id == *scope_id) {
+                    return match self.scopes[pos].values.get_mut(name) {
+                        Some(Value::Struct { type_name, fields }) => {
+                            Ok((type_name.clone(), fields))
+                        }
+                        _ => Err(CustError::new(format!(
+                            "pointer to out-of-scope variable '{name}'"
+                        ))),
+                    };
+                }
+                match self.static_value_by_scope_mut(*scope_id, name) {
                     Some(Value::Struct { type_name, fields }) => Ok((type_name.clone(), fields)),
                     _ => Err(CustError::new(format!(
                         "pointer to out-of-scope variable '{name}'"
@@ -4087,6 +4165,28 @@ impl Interpreter {
                     ))),
                     Value::Struct { .. } => Ok(PointerValue::Struct {
                         scope_id: scope.id,
+                        name: name.to_string(),
+                    }),
+                };
+            }
+            if let Some(storage) = scope
+                .static_local_ids
+                .get(name)
+                .and_then(|id| self.static_locals.get(id))
+            {
+                return match &storage.value {
+                    Value::Scalar { .. } => Ok(PointerValue::Scalar {
+                        scope_id: storage.scope_id,
+                        name: name.to_string(),
+                    }),
+                    Value::Array(_) => Err(CustError::new(format!(
+                        "array '{name}' requires indexed address-of"
+                    ))),
+                    Value::Pointer { .. } => Err(CustError::new(format!(
+                        "pointer '{name}' cannot be addressed in this pointer milestone"
+                    ))),
+                    Value::Struct { .. } => Ok(PointerValue::Struct {
+                        scope_id: storage.scope_id,
                         name: name.to_string(),
                     }),
                 };
@@ -4335,7 +4435,8 @@ impl Interpreter {
                     .scopes
                     .iter()
                     .find(|scope| scope.id == *scope_id)
-                    .and_then(|scope| scope.values.get(name));
+                    .and_then(|scope| scope.values.get(name))
+                    .or_else(|| self.static_value_by_scope(*scope_id, name));
                 match value {
                     Some(Value::Scalar { value, .. }) => Ok(*value),
                     _ => Err(CustError::new(format!(
@@ -4363,25 +4464,41 @@ impl Interpreter {
                         "pointer to out-of-scope variable '{name}'"
                     )));
                 }
-                let scope = self.scopes.iter_mut().find(|scope| scope.id == *scope_id);
-                let Some(scope) = scope else {
-                    return Err(CustError::new(format!(
-                        "pointer to out-of-scope variable '{name}'"
-                    )));
-                };
-                if scope.const_variables.contains(name) {
+                if let Some(scope) = self.scopes.iter().find(|scope| scope.id == *scope_id) {
+                    if scope.const_variables.contains(name) {
+                        return Err(CustError::new(format!(
+                            "cannot assign to const variable '{name}'"
+                        )));
+                    }
+                } else if self.static_locals.values().any(|storage| {
+                    storage.scope_id == *scope_id && storage.name == *name && storage.is_const
+                }) {
                     return Err(CustError::new(format!(
                         "cannot assign to const variable '{name}'"
                     )));
                 }
-                match scope.values.get_mut(name) {
+                match self
+                    .scopes
+                    .iter_mut()
+                    .find(|scope| scope.id == *scope_id)
+                    .and_then(|scope| scope.values.get_mut(name))
+                {
                     Some(Value::Scalar { value: slot, .. }) => {
                         *slot = value;
                         Ok(())
                     }
-                    _ => Err(CustError::new(format!(
+                    Some(_) => Err(CustError::new(format!(
                         "pointer to out-of-scope variable '{name}'"
                     ))),
+                    None => match self.static_value_by_scope_mut(*scope_id, name) {
+                        Some(Value::Scalar { value: slot, .. }) => {
+                            *slot = value;
+                            Ok(())
+                        }
+                        _ => Err(CustError::new(format!(
+                            "pointer to out-of-scope variable '{name}'"
+                        ))),
+                    },
                 }
             }
             PointerValue::ArrayBase { .. } | PointerValue::ArrayElement { .. } => {
@@ -5151,9 +5268,88 @@ impl Interpreter {
         }
     }
 
+    fn static_local_name_and_const(decl: &Stmt) -> CustResult<(&str, bool)> {
+        match decl {
+            Stmt::VarDecl { name, is_const, .. }
+            | Stmt::PointerDecl { name, is_const, .. }
+            | Stmt::ArrayDecl { name, is_const, .. }
+            | Stmt::StructVarDecl { name, is_const, .. } => Ok((name, *is_const)),
+            _ => Err(CustError::new(
+                "static local declarations must declare variables",
+            )),
+        }
+    }
+
+    fn initialize_static_local(&mut self, decl: &Stmt) -> CustResult<Value> {
+        match decl {
+            Stmt::VarDecl { ty, expr, .. } => Ok(Value::Scalar {
+                value: self.eval(expr)?,
+                ty: *ty,
+            }),
+            Stmt::PointerDecl {
+                ty,
+                expr,
+                points_to_const,
+                ..
+            } => {
+                self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
+                Ok(Value::Pointer {
+                    pointer: self.eval_pointer(expr)?,
+                    ty: ty.clone(),
+                    points_to_const: *points_to_const,
+                })
+            }
+            Stmt::ArrayDecl {
+                elem_type,
+                len,
+                is_const,
+                ..
+            } => {
+                let mut array = ArrayValue::mutable_zeroed(*len, *elem_type);
+                array.read_only = *is_const;
+                Ok(Value::Array(Rc::new(RefCell::new(array))))
+            }
+            Stmt::StructVarDecl { type_name, .. } => self.make_struct_value(type_name),
+            _ => Err(CustError::new(
+                "static local declarations must declare variables",
+            )),
+        }
+    }
+
+    fn exec_static_local(&mut self, id: usize, decl: &Stmt) -> CustResult<ExecFlow> {
+        let (name, is_const) = Self::static_local_name_and_const(decl)?;
+        if self.current_scope_has_identifier(name) {
+            return Err(CustError::new(format!(
+                "variable '{name}' already declared in this scope"
+            )));
+        }
+        if !self.static_locals.contains_key(&id) {
+            let value = self.initialize_static_local(decl)?;
+            let scope_id = self.next_scope_id;
+            self.next_scope_id += 1;
+            self.live_scope_ids.insert(scope_id);
+            self.static_locals.insert(
+                id,
+                StaticLocalStorage {
+                    scope_id,
+                    name: name.to_string(),
+                    value,
+                    is_const,
+                },
+            );
+        }
+        self.scopes
+            .last_mut()
+            .expect("exec_block always creates a current scope")
+            .static_local_ids
+            .insert(name.to_string(), id);
+        Ok(ExecFlow::None)
+    }
+
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
         match stmt {
             Stmt::Empty => Ok(ExecFlow::None),
+            Stmt::StaticLocal { id, decl } => self.exec_static_local(*id, decl),
             Stmt::VarDecl {
                 name,
                 ty,

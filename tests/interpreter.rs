@@ -154,15 +154,18 @@ fn supports_static_storage_class_at_top_level() {
 }
 
 #[test]
-fn rejects_static_local_declarations_for_now() {
-    let program = include_str!("fixtures/invalid/static_local_declaration.c");
+fn supports_persistent_static_local_storage() {
+    let program = include_str!("fixtures/valid/static_local_storage.c");
+
+    assert_eq!(interpret(program).unwrap(), 286);
+}
+
+#[test]
+fn keeps_static_local_names_block_scoped() {
+    let program = include_str!("fixtures/invalid/static_local_out_of_scope.c");
 
     let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "static local declarations are not supported at line 2, column 5"
-    );
+    assert_eq!(err.to_string(), "undefined variable 'hidden'");
 }
 
 #[test]
