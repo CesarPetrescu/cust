@@ -27,10 +27,16 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - `p.x = expr` is valid as an expression and returns the assigned scalar value.
   - `p.x += expr` and the other supported compound assignments read, update, store, and return the field value.
   - Prefix/postfix `++p.x`, `p.x++`, `--p.x`, and `p.x--` work with the same return-value semantics as scalar variables.
+- Struct function parameters:
+  - Function definitions and prototypes may name by-value struct parameters after a prior struct declaration, such as `int sum(struct Point p);`.
+  - Calls copy same-type struct arguments into the callee parameter scope by value.
+  - Writes to fields on the callee's copy do not mutate the caller's struct variable.
+  - Mismatched struct arguments report `function '<name>' struct parameter '<param>' expected struct '<Expected>', got struct '<Actual>'`.
+  - Non-struct arguments report `function '<name>' struct parameter '<param>' requires a struct argument`.
 
 ## Intentional limitations before later milestones
 
-- No struct function parameters or return types yet.
+- No struct return types yet.
 - No pointers to structs and no address-of/member pointer access yet.
 - No nested structs, arrays in structs, pointer fields, bit-fields, anonymous structs, unions, typedefs, or `const`.
 - No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic sizes.
@@ -41,6 +47,8 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store scalar values plus declared `CType`.
 - Struct fields are scoped as members of their owning value, not as independent variables.
 - Member access is scalar expression syntax backed by field lvalue evaluation helpers for simple assignment, compound assignment, and increment/decrement expressions.
+- Function signatures include struct parameter type names, so prototypes and later definitions must agree on the exact struct type.
+- Struct parameter binding clones the struct value into the function parameter scope, preserving by-value behavior without host/native addresses.
 
 ## Acceptance fixtures
 
@@ -61,9 +69,15 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - compares supported same-type copy and field lvalue behavior with native C.
 - Invalid fixture: `tests/fixtures/invalid/struct_assignment_type_mismatch.c`
   - verifies mismatched struct copy assignment reports the targeted type diagnostic.
+- Valid interpreter fixture: `tests/fixtures/valid/struct_parameters.c`
+  - covers struct parameters in definitions/prototypes, by-value copy semantics, and mixed scalar pointer output parameters.
+- Valid compiler-oracle fixture: `tests/fixtures/compat/valid/struct_parameters.c`
+  - compares supported by-value struct parameter behavior with native C.
+- Invalid fixtures: `tests/fixtures/invalid/struct_parameter_type_mismatch.c` and `tests/fixtures/invalid/struct_parameter_non_struct_argument.c`
+  - verify targeted diagnostics for mismatched and non-struct arguments.
 
 ## Next struct work
 
-1. Design and implement struct function parameters using by-value copies before considering pointers to structs.
-2. Add struct return types only after by-value parameter semantics are verified.
-3. Consider pointers to structs and `->` as a separate pointer-model extension.
+1. Add struct return types now that by-value parameter semantics are verified.
+2. Consider pointers to structs and `->` as a separate pointer-model extension after return-value behavior is covered.
+3. Keep nested/aggregate fields, typedefs, and const as later separate milestones.

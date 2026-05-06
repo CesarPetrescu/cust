@@ -42,6 +42,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Enum constant declarations: `enum Tag { A = 1, B, C = -1 };` at top level and inside blocks, optional tags, implicit incrementing values, trailing commas, scoped/shadowable integer constants, read-only assignment diagnostics for enum constants, malformed-value diagnostics, and C compiler-oracle coverage
 - [x] Preprocessor-free struct first milestone: top-level `struct Name { int x; char y; };` declarations, top-level/local zero-initialized `struct Name value;` variables, scalar member reads/writes with `.`, targeted unknown-field diagnostics, deterministic Cust `sizeof` for structs/fields, design notes in `docs/plans/struct-model.md`, and C compiler-oracle coverage
 - [x] Struct copy assignment and field lvalue expressions: same-type `b = a;` value-copy semantics with mismatched-type diagnostics, field assignment expressions (`return p.x = 3;`), field compound assignments (`p.x += 1` and related supported operators), prefix/postfix field increment/decrement, interpreter fixtures, invalid diagnostics, and C compiler-oracle coverage
+- [x] Struct by-value function parameters: parser accepts `struct Point p` parameters in definitions/prototypes after prior struct declarations, calls copy same-type struct arguments into callee scope, callee field writes do not mutate caller structs, mismatched/non-struct arguments report targeted diagnostics, and interpreter plus C compiler-oracle fixtures cover the supported subset
 
 ## P2 — data types
 

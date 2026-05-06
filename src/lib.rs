@@ -228,9 +228,9 @@ struct FunctionSignature {
     params: Vec<ParamSignature>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ParamSignature {
-    ty: CType,
+    ty: ParamType,
     kind: ParamKind,
 }
 
@@ -295,9 +295,15 @@ impl SizeOfType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Param {
-    ty: CType,
+    ty: ParamType,
     name: String,
     kind: ParamKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParamType {
+    Scalar(CType),
+    Struct(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -305,6 +311,7 @@ enum ParamKind {
     Scalar,
     Array(usize),
     Pointer,
+    Struct,
 }
 
 impl FunctionSignature {
@@ -314,7 +321,7 @@ impl FunctionSignature {
             params: params
                 .iter()
                 .map(|param| ParamSignature {
-                    ty: param.ty,
+                    ty: param.ty.clone(),
                     kind: param.kind,
                 })
                 .collect(),
@@ -458,7 +465,7 @@ struct EnumConstant {
 /// Supported v0.1 syntax:
 /// - `int main() { ... }`
 /// - top-level `int`/`char` scalar, array, and pointer globals initialized before `main()`
-/// - `int name(int param, char param, ...) { ... }` function definitions and calls, including bounded recursion
+/// - `int name(int param, char param, struct Point param, ...) { ... }` function definitions and calls, including bounded recursion
 /// - `int name = expression;` and `char name = expression;`
 /// - `name = expression;`
 /// - `return expression;`
@@ -1195,33 +1202,45 @@ impl Parser {
         }
 
         loop {
-            let ty = self.expect_type_after("parameter type")?;
-            let is_pointer = self.matches(&Token::Star);
-            if is_pointer && self.check(&Token::Star) {
-                return Err(Self::error_at(
-                    "pointer-to-pointer parameters are not supported".to_string(),
-                    self.peek_located(),
-                ));
-            }
-            let name = if is_pointer {
-                self.expect_ident_after("parameter name after '*'")?
+            let (ty, name, kind) = if self.matches(&Token::Struct) {
+                let type_name = self.expect_ident_after("struct parameter type name")?;
+                if !self.struct_types.contains_key(&type_name) {
+                    return Err(CustError::new(format!(
+                        "undefined struct type '{type_name}'"
+                    )));
+                }
+                let name = self.expect_ident_after("struct parameter name after type")?;
+                (ParamType::Struct(type_name), name, ParamKind::Struct)
             } else {
-                self.expect_ident_after("parameter name after type")?
-            };
-            let kind = if is_pointer {
-                if self.check(&Token::LBracket) {
+                let ty = self.expect_type_after("parameter type")?;
+                let is_pointer = self.matches(&Token::Star);
+                if is_pointer && self.check(&Token::Star) {
                     return Err(Self::error_at(
-                        "pointer array parameters are not supported".to_string(),
+                        "pointer-to-pointer parameters are not supported".to_string(),
                         self.peek_located(),
                     ));
                 }
-                ParamKind::Pointer
-            } else if self.matches(&Token::LBracket) {
-                let len = self.expect_array_len()?;
-                self.expect_closing_bracket_after("array parameter length")?;
-                ParamKind::Array(len)
-            } else {
-                ParamKind::Scalar
+                let name = if is_pointer {
+                    self.expect_ident_after("parameter name after '*'")?
+                } else {
+                    self.expect_ident_after("parameter name after type")?
+                };
+                let kind = if is_pointer {
+                    if self.check(&Token::LBracket) {
+                        return Err(Self::error_at(
+                            "pointer array parameters are not supported".to_string(),
+                            self.peek_located(),
+                        ));
+                    }
+                    ParamKind::Pointer
+                } else if self.matches(&Token::LBracket) {
+                    let len = self.expect_array_len()?;
+                    self.expect_closing_bracket_after("array parameter length")?;
+                    ParamKind::Array(len)
+                } else {
+                    ParamKind::Scalar
+                };
+                (ParamType::Scalar(ty), name, kind)
             };
             params.push(Param { ty, name, kind });
 
@@ -2883,17 +2902,35 @@ impl Interpreter {
         let mut param_scope = HashMap::new();
         for (param, arg_expr) in function.params.iter().zip(arg_exprs) {
             let arg = match param.kind {
-                ParamKind::Scalar => Value::Scalar {
-                    value: self.eval(arg_expr)?,
-                    ty: param.ty,
-                },
+                ParamKind::Scalar => {
+                    let ParamType::Scalar(ty) = &param.ty else {
+                        return Err(CustError::new("internal scalar parameter type mismatch"));
+                    };
+                    let ty = *ty;
+                    Value::Scalar {
+                        value: self.eval(arg_expr)?,
+                        ty,
+                    }
+                }
                 ParamKind::Array(expected_len) => {
                     self.eval_array_argument(name, &param.name, expected_len, arg_expr)?
                 }
-                ParamKind::Pointer => Value::Pointer {
-                    pointer: self.eval_pointer(arg_expr)?,
-                    ty: param.ty,
-                },
+                ParamKind::Pointer => {
+                    let ParamType::Scalar(ty) = &param.ty else {
+                        return Err(CustError::new("internal pointer parameter type mismatch"));
+                    };
+                    let ty = *ty;
+                    Value::Pointer {
+                        pointer: self.eval_pointer(arg_expr)?,
+                        ty,
+                    }
+                }
+                ParamKind::Struct => {
+                    let ParamType::Struct(type_name) = &param.ty else {
+                        return Err(CustError::new("internal struct parameter type mismatch"));
+                    };
+                    self.eval_struct_argument(name, &param.name, type_name, arg_expr)?
+                }
             };
             if param_scope.insert(param.name.clone(), arg).is_some() {
                 return Err(CustError::new(format!(
@@ -2963,6 +3000,32 @@ impl Interpreter {
             }
             _ => Err(CustError::new(format!(
                 "function '{function_name}' array parameter '{param_name}' requires an array argument"
+            ))),
+        }
+    }
+
+    fn eval_struct_argument(
+        &self,
+        function_name: &str,
+        param_name: &str,
+        expected_type: &str,
+        arg_expr: &Expr,
+    ) -> CustResult<Value> {
+        match arg_expr {
+            Expr::Var(arg_name) => match self.find_variable(arg_name).cloned() {
+                Some(Value::Struct { type_name, fields }) if type_name == expected_type => {
+                    Ok(Value::Struct { type_name, fields })
+                }
+                Some(Value::Struct { type_name, .. }) => Err(CustError::new(format!(
+                    "function '{function_name}' struct parameter '{param_name}' expected struct '{expected_type}', got struct '{type_name}'"
+                ))),
+                Some(_) => Err(CustError::new(format!(
+                    "function '{function_name}' struct parameter '{param_name}' requires a struct argument"
+                ))),
+                None => Err(CustError::new(format!("undefined variable '{arg_name}'"))),
+            },
+            _ => Err(CustError::new(format!(
+                "function '{function_name}' struct parameter '{param_name}' requires a struct argument"
             ))),
         }
     }

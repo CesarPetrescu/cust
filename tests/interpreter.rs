@@ -140,6 +140,37 @@ fn supports_struct_copy_and_field_lvalue_expressions() {
 }
 
 #[test]
+fn supports_struct_by_value_function_parameters() {
+    let program = include_str!("fixtures/valid/struct_parameters.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_mismatched_struct_function_arguments() {
+    let program = include_str!("fixtures/invalid/struct_parameter_type_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function 'read_x' struct parameter 'p' expected struct 'Point', got struct 'Pair'"
+    );
+}
+
+#[test]
+fn rejects_non_struct_arguments_for_struct_parameters() {
+    let program = include_str!("fixtures/invalid/struct_parameter_non_struct_argument.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function 'read_x' struct parameter 'p' requires a struct argument"
+    );
+}
+
+#[test]
 fn rejects_mismatched_struct_copy_assignment() {
     let program = include_str!("fixtures/invalid/struct_assignment_type_mismatch.c");
 
