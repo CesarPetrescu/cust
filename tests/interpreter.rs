@@ -202,6 +202,35 @@ fn supports_typedef_aliases_for_scalars_structs_and_pointers() {
 }
 
 #[test]
+fn supports_enum_typedef_aliases_as_integer_types() {
+    let program = include_str!("fixtures/valid/enum_typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 20);
+}
+
+#[test]
+fn rejects_typedef_aliases_to_unknown_enum_tags() {
+    let program = include_str!("fixtures/invalid/typedef_unknown_enum.c");
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "undefined enum type 'Missing' at line 2, column 14"
+    );
+}
+
+#[test]
+fn rejects_typedef_aliases_to_block_scoped_enum_tags_after_scope_exit() {
+    let program = include_str!("fixtures/invalid/block_enum_tag_out_of_scope.c");
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "undefined enum type 'Local' at line 5, column 18"
+    );
+}
+
+#[test]
 fn supports_pointer_typedef_aliases_for_declarations_params_and_sizeof() {
     let program = include_str!("fixtures/valid/pointer_typedef_aliases.c");
 

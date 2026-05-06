@@ -1084,6 +1084,7 @@ struct Parser {
     tokens: Vec<LocatedToken>,
     pos: usize,
     struct_types: HashMap<String, StructTypeDef>,
+    enum_type_scopes: Vec<HashSet<String>>,
     type_alias_scopes: Vec<HashMap<String, TypeAlias>>,
 }
 
@@ -1093,6 +1094,7 @@ impl Parser {
             tokens,
             pos: 0,
             struct_types: HashMap::new(),
+            enum_type_scopes: vec![HashSet::new()],
             type_alias_scopes: vec![HashMap::new()],
         }
     }
@@ -1239,6 +1241,13 @@ impl Parser {
             .find_map(|scope| scope.get(name))
     }
 
+    fn enum_type_is_declared(&self, name: &str) -> bool {
+        self.enum_type_scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+    }
+
     fn parse_decl_type(&mut self, context: &str) -> CustResult<DeclType> {
         let found = self.advance();
         match found.kind.clone() {
@@ -1252,6 +1261,25 @@ impl Parser {
                     )));
                 }
                 Ok(DeclType::Struct(type_name))
+            }
+            Token::Enum => {
+                let type_name_token = self.advance();
+                let type_name = match type_name_token.kind.clone() {
+                    Token::Ident(type_name) => type_name,
+                    token => {
+                        return Err(Self::error_at(
+                            format!("expected enum type name, found {token:?}"),
+                            &type_name_token,
+                        ));
+                    }
+                };
+                if !self.enum_type_is_declared(&type_name) {
+                    return Err(Self::error_at(
+                        format!("undefined enum type '{type_name}'"),
+                        &type_name_token,
+                    ));
+                }
+                Ok(DeclType::Scalar(CType::Int))
             }
             Token::Ident(name) => match self.lookup_type_alias(&name).cloned() {
                 Some(TypeAlias::Scalar(ty)) => Ok(DeclType::Scalar(ty)),
@@ -1526,6 +1554,7 @@ impl Parser {
     fn parse_block_after(&mut self, context: &str) -> CustResult<Vec<Stmt>> {
         self.expect_opening_brace_after(context)?;
         self.type_alias_scopes.push(HashMap::new());
+        self.enum_type_scopes.push(HashSet::new());
         let mut statements = Vec::new();
         let result = (|| {
             while !self.check(&Token::RBrace) {
@@ -1541,6 +1570,7 @@ impl Parser {
             self.expect(Token::RBrace)?;
             Ok(statements)
         })();
+        self.enum_type_scopes.pop();
         self.type_alias_scopes.pop();
         result
     }
@@ -1855,9 +1885,12 @@ impl Parser {
 
     fn parse_enum_decl(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Enum)?;
-        if matches!(self.peek(), Token::Ident(_)) {
+        let enum_tag = if let Token::Ident(name) = self.peek().clone() {
             self.advance();
-        }
+            Some(name)
+        } else {
+            None
+        };
         self.expect_opening_brace_after("enum")?;
 
         let mut constants = Vec::new();
@@ -1915,6 +1948,20 @@ impl Parser {
         }
         self.expect(Token::RBrace)?;
         self.expect_semicolon_after("enum declaration")?;
+        match enum_tag {
+            Some(enum_tag)
+                if !self
+                    .enum_type_scopes
+                    .last_mut()
+                    .expect("parser always has an enum type scope")
+                    .insert(enum_tag.clone()) =>
+            {
+                return Err(CustError::new(format!(
+                    "enum '{enum_tag}' already declared"
+                )));
+            }
+            _ => {}
+        }
         Ok(Stmt::EnumDecl { constants })
     }
 
