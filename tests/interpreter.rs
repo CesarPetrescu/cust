@@ -105,6 +105,40 @@ fn supports_uninitialized_scalar_and_pointer_declarations() {
 }
 
 #[test]
+fn supports_const_qualified_scalars_arrays_and_parameters() {
+    let program = include_str!("fixtures/valid/const_qualifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 83);
+}
+
+#[test]
+fn rejects_assignment_to_const_scalars() {
+    let program = include_str!("fixtures/invalid/const_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot assign to const variable 'value'");
+}
+
+#[test]
+fn rejects_assignment_to_const_arrays() {
+    let program = include_str!("fixtures/invalid/const_array_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot modify read-only array 'values'");
+}
+
+#[test]
+fn rejects_assignment_to_const_parameters() {
+    let program = include_str!("fixtures/invalid/const_parameter_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot assign to const variable 'value'");
+}
+
+#[test]
 fn supports_enum_constants_with_implicit_values_and_block_scope() {
     let program = include_str!("fixtures/valid/enums.c");
 

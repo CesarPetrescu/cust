@@ -35,6 +35,7 @@ const POINTER_SIZE: i64 = 8;
 enum Token {
     Int,
     Char,
+    Const,
     Void,
     Enum,
     Struct,
@@ -349,6 +350,7 @@ struct Param {
     ty: ParamType,
     name: String,
     kind: ParamKind,
+    is_const: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -436,20 +438,24 @@ enum Stmt {
         name: String,
         ty: CType,
         expr: Expr,
+        is_const: bool,
     },
     PointerDecl {
         name: String,
         ty: PointeeType,
         expr: Expr,
+        is_const: bool,
     },
     ArrayDecl {
         name: String,
         elem_type: CType,
         len: usize,
+        is_const: bool,
     },
     StructVarDecl {
         type_name: String,
         name: String,
+        is_const: bool,
     },
     EnumDecl {
         constants: Vec<EnumConstant>,
@@ -820,6 +826,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 let kind = match text.as_str() {
                     "int" => Token::Int,
                     "char" => Token::Char,
+                    "const" => Token::Const,
                     "void" => Token::Void,
                     "enum" => Token::Enum,
                     "struct" => Token::Struct,
@@ -1145,7 +1152,7 @@ impl Parser {
                         }
                     }
                 }
-            } else if matches!(self.peek(), Token::Int | Token::Char)
+            } else if matches!(self.peek(), Token::Int | Token::Char | Token::Const)
                 || self.current_alias().is_some()
             {
                 globals.push(self.parse_var_decl()?);
@@ -1257,6 +1264,12 @@ impl Parser {
                 &found,
             )),
         }
+    }
+
+    fn parse_const_qualified_decl_type(&mut self, context: &str) -> CustResult<(bool, DeclType)> {
+        let is_const = self.matches(&Token::Const);
+        let decl_type = self.parse_decl_type(context)?;
+        Ok((is_const, decl_type))
     }
 
     fn decl_type_to_return_type(decl_type: DeclType) -> ReturnType {
@@ -1389,7 +1402,7 @@ impl Parser {
         }
 
         loop {
-            let decl_type = self.parse_decl_type("parameter type")?;
+            let (is_const, decl_type) = self.parse_const_qualified_decl_type("parameter type")?;
             let is_pointer = self.matches(&Token::Star);
             if is_pointer && self.check(&Token::Star) {
                 return Err(Self::error_at(
@@ -1433,6 +1446,7 @@ impl Parser {
                 ty: Self::decl_type_to_param_type(&decl_type),
                 name,
                 kind,
+                is_const,
             });
 
             if self.matches(&Token::Comma) {
@@ -1499,7 +1513,7 @@ impl Parser {
     fn parse_stmt(&mut self) -> CustResult<Stmt> {
         match self.peek() {
             Token::Semi => self.parse_empty(),
-            Token::Int | Token::Char => self.parse_var_decl(),
+            Token::Int | Token::Char | Token::Const => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Typedef => {
                 self.parse_typedef_decl()?;
@@ -1573,7 +1587,7 @@ impl Parser {
     }
 
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
-        let decl_type = self.parse_decl_type("struct type name")?;
+        let (is_const, decl_type) = self.parse_const_qualified_decl_type("struct type name")?;
         let is_pointer = self.matches(&Token::Star);
         if is_pointer && self.check(&Token::Star) {
             return Err(Self::error_at(
@@ -1607,6 +1621,7 @@ impl Parser {
                     name,
                     ty: Self::decl_type_to_pointee_type(&decl_type),
                     expr: Expr::Number(0),
+                    is_const,
                 });
             } else {
                 let context = match &decl_type {
@@ -1627,6 +1642,7 @@ impl Parser {
                 name,
                 ty: Self::decl_type_to_pointee_type(&decl_type),
                 expr,
+                is_const,
             });
         }
         if matches!(decl_type, DeclType::Struct(_)) {
@@ -1640,7 +1656,11 @@ impl Parser {
                 self.expect_semicolon_after("struct variable declaration")?;
             }
             if let DeclType::Struct(type_name) = decl_type {
-                return Ok(Stmt::StructVarDecl { type_name, name });
+                return Ok(Stmt::StructVarDecl {
+                    type_name,
+                    name,
+                    is_const,
+                });
             }
         }
         let DeclType::Scalar(ty) = decl_type else {
@@ -1656,6 +1676,7 @@ impl Parser {
                 name,
                 elem_type: ty,
                 len,
+                is_const,
             });
         }
         let expr = if self.matches(&Token::Assign) {
@@ -1666,6 +1687,7 @@ impl Parser {
                 name,
                 ty,
                 expr: Expr::Number(0),
+                is_const,
             });
         } else {
             self.expect_assign_after("variable declaration")?;
@@ -1674,7 +1696,12 @@ impl Parser {
         if require_semi {
             self.expect_semicolon_after("variable declaration")?;
         }
-        Ok(Stmt::VarDecl { name, ty, expr })
+        Ok(Stmt::VarDecl {
+            name,
+            ty,
+            expr,
+            is_const,
+        })
     }
 
     fn parse_struct_definition(&mut self) -> CustResult<()> {
@@ -1746,11 +1773,16 @@ impl Parser {
                 name,
                 ty: PointeeType::Struct(type_name),
                 expr,
+                is_const: false,
             });
         }
         let name = self.expect_ident_after("struct variable name")?;
         self.expect_semicolon_after("struct variable declaration")?;
-        Ok(Stmt::StructVarDecl { type_name, name })
+        Ok(Stmt::StructVarDecl {
+            type_name,
+            name,
+            is_const: false,
+        })
     }
 
     fn parse_enum_decl(&mut self) -> CustResult<Stmt> {
@@ -2014,7 +2046,8 @@ impl Parser {
 
         let init = if self.matches(&Token::Semi) {
             None
-        } else if matches!(self.peek(), Token::Int | Token::Char) || self.current_alias().is_some()
+        } else if matches!(self.peek(), Token::Int | Token::Char | Token::Const)
+            || self.current_alias().is_some()
         {
             Some(Box::new(self.parse_var_decl()?))
         } else if self.starts_assignment_stmt() {
@@ -3049,6 +3082,7 @@ struct Scope {
     id: usize,
     values: HashMap<String, Value>,
     enum_constants: HashMap<String, i64>,
+    const_variables: HashSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3201,6 +3235,7 @@ impl Interpreter {
         }
 
         let mut param_scope = HashMap::new();
+        let mut const_params = HashSet::new();
         for (param, arg_expr) in function.params.iter().zip(arg_exprs) {
             let arg = match param.kind {
                 ParamKind::Scalar => {
@@ -3239,11 +3274,14 @@ impl Interpreter {
                     param.name
                 )));
             }
+            if param.is_const {
+                const_params.insert(param.name.clone());
+            }
         }
 
         self.call_depth += 1;
         self.return_type_stack.push(function.return_type.clone());
-        self.push_scope_with_values(param_scope);
+        self.push_scope_with_values_and_consts(param_scope, const_params);
         let result = match self.exec_block(&function.body) {
             Ok(ExecFlow::Return(value)) => {
                 self.validate_return_value(name, &function.return_type, value)
@@ -3399,6 +3437,14 @@ impl Interpreter {
     }
 
     fn push_scope_with_values(&mut self, values: HashMap<String, Value>) {
+        self.push_scope_with_values_and_consts(values, HashSet::new());
+    }
+
+    fn push_scope_with_values_and_consts(
+        &mut self,
+        values: HashMap<String, Value>,
+        const_variables: HashSet<String>,
+    ) {
         let id = self.next_scope_id;
         self.next_scope_id += 1;
         self.live_scope_ids.insert(id);
@@ -3406,7 +3452,40 @@ impl Interpreter {
             id,
             values,
             enum_constants: HashMap::new(),
+            const_variables,
         });
+    }
+
+    fn mark_current_variable_const(&mut self, name: &str) {
+        self.scopes
+            .last_mut()
+            .expect("exec_block always creates a current scope")
+            .const_variables
+            .insert(name.to_string());
+    }
+
+    fn is_const_variable(&self, name: &str) -> bool {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| {
+                if scope.values.contains_key(name) {
+                    Some(scope.const_variables.contains(name))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(false)
+    }
+
+    fn ensure_variable_mutable(&self, name: &str) -> CustResult<()> {
+        if self.is_const_variable(name) {
+            Err(CustError::new(format!(
+                "cannot assign to const variable '{name}'"
+            )))
+        } else {
+            Ok(())
+        }
     }
 
     fn pop_scope(&mut self) {
@@ -3542,6 +3621,7 @@ impl Interpreter {
     }
 
     fn assign_struct_field(&mut self, name: &str, field: &str, value: i64) -> CustResult<()> {
+        self.ensure_variable_mutable(name)?;
         match self.find_variable_mut(name) {
             Some(Value::Struct { type_name, fields }) => {
                 let field_value = fields.get_mut(field).ok_or_else(|| {
@@ -3661,6 +3741,7 @@ impl Interpreter {
     }
 
     fn assign_struct_copy(&mut self, name: &str, rhs: &Expr) -> CustResult<()> {
+        self.ensure_variable_mutable(name)?;
         let (rhs_type, rhs_fields) = match self.eval_struct_expr(rhs)? {
             ReturnValue::Struct { type_name, fields } => (type_name, fields),
             ReturnValue::Scalar(_) => {
@@ -3769,6 +3850,7 @@ impl Interpreter {
             }),
             Expr::Assign { name, value } => match self.find_variable(name).cloned() {
                 Some(Value::Pointer { .. }) => {
+                    self.ensure_variable_mutable(name)?;
                     let pointer = self.eval_pointer(value)?;
                     if let Some(Value::Pointer { pointer: slot, .. }) = self.find_variable_mut(name)
                     {
@@ -3822,6 +3904,7 @@ impl Interpreter {
                     None => return Err(CustError::new(format!("undefined variable '{name}'"))),
                 };
                 let offset = self.eval(value)?;
+                self.ensure_variable_mutable(name)?;
                 let pointer = match op {
                     CompoundOp::Add => self.offset_array_pointer(&pointer, offset)?,
                     CompoundOp::Sub => self.offset_array_pointer(&pointer, -offset)?,
@@ -3855,6 +3938,7 @@ impl Interpreter {
                         }
                         None => return Err(CustError::new(format!("undefined variable '{name}'"))),
                     };
+                    self.ensure_variable_mutable(name)?;
                     let offset = match op {
                         IncrementOp::Inc => 1,
                         IncrementOp::Dec => -1,
@@ -3987,12 +4071,18 @@ impl Interpreter {
                         "pointer to out-of-scope variable '{name}'"
                     )));
                 }
-                let slot = self
-                    .scopes
-                    .iter_mut()
-                    .find(|scope| scope.id == *scope_id)
-                    .and_then(|scope| scope.values.get_mut(name));
-                match slot {
+                let scope = self.scopes.iter_mut().find(|scope| scope.id == *scope_id);
+                let Some(scope) = scope else {
+                    return Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    )));
+                };
+                if scope.const_variables.contains(name) {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const variable '{name}'"
+                    )));
+                }
+                match scope.values.get_mut(name) {
                     Some(Value::Scalar { value: slot, .. }) => {
                         *slot = value;
                         Ok(())
@@ -4327,6 +4417,7 @@ impl Interpreter {
     fn eval_assignment_expr(&mut self, name: &str, value: &Expr) -> CustResult<i64> {
         match self.find_variable(name).cloned() {
             Some(Value::Scalar { .. }) => {
+                self.ensure_variable_mutable(name)?;
                 let value = self.eval(value)?;
                 if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
                     *slot = value;
@@ -4357,6 +4448,7 @@ impl Interpreter {
     ) -> CustResult<i64> {
         match self.find_variable(name).cloned() {
             Some(Value::Scalar { value: current, .. }) => {
+                self.ensure_variable_mutable(name)?;
                 let rhs = self.eval(value)?;
                 let result = Self::apply_compound_op(current, op, rhs)?;
                 if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
@@ -4602,6 +4694,7 @@ impl Interpreter {
         match target {
             Expr::Var(name) => match self.find_variable(name).cloned() {
                 Some(Value::Scalar { value: current, .. }) => {
+                    self.ensure_variable_mutable(name)?;
                     let updated = Self::apply_increment_op(current, op);
                     if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
                         *slot = updated;
@@ -4764,7 +4857,12 @@ impl Interpreter {
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
         match stmt {
             Stmt::Empty => Ok(ExecFlow::None),
-            Stmt::VarDecl { name, ty, expr } => {
+            Stmt::VarDecl {
+                name,
+                ty,
+                expr,
+                is_const,
+            } => {
                 let value = self.eval(expr)?;
                 if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
@@ -4773,9 +4871,17 @@ impl Interpreter {
                 }
                 let scope = self.current_scope_mut();
                 scope.insert(name.clone(), Value::Scalar { value, ty: *ty });
+                if *is_const {
+                    self.mark_current_variable_const(name);
+                }
                 Ok(ExecFlow::None)
             }
-            Stmt::PointerDecl { name, ty, expr } => {
+            Stmt::PointerDecl {
+                name,
+                ty,
+                expr,
+                is_const,
+            } => {
                 let pointer = self.eval_pointer(expr)?;
                 if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
@@ -4790,12 +4896,16 @@ impl Interpreter {
                         ty: ty.clone(),
                     },
                 );
+                if *is_const {
+                    self.mark_current_variable_const(name);
+                }
                 Ok(ExecFlow::None)
             }
             Stmt::ArrayDecl {
                 name,
                 elem_type,
                 len,
+                is_const,
             } => {
                 if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
@@ -4809,9 +4919,19 @@ impl Interpreter {
                         *len, *elem_type,
                     )))),
                 );
+                if *is_const {
+                    if let Some(Value::Array(array)) = self.find_variable(name) {
+                        array.borrow_mut().read_only = true;
+                    }
+                    self.mark_current_variable_const(name);
+                }
                 Ok(ExecFlow::None)
             }
-            Stmt::StructVarDecl { type_name, name } => {
+            Stmt::StructVarDecl {
+                type_name,
+                name,
+                is_const,
+            } => {
                 if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
                         "variable '{name}' already declared in this scope"
@@ -4819,6 +4939,9 @@ impl Interpreter {
                 }
                 let value = self.make_struct_value(type_name)?;
                 self.current_scope_mut().insert(name.clone(), value);
+                if *is_const {
+                    self.mark_current_variable_const(name);
+                }
                 Ok(ExecFlow::None)
             }
             Stmt::EnumDecl { constants } => {
@@ -4831,6 +4954,7 @@ impl Interpreter {
                 let existing = self.find_variable(name).cloned();
                 match existing {
                     Some(Value::Scalar { .. }) => {
+                        self.ensure_variable_mutable(name)?;
                         let value = self.eval(expr)?;
                         if let Some(Value::Scalar { value: slot, .. }) =
                             self.find_variable_mut(name)
@@ -4840,6 +4964,7 @@ impl Interpreter {
                         Ok(ExecFlow::None)
                     }
                     Some(Value::Pointer { .. }) => {
+                        self.ensure_variable_mutable(name)?;
                         let pointer = self.eval_pointer(expr)?;
                         if let Some(Value::Pointer { pointer: slot, .. }) =
                             self.find_variable_mut(name)
