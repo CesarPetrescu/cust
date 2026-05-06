@@ -460,6 +460,7 @@ enum Stmt {
         name: String,
         elem_type: CType,
         len: usize,
+        init: Vec<Expr>,
         is_const: bool,
     },
     StructVarDecl {
@@ -1826,6 +1827,11 @@ impl Parser {
         if self.matches(&Token::LBracket) {
             let len = self.expect_array_len()?;
             self.expect_closing_bracket_after("array length")?;
+            let init = if self.matches(&Token::Assign) {
+                self.parse_array_initializer(&name, len)?
+            } else {
+                Vec::new()
+            };
             if require_semi {
                 self.expect_semicolon_after("array declaration")?;
             }
@@ -1833,6 +1839,7 @@ impl Parser {
                 name,
                 elem_type: ty,
                 len,
+                init,
                 is_const: leading_const,
             });
         }
@@ -1859,6 +1866,33 @@ impl Parser {
             expr,
             is_const: leading_const,
         })
+    }
+
+    fn parse_array_initializer(&mut self, name: &str, len: usize) -> CustResult<Vec<Expr>> {
+        self.expect_opening_brace_after("array initializer")?;
+        let mut values = Vec::new();
+        if self.matches(&Token::RBrace) {
+            return Ok(values);
+        }
+        loop {
+            if values.len() == len {
+                return Err(CustError::new(format!(
+                    "too many initializers for array '{name}'"
+                )));
+            }
+            values.push(self.parse_assignment_expr()?);
+            if self.matches(&Token::RBrace) {
+                break;
+            }
+            if self.matches(&Token::Comma) {
+                if self.matches(&Token::RBrace) {
+                    break;
+                }
+                continue;
+            }
+            self.expect_closing_brace_after("array initializer")?;
+        }
+        Ok(values)
     }
 
     fn parse_struct_definition(&mut self) -> CustResult<()> {
@@ -2920,6 +2954,18 @@ impl Parser {
         }
     }
 
+    fn expect_closing_brace_after(&mut self, context: &str) -> CustResult<()> {
+        let found = self.advance();
+        if found.kind == Token::RBrace {
+            Ok(())
+        } else {
+            Err(Self::error_at(
+                format!("expected '}}' after {context}, found {:?}", found.kind),
+                &found,
+            ))
+        }
+    }
+
     fn expect_closing_paren_after(&mut self, context: &str) -> CustResult<()> {
         let found = self.advance();
         if found.kind == Token::RParen {
@@ -3921,6 +3967,21 @@ impl Interpreter {
             ))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
+    }
+
+    fn make_array_value(
+        &mut self,
+        len: usize,
+        elem_type: CType,
+        init: &[Expr],
+        read_only: bool,
+    ) -> CustResult<Value> {
+        let mut array = ArrayValue::mutable_zeroed(len, elem_type);
+        for (index, expr) in init.iter().enumerate() {
+            array.elements[index] = self.eval(expr)?;
+        }
+        array.read_only = read_only;
+        Ok(Value::Array(Rc::new(RefCell::new(array))))
     }
 
     fn make_struct_value(&self, type_name: &str) -> CustResult<Value> {
@@ -5312,13 +5373,10 @@ impl Interpreter {
             Stmt::ArrayDecl {
                 elem_type,
                 len,
+                init,
                 is_const,
                 ..
-            } => {
-                let mut array = ArrayValue::mutable_zeroed(*len, *elem_type);
-                array.read_only = *is_const;
-                Ok(Value::Array(Rc::new(RefCell::new(array))))
-            }
+            } => self.make_array_value(*len, *elem_type, init, *is_const),
             Stmt::StructVarDecl { type_name, .. } => self.make_struct_value(type_name),
             _ => Err(CustError::new(
                 "static local declarations must declare variables",
@@ -5411,6 +5469,7 @@ impl Interpreter {
                 name,
                 elem_type,
                 len,
+                init,
                 is_const,
             } => {
                 if self.current_scope_has_identifier(name) {
@@ -5418,17 +5477,9 @@ impl Interpreter {
                         "variable '{name}' already declared in this scope"
                     )));
                 }
-                let scope = self.current_scope_mut();
-                scope.insert(
-                    name.clone(),
-                    Value::Array(Rc::new(RefCell::new(ArrayValue::mutable_zeroed(
-                        *len, *elem_type,
-                    )))),
-                );
+                let value = self.make_array_value(*len, *elem_type, init, *is_const)?;
+                self.current_scope_mut().insert(name.clone(), value);
                 if *is_const {
-                    if let Some(Value::Array(array)) = self.find_variable(name) {
-                        array.borrow_mut().read_only = true;
-                    }
                     self.mark_current_variable_const(name);
                 }
                 Ok(ExecFlow::None)

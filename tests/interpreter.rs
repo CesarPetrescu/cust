@@ -112,6 +112,22 @@ fn supports_uninitialized_scalar_and_pointer_declarations() {
 }
 
 #[test]
+fn supports_scalar_array_initializers() {
+    let program = include_str!("fixtures/valid/array_initializers.c");
+
+    assert_eq!(interpret(program).unwrap(), 68);
+}
+
+#[test]
+fn rejects_array_initializers_longer_than_declared_length() {
+    let program = include_str!("fixtures/invalid/array_initializer_too_long.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "too many initializers for array 'values'");
+}
+
+#[test]
 fn supports_const_qualified_scalars_arrays_and_parameters() {
     let program = include_str!("fixtures/valid/const_qualifiers.c");
 
