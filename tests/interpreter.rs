@@ -147,6 +147,25 @@ fn supports_const_qualified_struct_fields() {
 }
 
 #[test]
+fn supports_static_storage_class_at_top_level() {
+    let program = include_str!("fixtures/valid/static_storage_class.c");
+
+    assert_eq!(interpret(program).unwrap(), 22);
+}
+
+#[test]
+fn rejects_static_local_declarations_for_now() {
+    let program = include_str!("fixtures/invalid/static_local_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "static local declarations are not supported at line 2, column 5"
+    );
+}
+
+#[test]
 fn rejects_assignment_to_const_struct_fields() {
     let program = include_str!("fixtures/invalid/const_struct_member_assignment.c");
 

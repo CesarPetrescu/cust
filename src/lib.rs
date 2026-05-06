@@ -36,6 +36,7 @@ enum Token {
     Int,
     Char,
     Const,
+    Static,
     Void,
     Enum,
     Struct,
@@ -832,6 +833,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "int" => Token::Int,
                     "char" => Token::Char,
                     "const" => Token::Const,
+                    "static" => Token::Static,
                     "void" => Token::Void,
                     "enum" => Token::Enum,
                     "struct" => Token::Struct,
@@ -1113,6 +1115,7 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            self.matches(&Token::Static);
             if self.starts_function_definition()
                 || self.starts_struct_function_declaration()
                 || self.starts_alias_function_declaration()
@@ -1601,6 +1604,10 @@ impl Parser {
     fn parse_stmt(&mut self) -> CustResult<Stmt> {
         match self.peek() {
             Token::Semi => self.parse_empty(),
+            Token::Static => Err(Self::error_at(
+                "static local declarations are not supported".to_string(),
+                self.peek_located(),
+            )),
             Token::Int | Token::Char | Token::Const => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Typedef => {
