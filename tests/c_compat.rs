@@ -30,6 +30,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/pointer_typedef_aliases.c",
     "tests/fixtures/compat/valid/pointers_scalars.c",
     "tests/fixtures/compat/valid/single_statement_control_bodies.c",
+    "tests/fixtures/compat/valid/sizeof_const_types.c",
     "tests/fixtures/compat/valid/sizeof_operator.c",
     "tests/fixtures/compat/valid/structs.c",
     "tests/fixtures/compat/valid/struct_lvalues_and_copy.c",

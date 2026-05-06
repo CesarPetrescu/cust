@@ -32,7 +32,7 @@ Add a deliberately scoped, preprocessor-free `typedef` milestone that improves C
   - function definitions and prototypes: `Count add(Count x, Byte y);`, `Point make(Count x);`
   - function parameters and returns, including struct-by-value semantics already implemented for the underlying struct type
   - struct field declarations for scalar aliases such as `Count x;`
-  - `sizeof(alias)`, `sizeof(alias *)`, and `sizeof(IntPtr)`
+  - `sizeof(alias)`, `sizeof(const alias)`, `sizeof(alias *)`, and `sizeof(IntPtr)`
 
 ## Runtime model
 
@@ -52,7 +52,7 @@ This means aliases do not create distinct types: `Count` behaves exactly like `i
 - Pointer-returning functions remain unsupported even when the return type is spelled through a pointer typedef alias.
 - Anonymous struct typedefs such as `typedef struct { int x; } Point;` are not supported.
 - Anonymous enum typedefs such as `typedef enum { READY } Status;` and enum-typed variables without a typedef alias are not supported.
-- Function pointer typedefs, array typedefs, type qualifiers (`const`), and aggregate/nested struct fields remain future work.
+- Function pointer typedefs, array typedefs, declaration-level type qualifiers (`const` outside the already supported `sizeof(const alias)` type context), and aggregate/nested struct fields remain future work.
 
 ## Acceptance coverage
 
@@ -63,15 +63,17 @@ This means aliases do not create distinct types: `Count` behaves exactly like `i
 - `tests/fixtures/valid/pointer_typedef_aliases.c` covers `int *`, `char *`, and `struct Point *` aliases in declarations, parameters, function calls, struct-pointer field access, and `sizeof(pointer_alias)`.
 - `tests/fixtures/invalid/pointer_typedef_to_pointer.c` and `tests/fixtures/invalid/direct_pointer_to_pointer_typedef.c` cover pointer-to-pointer typedef alias rejection.
 - `tests/fixtures/valid/enum_typedef_aliases.c` covers named enum typedef aliases in globals, locals, arrays, parameters, returns, block shadowing, and `sizeof(alias)` as Cust's integer size.
+- `tests/fixtures/valid/sizeof_const_types.c` covers `sizeof(const alias)` for scalar, struct, and pointer typedef aliases plus const-qualified built-in scalar and pointer type spellings.
 - `tests/fixtures/invalid/typedef_unknown_enum.c` covers the exact undefined enum-tag diagnostic for `typedef enum Missing Missing;`.
 - `tests/fixtures/invalid/block_enum_tag_out_of_scope.c` covers enum tag scope expiry before typedef alias resolution.
 - `tests/fixtures/compat/valid/typedef_aliases.c` verifies a native C compiler oracle for alias use while avoiding Cust-vs-native ABI `sizeof(int)`/struct-padding differences.
 - `tests/fixtures/compat/valid/block_scoped_typedefs.c` verifies block-scoped alias shadowing against a native C compiler oracle without ABI-sensitive struct-size assertions.
 - `tests/fixtures/compat/valid/pointer_typedef_aliases.c` verifies pointer alias declarations and calls against a native C compiler oracle while avoiding ABI-sensitive pointer-size assertions.
+- `tests/fixtures/compat/valid/sizeof_const_types.c` verifies const-qualified `sizeof` type contexts against a native C compiler oracle using only same-ABI relative comparisons.
 - `tests/fixtures/compat/valid/enum_typedef_aliases.c` verifies named enum typedef declarations and calls against a native C compiler oracle while avoiding ABI-sensitive enum-size assertions.
 
 ## Follow-up candidates
 
-1. Add `sizeof(const type)` and const-qualified type parsing in size/type contexts.
+1. Add declaration-level const-qualified aliases/pointers only after a separate const-pointer design, because `sizeof(const alias)` is parser-only and does not create runtime qualifier metadata.
 2. Add precise diagnostics for pointer-returning functions spelled with pointer typedef aliases if a user-facing fixture discovers an unclear location.
 3. Consider anonymous enum typedef declarations only if Cust later needs enum tags/types beyond integer aliases.

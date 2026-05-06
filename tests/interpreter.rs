@@ -98,6 +98,13 @@ fn supports_sizeof_operator_for_types_scalars_arrays_strings_and_pointers() {
 }
 
 #[test]
+fn supports_sizeof_const_qualified_types() {
+    let program = include_str!("fixtures/valid/sizeof_const_types.c");
+
+    assert_eq!(interpret(program).unwrap(), 58);
+}
+
+#[test]
 fn supports_uninitialized_scalar_and_pointer_declarations() {
     let program = include_str!("fixtures/valid/uninitialized_declarations.c");
 
@@ -433,6 +440,18 @@ fn rejects_sizeof_void_with_context() {
     assert_eq!(
         err.to_string(),
         "sizeof(void) is not supported at line 2, column 19"
+    );
+}
+
+#[test]
+fn rejects_sizeof_const_void_with_context() {
+    let program = include_str!("fixtures/invalid/sizeof_const_void.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "sizeof(void) is not supported at line 2, column 25"
     );
 }
 

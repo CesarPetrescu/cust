@@ -2583,9 +2583,12 @@ impl Parser {
 
     fn parse_sizeof(&mut self) -> CustResult<Expr> {
         if self.matches(&Token::LParen) {
-            if matches!(self.peek(), Token::Int | Token::Char | Token::Void)
-                || self.current_alias().is_some()
+            if matches!(
+                self.peek(),
+                Token::Int | Token::Char | Token::Const | Token::Void
+            ) || self.current_alias().is_some()
             {
+                let is_const_qualified = self.matches(&Token::Const);
                 let sizeof_type = if self.check(&Token::Void) {
                     let type_token = self.advance();
                     return Err(Self::error_at(
@@ -2593,6 +2596,16 @@ impl Parser {
                         &type_token,
                     ));
                 } else {
+                    if is_const_qualified
+                        && !matches!(self.peek(), Token::Int | Token::Char)
+                        && self.current_alias().is_none()
+                    {
+                        let found = self.peek_located().clone();
+                        return Err(Self::error_at(
+                            format!("expected sizeof type after const, found {:?}", found.kind),
+                            &found,
+                        ));
+                    }
                     match self.parse_decl_type("sizeof struct type name")? {
                         DeclType::Scalar(ty) => {
                             if self.matches(&Token::Star) {
