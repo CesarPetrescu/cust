@@ -4,6 +4,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
+COPY LICENSE ./
 COPY docker-compose.yml ./
 COPY src ./src
 COPY tests ./tests

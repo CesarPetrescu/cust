@@ -8,6 +8,7 @@ Last updated: 2026-05-07
 - Remote: `git@github.com-cust:CesarPetrescu/cust.git`
 - Default branch: `main`
 - Current version: `v0.1`
+- License: GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`), documented in `LICENSE`, `Cargo.toml`, and `README.md`.
 
 ## Implemented
 
@@ -27,6 +28,7 @@ Last updated: 2026-05-07
 - Docs:
   - `README.md`
   - `CHANGELOG.md`
+  - `LICENSE`
   - `docs/v0.1.md`
 - Docker:
   - `Dockerfile`
@@ -90,6 +92,7 @@ Last updated: 2026-05-07
 cargo fmt --check
 cargo clippy -- -D warnings
 cargo test
+cargo test --test repository_license
 cargo test --test interpreter path_designator -- --nocapture
 cargo test --test interpreter supports_path_designated_struct_initializers -- --nocapture
 cargo test --test interpreter designator -- --nocapture

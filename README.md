@@ -4,6 +4,10 @@ Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, inter
 
 > Status: **v0.1** — tested, Dockerized C-subset interpreter foundation.
 
+## License
+
+Cust is licensed under the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`). See `LICENSE` for the full text. This strong copyleft license is intended to keep distributed and network-served modified versions open-source.
+
 ## Why Cust?
 
 Cust is meant as a clean starting point for experimenting with language implementation in Rust:

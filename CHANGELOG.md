@@ -2,6 +2,10 @@
 
 All notable changes to Cust are documented here. Cust is still a small educational C-subset interpreter; release notes describe the supported subset, diagnostics, tooling, and verification status at each tag.
 
+## Unreleased
+
+- Added GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`) licensing so distributed and network-served modified versions remain open-source.
+
 ## v0.1 — 2026-05-05
 
 ### Language subset
@@ -44,4 +48,4 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 - Cust is not a full C implementation.
 - Unsupported areas include the preprocessor, `#include`, standard-library calls such as `printf`, floating-point values, structs/unions/enums, prototypes/declarations separate from definitions, `void` functions, multiple pointer levels, pointer arithmetic, and general assignment expressions.
-- The repository does not yet include a confirmed `LICENSE` file; licensing remains blocked on project-owner choice.
+- The repository is licensed under the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`).

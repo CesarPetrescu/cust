@@ -94,4 +94,4 @@ Prioritized backlog for autonomous implementation.
 - [x] CLI flag: `--version`
 - [x] Better README examples
 - [x] Release notes and tags (`CHANGELOG.md` and annotated `v0.1` tag)
-- [ ] License file (blocked on project-owner license choice)
+- [x] License file (`AGPL-3.0-or-later`) with README/package metadata and a regression test that keeps the strong copyleft declaration present.
