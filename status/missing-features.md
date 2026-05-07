@@ -80,7 +80,7 @@ Prioritized backlog for autonomous implementation.
 - [x] pointer parameters, array/string decay to pointer arguments, and pointer indexing for array-base pointers
 - [x] `&array[index]` array-element pointers and dereference assignment/read support
 - [x] Scoped array-backed pointer arithmetic: `p + n`, `n + p`, `p - n`, same-storage pointer difference, `p += n`, `p -= n`, and pointer-variable `++`/`--` with scalar/null/out-of-bounds diagnostics plus interpreter and C compiler-oracle fixtures
-- [x] Scoped aggregate-array element pointer arithmetic and indexed field access: `struct Point *p = &points[0]` and `union Number *n = &numbers[0]` support bounded `p + n`, `p - n`, `p += n`, `p -= n`, pointer-variable `++`/`--`, same-array pointer difference, and C-style indexed field lvalues such as `p[i].x`, `p[i].x += 1`, and `n[i].value++` over interpreter-owned struct/union array element pointers, with one-past/out-of-bounds/const-pointee diagnostics and compiler-oracle coverage
+- [x] Scoped aggregate-array element pointer arithmetic and indexed field access: `struct Point *p = &points[0]` and `union Number *n = &numbers[0]` support bounded `p + n`, `p - n`, `p += n`, `p -= n`, pointer-variable `++`/`--`, same-array pointer difference, C-style indexed field lvalues such as `p[i].x`, `p[i].x += 1`, and `n[i].value++`, and by-value aggregate expressions such as `struct Point copy = p[i];`, `copy = p[i];`, and `sum(p[i])` over interpreter-owned struct/union array element pointers, with one-past/out-of-bounds/const-pointee diagnostics and compiler-oracle coverage
 
 ## P3 — C-subset conformance tooling
 

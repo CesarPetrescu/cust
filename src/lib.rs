@@ -4494,18 +4494,22 @@ impl Interpreter {
                 None => return Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::ArrayGet { name, index } => {
-                let index = self.checked_struct_element_index(name, index)?;
-                match self.find_variable(name).cloned() {
-                    Some(Value::StructArray {
-                        type_name,
-                        elements,
-                        ..
-                    }) => Some((
-                        type_name,
-                        StructFieldValue::deep_clone_fields(&elements[index]),
-                    )),
-                    Some(_) => None,
-                    None => return Err(CustError::new(format!("undefined variable '{name}'"))),
+                if let Some((type_name, fields)) = self.indexed_struct_pointer_value(name, index)? {
+                    Some((type_name, fields))
+                } else {
+                    let index = self.checked_struct_element_index(name, index)?;
+                    match self.find_variable(name).cloned() {
+                        Some(Value::StructArray {
+                            type_name,
+                            elements,
+                            ..
+                        }) => Some((
+                            type_name,
+                            StructFieldValue::deep_clone_fields(&elements[index]),
+                        )),
+                        Some(_) => None,
+                        None => return Err(CustError::new(format!("undefined variable '{name}'"))),
+                    }
                 }
             }
             _ => None,
@@ -5488,15 +5492,33 @@ impl Interpreter {
         name: &str,
         index: &Expr,
     ) -> CustResult<Option<PointerValue>> {
-        let Some(Value::Pointer { pointer, .. }) = self.find_variable(name).cloned() else {
+        let Some(Value::Pointer { pointer, ty, .. }) = self.find_variable(name).cloned() else {
             return Ok(None);
         };
+        if !matches!(ty, PointeeType::Struct(_)) {
+            return Ok(None);
+        }
         let index_value = self.eval(index)?;
         let pointer = self.offset_array_pointer(&pointer, index_value)?;
         match pointer {
             PointerValue::StructElement { .. } => Ok(Some(pointer)),
             _ => Err(CustError::new("struct pointer is not indexable")),
         }
+    }
+
+    fn indexed_struct_pointer_value(
+        &mut self,
+        name: &str,
+        index: &Expr,
+    ) -> CustResult<Option<(String, HashMap<String, StructFieldValue>)>> {
+        let Some(pointer) = self.indexed_struct_pointer(name, index)? else {
+            return Ok(None);
+        };
+        let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
+        Ok(Some((
+            type_name,
+            StructFieldValue::deep_clone_fields(fields),
+        )))
     }
 
     fn find_variable_scope_id(&self, name: &str) -> Option<usize> {
@@ -7684,20 +7706,24 @@ impl Interpreter {
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::ArrayGet { name, index } => {
-                let index = self.checked_struct_element_index(name, index)?;
-                match self.find_variable(name).cloned() {
-                    Some(Value::StructArray {
-                        type_name,
-                        elements,
-                        ..
-                    }) => Ok(ReturnValue::Struct {
-                        type_name,
-                        fields: StructFieldValue::deep_clone_fields(&elements[index]),
-                    }),
-                    Some(_) => Err(CustError::new(format!(
-                        "variable '{name}' is not a struct array"
-                    ))),
-                    None => Err(CustError::new(format!("undefined variable '{name}'"))),
+                if let Some((type_name, fields)) = self.indexed_struct_pointer_value(name, index)? {
+                    Ok(ReturnValue::Struct { type_name, fields })
+                } else {
+                    let index = self.checked_struct_element_index(name, index)?;
+                    match self.find_variable(name).cloned() {
+                        Some(Value::StructArray {
+                            type_name,
+                            elements,
+                            ..
+                        }) => Ok(ReturnValue::Struct {
+                            type_name,
+                            fields: StructFieldValue::deep_clone_fields(&elements[index]),
+                        }),
+                        Some(_) => Err(CustError::new(format!(
+                            "variable '{name}' is not a struct array"
+                        ))),
+                        None => Err(CustError::new(format!("undefined variable '{name}'"))),
+                    }
                 }
             }
             Expr::Call { name, args } => self.call_function(name, args)?.ok_or_else(|| {

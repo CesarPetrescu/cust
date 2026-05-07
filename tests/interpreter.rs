@@ -196,6 +196,13 @@ fn supports_pointer_indexing_for_struct_and_union_arrays() {
 }
 
 #[test]
+fn supports_pointer_indexed_aggregate_values_as_copies() {
+    let program = include_str!("fixtures/valid/aggregate_pointer_indexed_values.c");
+
+    assert_eq!(interpret(program).unwrap(), 79);
+}
+
+#[test]
 fn rejects_const_aggregate_pointer_index_writes() {
     let program = include_str!("fixtures/invalid/const_aggregate_pointer_index_write.c");
 
