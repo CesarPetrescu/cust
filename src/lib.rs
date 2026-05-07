@@ -1383,7 +1383,7 @@ impl Parser {
                 self.tokens.get(self.pos + 3).map(|token| &token.kind)
             ),
             (
-                Token::Struct,
+                Token::Struct | Token::Union,
                 Some(Token::Ident(_)),
                 Some(Token::Ident(_)),
                 Some(Token::LParen)
@@ -6875,6 +6875,15 @@ impl Interpreter {
         if let Expr::Call { name, args } = expr {
             self.call_function(name, args)?;
             return Ok(());
+        }
+        match expr {
+            Expr::Assign { name, value }
+                if matches!(self.find_variable(name), Some(Value::Struct { .. })) =>
+            {
+                self.assign_struct_copy(name, value)?;
+                return Ok(());
+            }
+            _ => {}
         }
         if matches!(
             expr,

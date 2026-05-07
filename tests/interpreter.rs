@@ -154,6 +154,13 @@ fn supports_union_pointers_and_pointer_fields() {
 }
 
 #[test]
+fn supports_union_return_functions_and_prototypes() {
+    let program = include_str!("fixtures/valid/union_return_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 26);
+}
+
+#[test]
 fn rejects_pointer_to_pointer_union_fields() {
     let program = include_str!("fixtures/invalid/union_pointer_to_pointer_field.c");
 
