@@ -224,6 +224,24 @@ fn supports_pointer_return_functions_and_prototypes() {
 }
 
 #[test]
+fn supports_typedef_aggregate_definitions() {
+    let program = include_str!("fixtures/valid/typedef_aggregate_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 34);
+}
+
+#[test]
+fn rejects_block_scoped_typedef_aggregate_definitions() {
+    let program = include_str!("fixtures/invalid/block_typedef_aggregate_definition.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "block-scoped typedef aggregate definitions are not supported"
+    );
+}
+
+#[test]
 fn rejects_pointer_return_type_mismatches() {
     let program = include_str!("fixtures/invalid/pointer_return_type_mismatch.c");
 

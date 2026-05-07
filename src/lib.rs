@@ -1543,32 +1543,48 @@ impl Parser {
 
     fn parse_typedef_decl(&mut self) -> CustResult<()> {
         self.expect(Token::Typedef)?;
-        let base_type = self.parse_decl_type("typedef struct type name")?;
-        let alias = if self.matches(&Token::Star) {
-            if self.check(&Token::Star) {
-                return Err(Self::error_at(
-                    "pointer-to-pointer typedef aliases are not supported".to_string(),
-                    self.peek_located(),
+        let (alias, alias_context) = if self.is_aggregate_definition() {
+            if self.type_alias_scopes.len() > 1 {
+                return Err(CustError::new(
+                    "block-scoped typedef aggregate definitions are not supported",
                 ));
             }
-            match base_type {
-                DeclType::Scalar(ty) => TypeAlias::Pointer(PointeeType::Scalar(ty)),
-                DeclType::Struct(type_name) => TypeAlias::Pointer(PointeeType::Struct(type_name)),
-                DeclType::Pointer(_) => {
+            let (type_name, _) = self.parse_aggregate_definition_body(false)?;
+            (
+                TypeAlias::Struct(type_name),
+                "typedef alias name after aggregate definition",
+            )
+        } else {
+            let base_type = self.parse_decl_type("typedef struct type name")?;
+            let alias = if self.matches(&Token::Star) {
+                if self.check(&Token::Star) {
                     return Err(Self::error_at(
                         "pointer-to-pointer typedef aliases are not supported".to_string(),
-                        self.previous(),
+                        self.peek_located(),
                     ));
                 }
-            }
-        } else {
-            match base_type {
-                DeclType::Scalar(ty) => TypeAlias::Scalar(ty),
-                DeclType::Struct(type_name) => TypeAlias::Struct(type_name),
-                DeclType::Pointer(pointee) => TypeAlias::Pointer(pointee),
-            }
+                match base_type {
+                    DeclType::Scalar(ty) => TypeAlias::Pointer(PointeeType::Scalar(ty)),
+                    DeclType::Struct(type_name) => {
+                        TypeAlias::Pointer(PointeeType::Struct(type_name))
+                    }
+                    DeclType::Pointer(_) => {
+                        return Err(Self::error_at(
+                            "pointer-to-pointer typedef aliases are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
+                }
+            } else {
+                match base_type {
+                    DeclType::Scalar(ty) => TypeAlias::Scalar(ty),
+                    DeclType::Struct(type_name) => TypeAlias::Struct(type_name),
+                    DeclType::Pointer(pointee) => TypeAlias::Pointer(pointee),
+                }
+            };
+            (alias, "typedef alias name after type")
         };
-        let alias_name = self.expect_ident_after("typedef alias name after type")?;
+        let alias_name = self.expect_ident_after(alias_context)?;
         self.expect_semicolon_after("typedef declaration")?;
         let current_scope = self
             .type_alias_scopes
@@ -2376,6 +2392,14 @@ impl Parser {
     }
 
     fn parse_aggregate_definition(&mut self) -> CustResult<()> {
+        self.parse_aggregate_definition_body(true)?;
+        Ok(())
+    }
+
+    fn parse_aggregate_definition_body(
+        &mut self,
+        require_semicolon: bool,
+    ) -> CustResult<(String, AggregateKind)> {
         let kind = match self.advance().kind {
             Token::Struct => AggregateKind::Struct,
             Token::Union => AggregateKind::Union,
@@ -2389,7 +2413,7 @@ impl Parser {
         while !self.check(&Token::RBrace) {
             if self.check(&Token::Eof) {
                 return Err(Self::error_at(
-                    format!("unterminated struct declaration for '{type_name}'"),
+                    format!("unterminated {keyword} declaration for '{type_name}'"),
                     self.peek_located(),
                 ));
             }
@@ -2451,7 +2475,7 @@ impl Parser {
             let name = self.expect_ident_after(&format!("{keyword} field name after type"))?;
             if !names.insert(name.clone()) {
                 return Err(Self::error_at(
-                    format!("duplicate struct field '{name}'"),
+                    format!("duplicate {keyword} field '{name}'"),
                     self.previous(),
                 ));
             }
@@ -2488,7 +2512,9 @@ impl Parser {
             });
         }
         self.expect(Token::RBrace)?;
-        self.expect_semicolon_after(&format!("{keyword} declaration"))?;
+        if require_semicolon {
+            self.expect_semicolon_after(&format!("{keyword} declaration"))?;
+        }
         if self
             .struct_types
             .insert(type_name.clone(), StructTypeDef { fields, kind })
@@ -2498,7 +2524,7 @@ impl Parser {
                 "{keyword} '{type_name}' already declared"
             )));
         }
-        Ok(())
+        Ok((type_name, kind))
     }
 
     fn parse_aggregate_var_decl(&mut self) -> CustResult<Stmt> {

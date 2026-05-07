@@ -69,6 +69,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/struct_return_functions.c",
     "tests/fixtures/compat/valid/switch_statements.c",
     "tests/fixtures/compat/valid/typedef_aliases.c",
+    "tests/fixtures/compat/valid/typedef_aggregate_definitions.c",
     "tests/fixtures/compat/valid/uninitialized_global_declarations.c",
     "tests/fixtures/compat/valid/void_functions.c",
     "tests/fixtures/compat/valid/void_parameter_lists.c",
