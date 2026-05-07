@@ -5483,6 +5483,22 @@ impl Interpreter {
         Ok(index)
     }
 
+    fn indexed_struct_pointer(
+        &mut self,
+        name: &str,
+        index: &Expr,
+    ) -> CustResult<Option<PointerValue>> {
+        let Some(Value::Pointer { pointer, .. }) = self.find_variable(name).cloned() else {
+            return Ok(None);
+        };
+        let index_value = self.eval(index)?;
+        let pointer = self.offset_array_pointer(&pointer, index_value)?;
+        match pointer {
+            PointerValue::StructElement { .. } => Ok(Some(pointer)),
+            _ => Err(CustError::new("struct pointer is not indexable")),
+        }
+    }
+
     fn find_variable_scope_id(&self, name: &str) -> Option<usize> {
         for scope in self.scopes.iter().rev() {
             if scope.values.contains_key(name) {
@@ -5739,6 +5755,9 @@ impl Interpreter {
         index: &Expr,
         path: &[String],
     ) -> CustResult<i64> {
+        if let Some(pointer) = self.indexed_struct_pointer(name, index)? {
+            return self.read_struct_pointer_field(&pointer, path);
+        }
         let index = self.checked_struct_element_index(name, index)?;
         match self.find_variable(name) {
             Some(Value::StructArray {
@@ -5777,6 +5796,12 @@ impl Interpreter {
         path: &[String],
         value: i64,
     ) -> CustResult<()> {
+        if let Some(pointer) = self.indexed_struct_pointer(name, index)? {
+            if self.pointer_variable_points_to_const(name) {
+                return Err(CustError::new("cannot assign through pointer to const"));
+            }
+            return self.assign_struct_pointer_field(&pointer, path, value);
+        }
         self.ensure_variable_mutable(name)?;
         let index = self.checked_struct_element_index(name, index)?;
         let struct_types = self.struct_types.clone();

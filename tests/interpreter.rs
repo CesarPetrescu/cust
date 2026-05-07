@@ -189,6 +189,21 @@ fn supports_pointer_arithmetic_for_struct_and_union_arrays() {
 }
 
 #[test]
+fn supports_pointer_indexing_for_struct_and_union_arrays() {
+    let program = include_str!("fixtures/valid/aggregate_pointer_indexing.c");
+
+    assert_eq!(interpret(program).unwrap(), 87);
+}
+
+#[test]
+fn rejects_const_aggregate_pointer_index_writes() {
+    let program = include_str!("fixtures/invalid/const_aggregate_pointer_index_write.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
+}
+
+#[test]
 fn rejects_struct_pointer_arithmetic_out_of_bounds() {
     let program = include_str!("fixtures/invalid/struct_pointer_arithmetic_out_of_bounds.c");
 
