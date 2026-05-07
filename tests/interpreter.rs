@@ -182,6 +182,24 @@ fn supports_conditional_and_comma_expressions_for_aggregates() {
 }
 
 #[test]
+fn supports_pointer_arithmetic_for_struct_and_union_arrays() {
+    let program = include_str!("fixtures/valid/aggregate_pointer_arithmetic.c");
+
+    assert_eq!(interpret(program).unwrap(), 53);
+}
+
+#[test]
+fn rejects_struct_pointer_arithmetic_out_of_bounds() {
+    let program = include_str!("fixtures/invalid/struct_pointer_arithmetic_out_of_bounds.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "struct array pointer index 2 out of bounds for length 2"
+    );
+}
+
+#[test]
 fn rejects_aggregate_conditional_type_mismatches() {
     let program = include_str!("fixtures/invalid/aggregate_conditional_type_mismatch.c");
 

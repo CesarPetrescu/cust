@@ -150,8 +150,9 @@ Supported first:
 - `ptr[index]` reads/writes array storage when the pointer target is array-base.
 - `&array[index]` creates an array-element pointer.
 - `*(&array[index])` reads/writes exactly that element.
+- Array-backed scalar pointers and struct/union-array element pointers support scoped pointer arithmetic: `p + n`, `p - n`, `p += n`, `p -= n`, `p++`/`--p`, and pointer difference for two pointers into the same interpreter-owned array. Resulting positions must remain within an actual element; one-past pointers remain outside Cust's supported subset.
 
-Defer pointer arithmetic (`p + 1`, `p++`) until after this is stable.
+Defer generic scalar/standalone struct pointer arithmetic, one-past pointers, and pointer ordering until separate milestones justify them.
 
 ## Implementation steps
 

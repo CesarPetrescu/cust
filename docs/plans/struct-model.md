@@ -56,6 +56,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - Local/global declarations and function parameters may use one pointer level to a prior struct type, e.g. `struct Point *p = &point;`, `struct Point *p;`, `struct Point * const stable = &point;`, `const struct Point *view = &point;`, and `void set(struct Point *p);`.
   - `&point` produces an interpreter-owned pointer to the struct variable; null struct pointers use the existing `0` literal.
   - `&points[i]` produces an interpreter-owned pointer to a supported struct-array element, and field address-of expressions such as `&point.x`, `&packet.origin.y`, and `&points[i].x` produce scalar pointers that alias the owning struct storage.
+  - Struct-array element pointers support scoped pointer arithmetic (`p + n`, `p - n`, `p += n`, `p -= n`, `p++`/`--p`) and same-array pointer difference while staying within actual elements; one-past pointers remain unsupported.
   - `p->x` and `(*p).x` read scalar fields through a struct pointer.
   - Struct pointer field lvalue expressions support simple assignment, compound assignment, and prefix/postfix increment/decrement for scalar fields when the pointer target is mutable.
   - `const struct Point *p` and direct pointers to `const struct Point` variables are read-only views: writes through `p->field` / `(*p).field`, field compound assignment, and field increment/decrement report `cannot assign through pointer to const`.

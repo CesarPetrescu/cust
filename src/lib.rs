@@ -6429,10 +6429,14 @@ impl Interpreter {
             PointerValue::Null => Err(CustError::new("null pointer arithmetic is not supported")),
             PointerValue::Scalar { .. }
             | PointerValue::Struct { .. }
-            | PointerValue::StructElement { .. }
             | PointerValue::StructField { .. } => {
                 Err(CustError::new("scalar pointer arithmetic is not supported"))
             }
+            PointerValue::StructElement {
+                scope_id,
+                name,
+                index,
+            } => self.struct_array_pointer_at(*scope_id, name, *index as i64 + offset),
             PointerValue::ArrayBase { array, source_name } => {
                 self.array_pointer_at(array, source_name.clone(), offset)
             }
@@ -6442,6 +6446,48 @@ impl Interpreter {
                 index,
             } => self.array_pointer_at(array, source_name.clone(), *index as i64 + offset),
         }
+    }
+
+    fn struct_array_pointer_at(
+        &self,
+        scope_id: usize,
+        name: &str,
+        index: i64,
+    ) -> CustResult<PointerValue> {
+        if !self.live_scope_ids.contains(&scope_id) {
+            return Err(CustError::new(format!(
+                "pointer to out-of-scope variable '{name}'"
+            )));
+        }
+        let value = self
+            .scopes
+            .iter()
+            .find(|scope| scope.id == scope_id)
+            .and_then(|scope| scope.values.get(name))
+            .or_else(|| self.static_value_by_scope(scope_id, name));
+        let len = match value {
+            Some(Value::StructArray { elements, .. }) => elements.len(),
+            _ => {
+                return Err(CustError::new(format!(
+                    "pointer to out-of-scope variable '{name}'"
+                )));
+            }
+        };
+        let Ok(index_usize) = usize::try_from(index) else {
+            return Err(CustError::new(format!(
+                "struct array pointer index {index} out of bounds for length {len}"
+            )));
+        };
+        if index_usize >= len {
+            return Err(CustError::new(format!(
+                "struct array pointer index {index} out of bounds for length {len}"
+            )));
+        }
+        Ok(PointerValue::StructElement {
+            scope_id,
+            name: name.to_string(),
+            index: index_usize,
+        })
     }
 
     fn array_pointer_at(
@@ -6826,15 +6872,45 @@ impl Interpreter {
         }
     }
 
-    fn pointer_difference(left: &PointerValue, right: &PointerValue) -> CustResult<i64> {
-        let (left_array, left_index) = Self::array_pointer_index(left)?;
-        let (right_array, right_index) = Self::array_pointer_index(right)?;
-        if !Rc::ptr_eq(left_array, right_array) {
-            return Err(CustError::new(
-                "cannot subtract pointers to different arrays",
-            ));
+    fn pointer_difference(&self, left: &PointerValue, right: &PointerValue) -> CustResult<i64> {
+        match (left, right) {
+            (
+                PointerValue::StructElement {
+                    scope_id: left_scope,
+                    name: left_name,
+                    index: left_index,
+                },
+                PointerValue::StructElement {
+                    scope_id: right_scope,
+                    name: right_name,
+                    index: right_index,
+                },
+            ) => {
+                if left_scope != right_scope || left_name != right_name {
+                    return Err(CustError::new(
+                        "cannot subtract pointers to different arrays",
+                    ));
+                }
+                self.struct_array_pointer_at(*left_scope, left_name, *left_index as i64)?;
+                self.struct_array_pointer_at(*right_scope, right_name, *right_index as i64)?;
+                Ok(*left_index as i64 - *right_index as i64)
+            }
+            (PointerValue::StructElement { .. }, _) | (_, PointerValue::StructElement { .. }) => {
+                Err(CustError::new(
+                    "cannot subtract pointers to different arrays",
+                ))
+            }
+            _ => {
+                let (left_array, left_index) = Self::array_pointer_index(left)?;
+                let (right_array, right_index) = Self::array_pointer_index(right)?;
+                if !Rc::ptr_eq(left_array, right_array) {
+                    return Err(CustError::new(
+                        "cannot subtract pointers to different arrays",
+                    ));
+                }
+                Ok(left_index - right_index)
+            }
         }
-        Ok(left_index - right_index)
     }
 
     fn eval_truthy(&mut self, expr: &Expr) -> CustResult<bool> {
@@ -8337,7 +8413,7 @@ impl Interpreter {
                 BinaryOp::Add | BinaryOp::Sub => {
                     match (self.eval_pointer(left), self.eval_pointer(right)) {
                         (Ok(left_pointer), Ok(right_pointer)) if *op == BinaryOp::Sub => {
-                            return Self::pointer_difference(&left_pointer, &right_pointer);
+                            return self.pointer_difference(&left_pointer, &right_pointer);
                         }
                         (Ok(_), Ok(_)) if *op == BinaryOp::Add => {
                             return Err(CustError::new("cannot add two pointers"));
