@@ -140,6 +140,13 @@ fn supports_scalar_union_variables_fields_initializers_and_sizeof() {
 }
 
 #[test]
+fn supports_nested_union_fields_initializers_copy_and_parameters() {
+    let program = include_str!("fixtures/valid/nested_union_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 68);
+}
+
+#[test]
 fn rejects_union_initializers_longer_than_one_field() {
     let program = include_str!("fixtures/invalid/union_initializer_too_long.c");
 

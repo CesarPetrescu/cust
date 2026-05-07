@@ -5037,6 +5037,9 @@ impl Interpreter {
                             CustError::new(format!("struct '{nested_type}' has no field '{field}'"))
                         })?;
                     self.apply_struct_field_initializer(nested_fields, nested_field_def, value)?;
+                    if nested_type_def.kind == AggregateKind::Union {
+                        Self::sync_union_scalar_fields_from_active(nested_fields, field)?;
+                    }
                 }
             }
             (StructFieldType::Struct(_), _, StructInitializer::Array(_)) => {
@@ -5172,45 +5175,81 @@ impl Interpreter {
         }
     }
 
+    fn assign_scalar_field_in_map(
+        struct_types: &HashMap<String, StructTypeDef>,
+        type_name: &str,
+        fields_map: &mut HashMap<String, StructFieldValue>,
+        path: &[String],
+        value: i64,
+    ) -> CustResult<()> {
+        let Some((field, rest)) = path.split_first() else {
+            return Err(CustError::new("expected struct field"));
+        };
+        if rest.is_empty() {
+            let field_value = fields_map.get_mut(field).ok_or_else(|| {
+                CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+            })?;
+            if field_value.is_const() {
+                return Err(CustError::new(format!(
+                    "cannot assign to const struct field '{}'",
+                    Self::field_path_label(path)
+                )));
+            }
+            match field_value {
+                StructFieldValue::Scalar { value: slot, .. } => {
+                    *slot = value;
+                    if struct_types
+                        .get(type_name)
+                        .is_some_and(|aggregate| aggregate.kind == AggregateKind::Union)
+                    {
+                        Self::sync_union_scalar_fields_from_active(fields_map, field)?;
+                    }
+                    Ok(())
+                }
+                StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                    "struct field '{}' is an array",
+                    Self::field_path_label(path)
+                ))),
+                StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                    "struct field '{}' is a struct '{type_name}'",
+                    Self::field_path_label(path)
+                ))),
+                StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                    "pointer field '{}' used as scalar",
+                    Self::field_path_label(path)
+                ))),
+            }
+        } else {
+            let field_value = fields_map.get_mut(field).ok_or_else(|| {
+                CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+            })?;
+            match field_value {
+                StructFieldValue::Struct {
+                    type_name: nested_type,
+                    fields: nested_fields,
+                    ..
+                } => Self::assign_scalar_field_in_map(
+                    struct_types,
+                    nested_type,
+                    nested_fields,
+                    rest,
+                    value,
+                ),
+                StructFieldValue::Scalar { .. }
+                | StructFieldValue::Array { .. }
+                | StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                    "struct field '{field}' is not a struct"
+                ))),
+            }
+        }
+    }
+
     fn assign_struct_field(&mut self, name: &str, path: &[String], value: i64) -> CustResult<()> {
         self.ensure_variable_mutable(name)?;
-        let is_root_union = match self.find_variable(name) {
-            Some(Value::Struct { type_name, .. }) => self
-                .struct_types
-                .get(type_name)
-                .is_some_and(|aggregate| aggregate.kind == AggregateKind::Union),
-            _ => false,
-        };
+        let struct_types = self.struct_types.clone();
         match self.find_variable_mut(name) {
             Some(Value::Struct { type_name, fields }) => {
-                let (_, field_value) = Self::nested_field_value_mut(type_name, fields, path)?;
-                if field_value.is_const() {
-                    return Err(CustError::new(format!(
-                        "cannot assign to const struct field '{}'",
-                        Self::field_path_label(path)
-                    )));
-                }
-                match field_value {
-                    StructFieldValue::Scalar { value: slot, .. } => {
-                        *slot = value;
-                        if is_root_union && path.len() == 1 {
-                            Self::sync_union_scalar_fields_from_active(fields, &path[0])?;
-                        }
-                        Ok(())
-                    }
-                    StructFieldValue::Array { .. } => Err(CustError::new(format!(
-                        "struct field '{}' is an array",
-                        Self::field_path_label(path)
-                    ))),
-                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
-                        "struct field '{}' is a struct '{type_name}'",
-                        Self::field_path_label(path)
-                    ))),
-                    StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
-                        "pointer field '{}' used as scalar",
-                        Self::field_path_label(path)
-                    ))),
-                }
+                Self::assign_scalar_field_in_map(&struct_types, type_name, fields, path, value)
             }
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
@@ -5687,6 +5726,7 @@ impl Interpreter {
     ) -> CustResult<()> {
         self.ensure_variable_mutable(name)?;
         let index = self.checked_struct_element_index(name, index)?;
+        let struct_types = self.struct_types.clone();
         match self.find_variable_mut(name) {
             Some(Value::StructArray {
                 type_name,
@@ -5698,32 +5738,13 @@ impl Interpreter {
                         "cannot assign to const variable '{name}'"
                     )));
                 }
-                let (_, field_value) =
-                    Self::nested_field_value_mut(type_name, &mut elements[index], path)?;
-                if field_value.is_const() {
-                    return Err(CustError::new(format!(
-                        "cannot assign to const struct field '{}'",
-                        Self::field_path_label(path)
-                    )));
-                }
-                match field_value {
-                    StructFieldValue::Scalar { value: slot, .. } => {
-                        *slot = value;
-                        Ok(())
-                    }
-                    StructFieldValue::Array { .. } => Err(CustError::new(format!(
-                        "struct field '{}' is an array",
-                        Self::field_path_label(path)
-                    ))),
-                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
-                        "struct field '{}' is a struct '{type_name}'",
-                        Self::field_path_label(path)
-                    ))),
-                    StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
-                        "pointer field '{}' used as scalar",
-                        Self::field_path_label(path)
-                    ))),
-                }
+                Self::assign_scalar_field_in_map(
+                    &struct_types,
+                    type_name,
+                    &mut elements[index],
+                    path,
+                    value,
+                )
             }
             Some(_) => Err(CustError::new(format!(
                 "variable '{name}' is not a struct array"
