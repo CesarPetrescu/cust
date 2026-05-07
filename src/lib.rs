@@ -327,11 +327,21 @@ enum StructFieldType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StructInitializer {
     Expr(Expr),
-    Array(Vec<Expr>),
+    Array(Vec<ArrayInitializer>),
     Struct(Vec<StructInitializer>),
+    Designated {
+        field: String,
+        value: Box<StructInitializer>,
+    },
 }
 
 type StructArrayInitializer = Vec<StructInitializer>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ArrayInitializer {
+    Expr(Expr),
+    Designated { index: usize, value: Expr },
+}
 
 impl StructFieldType {
     fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
@@ -573,7 +583,7 @@ enum Stmt {
         name: String,
         elem_type: CType,
         len: usize,
-        init: Vec<Expr>,
+        init: Vec<ArrayInitializer>,
         is_const: bool,
     },
     StructVarDecl {
@@ -2016,19 +2026,33 @@ impl Parser {
         })
     }
 
-    fn parse_array_initializer(&mut self, name: &str, len: usize) -> CustResult<Vec<Expr>> {
+    fn parse_array_initializer(
+        &mut self,
+        name: &str,
+        len: usize,
+    ) -> CustResult<Vec<ArrayInitializer>> {
         self.expect_opening_brace_after("array initializer")?;
         let mut values = Vec::new();
+        let mut next_positional_index = 0usize;
         if self.matches(&Token::RBrace) {
             return Ok(values);
         }
         loop {
-            if values.len() == len {
-                return Err(CustError::new(format!(
-                    "too many initializers for array '{name}'"
-                )));
+            if self.check(&Token::LBracket) {
+                let index = self.parse_array_designator_index(name, len)?;
+                self.expect_assign_after("array designator")?;
+                let value = self.parse_assignment_expr()?;
+                next_positional_index = index + 1;
+                values.push(ArrayInitializer::Designated { index, value });
+            } else {
+                if next_positional_index == len {
+                    return Err(CustError::new(format!(
+                        "too many initializers for array '{name}'"
+                    )));
+                }
+                values.push(ArrayInitializer::Expr(self.parse_assignment_expr()?));
+                next_positional_index += 1;
             }
-            values.push(self.parse_assignment_expr()?);
             if self.matches(&Token::RBrace) {
                 break;
             }
@@ -2043,6 +2067,29 @@ impl Parser {
         Ok(values)
     }
 
+    fn parse_array_designator_index(&mut self, name: &str, len: usize) -> CustResult<usize> {
+        self.expect(Token::LBracket)?;
+        let found = self.advance();
+        let index = match &found.kind {
+            Token::Number(value) if *value >= 0 => usize::try_from(*value).map_err(|_| {
+                Self::error_at("array designator index is too large".to_string(), &found)
+            })?,
+            token => {
+                return Err(Self::error_at(
+                    format!("expected array designator index, found {token:?}"),
+                    &found,
+                ));
+            }
+        };
+        self.expect_closing_bracket_after("array designator")?;
+        if index >= len {
+            return Err(CustError::new(format!(
+                "array designator index {index} out of bounds for array '{name}'"
+            )));
+        }
+        Ok(index)
+    }
+
     fn parse_struct_initializer(&mut self, type_name: &str) -> CustResult<Vec<StructInitializer>> {
         let fields = self
             .struct_types
@@ -2051,26 +2098,40 @@ impl Parser {
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
         self.expect_opening_brace_after("struct initializer")?;
         let mut values = Vec::new();
+        let mut next_positional_index = 0usize;
         if self.matches(&Token::RBrace) {
             return Ok(values);
         }
         loop {
-            if values.len() == fields.len() {
-                return Err(CustError::new(format!(
-                    "too many initializers for struct '{type_name}'"
-                )));
+            if self.matches(&Token::Dot) {
+                let field_name = self.expect_ident_after("struct field name after '.'")?;
+                let field_index = fields
+                    .iter()
+                    .position(|field| field.name == field_name)
+                    .ok_or_else(|| {
+                        CustError::new(format!("struct '{type_name}' has no field '{field_name}'"))
+                    })?;
+                self.expect_assign_after("struct field designator")?;
+                let value = self.parse_struct_initializer_value(&fields[field_index])?;
+                next_positional_index = field_index + 1;
+                values.push(StructInitializer::Designated {
+                    field: field_name,
+                    value: Box::new(value),
+                });
+            } else {
+                if next_positional_index == fields.len() {
+                    return Err(CustError::new(format!(
+                        "too many initializers for struct '{type_name}'"
+                    )));
+                }
+                let field = &fields[next_positional_index];
+                let value = self.parse_struct_initializer_value(field)?;
+                values.push(StructInitializer::Designated {
+                    field: field.name.clone(),
+                    value: Box::new(value),
+                });
+                next_positional_index += 1;
             }
-            let field = &fields[values.len()];
-            let value = match &field.ty {
-                StructFieldType::Array(_, len) if self.check(&Token::LBrace) => {
-                    StructInitializer::Array(self.parse_array_initializer(&field.name, *len)?)
-                }
-                StructFieldType::Struct(nested_type) if self.check(&Token::LBrace) => {
-                    StructInitializer::Struct(self.parse_struct_initializer(nested_type)?)
-                }
-                _ => StructInitializer::Expr(self.parse_assignment_expr()?),
-            };
-            values.push(value);
             if self.matches(&Token::RBrace) {
                 break;
             }
@@ -2083,6 +2144,21 @@ impl Parser {
             self.expect_closing_brace_after("struct initializer")?;
         }
         Ok(values)
+    }
+
+    fn parse_struct_initializer_value(
+        &mut self,
+        field: &StructFieldDef,
+    ) -> CustResult<StructInitializer> {
+        match &field.ty {
+            StructFieldType::Array(_, len) if self.check(&Token::LBrace) => Ok(
+                StructInitializer::Array(self.parse_array_initializer(&field.name, *len)?),
+            ),
+            StructFieldType::Struct(nested_type) if self.check(&Token::LBrace) => Ok(
+                StructInitializer::Struct(self.parse_struct_initializer(nested_type)?),
+            ),
+            _ => Ok(StructInitializer::Expr(self.parse_assignment_expr()?)),
+        }
     }
 
     fn parse_struct_array_initializer(
@@ -4623,12 +4699,22 @@ impl Interpreter {
         &mut self,
         len: usize,
         elem_type: CType,
-        init: &[Expr],
+        init: &[ArrayInitializer],
         read_only: bool,
     ) -> CustResult<Value> {
         let mut array = ArrayValue::mutable_zeroed(len, elem_type);
-        for (index, expr) in init.iter().enumerate() {
-            array.elements[index] = self.eval(expr)?;
+        let mut next_positional_index = 0usize;
+        for initializer in init {
+            match initializer {
+                ArrayInitializer::Expr(expr) => {
+                    array.elements[next_positional_index] = self.eval(expr)?;
+                    next_positional_index += 1;
+                }
+                ArrayInitializer::Designated { index, value } => {
+                    array.elements[*index] = self.eval(value)?;
+                    next_positional_index = *index + 1;
+                }
+            }
         }
         array.read_only = read_only;
         Ok(Value::Array(Rc::new(RefCell::new(array))))
@@ -4676,10 +4762,20 @@ impl Interpreter {
             .cloned()
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
         let mut fields = HashMap::new();
+        let mut designated = HashMap::new();
+        for initializer in init {
+            if let StructInitializer::Designated { field, value } = initializer {
+                designated.insert(field.as_str(), value.as_ref());
+            }
+        }
         for (index, field) in struct_type.fields.iter().enumerate() {
+            let initializer = designated
+                .get(field.name.as_str())
+                .copied()
+                .or_else(|| init.get(index));
             let field_value = match &field.ty {
                 StructFieldType::Scalar(ty) => {
-                    let value = if let Some(expr) = init.get(index) {
+                    let value = if let Some(expr) = initializer {
                         match expr {
                             StructInitializer::Expr(expr) => self.eval(expr)?,
                             StructInitializer::Array(_) | StructInitializer::Struct(_) => {
@@ -4688,6 +4784,9 @@ impl Interpreter {
                                     field.name
                                 )));
                             }
+                            StructInitializer::Designated { .. } => unreachable!(
+                                "designated struct initializers are resolved before evaluation"
+                            ),
                         }
                     } else {
                         0
@@ -4699,7 +4798,7 @@ impl Interpreter {
                     }
                 }
                 StructFieldType::Array(elem_type, len) => {
-                    let array_init = match init.get(index) {
+                    let array_init = match initializer {
                         Some(StructInitializer::Array(values)) => values.as_slice(),
                         Some(StructInitializer::Expr(_)) | Some(StructInitializer::Struct(_)) => {
                             return Err(CustError::new(format!(
@@ -4707,11 +4806,24 @@ impl Interpreter {
                                 field.name
                             )));
                         }
+                        Some(StructInitializer::Designated { .. }) => unreachable!(
+                            "designated struct initializers are resolved before evaluation"
+                        ),
                         None => &[],
                     };
                     let mut array = ArrayValue::mutable_zeroed(*len, *elem_type);
-                    for (array_index, expr) in array_init.iter().enumerate() {
-                        array.elements[array_index] = self.eval(expr)?;
+                    let mut next_positional_index = 0usize;
+                    for initializer in array_init {
+                        match initializer {
+                            ArrayInitializer::Expr(expr) => {
+                                array.elements[next_positional_index] = self.eval(expr)?;
+                                next_positional_index += 1;
+                            }
+                            ArrayInitializer::Designated { index, value } => {
+                                array.elements[*index] = self.eval(value)?;
+                                next_positional_index = *index + 1;
+                            }
+                        }
                     }
                     array.read_only = field.is_const;
                     StructFieldValue::Array {
@@ -4720,7 +4832,7 @@ impl Interpreter {
                     }
                 }
                 StructFieldType::Struct(nested_type) => {
-                    let fields = match init.get(index) {
+                    let fields = match initializer {
                         Some(StructInitializer::Struct(init)) => {
                             self.make_struct_fields(nested_type, init)?
                         }
@@ -4748,6 +4860,9 @@ impl Interpreter {
                                 ),
                             }
                         }
+                        Some(StructInitializer::Designated { .. }) => unreachable!(
+                            "designated struct initializers are resolved before evaluation"
+                        ),
                         None => self.make_struct_fields(nested_type, &[])?,
                     };
                     StructFieldValue::Struct {
@@ -4757,7 +4872,7 @@ impl Interpreter {
                     }
                 }
                 StructFieldType::Pointer(pointee) => {
-                    let pointer = match init.get(index) {
+                    let pointer = match initializer {
                         Some(StructInitializer::Expr(expr)) => {
                             self.ensure_pointer_conversion_preserves_const(
                                 field.points_to_const,
@@ -4771,6 +4886,9 @@ impl Interpreter {
                                 field.name
                             )));
                         }
+                        Some(StructInitializer::Designated { .. }) => unreachable!(
+                            "designated struct initializers are resolved before evaluation"
+                        ),
                         None => PointerValue::Null,
                     };
                     StructFieldValue::Pointer {

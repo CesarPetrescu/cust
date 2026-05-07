@@ -119,6 +119,13 @@ fn supports_scalar_array_initializers() {
 }
 
 #[test]
+fn supports_designated_array_and_struct_initializers() {
+    let program = include_str!("fixtures/valid/designated_initializers.c");
+
+    assert_eq!(interpret(program).unwrap(), 133);
+}
+
+#[test]
 fn supports_scalar_struct_initializers() {
     let program = include_str!("fixtures/valid/struct_initializers.c");
 
@@ -243,6 +250,27 @@ fn rejects_array_initializers_longer_than_declared_length() {
     let err = interpret(program).unwrap_err();
 
     assert_eq!(err.to_string(), "too many initializers for array 'values'");
+}
+
+#[test]
+fn rejects_array_designators_outside_declared_length() {
+    let program = include_str!("fixtures/invalid/array_designator_out_of_bounds.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array designator index 3 out of bounds for array 'values'"
+    );
+}
+
+#[test]
+fn rejects_unknown_struct_field_designators() {
+    let program = include_str!("fixtures/invalid/struct_designator_unknown_field.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "struct 'Point' has no field 'z'");
 }
 
 #[test]
