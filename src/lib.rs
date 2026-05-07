@@ -4641,13 +4641,14 @@ impl Interpreter {
     }
 
     fn pointer_variable_points_to_const(&self, name: &str) -> bool {
-        matches!(
-            self.find_variable(name),
+        match self.find_variable(name) {
             Some(Value::Pointer {
-                points_to_const: true,
-                ..
-            })
-        )
+                points_to_const, ..
+            }) => *points_to_const,
+            Some(Value::Array(array)) => array.borrow().read_only,
+            Some(Value::StructArray { read_only, .. }) => *read_only,
+            _ => false,
+        }
     }
 
     fn ensure_pointer_variable_pointee_mutable(&self, name: &str) -> CustResult<()> {
@@ -6385,12 +6386,22 @@ impl Interpreter {
                     array: Rc::clone(array),
                     source_name: Some(name.clone()),
                 }),
+                Some(Value::StructArray { .. }) => {
+                    let scope_id = self
+                        .find_variable_scope_id(name)
+                        .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
+                    Ok(PointerValue::StructElement {
+                        scope_id,
+                        name: name.clone(),
+                        index: 0,
+                    })
+                }
                 Some(Value::Scalar { .. }) => Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
                 ))),
-                Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(
-                    CustError::new(format!("struct variable '{name}' used as pointer")),
-                ),
+                Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                    "struct variable '{name}' used as pointer"
+                ))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::StructGet { name, fields } => self.read_direct_struct_pointer_field(name, fields),

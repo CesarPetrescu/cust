@@ -144,6 +144,7 @@ Dereferencing an array-base pointer directly should read/write element `0` only 
 Supported first:
 
 - Passing an array variable to an `int *`/`char *` parameter decays to an array-base pointer.
+- Passing a supported struct/union array variable to a matching aggregate pointer parameter (`struct T *` / `union T *`) decays to an interpreter-owned pointer to element zero.
 - Passing a string literal to a `char *` parameter decays to a read-only array-base pointer.
 - Struct pointer fields copy pointer values by value during struct copy/parameter/return flows; they do not clone or own the pointee.
 - `const T *` pointer fields preserve pointee constness for conversion/write checks, while `T * const` pointer fields reject field reassignment.

@@ -210,6 +210,24 @@ fn supports_designated_initializers_for_aggregate_arrays() {
 }
 
 #[test]
+fn supports_aggregate_array_decay_to_pointer_parameters() {
+    let program = include_str!("fixtures/valid/aggregate_array_decay_to_pointers.c");
+
+    assert_eq!(interpret(program).unwrap(), 55);
+}
+
+#[test]
+fn rejects_const_aggregate_array_decay_to_mutable_pointer() {
+    let program = include_str!("fixtures/invalid/const_aggregate_array_decay_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
 fn rejects_struct_array_designators_out_of_bounds() {
     let program = include_str!("fixtures/invalid/struct_array_designator_out_of_bounds.c");
 

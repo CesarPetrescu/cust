@@ -18,6 +18,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/aggregate_pointer_indexing.c",
     "tests/fixtures/compat/valid/aggregate_pointer_indexed_values.c",
     "tests/fixtures/compat/valid/aggregate_array_designated_initializers.c",
+    "tests/fixtures/compat/valid/aggregate_array_decay_to_pointers.c",
     "tests/fixtures/compat/valid/address_of_struct_fields.c",
     "tests/fixtures/compat/valid/assignment_expressions.c",
     "tests/fixtures/compat/valid/bitwise_compound_assignments.c",
