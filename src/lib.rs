@@ -134,6 +134,17 @@ enum Expr {
         fields: Vec<String>,
         index: Box<Expr>,
     },
+    StructElementGet {
+        name: String,
+        index: Box<Expr>,
+        fields: Vec<String>,
+    },
+    StructElementArrayGet {
+        name: String,
+        index: Box<Expr>,
+        fields: Vec<String>,
+        array_index: Box<Expr>,
+    },
     ArrayGet {
         name: String,
         index: Box<Expr>,
@@ -177,6 +188,19 @@ enum Expr {
         index: Box<Expr>,
         value: Box<Expr>,
     },
+    StructElementSet {
+        name: String,
+        index: Box<Expr>,
+        fields: Vec<String>,
+        value: Box<Expr>,
+    },
+    StructElementArraySet {
+        name: String,
+        index: Box<Expr>,
+        fields: Vec<String>,
+        array_index: Box<Expr>,
+        value: Box<Expr>,
+    },
     CompoundAssign {
         name: String,
         op: CompoundOp,
@@ -209,6 +233,21 @@ enum Expr {
         name: String,
         fields: Vec<String>,
         index: Box<Expr>,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
+    StructElementCompoundSet {
+        name: String,
+        index: Box<Expr>,
+        fields: Vec<String>,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
+    StructElementArrayCompoundSet {
+        name: String,
+        index: Box<Expr>,
+        fields: Vec<String>,
+        array_index: Box<Expr>,
         op: CompoundOp,
         value: Box<Expr>,
     },
@@ -282,6 +321,8 @@ enum StructInitializer {
     Array(Vec<Expr>),
     Struct(Vec<StructInitializer>),
 }
+
+type StructArrayInitializer = Vec<StructInitializer>;
 
 impl StructFieldType {
     fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
@@ -530,6 +571,13 @@ enum Stmt {
         type_name: String,
         name: String,
         init: Vec<StructInitializer>,
+        is_const: bool,
+    },
+    StructArrayDecl {
+        type_name: String,
+        name: String,
+        len: usize,
+        init: Vec<StructArrayInitializer>,
         is_const: bool,
     },
     EnumDecl {
@@ -1868,6 +1916,30 @@ impl Parser {
             });
         }
         if matches!(decl_type, DeclType::Struct(_)) {
+            if self.matches(&Token::LBracket) {
+                let len = self.expect_array_len()?;
+                self.expect_closing_bracket_after("struct array length")?;
+                let DeclType::Struct(type_name) = &decl_type else {
+                    unreachable!("struct declarations return above")
+                };
+                let init = if self.matches(&Token::Assign) {
+                    self.parse_struct_array_initializer(&name, type_name, len)?
+                } else {
+                    Vec::new()
+                };
+                if require_semi {
+                    self.expect_semicolon_after("struct array declaration")?;
+                }
+                if let DeclType::Struct(type_name) = decl_type {
+                    return Ok(Stmt::StructArrayDecl {
+                        type_name,
+                        name,
+                        len,
+                        init,
+                        is_const: leading_const,
+                    });
+                }
+            }
             let init = if self.matches(&Token::Assign) {
                 let DeclType::Struct(type_name) = &decl_type else {
                     unreachable!("struct declarations return above")
@@ -2000,6 +2072,38 @@ impl Parser {
                 continue;
             }
             self.expect_closing_brace_after("struct initializer")?;
+        }
+        Ok(values)
+    }
+
+    fn parse_struct_array_initializer(
+        &mut self,
+        name: &str,
+        type_name: &str,
+        len: usize,
+    ) -> CustResult<Vec<StructArrayInitializer>> {
+        self.expect_opening_brace_after("struct array initializer")?;
+        let mut values = Vec::new();
+        if self.matches(&Token::RBrace) {
+            return Ok(values);
+        }
+        loop {
+            if values.len() == len {
+                return Err(CustError::new(format!(
+                    "too many initializers for struct array '{name}'"
+                )));
+            }
+            values.push(self.parse_struct_initializer(type_name)?);
+            if self.matches(&Token::RBrace) {
+                break;
+            }
+            if self.matches(&Token::Comma) {
+                if self.matches(&Token::RBrace) {
+                    break;
+                }
+                continue;
+            }
+            self.expect_closing_brace_after("struct array initializer")?;
         }
         Ok(values)
     }
@@ -2147,6 +2251,23 @@ impl Parser {
             });
         }
         let name = self.expect_ident_after("struct variable name")?;
+        if self.matches(&Token::LBracket) {
+            let len = self.expect_array_len()?;
+            self.expect_closing_bracket_after("struct array length")?;
+            let init = if self.matches(&Token::Assign) {
+                self.parse_struct_array_initializer(&name, &type_name, len)?
+            } else {
+                Vec::new()
+            };
+            self.expect_semicolon_after("struct array declaration")?;
+            return Ok(Stmt::StructArrayDecl {
+                type_name,
+                name,
+                len,
+                init,
+                is_const: false,
+            });
+        }
         let init = if self.matches(&Token::Assign) {
             self.parse_struct_initializer(&type_name)?
         } else {
@@ -2654,6 +2775,30 @@ impl Parser {
                     op,
                     value: Box::new(value),
                 }),
+                Expr::StructElementGet {
+                    name,
+                    index,
+                    fields,
+                } => Ok(Expr::StructElementCompoundSet {
+                    name,
+                    index,
+                    fields,
+                    op,
+                    value: Box::new(value),
+                }),
+                Expr::StructElementArrayGet {
+                    name,
+                    index,
+                    fields,
+                    array_index,
+                } => Ok(Expr::StructElementArrayCompoundSet {
+                    name,
+                    index,
+                    fields,
+                    array_index,
+                    op,
+                    value: Box::new(value),
+                }),
                 Expr::Deref(pointer) => Ok(Expr::DerefCompoundSet {
                     pointer,
                     op,
@@ -2697,6 +2842,28 @@ impl Parser {
                     name,
                     fields,
                     index,
+                    value: Box::new(value),
+                }),
+                Expr::StructElementGet {
+                    name,
+                    index,
+                    fields,
+                } => Ok(Expr::StructElementSet {
+                    name,
+                    index,
+                    fields,
+                    value: Box::new(value),
+                }),
+                Expr::StructElementArrayGet {
+                    name,
+                    index,
+                    fields,
+                    array_index,
+                } => Ok(Expr::StructElementArraySet {
+                    name,
+                    index,
+                    fields,
+                    array_index,
                     value: Box::new(value),
                 }),
                 Expr::Deref(pointer) => Ok(Expr::DerefSet {
@@ -2995,6 +3162,16 @@ impl Parser {
                         fields,
                         index: Box::new(index),
                     },
+                    Expr::StructElementGet {
+                        name,
+                        index: element_index,
+                        fields,
+                    } => Expr::StructElementArrayGet {
+                        name,
+                        index: element_index,
+                        fields,
+                        array_index: Box::new(index),
+                    },
                     _ => {
                         return Err(Self::error_at(
                             "invalid array index target".to_string(),
@@ -3012,6 +3189,23 @@ impl Parser {
                     Expr::StructGet { name, mut fields } => {
                         fields.push(field);
                         Expr::StructGet { name, fields }
+                    }
+                    Expr::ArrayGet { name, index } => Expr::StructElementGet {
+                        name,
+                        index,
+                        fields: vec![field],
+                    },
+                    Expr::StructElementGet {
+                        name,
+                        index,
+                        mut fields,
+                    } => {
+                        fields.push(field);
+                        Expr::StructElementGet {
+                            name,
+                            index,
+                            fields,
+                        }
                     }
                     Expr::Deref(pointer) => Expr::StructPtrGet {
                         pointer,
@@ -3060,6 +3254,8 @@ impl Parser {
             Expr::Var(_)
             | Expr::ArrayGet { .. }
             | Expr::StructArrayGet { .. }
+            | Expr::StructElementGet { .. }
+            | Expr::StructElementArrayGet { .. }
             | Expr::Deref(_)
             | Expr::StructGet { .. }
             | Expr::StructPtrGet { .. } => Ok(Expr::Increment {
@@ -3668,6 +3864,11 @@ enum Value {
         type_name: String,
         fields: HashMap<String, StructFieldValue>,
     },
+    StructArray {
+        type_name: String,
+        elements: Vec<HashMap<String, StructFieldValue>>,
+        read_only: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4013,7 +4214,7 @@ impl Interpreter {
     }
 
     fn eval_struct_argument(
-        &self,
+        &mut self,
         function_name: &str,
         param_name: &str,
         expected_type: &str,
@@ -4043,6 +4244,21 @@ impl Interpreter {
                 Some(_) => None,
                 None => return Err(CustError::new(format!("undefined variable '{name}'"))),
             },
+            Expr::ArrayGet { name, index } => {
+                let index = self.checked_struct_element_index(name, index)?;
+                match self.find_variable(name).cloned() {
+                    Some(Value::StructArray {
+                        type_name,
+                        elements,
+                        ..
+                    }) => Some((
+                        type_name,
+                        StructFieldValue::deep_clone_fields(&elements[index]),
+                    )),
+                    Some(_) => None,
+                    None => return Err(CustError::new(format!("undefined variable '{name}'"))),
+                }
+            }
             _ => None,
         };
 
@@ -4339,9 +4555,9 @@ impl Interpreter {
             Some(Value::Pointer { .. }) => {
                 Err(CustError::new(format!("pointer '{name}' used as scalar")))
             }
-            Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                "struct variable '{name}' used as scalar"
-            ))),
+            Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(CustError::new(
+                format!("struct variable '{name}' used as scalar"),
+            )),
             None => self
                 .find_enum_constant(name)
                 .ok_or_else(|| CustError::new(format!("undefined variable '{name}'"))),
@@ -4357,9 +4573,9 @@ impl Interpreter {
             Some(Value::Pointer { .. }) => {
                 Err(CustError::new(format!("pointer '{name}' is not an array")))
             }
-            Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                "struct variable '{name}' is not an array"
-            ))),
+            Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(CustError::new(
+                format!("struct variable '{name}' is not an array"),
+            )),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
@@ -4388,6 +4604,25 @@ impl Interpreter {
         Ok(Value::Struct {
             type_name: type_name.to_string(),
             fields,
+        })
+    }
+
+    fn make_struct_array_value(
+        &mut self,
+        type_name: &str,
+        len: usize,
+        init: &[StructArrayInitializer],
+        read_only: bool,
+    ) -> CustResult<Value> {
+        let mut elements = Vec::with_capacity(len);
+        for index in 0..len {
+            let element_init = init.get(index).map(Vec::as_slice).unwrap_or(&[]);
+            elements.push(self.make_struct_fields(type_name, element_init)?);
+        }
+        Ok(Value::StructArray {
+            type_name: type_name.to_string(),
+            elements,
+            read_only,
         })
     }
 
@@ -4778,6 +5013,175 @@ impl Interpreter {
         Ok((array, index))
     }
 
+    fn checked_struct_element_index(&mut self, name: &str, index: &Expr) -> CustResult<usize> {
+        let index_value = self.eval(index)?;
+        let len = match self.find_variable(name) {
+            Some(Value::StructArray { elements, .. }) => elements.len(),
+            Some(_) => {
+                return Err(CustError::new(format!(
+                    "variable '{name}' is not a struct array"
+                )));
+            }
+            None => return Err(CustError::new(format!("undefined variable '{name}'"))),
+        };
+        let Ok(index) = usize::try_from(index_value) else {
+            return Err(CustError::new(format!(
+                "struct array '{name}' index {index_value} out of bounds for length {len}"
+            )));
+        };
+        if index >= len {
+            return Err(CustError::new(format!(
+                "struct array '{name}' index {index_value} out of bounds for length {len}"
+            )));
+        }
+        Ok(index)
+    }
+
+    fn read_struct_element_field(
+        &mut self,
+        name: &str,
+        index: &Expr,
+        path: &[String],
+    ) -> CustResult<i64> {
+        let index = self.checked_struct_element_index(name, index)?;
+        match self.find_variable(name) {
+            Some(Value::StructArray {
+                type_name,
+                elements,
+                ..
+            }) => {
+                let (_, field_value) = Self::nested_field_value(type_name, &elements[index], path)?;
+                match field_value {
+                    StructFieldValue::Scalar { value, .. } => Ok(*value),
+                    StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is an array",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                        "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                        "pointer field '{}' used as scalar",
+                        Self::field_path_label(path)
+                    ))),
+                }
+            }
+            Some(_) => Err(CustError::new(format!(
+                "variable '{name}' is not a struct array"
+            ))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn assign_struct_element_field(
+        &mut self,
+        name: &str,
+        index: &Expr,
+        path: &[String],
+        value: i64,
+    ) -> CustResult<()> {
+        self.ensure_variable_mutable(name)?;
+        let index = self.checked_struct_element_index(name, index)?;
+        match self.find_variable_mut(name) {
+            Some(Value::StructArray {
+                type_name,
+                elements,
+                read_only,
+            }) => {
+                if *read_only {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const variable '{name}'"
+                    )));
+                }
+                let (_, field_value) =
+                    Self::nested_field_value_mut(type_name, &mut elements[index], path)?;
+                if field_value.is_const() {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(path)
+                    )));
+                }
+                match field_value {
+                    StructFieldValue::Scalar { value: slot, .. } => {
+                        *slot = value;
+                        Ok(())
+                    }
+                    StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is an array",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                        "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                        "pointer field '{}' used as scalar",
+                        Self::field_path_label(path)
+                    ))),
+                }
+            }
+            Some(_) => Err(CustError::new(format!(
+                "variable '{name}' is not a struct array"
+            ))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn find_struct_element_array_field(
+        &mut self,
+        name: &str,
+        index: &Expr,
+        path: &[String],
+    ) -> CustResult<Rc<RefCell<ArrayValue>>> {
+        let index = self.checked_struct_element_index(name, index)?;
+        match self.find_variable(name) {
+            Some(Value::StructArray {
+                type_name,
+                elements,
+                ..
+            }) => {
+                let (_, field_value) = Self::nested_field_value(type_name, &elements[index], path)?;
+                match field_value {
+                    StructFieldValue::Array { value, .. } => Ok(Rc::clone(value)),
+                    _ => Err(CustError::new(format!(
+                        "struct field '{}' is not an array",
+                        Self::field_path_label(path)
+                    ))),
+                }
+            }
+            Some(_) => Err(CustError::new(format!(
+                "variable '{name}' is not a struct array"
+            ))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn checked_struct_element_array_index(
+        &mut self,
+        name: &str,
+        index: &Expr,
+        fields: &[String],
+        array_index: &Expr,
+    ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
+        let array = self.find_struct_element_array_field(name, index, fields)?;
+        let index_value = self.eval(array_index)?;
+        let len = array.borrow().elements.len();
+        let Ok(index) = usize::try_from(index_value) else {
+            return Err(CustError::new(format!(
+                "array '{}' index {index_value} out of bounds for length {len}",
+                Self::field_path_label(fields)
+            )));
+        };
+        if index >= len {
+            return Err(CustError::new(format!(
+                "array '{}' index {index_value} out of bounds for length {len}",
+                Self::field_path_label(fields)
+            )));
+        }
+        Ok((array, index))
+    }
+
     fn eval_struct_array_set(
         &mut self,
         name: &str,
@@ -5053,6 +5457,9 @@ impl Interpreter {
                         scope_id: scope.id,
                         name: name.to_string(),
                     }),
+                    Value::StructArray { .. } => Err(CustError::new(format!(
+                        "struct array '{name}' requires indexed field access"
+                    ))),
                 };
             }
             if let Some(storage) = scope
@@ -5075,6 +5482,9 @@ impl Interpreter {
                         scope_id: storage.scope_id,
                         name: name.to_string(),
                     }),
+                    Value::StructArray { .. } => Err(CustError::new(format!(
+                        "struct array '{name}' requires indexed field access"
+                    ))),
                 };
             }
         }
@@ -5142,9 +5552,9 @@ impl Interpreter {
                 Some(Value::Array(_)) => Err(CustError::new(format!(
                     "array '{name}' requires indexed address-of"
                 ))),
-                Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                    "struct variable '{name}' used as pointer"
-                ))),
+                Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(
+                    CustError::new(format!("struct variable '{name}' used as pointer")),
+                ),
                 None => Err(CustError::new(format!(
                     "assignment to undeclared variable '{name}'"
                 ))),
@@ -5158,9 +5568,9 @@ impl Interpreter {
                 Some(Value::Scalar { .. }) => Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
                 ))),
-                Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                    "struct variable '{name}' used as pointer"
-                ))),
+                Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(
+                    CustError::new(format!("struct variable '{name}' used as pointer")),
+                ),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::StructGet { name, fields } => self.read_direct_struct_pointer_field(name, fields),
@@ -5188,7 +5598,7 @@ impl Interpreter {
                     Some(Value::Array(_)) => {
                         return Err(CustError::new(format!("array '{name}' is not a pointer")));
                     }
-                    Some(Value::Struct { .. }) => {
+                    Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => {
                         return Err(CustError::new(format!(
                             "struct variable '{name}' used as pointer"
                         )));
@@ -5223,7 +5633,7 @@ impl Interpreter {
                         Some(Value::Array(_)) => {
                             return Err(CustError::new(format!("array '{name}' is not a pointer")));
                         }
-                        Some(Value::Struct { .. }) => {
+                        Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => {
                             return Err(CustError::new(format!(
                                 "struct variable '{name}' used as pointer"
                             )));
@@ -5424,7 +5834,7 @@ impl Interpreter {
             Some(Value::Array(_)) => {
                 return Err(CustError::new(format!("array '{name}' is not a pointer")));
             }
-            Some(Value::Struct { .. }) => {
+            Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => {
                 return Err(CustError::new(format!(
                     "struct variable '{name}' used as pointer"
                 )));
@@ -5645,9 +6055,9 @@ impl Interpreter {
                 Some(Value::Array(_)) => Err(CustError::new(format!(
                     "array '{name}' requires indexed assignment"
                 ))),
-                Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                    "struct variable '{name}' used as scalar"
-                ))),
+                Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(
+                    CustError::new(format!("struct variable '{name}' used as scalar")),
+                ),
                 None => Err(CustError::new(format!(
                     "assignment to undeclared variable '{name}'"
                 ))),
@@ -5656,9 +6066,9 @@ impl Interpreter {
                 Some(Value::Pointer { pointer, .. }) => Ok(Self::pointer_truthy(&pointer)),
                 Some(Value::Array(array)) => Ok(!array.borrow().elements.is_empty()),
                 Some(Value::Scalar { value, .. }) => Ok(value != 0),
-                Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                    "struct variable '{name}' used as scalar"
-                ))),
+                Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(
+                    CustError::new(format!("struct variable '{name}' used as scalar")),
+                ),
                 None => self
                     .find_enum_constant(name)
                     .map(|value| value != 0)
@@ -5673,6 +6083,12 @@ impl Interpreter {
             | Expr::StructArrayGet { .. }
             | Expr::StructArraySet { .. }
             | Expr::StructArrayCompoundSet { .. }
+            | Expr::StructElementGet { .. }
+            | Expr::StructElementArrayGet { .. }
+            | Expr::StructElementSet { .. }
+            | Expr::StructElementArraySet { .. }
+            | Expr::StructElementCompoundSet { .. }
+            | Expr::StructElementArrayCompoundSet { .. }
             | Expr::StructGet { .. }
             | Expr::StructSet { .. }
             | Expr::StructCompoundSet { .. }
@@ -5740,9 +6156,9 @@ impl Interpreter {
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
             ))),
-            Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                "struct variable '{name}' assignment is not supported"
-            ))),
+            Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(CustError::new(
+                format!("struct variable '{name}' assignment is not supported"),
+            )),
             None if self.find_enum_constant(name).is_some() => Err(CustError::new(format!(
                 "cannot assign to enum constant '{name}'"
             ))),
@@ -5772,9 +6188,9 @@ impl Interpreter {
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
             ))),
-            Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                "struct variable '{name}' assignment is not supported"
-            ))),
+            Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(CustError::new(
+                format!("struct variable '{name}' assignment is not supported"),
+            )),
             None if self.find_enum_constant(name).is_some() => Err(CustError::new(format!(
                 "cannot assign to enum constant '{name}'"
             ))),
@@ -5851,10 +6267,24 @@ impl Interpreter {
             Expr::StructArrayGet { name, fields, .. } => {
                 self.sizeof_struct_array_indexed_value(name, fields)
             }
+            Expr::StructElementGet { name, fields, .. } => {
+                self.sizeof_struct_element_field(name, fields)
+            }
+            Expr::StructElementArrayGet { name, fields, .. } => {
+                self.sizeof_struct_element_array_indexed_value(name, fields)
+            }
             Expr::StructPtrGet { pointer, fields } => {
                 self.sizeof_struct_pointer_field(pointer, fields)
             }
-            Expr::ArrayGet { name, .. } => self.sizeof_indexed_value(name),
+            Expr::ArrayGet { name, .. } => match self.find_variable(name) {
+                Some(Value::StructArray { type_name, .. }) => self
+                    .struct_types
+                    .get(type_name)
+                    .map(|struct_type| struct_type.size(&self.struct_types))
+                    .transpose()?
+                    .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+                _ => self.sizeof_indexed_value(name),
+            },
             Expr::StringGet { .. } => Ok(CHAR_SIZE),
             Expr::AddressOf(_) | Expr::AddressOfArray { .. } => Ok(POINTER_SIZE),
             Expr::Deref(pointer) => self.sizeof_deref(pointer),
@@ -5873,6 +6303,14 @@ impl Interpreter {
             Expr::StructArraySet { name, fields, .. }
             | Expr::StructArrayCompoundSet { name, fields, .. } => {
                 self.sizeof_struct_array_indexed_value(name, fields)
+            }
+            Expr::StructElementSet { name, fields, .. }
+            | Expr::StructElementCompoundSet { name, fields, .. } => {
+                self.sizeof_struct_element_field(name, fields)
+            }
+            Expr::StructElementArraySet { name, fields, .. }
+            | Expr::StructElementArrayCompoundSet { name, fields, .. } => {
+                self.sizeof_struct_element_array_indexed_value(name, fields)
             }
             Expr::StructPtrSet {
                 pointer, fields, ..
@@ -5931,6 +6369,17 @@ impl Interpreter {
                 .map(|struct_type| struct_type.size(&self.struct_types))
                 .transpose()?
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            Some(Value::StructArray {
+                type_name,
+                elements,
+                ..
+            }) => self
+                .struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.size(&self.struct_types))
+                .transpose()?
+                .map(|element_size| element_size * elements.len() as i64)
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
@@ -5958,6 +6407,60 @@ impl Interpreter {
         Ok(array.borrow().elem_type.size())
     }
 
+    fn sizeof_struct_element_field(&self, name: &str, path: &[String]) -> CustResult<i64> {
+        match self.find_variable(name) {
+            Some(Value::StructArray {
+                type_name,
+                elements,
+                ..
+            }) => {
+                let Some(first_element) = elements.first() else {
+                    return Err(CustError::new(format!(
+                        "struct array '{name}' has no elements"
+                    )));
+                };
+                let (_, field_value) = Self::nested_field_value(type_name, first_element, path)?;
+                self.struct_field_value_size(field_value)
+            }
+            Some(_) => Err(CustError::new(format!(
+                "variable '{name}' is not a struct array"
+            ))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn sizeof_struct_element_array_indexed_value(
+        &self,
+        name: &str,
+        path: &[String],
+    ) -> CustResult<i64> {
+        match self.find_variable(name) {
+            Some(Value::StructArray {
+                type_name,
+                elements,
+                ..
+            }) => {
+                let Some(first_element) = elements.first() else {
+                    return Err(CustError::new(format!(
+                        "struct array '{name}' has no elements"
+                    )));
+                };
+                let (_, field_value) = Self::nested_field_value(type_name, first_element, path)?;
+                match field_value {
+                    StructFieldValue::Array { value, .. } => Ok(value.borrow().elem_type.size()),
+                    _ => Err(CustError::new(format!(
+                        "struct field '{}' is not an array",
+                        Self::field_path_label(path)
+                    ))),
+                }
+            }
+            Some(_) => Err(CustError::new(format!(
+                "variable '{name}' is not a struct array"
+            ))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
     fn clone_for_sizeof_pointer(&self, pointer: &Expr) -> CustResult<PointerValue> {
         match pointer {
             Expr::Var(name) => match self.find_variable(name) {
@@ -5981,9 +6484,9 @@ impl Interpreter {
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
             ))),
-            Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                "struct variable '{name}' assignment is not supported"
-            ))),
+            Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(CustError::new(
+                format!("struct variable '{name}' assignment is not supported"),
+            )),
             None if self.find_enum_constant(name).is_some() => Err(CustError::new(format!(
                 "cannot assign to enum constant '{name}'"
             ))),
@@ -6000,9 +6503,9 @@ impl Interpreter {
             Some(Value::Scalar { .. }) => {
                 Err(CustError::new(format!("variable '{name}' is not an array")))
             }
-            Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                "struct variable '{name}' is not an array"
-            ))),
+            Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(CustError::new(
+                format!("struct variable '{name}' is not an array"),
+            )),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
@@ -6015,9 +6518,9 @@ impl Interpreter {
                 Some(Value::Scalar { .. }) => Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
                 ))),
-                Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                    "struct variable '{name}' used as pointer"
-                ))),
+                Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(
+                    CustError::new(format!("struct variable '{name}' used as pointer")),
+                ),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::AddressOf(name) => self.sizeof_variable(name),
@@ -6049,9 +6552,11 @@ impl Interpreter {
                 Some(Value::Array(_)) => Err(CustError::new(format!(
                     "array '{name}' requires indexed assignment"
                 ))),
-                Some(Value::Struct { .. }) => Err(CustError::new(format!(
-                    "struct variable '{name}' assignment is not supported"
-                ))),
+                Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => {
+                    Err(CustError::new(format!(
+                        "struct variable '{name}' assignment is not supported"
+                    )))
+                }
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::ArrayGet { name, index } => {
@@ -6083,6 +6588,36 @@ impl Interpreter {
             } => {
                 self.ensure_variable_mutable(name)?;
                 let (array, index) = self.checked_struct_array_index(name, fields, index)?;
+                let current = array.borrow().elements[index];
+                let updated = Self::apply_increment_op(current, op);
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new(format!(
+                        "cannot modify read-only array '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
+                array.elements[index] = updated;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => {
+                let current = self.read_struct_element_field(name, index, fields)?;
+                let updated = Self::apply_increment_op(current, op);
+                self.assign_struct_element_field(name, index, fields, updated)?;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
+            Expr::StructElementArrayGet {
+                name,
+                index,
+                fields,
+                array_index,
+            } => {
+                let (array, index) =
+                    self.checked_struct_element_array_index(name, index, fields, array_index)?;
                 let current = array.borrow().elements[index];
                 let updated = Self::apply_increment_op(current, op);
                 let mut array = array.borrow_mut();
@@ -6221,6 +6756,23 @@ impl Interpreter {
                 Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
+            Expr::ArrayGet { name, index } => {
+                let index = self.checked_struct_element_index(name, index)?;
+                match self.find_variable(name).cloned() {
+                    Some(Value::StructArray {
+                        type_name,
+                        elements,
+                        ..
+                    }) => Ok(ReturnValue::Struct {
+                        type_name,
+                        fields: StructFieldValue::deep_clone_fields(&elements[index]),
+                    }),
+                    Some(_) => Err(CustError::new(format!(
+                        "variable '{name}' is not a struct array"
+                    ))),
+                    None => Err(CustError::new(format!("undefined variable '{name}'"))),
+                }
+            }
             Expr::Call { name, args } => self.call_function(name, args)?.ok_or_else(|| {
                 CustError::new(format!("void function '{name}' used as struct expression"))
             }),
@@ -6246,7 +6798,8 @@ impl Interpreter {
             Stmt::VarDecl { name, is_const, .. }
             | Stmt::PointerDecl { name, is_const, .. }
             | Stmt::ArrayDecl { name, is_const, .. }
-            | Stmt::StructVarDecl { name, is_const, .. } => Ok((name, *is_const)),
+            | Stmt::StructVarDecl { name, is_const, .. }
+            | Stmt::StructArrayDecl { name, is_const, .. } => Ok((name, *is_const)),
             _ => Err(CustError::new(
                 "static local declarations must declare variables",
             )),
@@ -6282,6 +6835,13 @@ impl Interpreter {
             Stmt::StructVarDecl {
                 type_name, init, ..
             } => self.make_struct_value(type_name, init),
+            Stmt::StructArrayDecl {
+                type_name,
+                len,
+                init,
+                is_const,
+                ..
+            } => self.make_struct_array_value(type_name, *len, init, *is_const),
             _ => Err(CustError::new(
                 "static local declarations must declare variables",
             )),
@@ -6406,6 +6966,25 @@ impl Interpreter {
                 }
                 Ok(ExecFlow::None)
             }
+            Stmt::StructArrayDecl {
+                type_name,
+                name,
+                len,
+                init,
+                is_const,
+            } => {
+                if self.current_scope_has_identifier(name) {
+                    return Err(CustError::new(format!(
+                        "variable '{name}' already declared in this scope"
+                    )));
+                }
+                let value = self.make_struct_array_value(type_name, *len, init, *is_const)?;
+                self.current_scope_mut().insert(name.clone(), value);
+                if *is_const {
+                    self.mark_current_variable_const(name);
+                }
+                Ok(ExecFlow::None)
+            }
             Stmt::EnumDecl { constants } => {
                 for constant in constants {
                     self.insert_enum_constant(constant.name.clone(), constant.value)?;
@@ -6445,6 +7024,9 @@ impl Interpreter {
                         self.assign_struct_copy(name, expr)?;
                         Ok(ExecFlow::None)
                     }
+                    Some(Value::StructArray { .. }) => Err(CustError::new(format!(
+                        "struct array '{name}' assignment is not supported"
+                    ))),
                     None if self.find_enum_constant(name).is_some() => Err(CustError::new(
                         format!("cannot assign to enum constant '{name}'"),
                     )),
@@ -6680,6 +7262,21 @@ impl Interpreter {
                 let (array, index) = self.checked_struct_array_index(name, fields, index)?;
                 Ok(array.borrow().elements[index])
             }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => self.read_struct_element_field(name, index, fields),
+            Expr::StructElementArrayGet {
+                name,
+                index,
+                fields,
+                array_index,
+            } => {
+                let (array, index) =
+                    self.checked_struct_element_array_index(name, index, fields, array_index)?;
+                Ok(array.borrow().elements[index])
+            }
             Expr::StructPtrGet { pointer, fields } => {
                 let pointer = self.eval_pointer(pointer)?;
                 self.read_struct_pointer_field(&pointer, fields)
@@ -6730,6 +7327,36 @@ impl Interpreter {
                 index,
                 value,
             } => self.eval_struct_array_set(name, fields, index, value),
+            Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                value,
+            } => {
+                let value = self.eval(value)?;
+                self.assign_struct_element_field(name, index, fields, value)?;
+                Ok(value)
+            }
+            Expr::StructElementArraySet {
+                name,
+                index,
+                fields,
+                array_index,
+                value,
+            } => {
+                let value = self.eval(value)?;
+                let (array, index) =
+                    self.checked_struct_element_array_index(name, index, fields, array_index)?;
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new(format!(
+                        "cannot modify read-only array '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
+                array.elements[index] = value;
+                Ok(value)
+            }
             Expr::StructArrayCompoundSet {
                 name,
                 fields,
@@ -6737,6 +7364,42 @@ impl Interpreter {
                 op,
                 value,
             } => self.eval_struct_array_compound_set(name, fields, index, *op, value),
+            Expr::StructElementCompoundSet {
+                name,
+                index,
+                fields,
+                op,
+                value,
+            } => {
+                let current = self.read_struct_element_field(name, index, fields)?;
+                let rhs = self.eval(value)?;
+                let result = Self::apply_compound_op(current, *op, rhs)?;
+                self.assign_struct_element_field(name, index, fields, result)?;
+                Ok(result)
+            }
+            Expr::StructElementArrayCompoundSet {
+                name,
+                index,
+                fields,
+                array_index,
+                op,
+                value,
+            } => {
+                let (array, index) =
+                    self.checked_struct_element_array_index(name, index, fields, array_index)?;
+                let current = array.borrow().elements[index];
+                let rhs = self.eval(value)?;
+                let result = Self::apply_compound_op(current, *op, rhs)?;
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new(format!(
+                        "cannot modify read-only array '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
+                array.elements[index] = result;
+                Ok(result)
+            }
             Expr::DerefSet { pointer, value } => {
                 self.ensure_pointer_expr_pointee_mutable(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;

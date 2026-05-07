@@ -147,6 +147,13 @@ fn supports_struct_array_fields() {
 }
 
 #[test]
+fn supports_arrays_of_structs() {
+    let program = include_str!("fixtures/valid/struct_arrays.c");
+
+    assert_eq!(interpret(program).unwrap(), 125);
+}
+
+#[test]
 fn supports_struct_pointer_fields() {
     let program = include_str!("fixtures/valid/struct_pointer_fields.c");
 
@@ -189,6 +196,18 @@ fn rejects_struct_array_initializers_longer_than_declared_length() {
     let err = interpret(program).unwrap_err();
 
     assert_eq!(err.to_string(), "too many initializers for array 'values'");
+}
+
+#[test]
+fn rejects_struct_array_variable_initializers_longer_than_declared_length() {
+    let program = include_str!("fixtures/invalid/struct_array_variable_initializer_too_long.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "too many initializers for struct array 'points'"
+    );
 }
 
 #[test]
