@@ -217,6 +217,13 @@ fn supports_aggregate_array_decay_to_pointer_parameters() {
 }
 
 #[test]
+fn supports_unsized_array_parameters_as_pointer_parameters() {
+    let program = include_str!("fixtures/valid/unsized_array_parameters.c");
+
+    assert_eq!(interpret(program).unwrap(), 109);
+}
+
+#[test]
 fn supports_pointer_return_functions_and_prototypes() {
     let program = include_str!("fixtures/valid/pointer_return_functions.c");
 
@@ -272,6 +279,17 @@ fn rejects_pointer_return_const_discard() {
 #[test]
 fn rejects_const_aggregate_array_decay_to_mutable_pointer() {
     let program = include_str!("fixtures/invalid/const_aggregate_array_decay_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_const_scalar_array_decay_to_mutable_unsized_parameter() {
+    let program = include_str!("fixtures/invalid/unsized_array_parameter_const_discard.c");
 
     let err = interpret(program).unwrap_err();
     assert_eq!(
@@ -1266,18 +1284,6 @@ fn reports_negative_array_lengths() {
     assert_eq!(
         err.to_string(),
         "array length must be positive at line 2, column 12"
-    );
-}
-
-#[test]
-fn reports_missing_array_parameter_lengths() {
-    let program = "int first(int values[]) { return values[0]; }\nint main() { int xs[1]; return first(xs); }\n";
-
-    let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "expected array length before ']' at line 1, column 22"
     );
 }
 

@@ -1771,19 +1771,34 @@ impl Parser {
                 }
                 ParamKind::Pointer
             } else if matches!(decl_type, DeclType::Struct(_)) {
-                ParamKind::Struct
+                if self.matches(&Token::LBracket) {
+                    if !self.check(&Token::RBracket) {
+                        self.expect_array_len()?;
+                    }
+                    self.expect_closing_bracket_after("array parameter length")?;
+                    ParamKind::Pointer
+                } else {
+                    ParamKind::Struct
+                }
             } else if self.matches(&Token::LBracket) {
-                let len = self.expect_array_len()?;
-                self.expect_closing_bracket_after("array parameter length")?;
-                ParamKind::Array(len)
+                if self.check(&Token::RBracket) {
+                    self.expect_closing_bracket_after("array parameter length")?;
+                    ParamKind::Pointer
+                } else {
+                    let len = self.expect_array_len()?;
+                    self.expect_closing_bracket_after("array parameter length")?;
+                    ParamKind::Array(len)
+                }
             } else {
                 ParamKind::Scalar
             };
-            let (is_const, points_to_const) = if is_pointer {
+            let (is_const, points_to_const) = if matches!(kind, ParamKind::Pointer) {
                 if has_explicit_star {
                     (post_star_const, leading_const)
-                } else {
+                } else if is_pointer {
                     (leading_const, false)
+                } else {
+                    (false, leading_const)
                 }
             } else {
                 (leading_const, false)

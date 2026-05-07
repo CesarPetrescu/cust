@@ -99,7 +99,7 @@ Features:
 - one-dimensional `int`/`char` arrays with indexed reads/writes
 - scalar pointers such as `int *p = &x;`, `*p`, and `*p = value;`
 - pointer parameters with array/string decay, pointer indexing (`p[i]`), and array-element addresses such as `&values[1]`
-- array parameters such as `char text[4]`; string literals are read-only NUL-terminated byte arrays and can be passed to matching array or pointer parameters
+- array parameters such as `char text[4]` and C-style unsized parameter spellings such as `int values[]`, `char text[]`, and `struct Point points[]`, which behave like pointer parameters; string literals are read-only NUL-terminated byte arrays and can be passed to matching array or pointer parameters
 - nested block scopes with inner shadowing
 - `return expr;` for `int` functions and `return;` for `void` functions
 - `if` / `else`
