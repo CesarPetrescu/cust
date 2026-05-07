@@ -2068,6 +2068,14 @@ impl Parser {
     }
 
     fn parse_array_designator_index(&mut self, name: &str, len: usize) -> CustResult<usize> {
+        self.parse_array_designator_index_with_context(&format!("array '{name}'"), len)
+    }
+
+    fn parse_array_designator_index_with_context(
+        &mut self,
+        context: &str,
+        len: usize,
+    ) -> CustResult<usize> {
         self.expect(Token::LBracket)?;
         let found = self.advance();
         let index = match &found.kind {
@@ -2084,7 +2092,7 @@ impl Parser {
         self.expect_closing_bracket_after("array designator")?;
         if index >= len {
             return Err(CustError::new(format!(
-                "array designator index {index} out of bounds for array '{name}'"
+                "array designator index {index} out of bounds for {context}"
             )));
         }
         Ok(index)
@@ -2104,15 +2112,8 @@ impl Parser {
         }
         loop {
             if self.matches(&Token::Dot) {
-                let field_name = self.expect_ident_after("struct field name after '.'")?;
-                let field_index = fields
-                    .iter()
-                    .position(|field| field.name == field_name)
-                    .ok_or_else(|| {
-                        CustError::new(format!("struct '{type_name}' has no field '{field_name}'"))
-                    })?;
-                self.expect_assign_after("struct field designator")?;
-                let value = self.parse_struct_initializer_value(&fields[field_index])?;
+                let (field_index, field_name, value) =
+                    self.parse_struct_designator_after_dot(type_name, &fields)?;
                 next_positional_index = field_index + 1;
                 values.push(StructInitializer::Designated {
                     field: field_name,
@@ -2144,6 +2145,70 @@ impl Parser {
             self.expect_closing_brace_after("struct initializer")?;
         }
         Ok(values)
+    }
+
+    fn parse_struct_designator_after_dot(
+        &mut self,
+        type_name: &str,
+        fields: &[StructFieldDef],
+    ) -> CustResult<(usize, String, StructInitializer)> {
+        let field_name = self.expect_ident_after("struct field name after '.'")?;
+        let field_index = fields
+            .iter()
+            .position(|field| field.name == field_name)
+            .ok_or_else(|| {
+                CustError::new(format!("struct '{type_name}' has no field '{field_name}'"))
+            })?;
+        let field = &fields[field_index];
+        let value = if self.matches(&Token::Dot) {
+            match &field.ty {
+                StructFieldType::Struct(nested_type) => {
+                    let nested_fields = self
+                        .struct_types
+                        .get(nested_type)
+                        .map(|struct_type| struct_type.fields.clone())
+                        .ok_or_else(|| {
+                            CustError::new(format!("undefined struct type '{nested_type}'"))
+                        })?;
+                    let (_, nested_field, nested_value) =
+                        self.parse_struct_designator_after_dot(nested_type, &nested_fields)?;
+                    StructInitializer::Struct(vec![StructInitializer::Designated {
+                        field: nested_field,
+                        value: Box::new(nested_value),
+                    }])
+                }
+                _ => {
+                    return Err(CustError::new(format!(
+                        "field '{}' is not a struct for path designator",
+                        field.name
+                    )));
+                }
+            }
+        } else if self.check(&Token::LBracket) {
+            match &field.ty {
+                StructFieldType::Array(_, len) => {
+                    let index = self.parse_array_designator_index_with_context(
+                        &format!("array field '{}'", field.name),
+                        *len,
+                    )?;
+                    self.expect_assign_after("array designator")?;
+                    StructInitializer::Array(vec![ArrayInitializer::Designated {
+                        index,
+                        value: self.parse_assignment_expr()?,
+                    }])
+                }
+                _ => {
+                    return Err(CustError::new(format!(
+                        "field '{}' is not an array for path designator",
+                        field.name
+                    )));
+                }
+            }
+        } else {
+            self.expect_assign_after("struct field designator")?;
+            self.parse_struct_initializer_value(field)?
+        };
+        Ok((field_index, field_name, value))
     }
 
     fn parse_struct_initializer_value(
@@ -4762,146 +4827,192 @@ impl Interpreter {
             .cloned()
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
         let mut fields = HashMap::new();
-        let mut designated = HashMap::new();
-        for initializer in init {
-            if let StructInitializer::Designated { field, value } = initializer {
-                designated.insert(field.as_str(), value.as_ref());
-            }
+        for field in &struct_type.fields {
+            fields.insert(field.name.clone(), self.default_struct_field_value(field)?);
         }
-        for (index, field) in struct_type.fields.iter().enumerate() {
-            let initializer = designated
-                .get(field.name.as_str())
-                .copied()
-                .or_else(|| init.get(index));
-            let field_value = match &field.ty {
-                StructFieldType::Scalar(ty) => {
-                    let value = if let Some(expr) = initializer {
-                        match expr {
-                            StructInitializer::Expr(expr) => self.eval(expr)?,
-                            StructInitializer::Array(_) | StructInitializer::Struct(_) => {
-                                return Err(CustError::new(format!(
-                                    "nested initializer for scalar field '{}' is not supported",
-                                    field.name
-                                )));
-                            }
-                            StructInitializer::Designated { .. } => unreachable!(
-                                "designated struct initializers are resolved before evaluation"
-                            ),
-                        }
-                    } else {
-                        0
-                    };
-                    StructFieldValue::Scalar {
-                        value,
-                        ty: *ty,
-                        is_const: field.is_const,
-                    }
-                }
-                StructFieldType::Array(elem_type, len) => {
-                    let array_init = match initializer {
-                        Some(StructInitializer::Array(values)) => values.as_slice(),
-                        Some(StructInitializer::Expr(_)) | Some(StructInitializer::Struct(_)) => {
-                            return Err(CustError::new(format!(
-                                "expected array initializer for struct field '{}'",
-                                field.name
-                            )));
-                        }
-                        Some(StructInitializer::Designated { .. }) => unreachable!(
-                            "designated struct initializers are resolved before evaluation"
-                        ),
-                        None => &[],
-                    };
-                    let mut array = ArrayValue::mutable_zeroed(*len, *elem_type);
-                    let mut next_positional_index = 0usize;
-                    for initializer in array_init {
-                        match initializer {
-                            ArrayInitializer::Expr(expr) => {
-                                array.elements[next_positional_index] = self.eval(expr)?;
-                                next_positional_index += 1;
-                            }
-                            ArrayInitializer::Designated { index, value } => {
-                                array.elements[*index] = self.eval(value)?;
-                                next_positional_index = *index + 1;
-                            }
-                        }
-                    }
-                    array.read_only = field.is_const;
-                    StructFieldValue::Array {
-                        value: Rc::new(RefCell::new(array)),
-                        is_const: field.is_const,
-                    }
-                }
-                StructFieldType::Struct(nested_type) => {
-                    let fields = match initializer {
-                        Some(StructInitializer::Struct(init)) => {
-                            self.make_struct_fields(nested_type, init)?
-                        }
-                        Some(StructInitializer::Array(_)) => {
-                            return Err(CustError::new(format!(
-                                "array initializer for struct field '{}' is not supported",
-                                field.name
-                            )));
-                        }
-                        Some(StructInitializer::Expr(expr)) => {
-                            match self.eval_struct_expr(expr)? {
-                                ReturnValue::Struct { type_name, fields }
-                                    if type_name == *nested_type =>
-                                {
-                                    fields
-                                }
-                                ReturnValue::Struct { type_name, .. } => {
-                                    return Err(CustError::new(format!(
-                                        "cannot initialize struct field '{}' of type '{}' with struct '{}'",
-                                        field.name, nested_type, type_name
-                                    )));
-                                }
-                                ReturnValue::Scalar(_) => unreachable!(
-                                    "eval_struct_expr only returns struct values or errors"
-                                ),
-                            }
-                        }
-                        Some(StructInitializer::Designated { .. }) => unreachable!(
-                            "designated struct initializers are resolved before evaluation"
-                        ),
-                        None => self.make_struct_fields(nested_type, &[])?,
-                    };
-                    StructFieldValue::Struct {
-                        type_name: nested_type.clone(),
-                        fields,
-                        is_const: field.is_const,
-                    }
-                }
-                StructFieldType::Pointer(pointee) => {
-                    let pointer = match initializer {
-                        Some(StructInitializer::Expr(expr)) => {
-                            self.ensure_pointer_conversion_preserves_const(
-                                field.points_to_const,
-                                expr,
-                            )?;
-                            self.eval_pointer(expr)?
-                        }
-                        Some(StructInitializer::Array(_)) | Some(StructInitializer::Struct(_)) => {
-                            return Err(CustError::new(format!(
-                                "nested initializer for pointer field '{}' is not supported",
-                                field.name
-                            )));
-                        }
-                        Some(StructInitializer::Designated { .. }) => unreachable!(
-                            "designated struct initializers are resolved before evaluation"
-                        ),
-                        None => PointerValue::Null,
-                    };
-                    StructFieldValue::Pointer {
-                        pointer,
-                        ty: pointee.clone(),
-                        is_const: field.is_const,
-                        points_to_const: field.points_to_const,
-                    }
-                }
+        for initializer in init {
+            let StructInitializer::Designated { field, value } = initializer else {
+                unreachable!("struct initializer parsing resolves positional entries to fields")
             };
-            fields.insert(field.name.clone(), field_value);
+            let field_def = struct_type
+                .fields
+                .iter()
+                .find(|field_def| field_def.name == *field)
+                .ok_or_else(|| {
+                    CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+                })?;
+            self.apply_struct_field_initializer(&mut fields, field_def, value)?;
         }
         Ok(fields)
+    }
+
+    fn default_struct_field_value(
+        &mut self,
+        field: &StructFieldDef,
+    ) -> CustResult<StructFieldValue> {
+        match &field.ty {
+            StructFieldType::Scalar(ty) => Ok(StructFieldValue::Scalar {
+                value: 0,
+                ty: *ty,
+                is_const: field.is_const,
+            }),
+            StructFieldType::Array(elem_type, len) => {
+                let mut array = ArrayValue::mutable_zeroed(*len, *elem_type);
+                array.read_only = field.is_const;
+                Ok(StructFieldValue::Array {
+                    value: Rc::new(RefCell::new(array)),
+                    is_const: field.is_const,
+                })
+            }
+            StructFieldType::Struct(nested_type) => Ok(StructFieldValue::Struct {
+                type_name: nested_type.clone(),
+                fields: self.make_struct_fields(nested_type, &[])?,
+                is_const: field.is_const,
+            }),
+            StructFieldType::Pointer(pointee) => Ok(StructFieldValue::Pointer {
+                pointer: PointerValue::Null,
+                ty: pointee.clone(),
+                is_const: field.is_const,
+                points_to_const: field.points_to_const,
+            }),
+        }
+    }
+
+    fn apply_struct_field_initializer(
+        &mut self,
+        fields: &mut HashMap<String, StructFieldValue>,
+        field: &StructFieldDef,
+        initializer: &StructInitializer,
+    ) -> CustResult<()> {
+        let field_value = fields
+            .get_mut(&field.name)
+            .ok_or_else(|| CustError::new(format!("missing struct field '{}'", field.name)))?;
+        match (&field.ty, field_value, initializer) {
+            (
+                StructFieldType::Scalar(_),
+                StructFieldValue::Scalar { value, .. },
+                StructInitializer::Expr(expr),
+            ) => {
+                *value = self.eval(expr)?;
+            }
+            (
+                StructFieldType::Scalar(_),
+                _,
+                StructInitializer::Array(_) | StructInitializer::Struct(_),
+            ) => {
+                return Err(CustError::new(format!(
+                    "nested initializer for scalar field '{}' is not supported",
+                    field.name
+                )));
+            }
+            (
+                StructFieldType::Array(_, _),
+                StructFieldValue::Array { value, .. },
+                StructInitializer::Array(array_init),
+            ) => {
+                let mut array = value.borrow_mut();
+                let mut next_positional_index = 0usize;
+                for initializer in array_init {
+                    match initializer {
+                        ArrayInitializer::Expr(expr) => {
+                            array.elements[next_positional_index] = self.eval(expr)?;
+                            next_positional_index += 1;
+                        }
+                        ArrayInitializer::Designated { index, value } => {
+                            array.elements[*index] = self.eval(value)?;
+                            next_positional_index = *index + 1;
+                        }
+                    }
+                }
+            }
+            (
+                StructFieldType::Array(_, _),
+                _,
+                StructInitializer::Expr(_) | StructInitializer::Struct(_),
+            ) => {
+                return Err(CustError::new(format!(
+                    "expected array initializer for struct field '{}'",
+                    field.name
+                )));
+            }
+            (
+                StructFieldType::Struct(nested_type),
+                StructFieldValue::Struct {
+                    fields: nested_fields,
+                    ..
+                },
+                StructInitializer::Struct(nested_init),
+            ) => {
+                let nested_type_def =
+                    self.struct_types.get(nested_type).cloned().ok_or_else(|| {
+                        CustError::new(format!("undefined struct type '{nested_type}'"))
+                    })?;
+                for nested_initializer in nested_init {
+                    let StructInitializer::Designated { field, value } = nested_initializer else {
+                        unreachable!(
+                            "nested struct initializer parsing resolves positional entries to fields"
+                        )
+                    };
+                    let nested_field_def = nested_type_def
+                        .fields
+                        .iter()
+                        .find(|field_def| field_def.name == *field)
+                        .ok_or_else(|| {
+                            CustError::new(format!("struct '{nested_type}' has no field '{field}'"))
+                        })?;
+                    self.apply_struct_field_initializer(nested_fields, nested_field_def, value)?;
+                }
+            }
+            (StructFieldType::Struct(_), _, StructInitializer::Array(_)) => {
+                return Err(CustError::new(format!(
+                    "array initializer for struct field '{}' is not supported",
+                    field.name
+                )));
+            }
+            (StructFieldType::Struct(nested_type), field_value, StructInitializer::Expr(expr)) => {
+                match self.eval_struct_expr(expr)? {
+                    ReturnValue::Struct { type_name, fields } if type_name == *nested_type => {
+                        *field_value = StructFieldValue::Struct {
+                            type_name,
+                            fields,
+                            is_const: field.is_const,
+                        };
+                    }
+                    ReturnValue::Struct { type_name, .. } => {
+                        return Err(CustError::new(format!(
+                            "cannot initialize struct field '{}' of type '{}' with struct '{}'",
+                            field.name, nested_type, type_name
+                        )));
+                    }
+                    ReturnValue::Scalar(_) => {
+                        unreachable!("eval_struct_expr only returns struct values or errors")
+                    }
+                }
+            }
+            (
+                StructFieldType::Pointer(_),
+                StructFieldValue::Pointer { pointer, .. },
+                StructInitializer::Expr(expr),
+            ) => {
+                self.ensure_pointer_conversion_preserves_const(field.points_to_const, expr)?;
+                *pointer = self.eval_pointer(expr)?;
+            }
+            (
+                StructFieldType::Pointer(_),
+                _,
+                StructInitializer::Array(_) | StructInitializer::Struct(_),
+            ) => {
+                return Err(CustError::new(format!(
+                    "nested initializer for pointer field '{}' is not supported",
+                    field.name
+                )));
+            }
+            (_, _, StructInitializer::Designated { .. }) => {
+                unreachable!("designated struct initializers are resolved before evaluation")
+            }
+            _ => unreachable!("struct field definition and value variants must match"),
+        }
+        Ok(())
     }
 
     fn field_path_label(fields: &[String]) -> &str {

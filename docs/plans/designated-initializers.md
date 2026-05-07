@@ -33,7 +33,7 @@ struct Point p = {.y = 2, .x = 1};
 
 ### Nested aggregate fields
 
-Nested brace lists may themselves use designators for supported nested structs and array fields:
+Nested brace lists may themselves use designators for supported nested structs and array fields. Cust also supports C path designators for nested struct fields and one-dimensional scalar array fields inside structs:
 
 ```c
 struct Inner { int x; int y; };
@@ -42,13 +42,18 @@ struct Packet packet = {
     .inner = {.y = 4, .x = 3},
     .values = {[1] = 6, [2] = 7},
 };
+struct Packet packet2 = {
+    .inner.x = 3,
+    .inner.y = 4,
+    .values[1] = 6,
+};
 ```
+
+Path designators apply in source order over zero/default-initialized aggregate storage. Multiple path entries for the same nested aggregate merge into the existing nested value instead of replacing sibling fields, so `.inner.x = 1, .inner.y = 2` leaves both fields initialized.
 
 ## Deliberate exclusions
 
 - Range designators such as `[0 ... 3]` are not supported.
-- Path designators such as `.inner.x = 1` are not yet supported; write a nested brace initializer instead (`.inner = {.x = 1}`).
-- Array element designators inside struct paths such as `.values[1] = 2` are not yet supported; write `.values = {[1] = 2}`.
 - Native C ABI layout and padding are not used for interpretation; compiler-oracle fixtures compare behavior/exit codes only.
 
 ## Implementation notes
@@ -59,5 +64,5 @@ struct Packet packet = {
 
 ## Acceptance coverage
 
-- Valid interpreter and compiler-oracle fixture: `tests/fixtures/valid/designated_initializers.c` and `tests/fixtures/compat/valid/designated_initializers.c`.
-- Invalid fixtures: `tests/fixtures/invalid/array_designator_out_of_bounds.c` and `tests/fixtures/invalid/struct_designator_unknown_field.c`.
+- Valid interpreter and compiler-oracle fixtures: `tests/fixtures/valid/designated_initializers.c` / `tests/fixtures/compat/valid/designated_initializers.c` and `tests/fixtures/valid/path_designated_initializers.c` / `tests/fixtures/compat/valid/path_designated_initializers.c`.
+- Invalid fixtures: `tests/fixtures/invalid/array_designator_out_of_bounds.c`, `tests/fixtures/invalid/struct_designator_unknown_field.c`, `tests/fixtures/invalid/struct_path_designator_unknown_field.c`, and `tests/fixtures/invalid/struct_array_path_designator_out_of_bounds.c`.

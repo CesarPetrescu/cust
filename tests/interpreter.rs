@@ -126,6 +126,13 @@ fn supports_designated_array_and_struct_initializers() {
 }
 
 #[test]
+fn supports_path_designated_struct_initializers() {
+    let program = include_str!("fixtures/valid/path_designated_initializers.c");
+
+    assert_eq!(interpret(program).unwrap(), 156);
+}
+
+#[test]
 fn supports_scalar_struct_initializers() {
     let program = include_str!("fixtures/valid/struct_initializers.c");
 
@@ -271,6 +278,27 @@ fn rejects_unknown_struct_field_designators() {
     let err = interpret(program).unwrap_err();
 
     assert_eq!(err.to_string(), "struct 'Point' has no field 'z'");
+}
+
+#[test]
+fn rejects_unknown_path_designator_fields() {
+    let program = include_str!("fixtures/invalid/struct_path_designator_unknown_field.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "struct 'Inner' has no field 'missing'");
+}
+
+#[test]
+fn rejects_struct_array_path_designators_outside_declared_length() {
+    let program = include_str!("fixtures/invalid/struct_array_path_designator_out_of_bounds.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array designator index 2 out of bounds for array field 'values'"
+    );
 }
 
 #[test]
