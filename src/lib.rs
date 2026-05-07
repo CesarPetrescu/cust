@@ -1270,6 +1270,7 @@ struct Parser {
     tokens: Vec<LocatedToken>,
     pos: usize,
     struct_types: HashMap<String, StructTypeDef>,
+    aggregate_type_scopes: Vec<HashSet<String>>,
     enum_type_scopes: Vec<HashSet<String>>,
     type_alias_scopes: Vec<HashMap<String, TypeAlias>>,
     next_static_local_id: usize,
@@ -1281,6 +1282,7 @@ impl Parser {
             tokens,
             pos: 0,
             struct_types: HashMap::new(),
+            aggregate_type_scopes: vec![HashSet::new()],
             enum_type_scopes: vec![HashSet::new()],
             type_alias_scopes: vec![HashMap::new()],
             next_static_local_id: 0,
@@ -1451,6 +1453,13 @@ impl Parser {
             .any(|scope| scope.contains(name))
     }
 
+    fn aggregate_type_is_declared(&self, name: &str) -> bool {
+        self.aggregate_type_scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+    }
+
     fn parse_decl_type(&mut self, context: &str) -> CustResult<DeclType> {
         let found = self.advance();
         match found.kind.clone() {
@@ -1463,7 +1472,7 @@ impl Parser {
                     "struct"
                 };
                 let type_name = self.expect_ident_after(context)?;
-                if !self.struct_types.contains_key(&type_name) {
+                if !self.aggregate_type_is_declared(&type_name) {
                     return Err(CustError::new(format!(
                         "undefined {keyword} type '{type_name}'"
                     )));
@@ -1544,11 +1553,6 @@ impl Parser {
     fn parse_typedef_decl(&mut self) -> CustResult<()> {
         self.expect(Token::Typedef)?;
         let (alias, alias_context) = if self.is_aggregate_definition() {
-            if self.type_alias_scopes.len() > 1 {
-                return Err(CustError::new(
-                    "block-scoped typedef aggregate definitions are not supported",
-                ));
-            }
             let (type_name, _) = self.parse_aggregate_definition_body(false)?;
             (
                 TypeAlias::Struct(type_name),
@@ -1827,6 +1831,7 @@ impl Parser {
         self.expect_opening_brace_after(context)?;
         self.type_alias_scopes.push(HashMap::new());
         self.enum_type_scopes.push(HashSet::new());
+        self.aggregate_type_scopes.push(HashSet::new());
         let mut statements = Vec::new();
         let result = (|| {
             while !self.check(&Token::RBrace) {
@@ -1842,6 +1847,7 @@ impl Parser {
             self.expect(Token::RBrace)?;
             Ok(statements)
         })();
+        self.aggregate_type_scopes.pop();
         self.enum_type_scopes.pop();
         self.type_alias_scopes.pop();
         result
@@ -2427,7 +2433,8 @@ impl Parser {
                 let field_keyword = field_kind.keyword();
                 let field_type_name =
                     self.expect_ident_after(&format!("{field_keyword} field type"))?;
-                if !self.struct_types.contains_key(&field_type_name) && field_type_name != type_name
+                if !self.aggregate_type_is_declared(&field_type_name)
+                    && field_type_name != type_name
                 {
                     return Err(CustError::new(format!(
                         "undefined {field_keyword} type '{field_type_name}'"
@@ -2515,10 +2522,18 @@ impl Parser {
         if require_semicolon {
             self.expect_semicolon_after(&format!("{keyword} declaration"))?;
         }
-        if self
-            .struct_types
-            .insert(type_name.clone(), StructTypeDef { fields, kind })
-            .is_some()
+        if self.struct_types.contains_key(&type_name) {
+            return Err(CustError::new(format!(
+                "{keyword} '{type_name}' already declared"
+            )));
+        }
+        self.struct_types
+            .insert(type_name.clone(), StructTypeDef { fields, kind });
+        if !self
+            .aggregate_type_scopes
+            .last_mut()
+            .expect("parser always has an aggregate type scope")
+            .insert(type_name.clone())
         {
             return Err(CustError::new(format!(
                 "{keyword} '{type_name}' already declared"
@@ -2535,7 +2550,7 @@ impl Parser {
         };
         let keyword = kind.keyword();
         let type_name = self.expect_ident_after(&format!("{keyword} type name"))?;
-        if !self.struct_types.contains_key(&type_name) {
+        if !self.aggregate_type_is_declared(&type_name) {
             return Err(CustError::new(format!(
                 "undefined struct type '{type_name}'"
             )));

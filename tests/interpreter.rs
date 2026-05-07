@@ -231,14 +231,18 @@ fn supports_typedef_aggregate_definitions() {
 }
 
 #[test]
-fn rejects_block_scoped_typedef_aggregate_definitions() {
-    let program = include_str!("fixtures/invalid/block_typedef_aggregate_definition.c");
+fn supports_block_scoped_typedef_aggregate_definitions() {
+    let program = include_str!("fixtures/valid/block_scoped_aggregate_typedef_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 39);
+}
+
+#[test]
+fn rejects_block_scoped_aggregate_typedef_alias_after_scope_exit() {
+    let program = include_str!("fixtures/invalid/block_aggregate_typedef_alias_out_of_scope.c");
 
     let err = interpret(program).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "block-scoped typedef aggregate definitions are not supported"
-    );
+    assert_eq!(err.to_string(), "undefined struct type 'Hidden'");
 }
 
 #[test]
