@@ -113,7 +113,7 @@ Features:
 - logical operators with C-style truth values and short-circuiting: `&& || !`
 - unary plus: `+expr`
 - comments: `// line comments` and `/* block comments */`
-- `sizeof` for supported types/expressions, including const-qualified type contexts such as `sizeof(const int)`, with Cust-defined sizes (`int = 8`, `char = 1`, pointer = `8`)
+- `sizeof` for supported types/expressions, including aggregate type spellings such as `sizeof(struct Point)` / `sizeof(union Number)` and const-qualified type contexts such as `sizeof(const int)`, with Cust-defined sizes (`int = 8`, `char = 1`, pointer = `8`, no native struct padding)
 
 ## CLI
 

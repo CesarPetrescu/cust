@@ -30,7 +30,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - `head.external` reads a scalar pointer field, so `*head.external` works in pointer contexts.
   - `head.next = &other;` / `head.external = &value;` reassign mutable pointer fields while preserving pointee-const conversion checks.
   - Unknown fields report `struct '<Type>' has no field '<field>'` at the innermost type where lookup fails.
-  - `sizeof(p)` sums Cust field sizes recursively (`int = 8`, `char = 1`) without native ABI padding.
+  - `sizeof(p)` and `sizeof(struct Point)` sum Cust field sizes recursively (`int = 8`, `char = 1`) without native ABI padding.
   - `sizeof(p.x)` uses the declared field type size; `sizeof(packet.values)` uses array length times element size; `sizeof(packet.values[0])` uses the element size; `sizeof(rect.origin)` uses the deterministic Cust size of the nested struct field.
 - Same-type struct copy assignment:
   - `b = a;` copies field values from one same-type struct variable to another.

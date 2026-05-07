@@ -3317,7 +3317,12 @@ impl Parser {
         if self.matches(&Token::LParen) {
             if matches!(
                 self.peek(),
-                Token::Int | Token::Char | Token::Const | Token::Void
+                Token::Int
+                    | Token::Char
+                    | Token::Struct
+                    | Token::Union
+                    | Token::Const
+                    | Token::Void
             ) || self.current_alias().is_some()
             {
                 let is_const_qualified = self.matches(&Token::Const);
@@ -3329,7 +3334,10 @@ impl Parser {
                     ));
                 } else {
                     if is_const_qualified
-                        && !matches!(self.peek(), Token::Int | Token::Char)
+                        && !matches!(
+                            self.peek(),
+                            Token::Int | Token::Char | Token::Struct | Token::Union
+                        )
                         && self.current_alias().is_none()
                     {
                         let found = self.peek_located().clone();

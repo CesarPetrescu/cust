@@ -105,6 +105,13 @@ fn supports_sizeof_const_qualified_types() {
 }
 
 #[test]
+fn supports_sizeof_aggregate_type_names() {
+    let program = include_str!("fixtures/valid/sizeof_aggregate_types.c");
+
+    assert_eq!(interpret(program).unwrap(), 42);
+}
+
+#[test]
 fn supports_uninitialized_scalar_and_pointer_declarations() {
     let program = include_str!("fixtures/valid/uninitialized_declarations.c");
 
