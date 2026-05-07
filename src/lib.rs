@@ -158,6 +158,15 @@ enum Expr {
         name: String,
         index: Box<Expr>,
     },
+    AddressOfStructField {
+        name: String,
+        fields: Vec<String>,
+    },
+    AddressOfStructElementField {
+        name: String,
+        index: Box<Expr>,
+        fields: Vec<String>,
+    },
     Deref(Box<Expr>),
     Assign {
         name: String,
@@ -3059,27 +3068,32 @@ impl Parser {
         } else if self.matches(&Token::Star) {
             Ok(Expr::Deref(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Amp) {
-            let found = self.advance();
-            match found.kind.clone() {
-                Token::Ident(name) => {
-                    if self.matches(&Token::LBracket) {
-                        let index = self.parse_index_expr()?;
-                        self.expect_closing_bracket_after("array index")?;
-                        Ok(Expr::AddressOfArray {
-                            name,
-                            index: Box::new(index),
-                        })
-                    } else {
-                        Ok(Expr::AddressOf(name))
-                    }
-                }
-                token => Err(Self::error_at(
-                    format!("expected identifier after '&', found {token:?}"),
-                    &found,
-                )),
-            }
+            let operator = self.previous().clone();
+            let target = self.parse_postfix()?;
+            Self::address_of_expr(target, &operator)
         } else {
             self.parse_postfix()
+        }
+    }
+
+    fn address_of_expr(target: Expr, operator: &LocatedToken) -> CustResult<Expr> {
+        match target {
+            Expr::Var(name) => Ok(Expr::AddressOf(name)),
+            Expr::ArrayGet { name, index } => Ok(Expr::AddressOfArray { name, index }),
+            Expr::StructGet { name, fields } => Ok(Expr::AddressOfStructField { name, fields }),
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => Ok(Expr::AddressOfStructElementField {
+                name,
+                index,
+                fields,
+            }),
+            _ => Err(Self::error_at(
+                "invalid address-of target".to_string(),
+                operator,
+            )),
         }
     }
 
@@ -3964,6 +3978,17 @@ enum PointerValue {
         scope_id: usize,
         name: String,
     },
+    StructElement {
+        scope_id: usize,
+        name: String,
+        index: usize,
+    },
+    StructField {
+        scope_id: usize,
+        name: String,
+        element_index: Option<usize>,
+        fields: Vec<String>,
+    },
     ArrayBase {
         array: Rc<RefCell<ArrayValue>>,
         source_name: Option<String>,
@@ -4385,6 +4410,20 @@ impl Interpreter {
         match expr {
             Expr::Var(name) => self.pointer_variable_points_to_const(name),
             Expr::AddressOf(name) => self.is_const_variable(name),
+            Expr::AddressOfStructField { name, fields } => self
+                .find_variable_scope_id(name)
+                .and_then(|scope_id| {
+                    self.struct_field_points_to_const(scope_id, name, None, fields)
+                        .ok()
+                })
+                .unwrap_or(false),
+            Expr::AddressOfStructElementField { name, fields, .. } => self
+                .find_variable_scope_id(name)
+                .and_then(|scope_id| {
+                    self.struct_field_points_to_const(scope_id, name, Some(0), fields)
+                        .ok()
+                })
+                .unwrap_or(false),
             Expr::StructGet { name, fields } => {
                 self.struct_pointer_field_points_to_const(name, fields)
             }
@@ -5037,6 +5076,256 @@ impl Interpreter {
         Ok(index)
     }
 
+    fn find_variable_scope_id(&self, name: &str) -> Option<usize> {
+        for scope in self.scopes.iter().rev() {
+            if scope.values.contains_key(name) {
+                return Some(scope.id);
+            }
+            if let Some(storage) = scope
+                .static_local_ids
+                .get(name)
+                .and_then(|id| self.static_locals.get(id))
+            {
+                return Some(storage.scope_id);
+            }
+        }
+        None
+    }
+
+    fn find_struct_element_pointer(
+        &mut self,
+        name: &str,
+        index: &Expr,
+    ) -> CustResult<PointerValue> {
+        let index = self.checked_struct_element_index(name, index)?;
+        let scope_id = self
+            .find_variable_scope_id(name)
+            .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
+        Ok(PointerValue::StructElement {
+            scope_id,
+            name: name.to_string(),
+            index,
+        })
+    }
+
+    fn struct_field_points_to_const(
+        &self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        path: &[String],
+    ) -> CustResult<bool> {
+        let root_is_const = self
+            .scopes
+            .iter()
+            .find(|scope| scope.id == scope_id)
+            .is_some_and(|scope| scope.const_variables.contains(name))
+            || self.static_locals.values().any(|storage| {
+                storage.scope_id == scope_id && storage.name == name && storage.is_const
+            });
+        let field_is_const =
+            match self.struct_field_by_scope(scope_id, name, element_index, path)? {
+                StructFieldValue::Scalar { is_const, .. }
+                | StructFieldValue::Array { is_const, .. }
+                | StructFieldValue::Struct { is_const, .. }
+                | StructFieldValue::Pointer { is_const, .. } => *is_const,
+            };
+        Ok(root_is_const || field_is_const)
+    }
+
+    fn find_struct_field_pointer(
+        &mut self,
+        name: &str,
+        fields: &[String],
+    ) -> CustResult<PointerValue> {
+        let scope_id = self
+            .find_variable_scope_id(name)
+            .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
+        match self.struct_field_by_scope(scope_id, name, None, fields)? {
+            StructFieldValue::Scalar { .. } => Ok(PointerValue::StructField {
+                scope_id,
+                name: name.to_string(),
+                element_index: None,
+                fields: fields.to_vec(),
+            }),
+            StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
+                array: Rc::clone(value),
+                source_name: Some(Self::field_path_label(fields).to_string()),
+            }),
+            StructFieldValue::Struct { .. } => Err(CustError::new(format!(
+                "struct field '{}' requires field access",
+                Self::field_path_label(fields)
+            ))),
+            StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                "pointer field '{}' cannot be addressed in this pointer milestone",
+                Self::field_path_label(fields)
+            ))),
+        }
+    }
+
+    fn find_struct_element_field_pointer(
+        &mut self,
+        name: &str,
+        index: &Expr,
+        fields: &[String],
+    ) -> CustResult<PointerValue> {
+        let index = self.checked_struct_element_index(name, index)?;
+        let scope_id = self
+            .find_variable_scope_id(name)
+            .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
+        match self.struct_field_by_scope(scope_id, name, Some(index), fields)? {
+            StructFieldValue::Scalar { .. } => Ok(PointerValue::StructField {
+                scope_id,
+                name: name.to_string(),
+                element_index: Some(index),
+                fields: fields.to_vec(),
+            }),
+            StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
+                array: Rc::clone(value),
+                source_name: Some(Self::field_path_label(fields).to_string()),
+            }),
+            StructFieldValue::Struct { .. } => Err(CustError::new(format!(
+                "struct field '{}' requires field access",
+                Self::field_path_label(fields)
+            ))),
+            StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                "pointer field '{}' cannot be addressed in this pointer milestone",
+                Self::field_path_label(fields)
+            ))),
+        }
+    }
+
+    fn struct_field_by_scope(
+        &self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        path: &[String],
+    ) -> CustResult<&StructFieldValue> {
+        if !self.live_scope_ids.contains(&scope_id) {
+            return Err(CustError::new(format!(
+                "pointer to out-of-scope variable '{name}'"
+            )));
+        }
+        let value = self
+            .scopes
+            .iter()
+            .find(|scope| scope.id == scope_id)
+            .and_then(|scope| scope.values.get(name))
+            .or_else(|| self.static_value_by_scope(scope_id, name));
+        match (value, element_index) {
+            (Some(Value::Struct { type_name, fields }), None) => {
+                Self::nested_field_value(type_name, fields, path).map(|(_, field)| field)
+            }
+            (
+                Some(Value::StructArray {
+                    type_name,
+                    elements,
+                    ..
+                }),
+                Some(index),
+            ) => {
+                Self::nested_field_value(type_name, &elements[index], path).map(|(_, field)| field)
+            }
+            _ => Err(CustError::new(format!(
+                "pointer to out-of-scope variable '{name}'"
+            ))),
+        }
+    }
+
+    fn struct_field_by_scope_mut(
+        &mut self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        path: &[String],
+    ) -> CustResult<&mut StructFieldValue> {
+        if !self.live_scope_ids.contains(&scope_id) {
+            return Err(CustError::new(format!(
+                "pointer to out-of-scope variable '{name}'"
+            )));
+        }
+        if let Some(pos) = self.scopes.iter().position(|scope| scope.id == scope_id) {
+            let value = self.scopes[pos].values.get_mut(name);
+            return match (value, element_index) {
+                (Some(Value::Struct { type_name, fields }), None) => {
+                    Self::nested_field_value_mut(type_name, fields, path).map(|(_, field)| field)
+                }
+                (
+                    Some(Value::StructArray {
+                        type_name,
+                        elements,
+                        ..
+                    }),
+                    Some(index),
+                ) => Self::nested_field_value_mut(type_name, &mut elements[index], path)
+                    .map(|(_, field)| field),
+                _ => Err(CustError::new(format!(
+                    "pointer to out-of-scope variable '{name}'"
+                ))),
+            };
+        }
+        match (
+            self.static_value_by_scope_mut(scope_id, name),
+            element_index,
+        ) {
+            (Some(Value::Struct { type_name, fields }), None) => {
+                Self::nested_field_value_mut(type_name, fields, path).map(|(_, field)| field)
+            }
+            (
+                Some(Value::StructArray {
+                    type_name,
+                    elements,
+                    ..
+                }),
+                Some(index),
+            ) => Self::nested_field_value_mut(type_name, &mut elements[index], path)
+                .map(|(_, field)| field),
+            _ => Err(CustError::new(format!(
+                "pointer to out-of-scope variable '{name}'"
+            ))),
+        }
+    }
+
+    fn read_struct_field_pointer(
+        &self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        fields: &[String],
+    ) -> CustResult<i64> {
+        match self.struct_field_by_scope(scope_id, name, element_index, fields)? {
+            StructFieldValue::Scalar { value, .. } => Ok(*value),
+            _ => Err(CustError::new(format!(
+                "struct field '{}' used as non-scalar pointer target",
+                Self::field_path_label(fields)
+            ))),
+        }
+    }
+
+    fn assign_struct_field_pointer(
+        &mut self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        fields: &[String],
+        value: i64,
+    ) -> CustResult<()> {
+        if self.struct_field_points_to_const(scope_id, name, element_index, fields)? {
+            return Err(CustError::new("cannot assign through pointer to const"));
+        }
+        match self.struct_field_by_scope_mut(scope_id, name, element_index, fields)? {
+            StructFieldValue::Scalar { value: slot, .. } => {
+                *slot = value;
+                Ok(())
+            }
+            _ => Err(CustError::new(format!(
+                "struct field '{}' used as non-scalar pointer target",
+                Self::field_path_label(fields)
+            ))),
+        }
+    }
+
     fn read_struct_element_field(
         &mut self,
         name: &str,
@@ -5264,6 +5553,36 @@ impl Interpreter {
                     ))),
                 }
             }
+            PointerValue::StructElement {
+                scope_id,
+                name,
+                index,
+            } => {
+                if !self.live_scope_ids.contains(scope_id) {
+                    return Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    )));
+                }
+                let value = self
+                    .scopes
+                    .iter()
+                    .find(|scope| scope.id == *scope_id)
+                    .and_then(|scope| scope.values.get(name))
+                    .or_else(|| self.static_value_by_scope(*scope_id, name));
+                match value {
+                    Some(Value::StructArray {
+                        type_name,
+                        elements,
+                        ..
+                    }) => Ok((type_name.clone(), &elements[*index])),
+                    _ => Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    ))),
+                }
+            }
+            PointerValue::StructField { .. } => {
+                Err(CustError::new("pointer does not reference a struct"))
+            }
             _ => Err(CustError::new("pointer does not reference a struct")),
         }
     }
@@ -5296,6 +5615,42 @@ impl Interpreter {
                         "pointer to out-of-scope variable '{name}'"
                     ))),
                 }
+            }
+            PointerValue::StructElement {
+                scope_id,
+                name,
+                index,
+            } => {
+                if !self.live_scope_ids.contains(scope_id) {
+                    return Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    )));
+                }
+                if let Some(pos) = self.scopes.iter().position(|scope| scope.id == *scope_id) {
+                    return match self.scopes[pos].values.get_mut(name) {
+                        Some(Value::StructArray {
+                            type_name,
+                            elements,
+                            ..
+                        }) => Ok((type_name.clone(), &mut elements[*index])),
+                        _ => Err(CustError::new(format!(
+                            "pointer to out-of-scope variable '{name}'"
+                        ))),
+                    };
+                }
+                match self.static_value_by_scope_mut(*scope_id, name) {
+                    Some(Value::StructArray {
+                        type_name,
+                        elements,
+                        ..
+                    }) => Ok((type_name.clone(), &mut elements[*index])),
+                    _ => Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    ))),
+                }
+            }
+            PointerValue::StructField { .. } => {
+                Err(CustError::new("pointer does not reference a struct"))
             }
             _ => Err(CustError::new("pointer does not reference a struct")),
         }
@@ -5511,7 +5866,11 @@ impl Interpreter {
             }
             Expr::AddressOf(name) => self.address_of_scalar(name),
             Expr::AddressOfArray { name, index } => {
-                if let Some(Value::Pointer { pointer, .. }) = self.find_variable(name).cloned() {
+                if let Some(Value::StructArray { .. }) = self.find_variable(name) {
+                    self.find_struct_element_pointer(name, index)
+                } else if let Some(Value::Pointer { pointer, .. }) =
+                    self.find_variable(name).cloned()
+                {
                     let index_value = self.eval(index)?;
                     let (array, source_name, index) =
                         self.checked_pointer_value_index(&pointer, index_value)?;
@@ -5529,6 +5888,14 @@ impl Interpreter {
                     })
                 }
             }
+            Expr::AddressOfStructField { name, fields } => {
+                self.find_struct_field_pointer(name, fields)
+            }
+            Expr::AddressOfStructElementField {
+                name,
+                index,
+                fields,
+            } => self.find_struct_element_field_pointer(name, index, fields),
             Expr::StringLiteral(values) => Ok(PointerValue::ArrayBase {
                 array: Rc::new(RefCell::new(ArrayValue::read_only(values.clone()))),
                 source_name: None,
@@ -5694,7 +6061,10 @@ impl Interpreter {
     ) -> CustResult<PointerValue> {
         match pointer {
             PointerValue::Null => Err(CustError::new("null pointer arithmetic is not supported")),
-            PointerValue::Scalar { .. } | PointerValue::Struct { .. } => {
+            PointerValue::Scalar { .. }
+            | PointerValue::Struct { .. }
+            | PointerValue::StructElement { .. }
+            | PointerValue::StructField { .. } => {
                 Err(CustError::new("scalar pointer arithmetic is not supported"))
             }
             PointerValue::ArrayBase { array, source_name } => {
@@ -5754,7 +6124,15 @@ impl Interpreter {
                     ))),
                 }
             }
-            PointerValue::Struct { .. } => Err(CustError::new("struct pointer used as scalar")),
+            PointerValue::Struct { .. } | PointerValue::StructElement { .. } => {
+                Err(CustError::new("struct pointer used as scalar"))
+            }
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => self.read_struct_field_pointer(*scope_id, name, *element_index, fields),
             PointerValue::ArrayBase { array, .. } => {
                 let array = array.borrow();
                 array.elements.first().copied().ok_or_else(|| {
@@ -5814,7 +6192,15 @@ impl Interpreter {
             PointerValue::ArrayBase { .. } | PointerValue::ArrayElement { .. } => {
                 self.assign_pointer_index(pointer, 0, value)
             }
-            PointerValue::Struct { .. } => Err(CustError::new("struct pointer used as scalar")),
+            PointerValue::Struct { .. } | PointerValue::StructElement { .. } => {
+                Err(CustError::new("struct pointer used as scalar"))
+            }
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => self.assign_struct_field_pointer(*scope_id, name, *element_index, fields, value),
         }
     }
 
@@ -5851,8 +6237,12 @@ impl Interpreter {
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, Option<String>, usize)> {
         match pointer {
             PointerValue::Null => Err(CustError::new("null pointer dereference")),
-            PointerValue::Scalar { .. } => Err(CustError::new("scalar pointer is not indexable")),
-            PointerValue::Struct { .. } => Err(CustError::new("struct pointer is not indexable")),
+            PointerValue::Scalar { .. } | PointerValue::StructField { .. } => {
+                Err(CustError::new("scalar pointer is not indexable"))
+            }
+            PointerValue::Struct { .. } | PointerValue::StructElement { .. } => {
+                Err(CustError::new("struct pointer is not indexable"))
+            }
             PointerValue::ArrayBase { array, source_name } => {
                 let len = array.borrow().elements.len();
                 let Ok(index) = usize::try_from(index_value) else {
@@ -5974,6 +6364,43 @@ impl Interpreter {
                 },
             ) => left_scope == right_scope && left_name == right_name,
             (
+                PointerValue::StructElement {
+                    scope_id: left_scope,
+                    name: left_name,
+                    index: left_index,
+                },
+                PointerValue::StructElement {
+                    scope_id: right_scope,
+                    name: right_name,
+                    index: right_index,
+                },
+            ) => left_scope == right_scope && left_name == right_name && left_index == right_index,
+            (
+                PointerValue::StructField {
+                    scope_id: left_scope,
+                    name: left_name,
+                    element_index: left_element,
+                    fields: left_fields,
+                },
+                PointerValue::StructField {
+                    scope_id: right_scope,
+                    name: right_name,
+                    element_index: right_element,
+                    fields: right_fields,
+                },
+            ) => {
+                left_scope == right_scope
+                    && left_name == right_name
+                    && left_element == right_element
+                    && left_fields == right_fields
+            }
+            (PointerValue::Struct { .. }, PointerValue::StructElement { .. })
+            | (PointerValue::StructElement { .. }, PointerValue::Struct { .. })
+            | (PointerValue::Struct { .. }, PointerValue::StructField { .. })
+            | (PointerValue::StructField { .. }, PointerValue::Struct { .. })
+            | (PointerValue::StructElement { .. }, PointerValue::StructField { .. })
+            | (PointerValue::StructField { .. }, PointerValue::StructElement { .. }) => false,
+            (
                 PointerValue::ArrayBase { array: left, .. },
                 PointerValue::ArrayBase { array: right, .. },
             ) => Rc::ptr_eq(left, right),
@@ -6015,6 +6442,7 @@ impl Interpreter {
             | (PointerValue::Struct { .. }, PointerValue::Scalar { .. })
             | (PointerValue::Struct { .. }, PointerValue::ArrayBase { .. })
             | (PointerValue::Struct { .. }, PointerValue::ArrayElement { .. }) => false,
+            _ => false,
         }
     }
 
@@ -6023,7 +6451,10 @@ impl Interpreter {
             PointerValue::ArrayBase { array, .. } => Ok((array, 0)),
             PointerValue::ArrayElement { array, index, .. } => Ok((array, *index as i64)),
             PointerValue::Null => Err(CustError::new("null pointer arithmetic is not supported")),
-            PointerValue::Scalar { .. } | PointerValue::Struct { .. } => {
+            PointerValue::Scalar { .. }
+            | PointerValue::Struct { .. }
+            | PointerValue::StructElement { .. }
+            | PointerValue::StructField { .. } => {
                 Err(CustError::new("scalar pointer arithmetic is not supported"))
             }
         }
@@ -6046,9 +6477,11 @@ impl Interpreter {
                 self.eval_discard(left)?;
                 self.eval_truthy(right)
             }
-            Expr::AddressOf(_) | Expr::AddressOfArray { .. } | Expr::StringLiteral(_) => {
-                Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
-            }
+            Expr::AddressOf(_)
+            | Expr::AddressOfArray { .. }
+            | Expr::AddressOfStructField { .. }
+            | Expr::AddressOfStructElementField { .. }
+            | Expr::StringLiteral(_) => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
             Expr::Assign { name, .. } => match self.find_variable(name).cloned() {
                 Some(Value::Pointer { .. }) => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
                 Some(Value::Scalar { .. }) => Ok(self.eval(expr)? != 0),
@@ -6286,7 +6719,10 @@ impl Interpreter {
                 _ => self.sizeof_indexed_value(name),
             },
             Expr::StringGet { .. } => Ok(CHAR_SIZE),
-            Expr::AddressOf(_) | Expr::AddressOfArray { .. } => Ok(POINTER_SIZE),
+            Expr::AddressOf(_)
+            | Expr::AddressOfArray { .. }
+            | Expr::AddressOfStructField { .. }
+            | Expr::AddressOfStructElementField { .. } => Ok(POINTER_SIZE),
             Expr::Deref(pointer) => self.sizeof_deref(pointer),
             Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
                 self.sizeof_assignment_result(name)
@@ -7284,7 +7720,10 @@ impl Interpreter {
             Expr::SizeOfType(sizeof_type) => Ok(sizeof_type.size(&self.struct_types)?),
             Expr::SizeOfValue(expr) => self.sizeof_expr(expr),
             Expr::Var(name) => self.find_scalar(name),
-            Expr::AddressOf(_) | Expr::AddressOfArray { .. } => {
+            Expr::AddressOf(_)
+            | Expr::AddressOfArray { .. }
+            | Expr::AddressOfStructField { .. }
+            | Expr::AddressOfStructElementField { .. } => {
                 Err(CustError::new("pointer value used as scalar"))
             }
             Expr::Assign { name, value } => self.eval_assignment_expr(name, value),

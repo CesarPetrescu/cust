@@ -6,6 +6,7 @@ use std::process::Command;
 const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/arithmetic_control_flow.c",
     "tests/fixtures/compat/valid/array_initializers.c",
+    "tests/fixtures/compat/valid/address_of_struct_fields.c",
     "tests/fixtures/compat/valid/assignment_expressions.c",
     "tests/fixtures/compat/valid/bitwise_compound_assignments.c",
     "tests/fixtures/compat/valid/bitwise_operators.c",

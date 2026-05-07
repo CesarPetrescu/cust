@@ -49,7 +49,7 @@ Do not encode pointee type semantics deeply at first; use it for diagnostics and
 
 Add:
 
-- Address-of: `&name` and `&array[index]`
+- Address-of: `&name`, `&array[index]`, `&struct_value.field`, `&nested.inner.field`, `&struct_array[index]`, and `&struct_array[index].field` for supported scalar/struct targets
 - Dereference: `*ptr`
 - Pointer indexing: `ptr[index]`
 - Struct pointer field access: `ptr->field` and `(*ptr).field` for scalar fields on supported struct pointers
@@ -81,6 +81,9 @@ enum PointerValue {
     Scalar { scope_id: usize, name: String },
     ArrayElement { array: Rc<RefCell<ArrayValue>>, index: usize },
     ArrayBase { array: Rc<RefCell<ArrayValue>> },
+    Struct { scope_id: usize, name: String },
+    StructElement { scope_id: usize, name: String, index: usize },
+    StructField { scope_id: usize, name: String, element_index: Option<usize>, fields: Vec<String> },
 }
 ```
 

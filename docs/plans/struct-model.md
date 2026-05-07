@@ -55,6 +55,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Struct pointers:
   - Local/global declarations and function parameters may use one pointer level to a prior struct type, e.g. `struct Point *p = &point;`, `struct Point *p;`, `struct Point * const stable = &point;`, `const struct Point *view = &point;`, and `void set(struct Point *p);`.
   - `&point` produces an interpreter-owned pointer to the struct variable; null struct pointers use the existing `0` literal.
+  - `&points[i]` produces an interpreter-owned pointer to a supported struct-array element, and field address-of expressions such as `&point.x`, `&packet.origin.y`, and `&points[i].x` produce scalar pointers that alias the owning struct storage.
   - `p->x` and `(*p).x` read scalar fields through a struct pointer.
   - Struct pointer field lvalue expressions support simple assignment, compound assignment, and prefix/postfix increment/decrement for scalar fields when the pointer target is mutable.
   - `const struct Point *p` and direct pointers to `const struct Point` variables are read-only views: writes through `p->field` / `(*p).field`, field compound assignment, and field increment/decrement report `cannot assign through pointer to const`.
@@ -71,7 +72,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 
 ## Intentional limitations before later milestones
 
-- No arrays of struct types, pointer-to-pointer fields, pointer array fields, bit-fields, anonymous structs, unions, or const-qualified nested struct fields inside struct definitions.
+- No pointer-to-pointer fields, pointer array fields, bit-fields, anonymous structs, unions, or const-qualified nested struct fields inside struct definitions.
 - No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic recursive sizes.
 
 ## Implementation model
@@ -86,6 +87,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Function signatures also include struct return type names, so prototypes and definitions must agree on the exact return struct type.
 - Return flow carries either scalar values or deep-cloned struct field maps; callers receive by-value struct results without borrowing callee stack storage.
 - Struct pointers extend the existing interpreter-owned pointer model with `PointerValue::Struct { scope_id, name }`, never host addresses.
+- Pointers to struct-array elements use interpreter-owned `{scope_id, name, index}` targets, and pointers to scalar struct fields retain the owner target plus field path so dereference assignment mutates the original field without host addresses.
 - Struct pointer dereference checks live scope IDs before field access, preserving the same out-of-scope safety used by scalar pointers.
 - Const struct variables/parameters reuse scope `const_variables` metadata; struct field writes and copy assignment check the owning struct binding before mutation.
 - Const struct pointer declarations/parameters use the existing `points_to_const` pointer metadata, and direct pointer writes also check whether the referenced struct target binding is const.
@@ -179,7 +181,11 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - covers `const int *field` as a reassignable pointer field whose pointee remains read-only for conversion checks.
 - Invalid fixtures: `tests/fixtures/invalid/struct_pointer_to_pointer_field.c` and `tests/fixtures/invalid/struct_pointer_field_const_discard.c`
   - verify pointer-to-pointer struct field rejection and const-pointee discard diagnostics from pointer fields.
+- Valid interpreter/compiler-oracle fixture: `tests/fixtures/valid/address_of_struct_fields.c` and `tests/fixtures/compat/valid/address_of_struct_fields.c`
+  - covers `&point.x`, `&packet.anchor.y`, `&points[i]`, `&points[i].field`, scalar dereference assignment through field pointers, and struct-pointer mutation of struct-array elements.
+- Invalid fixture: `tests/fixtures/invalid/const_struct_field_address_discard.c`
+  - verifies that taking a mutable pointer to a const struct field rejects const-discarding pointer conversion.
 
 ## Next struct work
 
-1. Consider arrays of structs or union-like aggregate features only as separate milestones with explicit deterministic layout/initializer/copy semantics; do not rely on native ABI padding.
+1. Consider union-like aggregate features or deeper aggregate/pointer forms only as separate milestones with explicit deterministic layout/initializer/copy semantics; do not rely on native ABI padding.

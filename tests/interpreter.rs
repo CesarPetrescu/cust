@@ -154,6 +154,13 @@ fn supports_arrays_of_structs() {
 }
 
 #[test]
+fn supports_address_of_struct_array_elements_and_fields() {
+    let program = include_str!("fixtures/valid/address_of_struct_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 175);
+}
+
+#[test]
 fn supports_struct_pointer_fields() {
     let program = include_str!("fixtures/valid/struct_pointer_fields.c");
 
@@ -181,6 +188,17 @@ fn rejects_pointer_to_pointer_struct_fields() {
 #[test]
 fn rejects_struct_pointer_field_const_discard() {
     let program = include_str!("fixtures/invalid/struct_pointer_field_const_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_const_struct_field_address_discard() {
+    let program = include_str!("fixtures/invalid/const_struct_field_address_discard.c");
 
     let err = interpret(program).unwrap_err();
     assert_eq!(
