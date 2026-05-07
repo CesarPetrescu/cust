@@ -168,6 +168,24 @@ fn supports_aggregate_initializer_expressions_from_returned_structs_and_unions()
 }
 
 #[test]
+fn supports_conditional_and_comma_expressions_for_aggregates() {
+    let program = include_str!("fixtures/valid/aggregate_conditional_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 63);
+}
+
+#[test]
+fn rejects_aggregate_conditional_type_mismatches() {
+    let program = include_str!("fixtures/invalid/aggregate_conditional_type_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign struct 'Size' to struct 'Point'"
+    );
+}
+
+#[test]
 fn rejects_aggregate_initializer_expression_type_mismatches() {
     let program = include_str!("fixtures/invalid/aggregate_initializer_type_mismatch.c");
 

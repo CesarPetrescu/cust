@@ -13,6 +13,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/union_pointers.c",
     "tests/fixtures/compat/valid/union_return_functions.c",
     "tests/fixtures/compat/valid/aggregate_initializer_expressions.c",
+    "tests/fixtures/compat/valid/aggregate_conditional_expressions.c",
     "tests/fixtures/compat/valid/address_of_struct_fields.c",
     "tests/fixtures/compat/valid/assignment_expressions.c",
     "tests/fixtures/compat/valid/bitwise_compound_assignments.c",

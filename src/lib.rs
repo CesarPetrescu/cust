@@ -7531,6 +7531,21 @@ impl Interpreter {
 
     fn eval_struct_expr(&mut self, expr: &Expr) -> CustResult<ReturnValue> {
         match expr {
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                if self.eval_truthy(cond)? {
+                    self.eval_struct_expr(then_expr)
+                } else {
+                    self.eval_struct_expr(else_expr)
+                }
+            }
+            Expr::Comma(left, right) => {
+                self.eval_discard(left)?;
+                self.eval_struct_expr(right)
+            }
             Expr::Var(name) => match self.find_variable(name).cloned() {
                 Some(Value::Struct { type_name, fields }) => Ok(ReturnValue::Struct {
                     type_name,
