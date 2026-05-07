@@ -358,7 +358,14 @@ enum StructVarInitializer {
     Expr(Expr),
 }
 
-type StructArrayInitializer = Vec<StructInitializer>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StructArrayInitializer {
+    Element(Vec<StructInitializer>),
+    Designated {
+        index: usize,
+        value: Vec<StructInitializer>,
+    },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ArrayInitializer {
@@ -2286,16 +2293,33 @@ impl Parser {
     ) -> CustResult<Vec<StructArrayInitializer>> {
         self.expect_opening_brace_after("struct array initializer")?;
         let mut values = Vec::new();
+        let mut next_positional_index = 0usize;
         if self.matches(&Token::RBrace) {
             return Ok(values);
         }
         loop {
-            if values.len() == len {
-                return Err(CustError::new(format!(
-                    "too many initializers for struct array '{name}'"
-                )));
+            if self.check(&Token::LBracket) {
+                let index = self.parse_array_designator_index_with_context(
+                    &format!("struct array '{name}'"),
+                    len,
+                )?;
+                self.expect_assign_after("array designator")?;
+                values.push(StructArrayInitializer::Designated {
+                    index,
+                    value: self.parse_struct_initializer(type_name)?,
+                });
+                next_positional_index = index + 1;
+            } else {
+                if next_positional_index == len {
+                    return Err(CustError::new(format!(
+                        "too many initializers for struct array '{name}'"
+                    )));
+                }
+                values.push(StructArrayInitializer::Element(
+                    self.parse_struct_initializer(type_name)?,
+                ));
+                next_positional_index += 1;
             }
-            values.push(self.parse_struct_initializer(type_name)?);
             if self.matches(&Token::RBrace) {
                 break;
             }
@@ -4912,9 +4936,25 @@ impl Interpreter {
         read_only: bool,
     ) -> CustResult<Value> {
         let mut elements = Vec::with_capacity(len);
-        for index in 0..len {
-            let element_init = init.get(index).map(Vec::as_slice).unwrap_or(&[]);
-            elements.push(self.make_struct_fields(type_name, element_init)?);
+        for _ in 0..len {
+            elements.push(self.make_struct_fields(type_name, &[])?);
+        }
+        let mut next_positional_index = 0usize;
+        for initializer in init {
+            match initializer {
+                StructArrayInitializer::Element(element_init) => {
+                    if next_positional_index == len {
+                        return Err(CustError::new("too many initializers for struct array"));
+                    }
+                    elements[next_positional_index] =
+                        self.make_struct_fields(type_name, element_init.as_slice())?;
+                    next_positional_index += 1;
+                }
+                StructArrayInitializer::Designated { index, value } => {
+                    elements[*index] = self.make_struct_fields(type_name, value.as_slice())?;
+                    next_positional_index = index + 1;
+                }
+            }
         }
         Ok(Value::StructArray {
             type_name: type_name.to_string(),

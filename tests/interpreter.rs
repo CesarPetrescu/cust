@@ -203,6 +203,24 @@ fn supports_pointer_indexed_aggregate_values_as_copies() {
 }
 
 #[test]
+fn supports_designated_initializers_for_aggregate_arrays() {
+    let program = include_str!("fixtures/valid/aggregate_array_designated_initializers.c");
+
+    assert_eq!(interpret(program).unwrap(), 40);
+}
+
+#[test]
+fn rejects_struct_array_designators_out_of_bounds() {
+    let program = include_str!("fixtures/invalid/struct_array_designator_out_of_bounds.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "array designator index 2 out of bounds for struct array 'points'"
+    );
+}
+
+#[test]
 fn rejects_const_aggregate_pointer_index_writes() {
     let program = include_str!("fixtures/invalid/const_aggregate_pointer_index_write.c");
 
