@@ -8,7 +8,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - `struct Point { int x; char y; };`
   - `struct Packet { int values[3]; char tag[2]; };`
   - `struct Rect { struct Point origin; int width; };` after `Point` is declared.
-  - Fields may be `int`, `char`, one-dimensional `int`/`char` arrays, `const int`, `const char`, or a prior named struct type.
+  - Fields may be `int`, `char`, one-dimensional `int`/`char` arrays, `const int`, `const char`, a prior named struct type, or one-level scalar/struct pointer fields such as `int *external;`, `const int *view;`, and `struct Node *next;` (including self-referential struct pointers).
   - Duplicate field names are rejected during parsing.
   - Re-declaring a struct type name is rejected.
 - Struct variables at top level and block scope:
@@ -17,6 +17,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - Scalar brace initializers such as `struct Point p = {1, 2};` initialize fields in declaration order, evaluate initializer expressions left-to-right, zero-fill omitted trailing fields, and reject excess initializers.
   - Array field brace initializers such as `struct Packet p = {{1, 2}, {'A', 0}};` initialize elements left-to-right, zero-fill omitted trailing elements, and reject excess entries with the array field name.
   - Nested struct brace initializers such as `struct Rect r = {{1, 2}, 3};` recursively initialize prior named struct fields, including zero-filled omitted nested fields and excess-initializer diagnostics at the nested struct type.
+  - Pointer field initializer entries such as `struct Node head = {3, &tail, 0};` evaluate to interpreter-owned pointer metadata; omitted pointer fields default to null. `const T *field` records pointee-const metadata and remains reassignable, while `T * const field` records a const pointer slot.
   - Const fields can be initialized in a struct initializer but remain read-only after declaration.
   - Normal block/global scope rules apply; inner variables may shadow outer variables.
 - Member access and member assignment:
@@ -25,6 +26,9 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - `rect.origin.x` reads nested scalar fields through a struct-valued field path.
   - `p.x = expr;` and `rect.origin.x = expr;` assign scalar fields.
   - `packet.values[0] = expr;`, compound assignments, and prefix/postfix increment/decrement work for array-field elements.
+  - `head.next` reads a struct pointer field as a pointer value, so `head.next->value` can chain through one-level pointer fields.
+  - `head.external` reads a scalar pointer field, so `*head.external` works in pointer contexts.
+  - `head.next = &other;` / `head.external = &value;` reassign mutable pointer fields while preserving pointee-const conversion checks.
   - Unknown fields report `struct '<Type>' has no field '<field>'` at the innermost type where lookup fails.
   - `sizeof(p)` sums Cust field sizes recursively (`int = 8`, `char = 1`) without native ABI padding.
   - `sizeof(p.x)` uses the declared field type size; `sizeof(packet.values)` uses array length times element size; `sizeof(packet.values[0])` uses the element size; `sizeof(rect.origin)` uses the deterministic Cust size of the nested struct field.
@@ -67,14 +71,14 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 
 ## Intentional limitations before later milestones
 
-- No pointer fields, arrays of struct types, bit-fields, anonymous structs, unions, or const-qualified nested struct fields inside struct definitions.
+- No arrays of struct types, pointer-to-pointer fields, pointer array fields, bit-fields, anonymous structs, unions, or const-qualified nested struct fields inside struct definitions.
 - No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic recursive sizes.
 
 ## Implementation model
 
 - Parser records top-level struct type definitions in `Program::struct_types`.
-- Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store scalar values plus declared `CType`/field-level const metadata, one-dimensional array storage with declared element type/length, or nested struct field maps with the nested type name.
-- Struct initializers are parsed as field-aware entries: scalar fields consume assignment-precedence expressions, array fields consume brace lists of assignment-precedence expressions, and nested struct fields may consume recursive brace initializer lists or same-type struct expressions. Entries are applied in declaration order before const field metadata prevents later writes; omitted array elements and nested fields are zero-initialized.
+- Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store scalar values plus declared `CType`/field-level const metadata, one-dimensional array storage with declared element type/length, nested struct field maps with the nested type name, or one-level scalar/struct pointer metadata.
+- Struct initializers are parsed as field-aware entries: scalar fields consume assignment-precedence expressions, array fields consume brace lists of assignment-precedence expressions, nested struct fields may consume recursive brace initializer lists or same-type struct expressions, and pointer fields consume pointer-valued expressions or default to null. Entries are applied in declaration order before const field metadata prevents later writes; omitted array elements and nested fields are zero-initialized.
 - Struct fields are scoped as members of their owning value, not as independent variables.
 - Member access is scalar expression syntax backed by field-path lvalue evaluation helpers for simple assignment, compound assignment, and increment/decrement expressions; array fields are indexed before element lvalue evaluation.
 - Function signatures include struct parameter type names, so prototypes and later definitions must agree on the exact struct type.
@@ -86,6 +90,9 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Const struct variables/parameters reuse scope `const_variables` metadata; struct field writes and copy assignment check the owning struct binding before mutation.
 - Const struct pointer declarations/parameters use the existing `points_to_const` pointer metadata, and direct pointer writes also check whether the referenced struct target binding is const.
 - Const struct fields are stored on each field value so cloned by-value parameters/returns preserve field-level read-only semantics.
+- Pointer fields store `PointerValue` plus pointee type and const metadata; struct copy, by-value parameter binding, and struct returns clone the pointer metadata by value just like C pointer fields copy the pointer value, not the pointee.
+- `const T *field` sets pointee-const metadata and rejects writes or conversions that would discard it, while `T * const field` uses field-level const metadata to reject pointer-field reassignment.
+- Pointer-to-pointer struct fields and pointer array fields are rejected during parsing with targeted diagnostics.
 - `->` parses as postfix pointer field access, and `(*p).x` is represented as field access through a dereferenced pointer expression.
 
 ## Acceptance fixtures
@@ -164,6 +171,15 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Invalid fixture: `tests/fixtures/invalid/struct_array_initializer_too_long.c`
   - verifies excess entries inside an array field initializer report `too many initializers for array '<field>'`.
 
+- Valid interpreter fixture: `tests/fixtures/valid/struct_pointer_fields.c`
+  - covers scalar and self-referential struct pointer fields, pointer-field initializers, `head.next->value`, `*head.external`, pointer-field reassignment, and by-value struct parameter behavior where pointer fields copy pointer values.
+- Valid compiler-oracle fixture: `tests/fixtures/compat/valid/struct_pointer_fields.c`
+  - compares supported pointer-field reads/writes/reassignment with native C without relying on native struct layout.
+- Valid interpreter/compiler-oracle fixture: `tests/fixtures/valid/struct_pointer_field_const_pointee.c` and `tests/fixtures/compat/valid/struct_pointer_field_const_pointee.c`
+  - covers `const int *field` as a reassignable pointer field whose pointee remains read-only for conversion checks.
+- Invalid fixtures: `tests/fixtures/invalid/struct_pointer_to_pointer_field.c` and `tests/fixtures/invalid/struct_pointer_field_const_discard.c`
+  - verify pointer-to-pointer struct field rejection and const-pointee discard diagnostics from pointer fields.
+
 ## Next struct work
 
-1. Consider pointer fields as a separate milestone with explicit ownership/const/pointer-target design; do not rely on native ABI padding.
+1. Consider arrays of structs or union-like aggregate features only as separate milestones with explicit deterministic layout/initializer/copy semantics; do not rely on native ABI padding.

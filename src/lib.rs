@@ -265,6 +265,7 @@ struct StructFieldDef {
     name: String,
     ty: StructFieldType,
     is_const: bool,
+    points_to_const: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,6 +273,7 @@ enum StructFieldType {
     Scalar(CType),
     Array(CType, usize),
     Struct(String),
+    Pointer(PointeeType),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,6 +293,7 @@ impl StructFieldType {
                 .map(|struct_type| struct_type.size(struct_types))
                 .transpose()?
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            StructFieldType::Pointer(_) => Ok(POINTER_SIZE),
         }
     }
 }
@@ -2014,17 +2017,53 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let (is_const, decl_type) =
-                self.parse_const_qualified_decl_type("struct field type")?;
+            let leading_const = self.matches(&Token::Const);
+            let decl_type = if self.matches(&Token::Struct) {
+                let field_type_name = self.expect_ident_after("struct field type")?;
+                if !self.struct_types.contains_key(&field_type_name) && field_type_name != type_name
+                {
+                    return Err(CustError::new(format!(
+                        "undefined struct type '{field_type_name}'"
+                    )));
+                }
+                DeclType::Struct(field_type_name)
+            } else {
+                self.parse_decl_type("struct field type")?
+            };
+            let has_explicit_star = self.matches(&Token::Star);
+            let post_star_const = has_explicit_star && self.matches(&Token::Const);
+            if has_explicit_star && self.check(&Token::Star) {
+                return Err(Self::error_at(
+                    "pointer-to-pointer struct fields are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer(_));
+            let (is_const, points_to_const) = if is_pointer {
+                if has_explicit_star {
+                    (post_star_const, leading_const)
+                } else {
+                    (leading_const, false)
+                }
+            } else {
+                (leading_const, false)
+            };
             let ty = match decl_type {
-                DeclType::Scalar(ty) => StructFieldType::Scalar(ty),
-                DeclType::Struct(type_name) => StructFieldType::Struct(type_name),
-                DeclType::Pointer(_) => {
+                DeclType::Scalar(ty) if has_explicit_star => {
+                    StructFieldType::Pointer(PointeeType::Scalar(ty))
+                }
+                DeclType::Struct(type_name) if has_explicit_star => {
+                    StructFieldType::Pointer(PointeeType::Struct(type_name))
+                }
+                DeclType::Pointer(_) if has_explicit_star => {
                     return Err(Self::error_at(
-                        "pointer struct fields are not supported".to_string(),
+                        "pointer-to-pointer struct fields are not supported".to_string(),
                         self.previous(),
                     ));
                 }
+                DeclType::Pointer(pointee) => StructFieldType::Pointer(pointee),
+                DeclType::Scalar(ty) => StructFieldType::Scalar(ty),
+                DeclType::Struct(type_name) => StructFieldType::Struct(type_name),
             };
             let name = self.expect_ident_after("struct field name after type")?;
             if !names.insert(name.clone()) {
@@ -2046,13 +2085,24 @@ impl Parser {
                             self.previous(),
                         ));
                     }
+                    StructFieldType::Pointer(_) => {
+                        return Err(Self::error_at(
+                            "pointer array struct fields are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
                     StructFieldType::Array(_, _) => unreachable!("array field not built yet"),
                 }
             } else {
                 ty
             };
             self.expect_semicolon_after("struct field declaration")?;
-            fields.push(StructFieldDef { name, ty, is_const });
+            fields.push(StructFieldDef {
+                name,
+                ty,
+                is_const,
+                points_to_const,
+            });
         }
         self.expect(Token::RBrace)?;
         self.expect_semicolon_after("struct declaration")?;
@@ -3636,6 +3686,12 @@ enum StructFieldValue {
         fields: HashMap<String, StructFieldValue>,
         is_const: bool,
     },
+    Pointer {
+        pointer: PointerValue,
+        ty: PointeeType,
+        is_const: bool,
+        points_to_const: bool,
+    },
 }
 
 impl StructFieldValue {
@@ -3643,7 +3699,8 @@ impl StructFieldValue {
         match self {
             StructFieldValue::Scalar { is_const, .. }
             | StructFieldValue::Array { is_const, .. }
-            | StructFieldValue::Struct { is_const, .. } => *is_const,
+            | StructFieldValue::Struct { is_const, .. }
+            | StructFieldValue::Pointer { is_const, .. } => *is_const,
         }
     }
 
@@ -3670,6 +3727,17 @@ impl StructFieldValue {
                 type_name: type_name.clone(),
                 fields: Self::deep_clone_fields(fields),
                 is_const: *is_const,
+            },
+            StructFieldValue::Pointer {
+                pointer,
+                ty,
+                is_const,
+                points_to_const,
+            } => StructFieldValue::Pointer {
+                pointer: pointer.clone(),
+                ty: ty.clone(),
+                is_const: *is_const,
+                points_to_const: *points_to_const,
             },
         }
     }
@@ -3967,7 +4035,9 @@ impl Interpreter {
                             type_name.clone(),
                             StructFieldValue::deep_clone_fields(fields),
                         )),
-                        StructFieldValue::Scalar { .. } | StructFieldValue::Array { .. } => None,
+                        StructFieldValue::Scalar { .. }
+                        | StructFieldValue::Array { .. }
+                        | StructFieldValue::Pointer { .. } => None,
                     }
                 }
                 Some(_) => None,
@@ -4099,6 +4169,9 @@ impl Interpreter {
         match expr {
             Expr::Var(name) => self.pointer_variable_points_to_const(name),
             Expr::AddressOf(name) => self.is_const_variable(name),
+            Expr::StructGet { name, fields } => {
+                self.struct_pointer_field_points_to_const(name, fields)
+            }
             Expr::AddressOfArray { name, .. } => match self.find_variable(name) {
                 Some(Value::Array(array)) => array.borrow().read_only,
                 Some(Value::Pointer {
@@ -4120,6 +4193,14 @@ impl Interpreter {
             }
             Expr::Assign { name, value } => {
                 self.pointer_variable_points_to_const(name)
+                    || self.pointer_expr_points_to_const(value)
+            }
+            Expr::StructSet {
+                name,
+                fields,
+                value,
+            } => {
+                self.struct_pointer_field_points_to_const(name, fields)
                     || self.pointer_expr_points_to_const(value)
             }
             Expr::CompoundAssign { name, .. } => self.pointer_variable_points_to_const(name),
@@ -4401,6 +4482,30 @@ impl Interpreter {
                         is_const: field.is_const,
                     }
                 }
+                StructFieldType::Pointer(pointee) => {
+                    let pointer = match init.get(index) {
+                        Some(StructInitializer::Expr(expr)) => {
+                            self.ensure_pointer_conversion_preserves_const(
+                                field.points_to_const,
+                                expr,
+                            )?;
+                            self.eval_pointer(expr)?
+                        }
+                        Some(StructInitializer::Array(_)) | Some(StructInitializer::Struct(_)) => {
+                            return Err(CustError::new(format!(
+                                "nested initializer for pointer field '{}' is not supported",
+                                field.name
+                            )));
+                        }
+                        None => PointerValue::Null,
+                    };
+                    StructFieldValue::Pointer {
+                        pointer,
+                        ty: pointee.clone(),
+                        is_const: field.is_const,
+                        points_to_const: field.points_to_const,
+                    }
+                }
             };
             fields.insert(field.name.clone(), field_value);
         }
@@ -4429,9 +4534,11 @@ impl Interpreter {
             StructFieldValue::Struct {
                 type_name, fields, ..
             } => Self::nested_field_value(type_name, fields, rest),
-            StructFieldValue::Scalar { .. } | StructFieldValue::Array { .. } => Err(
-                CustError::new(format!("struct field '{field}' is not a struct")),
-            ),
+            StructFieldValue::Scalar { .. }
+            | StructFieldValue::Array { .. }
+            | StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                "struct field '{field}' is not a struct"
+            ))),
         }
     }
 
@@ -4453,9 +4560,11 @@ impl Interpreter {
             StructFieldValue::Struct {
                 type_name, fields, ..
             } => Self::nested_field_value_mut(type_name, fields, rest),
-            StructFieldValue::Scalar { .. } | StructFieldValue::Array { .. } => Err(
-                CustError::new(format!("struct field '{field}' is not a struct")),
-            ),
+            StructFieldValue::Scalar { .. }
+            | StructFieldValue::Array { .. }
+            | StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                "struct field '{field}' is not a struct"
+            ))),
         }
     }
 
@@ -4471,6 +4580,10 @@ impl Interpreter {
                     ))),
                     StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
                         "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                        "pointer field '{}' used as scalar",
                         Self::field_path_label(path)
                     ))),
                 }
@@ -4504,6 +4617,107 @@ impl Interpreter {
                         "struct field '{}' is a struct '{type_name}'",
                         Self::field_path_label(path)
                     ))),
+                    StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                        "pointer field '{}' used as scalar",
+                        Self::field_path_label(path)
+                    ))),
+                }
+            }
+            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn struct_pointer_field_points_to_const(&self, name: &str, path: &[String]) -> bool {
+        match self.find_variable(name) {
+            Some(Value::Struct { type_name, fields }) => {
+                match Self::nested_field_value(type_name, fields, path) {
+                    Ok((
+                        _,
+                        StructFieldValue::Pointer {
+                            points_to_const, ..
+                        },
+                    )) => *points_to_const,
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn struct_field_is_pointer(&self, name: &str, path: &[String]) -> bool {
+        matches!(
+            self.find_variable(name),
+            Some(Value::Struct { type_name, fields })
+                if matches!(
+                    Self::nested_field_value(type_name, fields, path),
+                    Ok((_, StructFieldValue::Pointer { .. }))
+                )
+        )
+    }
+
+    fn read_direct_struct_pointer_field(
+        &self,
+        name: &str,
+        path: &[String],
+    ) -> CustResult<PointerValue> {
+        match self.find_variable(name) {
+            Some(Value::Struct { type_name, fields }) => {
+                let (_, field_value) = Self::nested_field_value(type_name, fields, path)?;
+                match field_value {
+                    StructFieldValue::Pointer { pointer, .. } => Ok(pointer.clone()),
+                    StructFieldValue::Scalar { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is not a pointer",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is an array",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                        "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(path)
+                    ))),
+                }
+            }
+            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn assign_direct_struct_pointer_field(
+        &mut self,
+        name: &str,
+        path: &[String],
+        value: PointerValue,
+    ) -> CustResult<()> {
+        self.ensure_variable_mutable(name)?;
+        match self.find_variable_mut(name) {
+            Some(Value::Struct { type_name, fields }) => {
+                let (_, field_value) = Self::nested_field_value_mut(type_name, fields, path)?;
+                if field_value.is_const() {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(path)
+                    )));
+                }
+                match field_value {
+                    StructFieldValue::Pointer { pointer, .. } => {
+                        *pointer = value;
+                        Ok(())
+                    }
+                    StructFieldValue::Scalar { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is not a pointer",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is an array",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                        "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(path)
+                    ))),
                 }
             }
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
@@ -4527,6 +4741,10 @@ impl Interpreter {
                     ))),
                     StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
                         "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is not an array",
                         Self::field_path_label(path)
                     ))),
                 }
@@ -4696,6 +4914,10 @@ impl Interpreter {
                 "struct field '{}' is a struct '{type_name}'",
                 Self::field_path_label(path)
             ))),
+            StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                "pointer field '{}' used as scalar",
+                Self::field_path_label(path)
+            ))),
         }
     }
 
@@ -4725,6 +4947,10 @@ impl Interpreter {
             ))),
             StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
                 "struct field '{}' is a struct '{type_name}'",
+                Self::field_path_label(path)
+            ))),
+            StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                "pointer field '{}' used as scalar",
                 Self::field_path_label(path)
             ))),
         }
@@ -4787,6 +5013,9 @@ impl Interpreter {
     }
 
     fn eval_struct_set(&mut self, name: &str, fields: &[String], value: &Expr) -> CustResult<i64> {
+        if self.struct_field_is_pointer(name, fields) {
+            return Err(CustError::new("pointer value used as scalar"));
+        }
         let value = self.eval(value)?;
         self.assign_struct_field(name, fields, value)?;
         Ok(value)
@@ -4934,6 +5163,20 @@ impl Interpreter {
                 ))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
+            Expr::StructGet { name, fields } => self.read_direct_struct_pointer_field(name, fields),
+            Expr::StructSet {
+                name,
+                fields,
+                value,
+            } => {
+                self.ensure_pointer_conversion_preserves_const(
+                    self.struct_pointer_field_points_to_const(name, fields),
+                    value,
+                )?;
+                let pointer = self.eval_pointer(value)?;
+                self.assign_direct_struct_pointer_field(name, fields, pointer.clone())?;
+                Ok(pointer)
+            }
             Expr::CompoundAssign { name, op, value } => {
                 let pointer = match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => pointer,
@@ -5670,6 +5913,7 @@ impl Interpreter {
                 .map(|struct_type| struct_type.size(&self.struct_types))
                 .transpose()?
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            StructFieldValue::Pointer { .. } => Ok(POINTER_SIZE),
         }
     }
 
@@ -5967,7 +6211,9 @@ impl Interpreter {
                             type_name: type_name.clone(),
                             fields: StructFieldValue::deep_clone_fields(fields),
                         }),
-                        StructFieldValue::Scalar { .. } | StructFieldValue::Array { .. } => {
+                        StructFieldValue::Scalar { .. }
+                        | StructFieldValue::Array { .. }
+                        | StructFieldValue::Pointer { .. } => {
                             Err(CustError::new("expected struct expression"))
                         }
                     }
@@ -6240,8 +6486,17 @@ impl Interpreter {
                 fields,
                 value,
             } => {
-                let value = self.eval(value)?;
-                self.assign_struct_field(name, fields, value)?;
+                if self.struct_field_is_pointer(name, fields) {
+                    self.ensure_pointer_conversion_preserves_const(
+                        self.struct_pointer_field_points_to_const(name, fields),
+                        value,
+                    )?;
+                    let pointer = self.eval_pointer(value)?;
+                    self.assign_direct_struct_pointer_field(name, fields, pointer)?;
+                } else {
+                    let value = self.eval(value)?;
+                    self.assign_struct_field(name, fields, value)?;
+                }
                 Ok(ExecFlow::None)
             }
             Stmt::Expr(expr) => {

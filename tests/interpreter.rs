@@ -147,6 +147,42 @@ fn supports_struct_array_fields() {
 }
 
 #[test]
+fn supports_struct_pointer_fields() {
+    let program = include_str!("fixtures/valid/struct_pointer_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 41);
+}
+
+#[test]
+fn supports_struct_pointer_fields_with_const_pointee_views() {
+    let program = include_str!("fixtures/valid/struct_pointer_field_const_pointee.c");
+
+    assert_eq!(interpret(program).unwrap(), 18);
+}
+
+#[test]
+fn rejects_pointer_to_pointer_struct_fields() {
+    let program = include_str!("fixtures/invalid/struct_pointer_to_pointer_field.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "pointer-to-pointer struct fields are not supported at line 2, column 10"
+    );
+}
+
+#[test]
+fn rejects_struct_pointer_field_const_discard() {
+    let program = include_str!("fixtures/invalid/struct_pointer_field_const_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
 fn rejects_struct_array_initializers_longer_than_declared_length() {
     let program = include_str!("fixtures/invalid/struct_array_initializer_too_long.c");
 

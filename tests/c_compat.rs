@@ -42,6 +42,8 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/static_storage_class.c",
     "tests/fixtures/compat/valid/static_local_storage.c",
     "tests/fixtures/compat/valid/struct_array_fields.c",
+    "tests/fixtures/compat/valid/struct_pointer_fields.c",
+    "tests/fixtures/compat/valid/struct_pointer_field_const_pointee.c",
     "tests/fixtures/compat/valid/struct_initializers.c",
     "tests/fixtures/compat/valid/structs.c",
     "tests/fixtures/compat/valid/struct_lvalues_and_copy.c",

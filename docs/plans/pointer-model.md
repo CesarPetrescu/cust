@@ -53,6 +53,7 @@ Add:
 - Dereference: `*ptr`
 - Pointer indexing: `ptr[index]`
 - Struct pointer field access: `ptr->field` and `(*ptr).field` for scalar fields on supported struct pointers
+- Struct pointer fields: `struct Node { int *external; struct Node *next; };` store interpreter-owned pointer metadata, including self-referential struct pointer fields and const-pointee metadata for `const T *field`.
 - Null literal: use integer `0` as the only null pointer literal in pointer initializers/assignments and pointer arguments.
 
 `&` should be parsed as a unary operator with precedence matching the existing unary operators. `*` remains multiplication in binary position and becomes dereference in unary position. Parser context already distinguishes unary/binary `-`; apply the same approach for unary `*`.
@@ -141,6 +142,8 @@ Supported first:
 
 - Passing an array variable to an `int *`/`char *` parameter decays to an array-base pointer.
 - Passing a string literal to a `char *` parameter decays to a read-only array-base pointer.
+- Struct pointer fields copy pointer values by value during struct copy/parameter/return flows; they do not clone or own the pointee.
+- `const T *` pointer fields preserve pointee constness for conversion/write checks, while `T * const` pointer fields reject field reassignment.
 - `ptr[index]` reads/writes array storage when the pointer target is array-base.
 - `&array[index]` creates an array-element pointer.
 - `*(&array[index])` reads/writes exactly that element.
