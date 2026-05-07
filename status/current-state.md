@@ -56,6 +56,7 @@ Last updated: 2026-05-07
 - Const-qualified struct variables and by-value parameters are supported for the existing scalar-field struct subset: `const struct Point p;` and `const Point p;` after a typedef create zero-initialized read-only struct bindings, `int f(const struct Point p)` receives a by-value read-only parameter copy, direct field/copy assignment to const struct bindings reports `cannot assign to const variable '<name>'`, and writes through const struct pointers or direct pointers to const struct targets report `cannot assign through pointer to const`.
 - Const-qualified scalar fields inside struct definitions are supported for `const int` and `const char` fields. Field reads work through direct variables and struct pointers, mutable sibling fields remain writable, writes to const fields report `cannot assign to const struct field '<field>'`, and whole-struct copy assignment into struct types containing const fields reports `cannot assign to struct '<Type>' with const fields`.
 - One-level pointer fields inside structs are supported for scalar and struct pointees, including self-referential links such as `struct Node *next;`, scalar pointer fields such as `int *external;`, pointer-field initializer entries, pointer-field reassignment, chained struct-pointer field access (`head.next->value`), and dereference of scalar pointer fields (`*head.external`). Pointer fields copy pointer values by value during struct copy/parameter/return flows, preserve pointee const metadata for `const T *field`, and reject unsupported pointer-to-pointer or pointer-array fields with targeted diagnostics.
+- First-pass scalar-field `union` support is documented in `docs/plans/union-model.md`: named top-level unions such as `union Number { int value; char tag; };` can be declared as variables, zero-initialized or initialized with one first-field brace initializer, read/written with `.`, and queried with deterministic Cust `sizeof`; scalar union fields share one logical interpreter value while native ABI byte layout and padding remain intentionally out of scope.
 - `return expr;`
 - nested block statements `{ ... }` with per-block variable scopes, inner shadowing, and outer-scope assignment lookup
 - `if (...) statement else statement` with braced blocks, single-statement control bodies, `else if` chains, and C dangling-`else` binding to the nearest unmatched `if`
@@ -87,6 +88,18 @@ Last updated: 2026-05-07
 - Parser diagnostics now include targeted missing-`(` messages after function names and `if`/`while`/`for` keywords, targeted missing-semicolon messages after `break`, `continue`, and `for` conditions, targeted missing-`=` messages after variable/pointer declarations and scalar/indexed/dereference assignments, targeted missing-name/type messages for function names, variable/pointer declarations, and parameter lists, unmatched closing delimiter messages for stray `)`/`]` in statements and extra `}` at top level, context-aware unterminated-block messages (for example after a function header or `if` condition), explicit empty-array-length diagnostics before `]`, negative array-length diagnostics, explicit rejection of `break`/`continue` in non-body `for` clauses, pointer-parameter malformed-list coverage, explicit unsupported pointer-return/pointer-array/parser diagnostics, explicit unsupported pointer-to-pointer parameter/declaration diagnostics, delimiter-aware trailing-comma diagnostics for function parameter/call lists, and duplicate `switch` case/default label diagnostics.
 
 ## Verified commands
+
+```bash
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter union -- --nocapture
+cargo test --test c_compat -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+All passed after the 2026-05-07 autonomous first-pass union run. This run added `docs/plans/union-model.md`, lexer/parser/runtime support for named scalar-field `union` declarations and variables, deterministic max-field `sizeof`, one first-field brace initializer, scalar member reads/writes over shared logical interpreter storage, and targeted excess-initializer diagnostics. Coverage includes `tests/fixtures/valid/unions.c`, `tests/fixtures/invalid/union_initializer_too_long.c`, and native C compiler-oracle fixture `tests/fixtures/compat/valid/unions.c`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 ```bash
 cargo fmt --check

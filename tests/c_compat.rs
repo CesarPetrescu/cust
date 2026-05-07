@@ -8,6 +8,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/array_initializers.c",
     "tests/fixtures/compat/valid/designated_initializers.c",
     "tests/fixtures/compat/valid/path_designated_initializers.c",
+    "tests/fixtures/compat/valid/unions.c",
     "tests/fixtures/compat/valid/address_of_struct_fields.c",
     "tests/fixtures/compat/valid/assignment_expressions.c",
     "tests/fixtures/compat/valid/bitwise_compound_assignments.c",

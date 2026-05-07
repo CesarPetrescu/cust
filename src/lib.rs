@@ -40,6 +40,7 @@ enum Token {
     Void,
     Enum,
     Struct,
+    Union,
     Typedef,
     Sizeof,
     Return,
@@ -306,6 +307,22 @@ enum DeclType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StructTypeDef {
     fields: Vec<StructFieldDef>,
+    kind: AggregateKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AggregateKind {
+    Struct,
+    Union,
+}
+
+impl AggregateKind {
+    fn keyword(self) -> &'static str {
+        match self {
+            AggregateKind::Struct => "struct",
+            AggregateKind::Union => "union",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -360,10 +377,18 @@ impl StructFieldType {
 
 impl StructTypeDef {
     fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
-        self.fields
-            .iter()
-            .map(|field| field.ty.size(struct_types))
-            .try_fold(0, |sum, size| size.map(|size| sum + size))
+        match self.kind {
+            AggregateKind::Struct => self
+                .fields
+                .iter()
+                .map(|field| field.ty.size(struct_types))
+                .try_fold(0, |sum, size| size.map(|size| sum + size)),
+            AggregateKind::Union => self
+                .fields
+                .iter()
+                .map(|field| field.ty.size(struct_types))
+                .try_fold(0, |max, size| size.map(|size| max.max(size))),
+        }
     }
 }
 
@@ -973,6 +998,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "void" => Token::Void,
                     "enum" => Token::Enum,
                     "struct" => Token::Struct,
+                    "union" => Token::Union,
                     "typedef" => Token::Typedef,
                     "sizeof" => Token::Sizeof,
                     "return" => Token::Return,
@@ -1308,11 +1334,11 @@ impl Parser {
                 self.parse_typedef_decl()?;
             } else if self.check(&Token::Enum) {
                 globals.push(self.parse_enum_decl()?);
-            } else if self.check(&Token::Struct) {
-                if self.is_struct_definition() {
-                    self.parse_struct_definition()?;
+            } else if matches!(self.peek(), Token::Struct | Token::Union) {
+                if self.is_aggregate_definition() {
+                    self.parse_aggregate_definition()?;
                 } else {
-                    globals.push(self.parse_struct_var_decl()?);
+                    globals.push(self.parse_aggregate_var_decl()?);
                 }
             } else {
                 let found = self.peek_located().clone();
@@ -1333,13 +1359,18 @@ impl Parser {
         })
     }
 
-    fn is_struct_definition(&self) -> bool {
+    fn is_aggregate_definition(&self) -> bool {
         matches!(
             (
+                self.peek(),
                 self.tokens.get(self.pos + 1).map(|token| &token.kind),
                 self.tokens.get(self.pos + 2).map(|token| &token.kind)
             ),
-            (Some(Token::Ident(_)), Some(Token::LBrace))
+            (
+                Token::Struct | Token::Union,
+                Some(Token::Ident(_)),
+                Some(Token::LBrace)
+            )
         )
     }
 
@@ -1397,11 +1428,16 @@ impl Parser {
         match found.kind.clone() {
             Token::Int => Ok(DeclType::Scalar(CType::Int)),
             Token::Char => Ok(DeclType::Scalar(CType::Char)),
-            Token::Struct => {
+            Token::Struct | Token::Union => {
+                let keyword = if matches!(found.kind, Token::Union) {
+                    "union"
+                } else {
+                    "struct"
+                };
                 let type_name = self.expect_ident_after(context)?;
                 if !self.struct_types.contains_key(&type_name) {
                     return Err(CustError::new(format!(
-                        "undefined struct type '{type_name}'"
+                        "undefined {keyword} type '{type_name}'"
                     )));
                 }
                 Ok(DeclType::Struct(type_name))
@@ -1760,7 +1796,7 @@ impl Parser {
                 Ok(Stmt::Empty)
             }
             Token::Enum => self.parse_enum_decl(),
-            Token::Struct => self.parse_struct_var_decl(),
+            Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             Token::Return => self.parse_return(),
             Token::LBrace => Ok(Stmt::Block(self.parse_block_after("block statement")?)),
             Token::If => self.parse_if(),
@@ -1829,7 +1865,7 @@ impl Parser {
         let decl = match self.peek() {
             Token::Int | Token::Char | Token::Const => self.parse_var_decl()?,
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
-            Token::Struct => self.parse_struct_var_decl()?,
+            Token::Struct | Token::Union => self.parse_aggregate_var_decl()?,
             token => {
                 return Err(Self::error_at(
                     format!("expected declaration after static, found {token:?}"),
@@ -2099,12 +2135,14 @@ impl Parser {
     }
 
     fn parse_struct_initializer(&mut self, type_name: &str) -> CustResult<Vec<StructInitializer>> {
-        let fields = self
+        let struct_type = self
             .struct_types
             .get(type_name)
-            .map(|struct_type| struct_type.fields.clone())
+            .cloned()
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
-        self.expect_opening_brace_after("struct initializer")?;
+        let fields = struct_type.fields.clone();
+        let aggregate_keyword = struct_type.kind.keyword();
+        self.expect_opening_brace_after(&format!("{aggregate_keyword} initializer"))?;
         let mut values = Vec::new();
         let mut next_positional_index = 0usize;
         if self.matches(&Token::RBrace) {
@@ -2120,9 +2158,11 @@ impl Parser {
                     value: Box::new(value),
                 });
             } else {
-                if next_positional_index == fields.len() {
+                if next_positional_index == fields.len()
+                    || (struct_type.kind == AggregateKind::Union && next_positional_index > 0)
+                {
                     return Err(CustError::new(format!(
-                        "too many initializers for struct '{type_name}'"
+                        "too many initializers for {aggregate_keyword} '{type_name}'"
                     )));
                 }
                 let field = &fields[next_positional_index];
@@ -2258,10 +2298,15 @@ impl Parser {
         Ok(values)
     }
 
-    fn parse_struct_definition(&mut self) -> CustResult<()> {
-        self.expect(Token::Struct)?;
-        let type_name = self.expect_ident_after("struct name")?;
-        self.expect_opening_brace_after("struct name")?;
+    fn parse_aggregate_definition(&mut self) -> CustResult<()> {
+        let kind = match self.advance().kind {
+            Token::Struct => AggregateKind::Struct,
+            Token::Union => AggregateKind::Union,
+            token => unreachable!("expected aggregate keyword, found {token:?}"),
+        };
+        let keyword = kind.keyword();
+        let type_name = self.expect_ident_after(&format!("{keyword} name"))?;
+        self.expect_opening_brace_after(&format!("{keyword} name"))?;
         let mut fields = Vec::new();
         let mut names = HashSet::new();
         while !self.check(&Token::RBrace) {
@@ -2359,22 +2404,27 @@ impl Parser {
             });
         }
         self.expect(Token::RBrace)?;
-        self.expect_semicolon_after("struct declaration")?;
+        self.expect_semicolon_after(&format!("{keyword} declaration"))?;
         if self
             .struct_types
-            .insert(type_name.clone(), StructTypeDef { fields })
+            .insert(type_name.clone(), StructTypeDef { fields, kind })
             .is_some()
         {
             return Err(CustError::new(format!(
-                "struct '{type_name}' already declared"
+                "{keyword} '{type_name}' already declared"
             )));
         }
         Ok(())
     }
 
-    fn parse_struct_var_decl(&mut self) -> CustResult<Stmt> {
-        self.expect(Token::Struct)?;
-        let type_name = self.expect_ident_after("struct type name")?;
+    fn parse_aggregate_var_decl(&mut self) -> CustResult<Stmt> {
+        let kind = match self.advance().kind {
+            Token::Struct => AggregateKind::Struct,
+            Token::Union => AggregateKind::Union,
+            token => unreachable!("expected aggregate keyword, found {token:?}"),
+        };
+        let keyword = kind.keyword();
+        let type_name = self.expect_ident_after(&format!("{keyword} type name"))?;
         if !self.struct_types.contains_key(&type_name) {
             return Err(CustError::new(format!(
                 "undefined struct type '{type_name}'"
@@ -4842,8 +4892,34 @@ impl Interpreter {
                     CustError::new(format!("struct '{type_name}' has no field '{field}'"))
                 })?;
             self.apply_struct_field_initializer(&mut fields, field_def, value)?;
+            if struct_type.kind == AggregateKind::Union {
+                Self::sync_union_scalar_fields_from_active(&mut fields, field)?;
+            }
         }
         Ok(fields)
+    }
+
+    fn sync_union_scalar_fields_from_active(
+        fields: &mut HashMap<String, StructFieldValue>,
+        active_field: &str,
+    ) -> CustResult<()> {
+        let active_value = match fields.get(active_field) {
+            Some(StructFieldValue::Scalar { value, .. }) => Some(*value),
+            Some(_) => None,
+            None => {
+                return Err(CustError::new(format!(
+                    "missing union field '{active_field}'"
+                )));
+            }
+        };
+        if let Some(active_value) = active_value {
+            for field_value in fields.values_mut() {
+                if let StructFieldValue::Scalar { value, .. } = field_value {
+                    *value = active_value;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn default_struct_field_value(
@@ -5098,6 +5174,13 @@ impl Interpreter {
 
     fn assign_struct_field(&mut self, name: &str, path: &[String], value: i64) -> CustResult<()> {
         self.ensure_variable_mutable(name)?;
+        let is_root_union = match self.find_variable(name) {
+            Some(Value::Struct { type_name, .. }) => self
+                .struct_types
+                .get(type_name)
+                .is_some_and(|aggregate| aggregate.kind == AggregateKind::Union),
+            _ => false,
+        };
         match self.find_variable_mut(name) {
             Some(Value::Struct { type_name, fields }) => {
                 let (_, field_value) = Self::nested_field_value_mut(type_name, fields, path)?;
@@ -5110,6 +5193,9 @@ impl Interpreter {
                 match field_value {
                     StructFieldValue::Scalar { value: slot, .. } => {
                         *slot = value;
+                        if is_root_union && path.len() == 1 {
+                            Self::sync_union_scalar_fields_from_active(fields, &path[0])?;
+                        }
                         Ok(())
                     }
                     StructFieldValue::Array { .. } => Err(CustError::new(format!(

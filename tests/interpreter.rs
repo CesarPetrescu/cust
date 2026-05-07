@@ -133,6 +133,22 @@ fn supports_path_designated_struct_initializers() {
 }
 
 #[test]
+fn supports_scalar_union_variables_fields_initializers_and_sizeof() {
+    let program = include_str!("fixtures/valid/unions.c");
+
+    assert_eq!(interpret(program).unwrap(), 103);
+}
+
+#[test]
+fn rejects_union_initializers_longer_than_one_field() {
+    let program = include_str!("fixtures/invalid/union_initializer_too_long.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "too many initializers for union 'Number'");
+}
+
+#[test]
 fn supports_scalar_struct_initializers() {
     let program = include_str!("fixtures/valid/struct_initializers.c");
 
