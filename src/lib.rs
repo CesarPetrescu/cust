@@ -433,6 +433,10 @@ enum TopLevelFunction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReturnType {
     Scalar(CType),
+    Pointer {
+        ty: PointeeType,
+        points_to_const: bool,
+    },
     Struct(String),
     Void,
 }
@@ -442,6 +446,7 @@ impl ReturnType {
         match self {
             ReturnType::Scalar(CType::Int) => "int",
             ReturnType::Scalar(CType::Char) => "char",
+            ReturnType::Pointer { .. } => "pointer",
             ReturnType::Struct(_) => "struct",
             ReturnType::Void => "void",
         }
@@ -450,6 +455,7 @@ impl ReturnType {
     fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> Option<i64> {
         match self {
             ReturnType::Scalar(ty) => Some(ty.size()),
+            ReturnType::Pointer { .. } => Some(POINTER_SIZE),
             ReturnType::Struct(type_name) => struct_types
                 .get(type_name)
                 .map(|struct_type| struct_type.size(struct_types))
@@ -1388,19 +1394,28 @@ impl Parser {
     }
 
     fn starts_struct_function_declaration(&self) -> bool {
+        if !matches!(self.peek(), Token::Struct | Token::Union) {
+            return false;
+        }
+        if !matches!(
+            self.tokens.get(self.pos + 1).map(|token| &token.kind),
+            Some(Token::Ident(_))
+        ) {
+            return false;
+        }
+        let mut index = self.pos + 2;
+        while matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Star | Token::Const)
+        ) {
+            index += 1;
+        }
         matches!(
             (
-                self.peek(),
-                self.tokens.get(self.pos + 1).map(|token| &token.kind),
-                self.tokens.get(self.pos + 2).map(|token| &token.kind),
-                self.tokens.get(self.pos + 3).map(|token| &token.kind)
+                self.tokens.get(index).map(|token| &token.kind),
+                self.tokens.get(index + 1).map(|token| &token.kind)
             ),
-            (
-                Token::Struct | Token::Union,
-                Some(Token::Ident(_)),
-                Some(Token::Ident(_)),
-                Some(Token::LParen)
-            )
+            (Some(Token::Ident(_)), Some(Token::LParen))
         )
     }
 
@@ -1500,7 +1515,10 @@ impl Parser {
         match decl_type {
             DeclType::Scalar(ty) => ReturnType::Scalar(ty),
             DeclType::Struct(type_name) => ReturnType::Struct(type_name),
-            DeclType::Pointer(_) => unreachable!("pointer aliases cannot be function return types"),
+            DeclType::Pointer(ty) => ReturnType::Pointer {
+                ty,
+                points_to_const: false,
+            },
         }
     }
 
@@ -1565,16 +1583,25 @@ impl Parser {
     }
 
     fn starts_function_definition(&self) -> bool {
-        if !matches!(self.peek(), Token::Int | Token::Char | Token::Void)
-            && self.current_alias().is_none()
+        let mut index = self.pos;
+        if matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Const)
+        ) {
+            index += 1;
+        }
+        if !matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Int | Token::Char | Token::Void)
+        ) && self.current_alias().is_none()
         {
             return false;
         }
 
-        let mut index = self.pos + 1;
-        if matches!(
+        index += 1;
+        while matches!(
             self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Star)
+            Some(Token::Star | Token::Const)
         ) {
             index += 1;
         }
@@ -1604,12 +1631,6 @@ impl Parser {
 
     fn parse_function_declaration(&mut self) -> CustResult<(String, TopLevelFunction)> {
         let return_type = self.parse_function_return_type()?;
-        if self.check(&Token::Star) {
-            return Err(Self::error_at(
-                "pointer return types are not supported".to_string(),
-                self.peek_located(),
-            ));
-        }
         let name = self.expect_ident_after("function name after return type")?;
         self.expect_opening_paren_after("function name")?;
         let params = self.parse_params()?;
@@ -1636,10 +1657,30 @@ impl Parser {
             self.advance();
             return Ok(ReturnType::Void);
         }
-        let decl_type = self.parse_decl_type("struct return type name")?;
-        if matches!(decl_type, DeclType::Pointer(_)) {
+        let (leading_const, decl_type) =
+            self.parse_const_qualified_decl_type("struct return type name")?;
+        if self.matches(&Token::Star) {
+            if matches!(decl_type, DeclType::Pointer(_)) || self.check(&Token::Star) {
+                return Err(Self::error_at(
+                    "pointer-to-pointer return types are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            self.matches(&Token::Const);
+            return Ok(ReturnType::Pointer {
+                ty: Self::decl_type_to_pointee_type(&decl_type),
+                points_to_const: leading_const,
+            });
+        }
+        if let DeclType::Pointer(pointee) = decl_type {
+            return Ok(ReturnType::Pointer {
+                ty: pointee,
+                points_to_const: leading_const,
+            });
+        }
+        if leading_const {
             return Err(Self::error_at(
-                "pointer return types are not supported".to_string(),
+                "const-qualified scalar return types are not supported".to_string(),
                 self.previous(),
             ));
         }
@@ -4104,6 +4145,11 @@ enum ExecFlow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReturnValue {
     Scalar(i64),
+    Pointer {
+        pointer: PointerValue,
+        ty: PointeeType,
+        points_to_const: bool,
+    },
     Struct {
         type_name: String,
         fields: HashMap<String, StructFieldValue>,
@@ -4304,6 +4350,9 @@ impl Interpreter {
 
         let result = match self.call_function("main", &[])? {
             Some(ReturnValue::Scalar(value)) => Ok(value),
+            Some(ReturnValue::Pointer { .. }) => Err(CustError::new(
+                "pointer function 'main' used as program entry point",
+            )),
             Some(ReturnValue::Struct { .. }) => Err(CustError::new(
                 "struct function 'main' used as program entry point",
             )),
@@ -4399,6 +4448,9 @@ impl Interpreter {
                 ReturnType::Scalar(_) => Err(CustError::new(format!(
                     "function '{name}' finished without return"
                 ))),
+                ReturnType::Pointer { .. } => Err(CustError::new(format!(
+                    "function '{name}' finished without return"
+                ))),
                 ReturnType::Struct(_) => Err(CustError::new(format!(
                     "function '{name}' finished without return"
                 ))),
@@ -4431,6 +4483,48 @@ impl Interpreter {
             (ReturnType::Scalar(_), Some(ReturnValue::Struct { .. })) => Err(CustError::new(
                 format!("struct value returned from scalar function '{function_name}'"),
             )),
+            (ReturnType::Scalar(_), Some(ReturnValue::Pointer { .. })) => Err(CustError::new(
+                format!("pointer value returned from scalar function '{function_name}'"),
+            )),
+            (
+                ReturnType::Pointer {
+                    ty: expected_ty,
+                    points_to_const: expected_const,
+                },
+                Some(ReturnValue::Pointer {
+                    pointer,
+                    ty,
+                    points_to_const,
+                }),
+            ) if &ty == expected_ty && (!points_to_const || *expected_const) => {
+                Ok(Some(ReturnValue::Pointer {
+                    pointer,
+                    ty,
+                    points_to_const,
+                }))
+            }
+            (
+                ReturnType::Pointer {
+                    ty: expected_ty, ..
+                },
+                Some(ReturnValue::Pointer { ty, .. }),
+            ) if &ty != expected_ty => Err(CustError::new(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                self.pointee_label(&ty),
+                self.pointee_label(expected_ty)
+            ))),
+            (ReturnType::Pointer { .. }, Some(ReturnValue::Pointer { .. })) => Err(CustError::new(
+                "cannot discard const qualifier from pointer target",
+            )),
+            (ReturnType::Pointer { .. }, Some(ReturnValue::Scalar(_))) => Err(CustError::new(
+                format!("pointer function '{function_name}' requires a pointer return value"),
+            )),
+            (ReturnType::Pointer { .. }, Some(ReturnValue::Struct { .. })) => Err(CustError::new(
+                format!("pointer function '{function_name}' requires a pointer return value"),
+            )),
+            (ReturnType::Pointer { .. }, None) => Err(CustError::new(format!(
+                "pointer function '{function_name}' returned without a value"
+            ))),
             (
                 ReturnType::Struct(expected_type),
                 Some(ReturnValue::Struct { type_name, fields }),
@@ -4443,6 +4537,9 @@ impl Interpreter {
             (ReturnType::Struct(_), Some(ReturnValue::Scalar(_))) => Err(CustError::new(format!(
                 "struct function '{function_name}' requires a struct return value"
             ))),
+            (ReturnType::Struct(_), Some(ReturnValue::Pointer { .. })) => Err(CustError::new(
+                format!("struct function '{function_name}' requires a struct return value"),
+            )),
             (ReturnType::Struct(_), None) => Err(CustError::new(format!(
                 "struct function '{function_name}' returned without a value"
             ))),
@@ -5028,6 +5125,9 @@ impl Interpreter {
                 ReturnValue::Scalar(_) => {
                     return Err(CustError::new("struct initializer requires struct value"));
                 }
+                ReturnValue::Pointer { .. } => {
+                    return Err(CustError::new("struct initializer requires struct value"));
+                }
             },
             None => self.make_struct_fields(type_name, &[])?,
         };
@@ -5270,6 +5370,9 @@ impl Interpreter {
                         )));
                     }
                     ReturnValue::Scalar(_) => {
+                        unreachable!("eval_struct_expr only returns struct values or errors")
+                    }
+                    ReturnValue::Pointer { .. } => {
                         unreachable!("eval_struct_expr only returns struct values or errors")
                     }
                 }
@@ -6317,6 +6420,9 @@ impl Interpreter {
             ReturnValue::Scalar(_) => {
                 return Err(CustError::new("struct assignment requires struct value"));
             }
+            ReturnValue::Pointer { .. } => {
+                return Err(CustError::new("struct assignment requires struct value"));
+            }
         };
 
         match self.find_variable_mut(name) {
@@ -6466,6 +6572,18 @@ impl Interpreter {
                 array: Rc::new(RefCell::new(ArrayValue::read_only(values.clone()))),
                 source_name: None,
             }),
+            Expr::Call { name, args } => match self.call_function(name, args)? {
+                Some(ReturnValue::Pointer { pointer, .. }) => Ok(pointer),
+                Some(ReturnValue::Scalar(_)) => Err(CustError::new(format!(
+                    "scalar function '{name}' used as pointer expression"
+                ))),
+                Some(ReturnValue::Struct { .. }) => Err(CustError::new(format!(
+                    "struct function '{name}' used as pointer expression"
+                ))),
+                None => Err(CustError::new(format!(
+                    "void function '{name}' used as pointer expression"
+                ))),
+            },
             Expr::Assign { name, value } => match self.find_variable(name).cloned() {
                 Some(Value::Pointer {
                     ty,
@@ -6960,8 +7078,40 @@ impl Interpreter {
         !matches!(pointer, PointerValue::Null)
     }
 
-    fn expr_is_pointer_value(&mut self, expr: &Expr) -> bool {
-        !matches!(expr, Expr::Number(_)) && self.eval_pointer(expr).is_ok()
+    fn expr_is_pointer_value(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Number(_) => false,
+            Expr::AddressOf(_)
+            | Expr::AddressOfArray { .. }
+            | Expr::AddressOfStructField { .. }
+            | Expr::AddressOfStructElementField { .. }
+            | Expr::StringLiteral(_) => true,
+            Expr::Var(name) | Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
+                matches!(
+                    self.find_variable(name),
+                    Some(Value::Pointer { .. } | Value::Array(_) | Value::StructArray { .. })
+                )
+            }
+            Expr::StructGet { name, fields } => self.struct_field_is_pointer(name, fields),
+            Expr::StructSet { name, fields, .. } => self.struct_field_is_pointer(name, fields),
+            Expr::Increment { target, .. } => self.expr_is_pointer_value(target),
+            Expr::Call { name, .. } => matches!(
+                self.functions
+                    .get(name)
+                    .map(|function| &function.return_type),
+                Some(ReturnType::Pointer { .. })
+            ),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => self.expr_is_pointer_value(then_expr) || self.expr_is_pointer_value(else_expr),
+            Expr::Comma(_, right) => self.expr_is_pointer_value(right),
+            Expr::Binary(left, BinaryOp::Add | BinaryOp::Sub, right) => {
+                self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right)
+            }
+            _ => false,
+        }
     }
 
     fn pointer_eq(left: &PointerValue, right: &PointerValue) -> bool {
@@ -7183,16 +7333,28 @@ impl Interpreter {
             | Expr::StructPtrGet { .. }
             | Expr::StructPtrSet { .. }
             | Expr::StructPtrCompoundSet { .. }
-            | Expr::StringGet { .. }
-            | Expr::Call { .. } => Ok(self.eval(expr)? != 0),
+            | Expr::StringGet { .. } => Ok(self.eval(expr)? != 0),
+            Expr::Call { name, .. }
+                if matches!(
+                    self.functions
+                        .get(name)
+                        .map(|function| &function.return_type),
+                    Some(ReturnType::Pointer { .. })
+                ) =>
+            {
+                Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
+            }
+            Expr::Call { .. } => Ok(self.eval(expr)? != 0),
             Expr::Number(value) => Ok(*value != 0),
-            Expr::Binary(_, BinaryOp::Add | BinaryOp::Sub, _) => match self.eval_pointer(expr) {
-                Ok(pointer) => Ok(Self::pointer_truthy(&pointer)),
-                Err(error) if error.to_string() == "expected pointer expression" => {
-                    Ok(self.eval(expr)? != 0)
+            Expr::Binary(_, BinaryOp::Add | BinaryOp::Sub, _)
+                if self.expr_is_pointer_value(expr) =>
+            {
+                match self.eval_pointer(expr) {
+                    Ok(pointer) => Ok(Self::pointer_truthy(&pointer)),
+                    Err(error) => Err(error),
                 }
-                Err(error) => Err(error),
-            },
+            }
+            Expr::Binary(_, BinaryOp::Add | BinaryOp::Sub, _) => Ok(self.eval(expr)? != 0),
             Expr::UnaryPlus(_)
             | Expr::UnaryMinus(_)
             | Expr::BitwiseNot(_)
@@ -7892,9 +8054,20 @@ impl Interpreter {
                     }
                 }
             }
-            Expr::Call { name, args } => self.call_function(name, args)?.ok_or_else(|| {
-                CustError::new(format!("void function '{name}' used as struct expression"))
-            }),
+            Expr::Call { name, args } => match self.call_function(name, args)? {
+                Some(ReturnValue::Struct { type_name, fields }) => {
+                    Ok(ReturnValue::Struct { type_name, fields })
+                }
+                Some(ReturnValue::Scalar(_)) => Err(CustError::new(format!(
+                    "scalar function '{name}' used as struct expression"
+                ))),
+                Some(ReturnValue::Pointer { .. }) => Err(CustError::new(format!(
+                    "pointer function '{name}' used as struct expression"
+                ))),
+                None => Err(CustError::new(format!(
+                    "void function '{name}' used as struct expression"
+                ))),
+            },
             _ => Err(CustError::new("expected struct expression")),
         }
     }
@@ -7905,6 +8078,19 @@ impl Interpreter {
         };
         match self.return_type_stack.last().cloned() {
             Some(ReturnType::Struct(_)) => Ok(Some(self.eval_struct_expr(expr)?)),
+            Some(ReturnType::Pointer {
+                ty,
+                points_to_const,
+            }) => {
+                self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
+                let pointer = self.eval_pointer(expr)?;
+                self.ensure_pointer_type_matches(&ty, &pointer)?;
+                Ok(Some(ReturnValue::Pointer {
+                    pointer,
+                    ty,
+                    points_to_const,
+                }))
+            }
             Some(ReturnType::Scalar(_)) | Some(ReturnType::Void) => {
                 Ok(Some(ReturnValue::Scalar(self.eval(expr)?)))
             }
@@ -8591,6 +8777,9 @@ impl Interpreter {
             }
             Expr::Call { name, args } => match self.call_function(name, args)? {
                 Some(ReturnValue::Scalar(value)) => Ok(value),
+                Some(ReturnValue::Pointer { .. }) => {
+                    Err(CustError::new("pointer value used as scalar"))
+                }
                 Some(ReturnValue::Struct { .. }) => Err(CustError::new(format!(
                     "struct function '{name}' used as scalar expression"
                 ))),
@@ -8634,17 +8823,20 @@ impl Interpreter {
                 }
                 BinaryOp::Eq | BinaryOp::Ne => self.eval_equality(left, op, right),
                 BinaryOp::Add | BinaryOp::Sub => {
-                    match (self.eval_pointer(left), self.eval_pointer(right)) {
-                        (Ok(left_pointer), Ok(right_pointer)) if *op == BinaryOp::Sub => {
-                            return self.pointer_difference(&left_pointer, &right_pointer);
+                    if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
+                        match (self.eval_pointer(left), self.eval_pointer(right)) {
+                            (Ok(left_pointer), Ok(right_pointer)) if *op == BinaryOp::Sub => {
+                                return self.pointer_difference(&left_pointer, &right_pointer);
+                            }
+                            (Ok(_), Ok(_)) if *op == BinaryOp::Add => {
+                                return Err(CustError::new("cannot add two pointers"));
+                            }
+                            (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
+                                return Err(CustError::new("pointer value used as scalar"));
+                            }
+                            (Err(error), Err(_)) => return Err(error),
+                            (Ok(_), Ok(_)) => {}
                         }
-                        (Ok(_), Ok(_)) if *op == BinaryOp::Add => {
-                            return Err(CustError::new("cannot add two pointers"));
-                        }
-                        (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
-                            return Err(CustError::new("pointer value used as scalar"));
-                        }
-                        (Err(_), Err(_)) | (Ok(_), Ok(_)) => {}
                     }
                     let lhs = self.eval(left)?;
                     let rhs = self.eval(right)?;
