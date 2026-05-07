@@ -147,6 +147,24 @@ fn supports_nested_union_fields_initializers_copy_and_parameters() {
 }
 
 #[test]
+fn supports_union_pointers_and_pointer_fields() {
+    let program = include_str!("fixtures/valid/union_pointers.c");
+
+    assert_eq!(interpret(program).unwrap(), 61);
+}
+
+#[test]
+fn rejects_pointer_to_pointer_union_fields() {
+    let program = include_str!("fixtures/invalid/union_pointer_to_pointer_field.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "pointer-to-pointer union fields are not supported at line 3, column 17"
+    );
+}
+
+#[test]
 fn rejects_union_initializers_longer_than_one_field() {
     let program = include_str!("fixtures/invalid/union_initializer_too_long.c");
 

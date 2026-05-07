@@ -2317,23 +2317,30 @@ impl Parser {
                 ));
             }
             let leading_const = self.matches(&Token::Const);
-            let decl_type = if self.matches(&Token::Struct) {
-                let field_type_name = self.expect_ident_after("struct field type")?;
+            let decl_type = if matches!(self.peek(), Token::Struct | Token::Union) {
+                let field_kind = match self.advance().kind {
+                    Token::Struct => AggregateKind::Struct,
+                    Token::Union => AggregateKind::Union,
+                    token => unreachable!("expected aggregate field type, found {token:?}"),
+                };
+                let field_keyword = field_kind.keyword();
+                let field_type_name =
+                    self.expect_ident_after(&format!("{field_keyword} field type"))?;
                 if !self.struct_types.contains_key(&field_type_name) && field_type_name != type_name
                 {
                     return Err(CustError::new(format!(
-                        "undefined struct type '{field_type_name}'"
+                        "undefined {field_keyword} type '{field_type_name}'"
                     )));
                 }
                 DeclType::Struct(field_type_name)
             } else {
-                self.parse_decl_type("struct field type")?
+                self.parse_decl_type(&format!("{keyword} field type"))?
             };
             let has_explicit_star = self.matches(&Token::Star);
             let post_star_const = has_explicit_star && self.matches(&Token::Const);
             if has_explicit_star && self.check(&Token::Star) {
                 return Err(Self::error_at(
-                    "pointer-to-pointer struct fields are not supported".to_string(),
+                    format!("pointer-to-pointer {keyword} fields are not supported"),
                     self.peek_located(),
                 ));
             }
@@ -2356,7 +2363,7 @@ impl Parser {
                 }
                 DeclType::Pointer(_) if has_explicit_star => {
                     return Err(Self::error_at(
-                        "pointer-to-pointer struct fields are not supported".to_string(),
+                        format!("pointer-to-pointer {keyword} fields are not supported"),
                         self.previous(),
                     ));
                 }
@@ -2364,7 +2371,7 @@ impl Parser {
                 DeclType::Scalar(ty) => StructFieldType::Scalar(ty),
                 DeclType::Struct(type_name) => StructFieldType::Struct(type_name),
             };
-            let name = self.expect_ident_after("struct field name after type")?;
+            let name = self.expect_ident_after(&format!("{keyword} field name after type"))?;
             if !names.insert(name.clone()) {
                 return Err(Self::error_at(
                     format!("duplicate struct field '{name}'"),
@@ -2380,13 +2387,13 @@ impl Parser {
                     }
                     StructFieldType::Struct(_) => {
                         return Err(Self::error_at(
-                            "struct array fields are not supported".to_string(),
+                            format!("{keyword} array fields are not supported"),
                             self.previous(),
                         ));
                     }
                     StructFieldType::Pointer(_) => {
                         return Err(Self::error_at(
-                            "pointer array struct fields are not supported".to_string(),
+                            format!("pointer array {keyword} fields are not supported"),
                             self.previous(),
                         ));
                     }
@@ -6023,32 +6030,9 @@ impl Interpreter {
         value: i64,
     ) -> CustResult<()> {
         self.ensure_struct_pointer_target_mutable(pointer)?;
+        let struct_types = self.struct_types.clone();
         let (type_name, fields) = self.find_struct_pointer_fields_mut(pointer)?;
-        let (_, field_value) = Self::nested_field_value_mut(&type_name, fields, path)?;
-        if field_value.is_const() {
-            return Err(CustError::new(format!(
-                "cannot assign to const struct field '{}'",
-                Self::field_path_label(path)
-            )));
-        }
-        match field_value {
-            StructFieldValue::Scalar { value: slot, .. } => {
-                *slot = value;
-                Ok(())
-            }
-            StructFieldValue::Array { .. } => Err(CustError::new(format!(
-                "struct field '{}' is an array",
-                Self::field_path_label(path)
-            ))),
-            StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
-                "struct field '{}' is a struct '{type_name}'",
-                Self::field_path_label(path)
-            ))),
-            StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
-                "pointer field '{}' used as scalar",
-                Self::field_path_label(path)
-            ))),
-        }
+        Self::assign_scalar_field_in_map(&struct_types, &type_name, fields, path, value)
     }
 
     fn eval_struct_ptr_set(
