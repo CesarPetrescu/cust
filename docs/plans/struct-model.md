@@ -49,7 +49,7 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 - Struct return types:
   - Function definitions and prototypes may return a prior struct type, such as `struct Point make_point(int x);`.
   - `return p;` clones the returned struct value so local return variables remain valid after the callee exits.
-  - Struct-returning calls can be assigned to same-type struct variables, e.g. `p = make_point(1);`.
+  - Struct-returning calls can initialize or be assigned to same-type struct variables, e.g. `struct Point p = make_point(1);` and `p = make_point(2);`.
   - Mismatched struct return values report `struct function '<name>' expected return struct '<Expected>', got struct '<Actual>'`.
   - Empty returns from struct functions report `struct function '<name>' returned without a value`.
 - Struct pointers:

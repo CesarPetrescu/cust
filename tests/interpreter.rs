@@ -161,6 +161,24 @@ fn supports_union_return_functions_and_prototypes() {
 }
 
 #[test]
+fn supports_aggregate_initializer_expressions_from_returned_structs_and_unions() {
+    let program = include_str!("fixtures/valid/aggregate_initializer_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 47);
+}
+
+#[test]
+fn rejects_aggregate_initializer_expression_type_mismatches() {
+    let program = include_str!("fixtures/invalid/aggregate_initializer_type_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign struct 'Size' to struct 'Point'"
+    );
+}
+
+#[test]
 fn rejects_pointer_to_pointer_union_fields() {
     let program = include_str!("fixtures/invalid/union_pointer_to_pointer_field.c");
 

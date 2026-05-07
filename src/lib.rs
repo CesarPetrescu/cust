@@ -352,6 +352,12 @@ enum StructInitializer {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StructVarInitializer {
+    Fields(Vec<StructInitializer>),
+    Expr(Expr),
+}
+
 type StructArrayInitializer = Vec<StructInitializer>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -614,7 +620,7 @@ enum Stmt {
     StructVarDecl {
         type_name: String,
         name: String,
-        init: Vec<StructInitializer>,
+        init: Option<StructVarInitializer>,
         is_const: bool,
     },
     StructArrayDecl {
@@ -1999,9 +2005,15 @@ impl Parser {
                 let DeclType::Struct(type_name) = &decl_type else {
                     unreachable!("struct declarations return above")
                 };
-                self.parse_struct_initializer(type_name)?
+                if self.check(&Token::LBrace) {
+                    Some(StructVarInitializer::Fields(
+                        self.parse_struct_initializer(type_name)?,
+                    ))
+                } else {
+                    Some(StructVarInitializer::Expr(self.parse_expr()?))
+                }
             } else {
-                Vec::new()
+                None
             };
             if require_semi {
                 self.expect_semicolon_after("struct variable declaration")?;
@@ -2476,9 +2488,15 @@ impl Parser {
             });
         }
         let init = if self.matches(&Token::Assign) {
-            self.parse_struct_initializer(&type_name)?
+            if self.check(&Token::LBrace) {
+                Some(StructVarInitializer::Fields(
+                    self.parse_struct_initializer(&type_name)?,
+                ))
+            } else {
+                Some(StructVarInitializer::Expr(self.parse_expr()?))
+            }
         } else {
-            Vec::new()
+            None
         };
         self.expect_semicolon_after("struct variable declaration")?;
         Ok(Stmt::StructVarDecl {
@@ -4845,9 +4863,29 @@ impl Interpreter {
     fn make_struct_value(
         &mut self,
         type_name: &str,
-        init: &[StructInitializer],
+        init: Option<&StructVarInitializer>,
     ) -> CustResult<Value> {
-        let fields = self.make_struct_fields(type_name, init)?;
+        let fields = match init {
+            Some(StructVarInitializer::Fields(init)) => self.make_struct_fields(type_name, init)?,
+            Some(StructVarInitializer::Expr(expr)) => match self.eval_struct_expr(expr)? {
+                ReturnValue::Struct {
+                    type_name: rhs_type,
+                    fields,
+                } if rhs_type == type_name => fields,
+                ReturnValue::Struct {
+                    type_name: rhs_type,
+                    ..
+                } => {
+                    return Err(CustError::new(format!(
+                        "cannot assign struct '{rhs_type}' to struct '{type_name}'"
+                    )));
+                }
+                ReturnValue::Scalar(_) => {
+                    return Err(CustError::new("struct initializer requires struct value"));
+                }
+            },
+            None => self.make_struct_fields(type_name, &[])?,
+        };
         Ok(Value::Struct {
             type_name: type_name.to_string(),
             fields,
@@ -7599,7 +7637,7 @@ impl Interpreter {
             } => self.make_array_value(*len, *elem_type, init, *is_const),
             Stmt::StructVarDecl {
                 type_name, init, ..
-            } => self.make_struct_value(type_name, init),
+            } => self.make_struct_value(type_name, init.as_ref()),
             Stmt::StructArrayDecl {
                 type_name,
                 len,
@@ -7724,7 +7762,7 @@ impl Interpreter {
                         "variable '{name}' already declared in this scope"
                     )));
                 }
-                let value = self.make_struct_value(type_name, init)?;
+                let value = self.make_struct_value(type_name, init.as_ref())?;
                 self.current_scope_mut().insert(name.clone(), value);
                 if *is_const {
                     self.mark_current_variable_const(name);
