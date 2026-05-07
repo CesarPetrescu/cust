@@ -4,26 +4,30 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 
 ## Supported milestones
 
-- Top-level struct type declarations with scalar and nested struct fields:
+- Top-level struct type declarations with scalar, array, and nested struct fields:
   - `struct Point { int x; char y; };`
+  - `struct Packet { int values[3]; char tag[2]; };`
   - `struct Rect { struct Point origin; int width; };` after `Point` is declared.
-  - Fields may be `int`, `char`, `const int`, `const char`, or a prior named struct type.
+  - Fields may be `int`, `char`, one-dimensional `int`/`char` arrays, `const int`, `const char`, or a prior named struct type.
   - Duplicate field names are rejected during parsing.
   - Re-declaring a struct type name is rejected.
 - Struct variables at top level and block scope:
   - `struct Point p;`
   - Fields are deterministic Cust values initialized to `0`.
   - Scalar brace initializers such as `struct Point p = {1, 2};` initialize fields in declaration order, evaluate initializer expressions left-to-right, zero-fill omitted trailing fields, and reject excess initializers.
+  - Array field brace initializers such as `struct Packet p = {{1, 2}, {'A', 0}};` initialize elements left-to-right, zero-fill omitted trailing elements, and reject excess entries with the array field name.
   - Nested struct brace initializers such as `struct Rect r = {{1, 2}, 3};` recursively initialize prior named struct fields, including zero-filled omitted nested fields and excess-initializer diagnostics at the nested struct type.
   - Const fields can be initialized in a struct initializer but remain read-only after declaration.
   - Normal block/global scope rules apply; inner variables may shadow outer variables.
 - Member access and member assignment:
   - `p.x` reads a scalar field.
+  - `packet.values[0]` reads a scalar element of an array field.
   - `rect.origin.x` reads nested scalar fields through a struct-valued field path.
   - `p.x = expr;` and `rect.origin.x = expr;` assign scalar fields.
+  - `packet.values[0] = expr;`, compound assignments, and prefix/postfix increment/decrement work for array-field elements.
   - Unknown fields report `struct '<Type>' has no field '<field>'` at the innermost type where lookup fails.
   - `sizeof(p)` sums Cust field sizes recursively (`int = 8`, `char = 1`) without native ABI padding.
-  - `sizeof(p.x)` uses the declared field type size; `sizeof(rect.origin)` uses the deterministic Cust size of the nested struct field.
+  - `sizeof(p.x)` uses the declared field type size; `sizeof(packet.values)` uses array length times element size; `sizeof(packet.values[0])` uses the element size; `sizeof(rect.origin)` uses the deterministic Cust size of the nested struct field.
 - Same-type struct copy assignment:
   - `b = a;` copies field values from one same-type struct variable to another.
   - The copy is value semantics: later writes to `a.x` do not mutate `b.x`.
@@ -63,20 +67,20 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
 
 ## Intentional limitations before later milestones
 
-- No arrays in structs, pointer fields, bit-fields, anonymous structs, unions, or const-qualified nested struct fields inside struct definitions.
+- No pointer fields, arrays of struct types, bit-fields, anonymous structs, unions, or const-qualified nested struct fields inside struct definitions.
 - No native ABI layout or padding; Cust keeps interpreter-owned field maps and deterministic recursive sizes.
 
 ## Implementation model
 
 - Parser records top-level struct type definitions in `Program::struct_types`.
-- Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store either scalar values plus declared `CType`/field-level const metadata or nested struct field maps with the nested type name.
-- Struct initializers are parsed as field-aware entries: scalar fields consume assignment-precedence expressions, while nested struct fields may consume recursive brace initializer lists or same-type struct expressions. Entries are applied in declaration order before const field metadata prevents later writes; omitted nested fields are recursively zero-initialized.
+- Runtime struct variables are `Value::Struct { type_name, fields }`, where fields store scalar values plus declared `CType`/field-level const metadata, one-dimensional array storage with declared element type/length, or nested struct field maps with the nested type name.
+- Struct initializers are parsed as field-aware entries: scalar fields consume assignment-precedence expressions, array fields consume brace lists of assignment-precedence expressions, and nested struct fields may consume recursive brace initializer lists or same-type struct expressions. Entries are applied in declaration order before const field metadata prevents later writes; omitted array elements and nested fields are zero-initialized.
 - Struct fields are scoped as members of their owning value, not as independent variables.
-- Member access is scalar expression syntax backed by field-path lvalue evaluation helpers for simple assignment, compound assignment, and increment/decrement expressions.
+- Member access is scalar expression syntax backed by field-path lvalue evaluation helpers for simple assignment, compound assignment, and increment/decrement expressions; array fields are indexed before element lvalue evaluation.
 - Function signatures include struct parameter type names, so prototypes and later definitions must agree on the exact struct type.
-- Struct parameter binding clones the struct value into the function parameter scope, preserving by-value behavior without host/native addresses.
+- Struct parameter binding deep-clones the struct value into the function parameter scope, preserving by-value behavior for scalar, array, and nested struct fields without host/native addresses.
 - Function signatures also include struct return type names, so prototypes and definitions must agree on the exact return struct type.
-- Return flow carries either scalar values or cloned struct field maps; callers receive by-value struct results without borrowing callee stack storage.
+- Return flow carries either scalar values or deep-cloned struct field maps; callers receive by-value struct results without borrowing callee stack storage.
 - Struct pointers extend the existing interpreter-owned pointer model with `PointerValue::Struct { scope_id, name }`, never host addresses.
 - Struct pointer dereference checks live scope IDs before field access, preserving the same out-of-scope safety used by scalar pointers.
 - Const struct variables/parameters reuse scope `const_variables` metadata; struct field writes and copy assignment check the owning struct binding before mutation.
@@ -153,7 +157,13 @@ This document defines Cust's deliberately scoped, preprocessor-free `struct` roa
   - compares fully spelled nested aggregate initializers with native C while avoiding native struct layout checks.
 - Invalid fixture: `tests/fixtures/invalid/nested_struct_initializer_too_long.c`
   - verifies excess initializer entries inside a nested struct initializer report the nested struct type diagnostic.
+- Valid interpreter fixture: `tests/fixtures/valid/struct_array_fields.c`
+  - covers one-dimensional `int`/`char` array fields, nested array brace initializers, omitted-element zero-fill, element assignment/compound/increment lvalues, by-value struct parameter/copy isolation with array fields, and deterministic Cust `sizeof(array_field)`.
+- Valid compiler-oracle fixture: `tests/fixtures/compat/valid/struct_array_fields.c`
+  - compares supported struct array-field reads/writes, copy assignment, and by-value parameter behavior with native C while avoiding Cust-specific `sizeof(int)` assertions.
+- Invalid fixture: `tests/fixtures/invalid/struct_array_initializer_too_long.c`
+  - verifies excess entries inside an array field initializer report `too many initializers for array '<field>'`.
 
 ## Next struct work
 
-1. Consider arrays-in-structs or pointer fields as separate milestones with explicit storage/layout design; do not rely on native ABI padding.
+1. Consider pointer fields as a separate milestone with explicit ownership/const/pointer-target design; do not rely on native ABI padding.

@@ -129,6 +129,11 @@ enum Expr {
         pointer: Box<Expr>,
         fields: Vec<String>,
     },
+    StructArrayGet {
+        name: String,
+        fields: Vec<String>,
+        index: Box<Expr>,
+    },
     ArrayGet {
         name: String,
         index: Box<Expr>,
@@ -166,6 +171,12 @@ enum Expr {
         fields: Vec<String>,
         value: Box<Expr>,
     },
+    StructArraySet {
+        name: String,
+        fields: Vec<String>,
+        index: Box<Expr>,
+        value: Box<Expr>,
+    },
     CompoundAssign {
         name: String,
         op: CompoundOp,
@@ -191,6 +202,13 @@ enum Expr {
     StructPtrCompoundSet {
         pointer: Box<Expr>,
         fields: Vec<String>,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
+    StructArrayCompoundSet {
+        name: String,
+        fields: Vec<String>,
+        index: Box<Expr>,
         op: CompoundOp,
         value: Box<Expr>,
     },
@@ -252,12 +270,14 @@ struct StructFieldDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StructFieldType {
     Scalar(CType),
+    Array(CType, usize),
     Struct(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StructInitializer {
     Expr(Expr),
+    Array(Vec<Expr>),
     Struct(Vec<StructInitializer>),
 }
 
@@ -265,6 +285,7 @@ impl StructFieldType {
     fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
         match self {
             StructFieldType::Scalar(ty) => Ok(ty.size()),
+            StructFieldType::Array(ty, len) => Ok(*len as i64 * ty.size()),
             StructFieldType::Struct(type_name) => struct_types
                 .get(type_name)
                 .map(|struct_type| struct_type.size(struct_types))
@@ -1957,6 +1978,9 @@ impl Parser {
             }
             let field = &fields[values.len()];
             let value = match &field.ty {
+                StructFieldType::Array(_, len) if self.check(&Token::LBrace) => {
+                    StructInitializer::Array(self.parse_array_initializer(&field.name, *len)?)
+                }
                 StructFieldType::Struct(nested_type) if self.check(&Token::LBrace) => {
                     StructInitializer::Struct(self.parse_struct_initializer(nested_type)?)
                 }
@@ -2009,6 +2033,24 @@ impl Parser {
                     self.previous(),
                 ));
             }
+            let ty = if self.matches(&Token::LBracket) {
+                match ty {
+                    StructFieldType::Scalar(elem_type) => {
+                        let len = self.expect_array_len()?;
+                        self.expect_closing_bracket_after("struct array field length")?;
+                        StructFieldType::Array(elem_type, len)
+                    }
+                    StructFieldType::Struct(_) => {
+                        return Err(Self::error_at(
+                            "struct array fields are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
+                    StructFieldType::Array(_, _) => unreachable!("array field not built yet"),
+                }
+            } else {
+                ty
+            };
             self.expect_semicolon_after("struct field declaration")?;
             fields.push(StructFieldDef { name, ty, is_const });
         }
@@ -2212,6 +2254,35 @@ impl Parser {
             let mut fields = vec![self.expect_ident_after("struct field name after '.'")?];
             while self.matches(&Token::Dot) {
                 fields.push(self.expect_ident_after("struct field name after '.'")?);
+            }
+            if self.matches(&Token::LBracket) {
+                let index = self.parse_index_expr()?;
+                self.expect_closing_bracket_after("array index")?;
+                if let Some(op) = self.compound_assignment_op() {
+                    self.advance();
+                    let value = self.parse_expr()?;
+                    if require_semi {
+                        self.expect_semicolon_after("assignment")?;
+                    }
+                    return Ok(Stmt::Expr(Expr::StructArrayCompoundSet {
+                        name,
+                        fields,
+                        index: Box::new(index),
+                        op,
+                        value: Box::new(value),
+                    }));
+                }
+                self.expect_assign_after("struct array field assignment")?;
+                let value = self.parse_expr()?;
+                if require_semi {
+                    self.expect_semicolon_after("assignment")?;
+                }
+                return Ok(Stmt::Expr(Expr::StructArraySet {
+                    name,
+                    fields,
+                    index: Box::new(index),
+                    value: Box::new(value),
+                }));
             }
             if let Some(op) = self.compound_assignment_op() {
                 self.advance();
@@ -2522,6 +2593,17 @@ impl Parser {
                     op,
                     value: Box::new(value),
                 }),
+                Expr::StructArrayGet {
+                    name,
+                    fields,
+                    index,
+                } => Ok(Expr::StructArrayCompoundSet {
+                    name,
+                    fields,
+                    index,
+                    op,
+                    value: Box::new(value),
+                }),
                 Expr::Deref(pointer) => Ok(Expr::DerefCompoundSet {
                     pointer,
                     op,
@@ -2554,6 +2636,16 @@ impl Parser {
                 }),
                 Expr::ArrayGet { name, index } => Ok(Expr::ArraySet {
                     name,
+                    index,
+                    value: Box::new(value),
+                }),
+                Expr::StructArrayGet {
+                    name,
+                    fields,
+                    index,
+                } => Ok(Expr::StructArraySet {
+                    name,
+                    fields,
                     index,
                     value: Box::new(value),
                 }),
@@ -2840,7 +2932,27 @@ impl Parser {
     fn parse_postfix(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_primary()?;
         loop {
-            if self.matches(&Token::Dot) {
+            if self.matches(&Token::LBracket) {
+                let index = self.parse_index_expr()?;
+                self.expect_closing_bracket_after("array index")?;
+                expr = match expr {
+                    Expr::Var(name) => Expr::ArrayGet {
+                        name,
+                        index: Box::new(index),
+                    },
+                    Expr::StructGet { name, fields } => Expr::StructArrayGet {
+                        name,
+                        fields,
+                        index: Box::new(index),
+                    },
+                    _ => {
+                        return Err(Self::error_at(
+                            "invalid array index target".to_string(),
+                            self.previous(),
+                        ));
+                    }
+                };
+            } else if self.matches(&Token::Dot) {
                 let field = self.expect_ident_after("struct field name after '.'")?;
                 expr = match expr {
                     Expr::Var(name) => Expr::StructGet {
@@ -2897,6 +3009,7 @@ impl Parser {
         match target {
             Expr::Var(_)
             | Expr::ArrayGet { .. }
+            | Expr::StructArrayGet { .. }
             | Expr::Deref(_)
             | Expr::StructGet { .. }
             | Expr::StructPtrGet { .. } => Ok(Expr::Increment {
@@ -3514,6 +3627,10 @@ enum StructFieldValue {
         ty: CType,
         is_const: bool,
     },
+    Array {
+        value: Rc<RefCell<ArrayValue>>,
+        is_const: bool,
+    },
     Struct {
         type_name: String,
         fields: HashMap<String, StructFieldValue>,
@@ -3525,8 +3642,45 @@ impl StructFieldValue {
     fn is_const(&self) -> bool {
         match self {
             StructFieldValue::Scalar { is_const, .. }
+            | StructFieldValue::Array { is_const, .. }
             | StructFieldValue::Struct { is_const, .. } => *is_const,
         }
+    }
+
+    fn deep_clone(&self) -> Self {
+        match self {
+            StructFieldValue::Scalar {
+                value,
+                ty,
+                is_const,
+            } => StructFieldValue::Scalar {
+                value: *value,
+                ty: *ty,
+                is_const: *is_const,
+            },
+            StructFieldValue::Array { value, is_const } => StructFieldValue::Array {
+                value: Rc::new(RefCell::new(value.borrow().clone())),
+                is_const: *is_const,
+            },
+            StructFieldValue::Struct {
+                type_name,
+                fields,
+                is_const,
+            } => StructFieldValue::Struct {
+                type_name: type_name.clone(),
+                fields: Self::deep_clone_fields(fields),
+                is_const: *is_const,
+            },
+        }
+    }
+
+    fn deep_clone_fields(
+        fields: &HashMap<String, StructFieldValue>,
+    ) -> HashMap<String, StructFieldValue> {
+        fields
+            .iter()
+            .map(|(name, value)| (name.clone(), value.deep_clone()))
+            .collect()
     }
 }
 
@@ -3809,8 +3963,11 @@ impl Interpreter {
                     match field_value {
                         StructFieldValue::Struct {
                             type_name, fields, ..
-                        } => Some((type_name.clone(), fields.clone())),
-                        StructFieldValue::Scalar { .. } => None,
+                        } => Some((
+                            type_name.clone(),
+                            StructFieldValue::deep_clone_fields(fields),
+                        )),
+                        StructFieldValue::Scalar { .. } | StructFieldValue::Array { .. } => None,
                     }
                 }
                 Some(_) => None,
@@ -4170,7 +4327,7 @@ impl Interpreter {
                     let value = if let Some(expr) = init.get(index) {
                         match expr {
                             StructInitializer::Expr(expr) => self.eval(expr)?,
-                            StructInitializer::Struct(_) => {
+                            StructInitializer::Array(_) | StructInitializer::Struct(_) => {
                                 return Err(CustError::new(format!(
                                     "nested initializer for scalar field '{}' is not supported",
                                     field.name
@@ -4186,10 +4343,37 @@ impl Interpreter {
                         is_const: field.is_const,
                     }
                 }
+                StructFieldType::Array(elem_type, len) => {
+                    let array_init = match init.get(index) {
+                        Some(StructInitializer::Array(values)) => values.as_slice(),
+                        Some(StructInitializer::Expr(_)) | Some(StructInitializer::Struct(_)) => {
+                            return Err(CustError::new(format!(
+                                "expected array initializer for struct field '{}'",
+                                field.name
+                            )));
+                        }
+                        None => &[],
+                    };
+                    let mut array = ArrayValue::mutable_zeroed(*len, *elem_type);
+                    for (array_index, expr) in array_init.iter().enumerate() {
+                        array.elements[array_index] = self.eval(expr)?;
+                    }
+                    array.read_only = field.is_const;
+                    StructFieldValue::Array {
+                        value: Rc::new(RefCell::new(array)),
+                        is_const: field.is_const,
+                    }
+                }
                 StructFieldType::Struct(nested_type) => {
                     let fields = match init.get(index) {
                         Some(StructInitializer::Struct(init)) => {
                             self.make_struct_fields(nested_type, init)?
+                        }
+                        Some(StructInitializer::Array(_)) => {
+                            return Err(CustError::new(format!(
+                                "array initializer for struct field '{}' is not supported",
+                                field.name
+                            )));
                         }
                         Some(StructInitializer::Expr(expr)) => {
                             match self.eval_struct_expr(expr)? {
@@ -4245,9 +4429,9 @@ impl Interpreter {
             StructFieldValue::Struct {
                 type_name, fields, ..
             } => Self::nested_field_value(type_name, fields, rest),
-            StructFieldValue::Scalar { .. } => Err(CustError::new(format!(
-                "struct field '{field}' is not a struct"
-            ))),
+            StructFieldValue::Scalar { .. } | StructFieldValue::Array { .. } => Err(
+                CustError::new(format!("struct field '{field}' is not a struct")),
+            ),
         }
     }
 
@@ -4269,9 +4453,9 @@ impl Interpreter {
             StructFieldValue::Struct {
                 type_name, fields, ..
             } => Self::nested_field_value_mut(type_name, fields, rest),
-            StructFieldValue::Scalar { .. } => Err(CustError::new(format!(
-                "struct field '{field}' is not a struct"
-            ))),
+            StructFieldValue::Scalar { .. } | StructFieldValue::Array { .. } => Err(
+                CustError::new(format!("struct field '{field}' is not a struct")),
+            ),
         }
     }
 
@@ -4281,6 +4465,10 @@ impl Interpreter {
                 let (_, field_value) = Self::nested_field_value(type_name, fields, path)?;
                 match field_value {
                     StructFieldValue::Scalar { value, .. } => Ok(*value),
+                    StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is an array",
+                        Self::field_path_label(path)
+                    ))),
                     StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
                         "struct field '{}' is a struct '{type_name}'",
                         Self::field_path_label(path)
@@ -4308,6 +4496,10 @@ impl Interpreter {
                         *slot = value;
                         Ok(())
                     }
+                    StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is an array",
+                        Self::field_path_label(path)
+                    ))),
                     StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
                         "struct field '{}' is a struct '{type_name}'",
                         Self::field_path_label(path)
@@ -4317,6 +4509,100 @@ impl Interpreter {
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
+    }
+
+    fn find_struct_array_field(
+        &self,
+        name: &str,
+        path: &[String],
+    ) -> CustResult<Rc<RefCell<ArrayValue>>> {
+        match self.find_variable(name) {
+            Some(Value::Struct { type_name, fields }) => {
+                let (_, field_value) = Self::nested_field_value(type_name, fields, path)?;
+                match field_value {
+                    StructFieldValue::Array { value, .. } => Ok(Rc::clone(value)),
+                    StructFieldValue::Scalar { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is not an array",
+                        Self::field_path_label(path)
+                    ))),
+                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                        "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(path)
+                    ))),
+                }
+            }
+            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn checked_struct_array_index(
+        &mut self,
+        name: &str,
+        fields: &[String],
+        index: &Expr,
+    ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
+        let index_value = self.eval(index)?;
+        let array = self.find_struct_array_field(name, fields)?;
+        let len = array.borrow().elements.len();
+        let Ok(index) = usize::try_from(index_value) else {
+            return Err(CustError::new(format!(
+                "array '{}' index {index_value} out of bounds for length {len}",
+                Self::field_path_label(fields)
+            )));
+        };
+        if index >= len {
+            return Err(CustError::new(format!(
+                "array '{}' index {index_value} out of bounds for length {len}",
+                Self::field_path_label(fields)
+            )));
+        }
+        Ok((array, index))
+    }
+
+    fn eval_struct_array_set(
+        &mut self,
+        name: &str,
+        fields: &[String],
+        index: &Expr,
+        value: &Expr,
+    ) -> CustResult<i64> {
+        self.ensure_variable_mutable(name)?;
+        let value = self.eval(value)?;
+        let (array, index) = self.checked_struct_array_index(name, fields, index)?;
+        let mut array = array.borrow_mut();
+        if array.read_only {
+            return Err(CustError::new(format!(
+                "cannot modify read-only array '{}'",
+                Self::field_path_label(fields)
+            )));
+        }
+        array.elements[index] = value;
+        Ok(value)
+    }
+
+    fn eval_struct_array_compound_set(
+        &mut self,
+        name: &str,
+        fields: &[String],
+        index: &Expr,
+        op: CompoundOp,
+        value: &Expr,
+    ) -> CustResult<i64> {
+        self.ensure_variable_mutable(name)?;
+        let (array, index) = self.checked_struct_array_index(name, fields, index)?;
+        let current = array.borrow().elements[index];
+        let rhs = self.eval(value)?;
+        let result = Self::apply_compound_op(current, op, rhs)?;
+        let mut array = array.borrow_mut();
+        if array.read_only {
+            return Err(CustError::new(format!(
+                "cannot modify read-only array '{}'",
+                Self::field_path_label(fields)
+            )));
+        }
+        array.elements[index] = result;
+        Ok(result)
     }
 
     fn static_value_by_scope(&self, scope_id: usize, name: &str) -> Option<&Value> {
@@ -4402,6 +4688,10 @@ impl Interpreter {
         let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
         match field_value {
             StructFieldValue::Scalar { value, .. } => Ok(*value),
+            StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                "struct field '{}' is an array",
+                Self::field_path_label(path)
+            ))),
             StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
                 "struct field '{}' is a struct '{type_name}'",
                 Self::field_path_label(path)
@@ -4429,6 +4719,10 @@ impl Interpreter {
                 *slot = value;
                 Ok(())
             }
+            StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                "struct field '{}' is an array",
+                Self::field_path_label(path)
+            ))),
             StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
                 "struct field '{}' is a struct '{type_name}'",
                 Self::field_path_label(path)
@@ -5133,6 +5427,9 @@ impl Interpreter {
             | Expr::ArrayGet { .. }
             | Expr::ArraySet { .. }
             | Expr::ArrayCompoundSet { .. }
+            | Expr::StructArrayGet { .. }
+            | Expr::StructArraySet { .. }
+            | Expr::StructArrayCompoundSet { .. }
             | Expr::StructGet { .. }
             | Expr::StructSet { .. }
             | Expr::StructCompoundSet { .. }
@@ -5308,6 +5605,9 @@ impl Interpreter {
             Expr::SizeOfType(_) | Expr::SizeOfValue(_) => Ok(INT_SIZE),
             Expr::Var(name) => self.sizeof_variable(name),
             Expr::StructGet { name, fields } => self.sizeof_struct_field(name, fields),
+            Expr::StructArrayGet { name, fields, .. } => {
+                self.sizeof_struct_array_indexed_value(name, fields)
+            }
             Expr::StructPtrGet { pointer, fields } => {
                 self.sizeof_struct_pointer_field(pointer, fields)
             }
@@ -5326,6 +5626,10 @@ impl Interpreter {
             }
             Expr::StructSet { name, fields, .. } | Expr::StructCompoundSet { name, fields, .. } => {
                 self.sizeof_struct_field(name, fields)
+            }
+            Expr::StructArraySet { name, fields, .. }
+            | Expr::StructArrayCompoundSet { name, fields, .. } => {
+                self.sizeof_struct_array_indexed_value(name, fields)
             }
             Expr::StructPtrSet {
                 pointer, fields, ..
@@ -5356,6 +5660,10 @@ impl Interpreter {
     fn struct_field_value_size(&self, field_value: &StructFieldValue) -> CustResult<i64> {
         match field_value {
             StructFieldValue::Scalar { ty, .. } => Ok(ty.size()),
+            StructFieldValue::Array { value, .. } => {
+                let array = value.borrow();
+                Ok(array.elements.len() as i64 * array.elem_type.size())
+            }
             StructFieldValue::Struct { type_name, .. } => self
                 .struct_types
                 .get(type_name)
@@ -5399,6 +5707,11 @@ impl Interpreter {
         let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
         let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
         self.struct_field_value_size(field_value)
+    }
+
+    fn sizeof_struct_array_indexed_value(&self, name: &str, path: &[String]) -> CustResult<i64> {
+        let array = self.find_struct_array_field(name, path)?;
+        Ok(array.borrow().elem_type.size())
     }
 
     fn clone_for_sizeof_pointer(&self, pointer: &Expr) -> CustResult<PointerValue> {
@@ -5519,6 +5832,25 @@ impl Interpreter {
                 array.elements[index] = updated;
                 Ok(Self::increment_result(current, updated, prefix))
             }
+            Expr::StructArrayGet {
+                name,
+                fields,
+                index,
+            } => {
+                self.ensure_variable_mutable(name)?;
+                let (array, index) = self.checked_struct_array_index(name, fields, index)?;
+                let current = array.borrow().elements[index];
+                let updated = Self::apply_increment_op(current, op);
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new(format!(
+                        "cannot modify read-only array '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
+                array.elements[index] = updated;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
             Expr::StructGet { name, fields } => {
                 let current = self.read_struct_field(name, fields)?;
                 let updated = Self::apply_increment_op(current, op);
@@ -5618,9 +5950,10 @@ impl Interpreter {
     fn eval_struct_expr(&mut self, expr: &Expr) -> CustResult<ReturnValue> {
         match expr {
             Expr::Var(name) => match self.find_variable(name).cloned() {
-                Some(Value::Struct { type_name, fields }) => {
-                    Ok(ReturnValue::Struct { type_name, fields })
-                }
+                Some(Value::Struct { type_name, fields }) => Ok(ReturnValue::Struct {
+                    type_name,
+                    fields: StructFieldValue::deep_clone_fields(&fields),
+                }),
                 Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
@@ -5632,9 +5965,9 @@ impl Interpreter {
                             type_name, fields, ..
                         } => Ok(ReturnValue::Struct {
                             type_name: type_name.clone(),
-                            fields: fields.clone(),
+                            fields: StructFieldValue::deep_clone_fields(fields),
                         }),
-                        StructFieldValue::Scalar { .. } => {
+                        StructFieldValue::Scalar { .. } | StructFieldValue::Array { .. } => {
                             Err(CustError::new("expected struct expression"))
                         }
                     }
@@ -6084,6 +6417,14 @@ impl Interpreter {
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
             Expr::StructGet { name, fields } => self.read_struct_field(name, fields),
+            Expr::StructArrayGet {
+                name,
+                fields,
+                index,
+            } => {
+                let (array, index) = self.checked_struct_array_index(name, fields, index)?;
+                Ok(array.borrow().elements[index])
+            }
             Expr::StructPtrGet { pointer, fields } => {
                 let pointer = self.eval_pointer(pointer)?;
                 self.read_struct_pointer_field(&pointer, fields)
@@ -6128,6 +6469,19 @@ impl Interpreter {
                 op,
                 value,
             } => self.eval_array_compound_set(name, index, *op, value),
+            Expr::StructArraySet {
+                name,
+                fields,
+                index,
+                value,
+            } => self.eval_struct_array_set(name, fields, index, value),
+            Expr::StructArrayCompoundSet {
+                name,
+                fields,
+                index,
+                op,
+                value,
+            } => self.eval_struct_array_compound_set(name, fields, index, *op, value),
             Expr::DerefSet { pointer, value } => {
                 self.ensure_pointer_expr_pointee_mutable(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;

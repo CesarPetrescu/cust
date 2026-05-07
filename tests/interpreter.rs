@@ -140,6 +140,22 @@ fn supports_nested_struct_initializers() {
 }
 
 #[test]
+fn supports_struct_array_fields() {
+    let program = include_str!("fixtures/valid/struct_array_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 197);
+}
+
+#[test]
+fn rejects_struct_array_initializers_longer_than_declared_length() {
+    let program = include_str!("fixtures/invalid/struct_array_initializer_too_long.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "too many initializers for array 'values'");
+}
+
+#[test]
 fn rejects_unknown_nested_struct_fields() {
     let program = include_str!("fixtures/invalid/nested_struct_unknown_field.c");
 
