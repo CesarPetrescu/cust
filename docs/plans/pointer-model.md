@@ -1,6 +1,6 @@
 # Cust Pointer Model Design
 
-Last updated: 2026-05-04
+Last updated: 2026-05-07
 
 ## Goal
 
@@ -43,7 +43,7 @@ enum ValueKind {
 }
 ```
 
-Do not encode pointee type semantics deeply at first; use it for diagnostics and obvious type-shape checks only.
+Do not encode pointee type semantics deeply at first; use it for diagnostics and obvious type-shape checks only. Cust now validates pointer declarations, assignments/assignment expressions, struct/union pointer fields, and function arguments against the declared pointee type, while still allowing `0` as a null pointer for any pointer type. Mismatches such as passing `char *` to `int *` or `union Number *` to `struct Point *` report deterministic diagnostics like `cannot convert pointer to char to pointer to int` or `cannot convert pointer to union 'Number' to pointer to struct 'Point'`.
 
 ### Expressions
 

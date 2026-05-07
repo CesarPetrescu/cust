@@ -94,6 +94,18 @@ Last updated: 2026-05-07
 cargo fmt --check
 cargo clippy -- -D warnings
 cargo test
+cargo test --test interpreter pointer_type_mismatch -- --nocapture
+cargo test --test interpreter pointer_assignment_type_mismatches -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+All passed after the 2026-05-07 autonomous pointer-type-compatibility run. This run tightened Cust's safe pointer model so declared pointer slots, pointer parameters, pointer assignment expressions/statements, and pointer-field initializers validate the concrete runtime pointee type before accepting non-null pointer values. Invalid conversions now fail at the conversion boundary instead of mutating wrong-typed storage or producing misleading later diagnostics: `char *` into `int *` reports `cannot convert pointer to char to pointer to int`, `union Number *` into `struct Point *` reports `cannot convert pointer to union 'Number' to pointer to struct 'Point'`, and `struct Size *` assignment into `struct Point *` reports the same targeted shape. Null pointer conversions remain type-compatible, and existing const-discard checks are preserved. Coverage includes `tests/fixtures/invalid/scalar_pointer_type_mismatch.c`, `tests/fixtures/invalid/aggregate_pointer_type_mismatch.c`, `tests/fixtures/invalid/pointer_assignment_type_mismatch.c`, updated pointer model notes, and `references/cust-pointer-type-compatibility.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+```bash
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
 cargo test --test interpreter aggregate_array_decay -- --nocapture
 cargo test --test c_compat -- --nocapture
 docker compose run --rm test

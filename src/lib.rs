@@ -4362,8 +4362,10 @@ impl Interpreter {
                         param.points_to_const,
                         arg_expr,
                     )?;
+                    let pointer = self.eval_pointer(arg_expr)?;
+                    self.ensure_pointer_type_matches(&ty, &pointer)?;
                     Value::Pointer {
-                        pointer: self.eval_pointer(arg_expr)?,
+                        pointer,
                         ty,
                         points_to_const: param.points_to_const,
                     }
@@ -4726,12 +4728,118 @@ impl Interpreter {
         value: &Expr,
     ) -> CustResult<()> {
         if !target_points_to_const && self.pointer_expr_points_to_const(value) {
-            Err(CustError::new(
+            return Err(CustError::new(
                 "cannot discard const qualifier from pointer target",
-            ))
-        } else {
-            Ok(())
+            ));
         }
+        Ok(())
+    }
+
+    fn pointee_label(&self, ty: &PointeeType) -> String {
+        match ty {
+            PointeeType::Scalar(CType::Int) => "int".to_string(),
+            PointeeType::Scalar(CType::Char) => "char".to_string(),
+            PointeeType::Struct(type_name) => {
+                let keyword = self
+                    .struct_types
+                    .get(type_name)
+                    .map(|aggregate| aggregate.kind.keyword())
+                    .unwrap_or("struct");
+                format!("{keyword} '{type_name}'")
+            }
+        }
+    }
+
+    fn pointer_value_type(&self, pointer: &PointerValue) -> CustResult<Option<PointeeType>> {
+        match pointer {
+            PointerValue::Null => Ok(None),
+            PointerValue::Scalar { scope_id, name } => {
+                let value = self
+                    .scopes
+                    .iter()
+                    .find(|scope| scope.id == *scope_id)
+                    .and_then(|scope| scope.values.get(name))
+                    .or_else(|| self.static_value_by_scope(*scope_id, name));
+                match value {
+                    Some(Value::Scalar { ty, .. }) => Ok(Some(PointeeType::Scalar(*ty))),
+                    _ => Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    ))),
+                }
+            }
+            PointerValue::ArrayBase { array, .. } | PointerValue::ArrayElement { array, .. } => {
+                Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
+            }
+            PointerValue::Struct { scope_id, name } => {
+                let value = self
+                    .scopes
+                    .iter()
+                    .find(|scope| scope.id == *scope_id)
+                    .and_then(|scope| scope.values.get(name))
+                    .or_else(|| self.static_value_by_scope(*scope_id, name));
+                match value {
+                    Some(Value::Struct { type_name, .. }) => {
+                        Ok(Some(PointeeType::Struct(type_name.clone())))
+                    }
+                    _ => Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    ))),
+                }
+            }
+            PointerValue::StructElement {
+                scope_id,
+                name,
+                index: _,
+            } => {
+                let value = self
+                    .scopes
+                    .iter()
+                    .find(|scope| scope.id == *scope_id)
+                    .and_then(|scope| scope.values.get(name))
+                    .or_else(|| self.static_value_by_scope(*scope_id, name));
+                match value {
+                    Some(Value::StructArray { type_name, .. }) => {
+                        Ok(Some(PointeeType::Struct(type_name.clone())))
+                    }
+                    _ => Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    ))),
+                }
+            }
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => match self.struct_field_by_scope(*scope_id, name, *element_index, fields)? {
+                StructFieldValue::Scalar { ty, .. } => Ok(Some(PointeeType::Scalar(*ty))),
+                StructFieldValue::Array { value, .. } => {
+                    Ok(Some(PointeeType::Scalar(value.borrow().elem_type)))
+                }
+                StructFieldValue::Struct { type_name, .. } => {
+                    Ok(Some(PointeeType::Struct(type_name.clone())))
+                }
+                StructFieldValue::Pointer { ty, .. } => Ok(Some(ty.clone())),
+            },
+        }
+    }
+
+    fn ensure_pointer_type_matches(
+        &self,
+        expected: &PointeeType,
+        pointer: &PointerValue,
+    ) -> CustResult<()> {
+        let Some(actual) = self.pointer_value_type(pointer)? else {
+            return Ok(());
+        };
+        if &actual != expected {
+            return Err(CustError::new(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                self.pointee_label(&actual),
+                self.pointee_label(expected)
+            )));
+        }
+        Ok(())
     }
 
     fn ensure_pointer_expr_pointee_mutable(&self, expr: &Expr) -> CustResult<()> {
@@ -5172,7 +5280,11 @@ impl Interpreter {
                 StructInitializer::Expr(expr),
             ) => {
                 self.ensure_pointer_conversion_preserves_const(field.points_to_const, expr)?;
-                *pointer = self.eval_pointer(expr)?;
+                let assigned = self.eval_pointer(expr)?;
+                if let StructFieldType::Pointer(expected_ty) = &field.ty {
+                    self.ensure_pointer_type_matches(expected_ty, &assigned)?;
+                }
+                *pointer = assigned;
             }
             (
                 StructFieldType::Pointer(_),
@@ -6356,11 +6468,14 @@ impl Interpreter {
             }),
             Expr::Assign { name, value } => match self.find_variable(name).cloned() {
                 Some(Value::Pointer {
-                    points_to_const, ..
+                    ty,
+                    points_to_const,
+                    ..
                 }) => {
                     self.ensure_variable_mutable(name)?;
                     self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
                     let pointer = self.eval_pointer(value)?;
+                    self.ensure_pointer_type_matches(&ty, &pointer)?;
                     if let Some(Value::Pointer { pointer: slot, .. }) = self.find_variable_mut(name)
                     {
                         *slot = pointer.clone();
@@ -7823,8 +7938,10 @@ impl Interpreter {
                 ..
             } => {
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
+                let pointer = self.eval_pointer(expr)?;
+                self.ensure_pointer_type_matches(ty, &pointer)?;
                 Ok(Value::Pointer {
-                    pointer: self.eval_pointer(expr)?,
+                    pointer,
                     ty: ty.clone(),
                     points_to_const: *points_to_const,
                 })
@@ -7914,6 +8031,7 @@ impl Interpreter {
             } => {
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
+                self.ensure_pointer_type_matches(ty, &pointer)?;
                 if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
                         "variable '{name}' already declared in this scope"
@@ -8009,11 +8127,14 @@ impl Interpreter {
                         Ok(ExecFlow::None)
                     }
                     Some(Value::Pointer {
-                        points_to_const, ..
+                        ty,
+                        points_to_const,
+                        ..
                     }) => {
                         self.ensure_variable_mutable(name)?;
                         self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
                         let pointer = self.eval_pointer(expr)?;
+                        self.ensure_pointer_type_matches(&ty, &pointer)?;
                         if let Some(Value::Pointer { pointer: slot, .. }) =
                             self.find_variable_mut(name)
                         {

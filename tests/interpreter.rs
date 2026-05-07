@@ -228,6 +228,39 @@ fn rejects_const_aggregate_array_decay_to_mutable_pointer() {
 }
 
 #[test]
+fn rejects_scalar_pointer_type_mismatches() {
+    let program = include_str!("fixtures/invalid/scalar_pointer_type_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot convert pointer to char to pointer to int"
+    );
+}
+
+#[test]
+fn rejects_aggregate_pointer_type_mismatches() {
+    let program = include_str!("fixtures/invalid/aggregate_pointer_type_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot convert pointer to union 'Number' to pointer to struct 'Point'"
+    );
+}
+
+#[test]
+fn rejects_pointer_assignment_type_mismatches() {
+    let program = include_str!("fixtures/invalid/pointer_assignment_type_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot convert pointer to struct 'Size' to pointer to struct 'Point'"
+    );
+}
+
+#[test]
 fn rejects_struct_array_designators_out_of_bounds() {
     let program = include_str!("fixtures/invalid/struct_array_designator_out_of_bounds.c");
 
