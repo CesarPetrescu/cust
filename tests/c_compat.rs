@@ -45,6 +45,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/enum_typedef_aliases.c",
     "tests/fixtures/compat/valid/enums.c",
     "tests/fixtures/compat/valid/function_prototypes.c",
+    "tests/fixtures/compat/valid/fixed_array_parameters_decay.c",
     "tests/fixtures/compat/valid/functions_arrays_and_strings.c",
     "tests/fixtures/compat/valid/global_variables.c",
     "tests/fixtures/compat/valid/increment_decrement.c",

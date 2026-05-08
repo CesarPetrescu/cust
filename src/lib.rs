@@ -545,7 +545,6 @@ enum PointeeType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParamKind {
     Scalar,
-    Array(usize),
     Pointer,
     Struct,
 }
@@ -1855,12 +1854,11 @@ impl Parser {
             } else if self.matches(&Token::LBracket) {
                 if self.check(&Token::RBracket) {
                     self.expect_closing_bracket_after("array parameter length")?;
-                    ParamKind::Pointer
                 } else {
-                    let len = self.expect_array_len()?;
+                    self.expect_array_len()?;
                     self.expect_closing_bracket_after("array parameter length")?;
-                    ParamKind::Array(len)
                 }
+                ParamKind::Pointer
             } else {
                 ParamKind::Scalar
             };
@@ -4671,9 +4669,6 @@ impl Interpreter {
                         ty,
                     }
                 }
-                ParamKind::Array(expected_len) => {
-                    self.eval_array_argument(name, &param.name, expected_len, arg_expr)?
-                }
                 ParamKind::Pointer => {
                     let ty = match &param.ty {
                         ParamType::Scalar(ty) => PointeeType::Scalar(*ty),
@@ -4821,41 +4816,6 @@ impl Interpreter {
                 "void function '{function_name}' returned a value"
             ))),
             (ReturnType::Void, None) => Ok(None),
-        }
-    }
-
-    fn eval_array_argument(
-        &self,
-        function_name: &str,
-        param_name: &str,
-        expected_len: usize,
-        arg_expr: &Expr,
-    ) -> CustResult<Value> {
-        match arg_expr {
-            Expr::Var(arg_name) => {
-                let array = self.find_array(arg_name)?;
-                let actual_len = array.borrow().elements.len();
-                if actual_len != expected_len {
-                    return Err(CustError::new(format!(
-                        "function '{function_name}' array parameter '{param_name}' expected length {expected_len}, got {actual_len}"
-                    )));
-                }
-                Ok(Value::Array(array))
-            }
-            Expr::StringLiteral(values) => {
-                let actual_len = values.len();
-                if actual_len != expected_len {
-                    return Err(CustError::new(format!(
-                        "function '{function_name}' array parameter '{param_name}' expected length {expected_len}, got {actual_len}"
-                    )));
-                }
-                Ok(Value::Array(Rc::new(RefCell::new(ArrayValue::read_only(
-                    values.clone(),
-                )))))
-            }
-            _ => Err(CustError::new(format!(
-                "function '{function_name}' array parameter '{param_name}' requires an array argument"
-            ))),
         }
     }
 

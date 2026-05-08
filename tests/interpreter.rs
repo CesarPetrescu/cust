@@ -296,6 +296,13 @@ fn supports_unsized_array_parameters_as_pointer_parameters() {
 }
 
 #[test]
+fn supports_fixed_array_parameters_as_pointer_parameters() {
+    let program = include_str!("fixtures/valid/fixed_array_parameters_decay.c");
+
+    assert_eq!(interpret(program).unwrap(), 19);
+}
+
+#[test]
 fn supports_pointer_return_functions_and_prototypes() {
     let program = include_str!("fixtures/valid/pointer_return_functions.c");
 
@@ -2513,7 +2520,10 @@ fn rejects_writes_through_string_literal_array_parameters() {
 
     let err = interpret(program).unwrap_err();
 
-    assert_eq!(err.to_string(), "cannot modify read-only array 'text'");
+    assert_eq!(
+        err.to_string(),
+        "cannot modify read-only array through pointer"
+    );
 }
 
 #[test]
