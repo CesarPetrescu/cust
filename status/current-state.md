@@ -76,6 +76,8 @@ Last updated: 2026-05-09
 - logical operators `&&`, `||`, and `!` with C-style integer truth values and short-circuit evaluation for `&&`/`||`
 - comments: `//` line comments and `/* ... */` block comments; unterminated block comments report a lexer source-line/caret diagnostic at the opening `/*`.
 
+- Pointer parameters now accept direct struct scalar-array fields and struct-array element scalar-array fields by decay, so `use(packet.values)` and `use(packets[i].values)` create interpreter-owned array-base pointers; `&packet.values[i]` and `&packets[n].values[i]` create array-element pointers that alias the embedded field storage and preserve existing const/read-only diagnostics.
+
 ## Test/tooling coverage
 
 - Cust is an interpreter. The implementation and runtime path must execute via `cust::interpret`/the `cust` CLI. Native compilers (`$CC`, `gcc`, `clang`, or `cc`) are allowed only inside tests as external oracles that compile supported fixtures and compare native exit codes against Cust results; they must not be used as implementation helpers or as Cust's execution engine. `clangd` is editor/LSP-only and is not part of verification.
@@ -93,6 +95,18 @@ Last updated: 2026-05-09
 - Parser diagnostics now include targeted missing-`(` messages after function names and `if`/`while`/`for` keywords, targeted missing-semicolon messages after `break`, `continue`, and `for` conditions, targeted missing-`=` messages after variable/pointer declarations and scalar/indexed/dereference assignments, targeted missing-name/type messages for function names, variable/pointer declarations, and parameter lists, unmatched closing delimiter messages for stray `)`/`]` in statements and extra `}` at top level, context-aware unterminated-block messages (for example after a function header or `if` condition), explicit empty-array-length diagnostics before `]` in declarations, negative array-length diagnostics, explicit rejection of `break`/`continue` in non-body `for` clauses, pointer-parameter malformed-list coverage, explicit unsupported pointer-return/pointer-array/parser diagnostics, explicit unsupported pointer-to-pointer parameter/declaration diagnostics, delimiter-aware trailing-comma diagnostics for function parameter/call lists, and duplicate `switch` case/default label diagnostics.
 
 ## Verified commands
+
+```bash
+cargo test --test interpreter supports_struct_array_field_decay_and_element_address_of -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+All passed after the 2026-05-09 autonomous struct-array field decay/address-of parity run. This run added scalar array-field decay and element address-of support for direct struct variables and struct-array elements: `packet.values` / `packets[i].values` can bind to `int *`/`char *` parameters, and `&packet.values[j]` / `&packets[i].values[j]` produce mutable interpreter-owned array-element pointers to embedded field storage. Coverage includes `tests/fixtures/valid/struct_array_field_decay.c`, native C compiler-oracle fixture `tests/fixtures/compat/valid/struct_array_field_decay.c`, and `tests/interpreter.rs` / `tests/c_compat.rs` wiring. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 ```bash
 cargo test --test interpreter struct_char_array -- --nocapture

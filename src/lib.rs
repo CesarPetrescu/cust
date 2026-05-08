@@ -168,6 +168,17 @@ enum Expr {
         index: Box<Expr>,
         fields: Vec<String>,
     },
+    AddressOfStructArrayField {
+        name: String,
+        fields: Vec<String>,
+        index: Box<Expr>,
+    },
+    AddressOfStructElementArrayField {
+        name: String,
+        index: Box<Expr>,
+        fields: Vec<String>,
+        array_index: Box<Expr>,
+    },
     Deref(Box<Expr>),
     Assign {
         name: String,
@@ -3984,6 +3995,26 @@ impl Parser {
                 index,
                 fields,
             }),
+            Expr::StructArrayGet {
+                name,
+                fields,
+                index,
+            } => Ok(Expr::AddressOfStructArrayField {
+                name,
+                fields,
+                index,
+            }),
+            Expr::StructElementArrayGet {
+                name,
+                index,
+                fields,
+                array_index,
+            } => Ok(Expr::AddressOfStructElementArrayField {
+                name,
+                index,
+                fields,
+                array_index,
+            }),
             Expr::ScalarLiteral { ty, init } => Ok(Expr::AddressOfScalarLiteral { ty, init }),
             Expr::AggregateLiteral { type_name, init } => {
                 Ok(Expr::AddressOfAggregateLiteral { type_name, init })
@@ -5397,6 +5428,7 @@ impl Interpreter {
                 _ => Ok(None),
             },
             Expr::AddressOfStructField { name, fields }
+            | Expr::AddressOfStructArrayField { name, fields, .. }
             | Expr::StructGet { name, fields }
             | Expr::StructSet { name, fields, .. } => match self.find_variable(name) {
                 Some(Value::Struct {
@@ -5414,7 +5446,8 @@ impl Interpreter {
                 },
                 _ => Ok(None),
             },
-            Expr::AddressOfStructElementField { name, fields, .. } => {
+            Expr::AddressOfStructElementField { name, fields, .. }
+            | Expr::AddressOfStructElementArrayField { name, fields, .. } => {
                 match self.find_variable(name) {
                     Some(Value::StructArray {
                         type_name,
@@ -5485,14 +5518,16 @@ impl Interpreter {
         match expr {
             Expr::Var(name) => self.pointer_variable_points_to_const(name),
             Expr::AddressOf(name) => self.is_const_variable(name),
-            Expr::AddressOfStructField { name, fields } => self
+            Expr::AddressOfStructField { name, fields }
+            | Expr::AddressOfStructArrayField { name, fields, .. } => self
                 .find_variable_scope_id(name)
                 .and_then(|scope_id| {
                     self.struct_field_points_to_const(scope_id, name, None, fields)
                         .ok()
                 })
                 .unwrap_or(false),
-            Expr::AddressOfStructElementField { name, fields, .. } => self
+            Expr::AddressOfStructElementField { name, fields, .. }
+            | Expr::AddressOfStructElementArrayField { name, fields, .. } => self
                 .find_variable_scope_id(name)
                 .and_then(|scope_id| {
                     self.struct_field_points_to_const(scope_id, name, Some(0), fields)
@@ -6666,6 +6701,61 @@ impl Interpreter {
         Ok((array, index))
     }
 
+    fn find_struct_array_field_pointer(
+        &mut self,
+        name: &str,
+        fields: &[String],
+        index: &Expr,
+    ) -> CustResult<PointerValue> {
+        let (array, index) = self.checked_struct_array_index(name, fields, index)?;
+        Ok(PointerValue::ArrayElement {
+            array,
+            source_name: Some(Self::field_path_label(fields).to_string()),
+            index,
+        })
+    }
+
+    fn find_struct_array_field_base_pointer(
+        &self,
+        name: &str,
+        fields: &[String],
+    ) -> CustResult<PointerValue> {
+        let array = self.find_struct_array_field(name, fields)?;
+        Ok(PointerValue::ArrayBase {
+            array,
+            source_name: Some(Self::field_path_label(fields).to_string()),
+        })
+    }
+
+    fn find_struct_element_array_field_pointer(
+        &mut self,
+        name: &str,
+        index: &Expr,
+        fields: &[String],
+        array_index: &Expr,
+    ) -> CustResult<PointerValue> {
+        let (array, index) =
+            self.checked_struct_element_array_index(name, index, fields, array_index)?;
+        Ok(PointerValue::ArrayElement {
+            array,
+            source_name: Some(Self::field_path_label(fields).to_string()),
+            index,
+        })
+    }
+
+    fn find_struct_element_array_field_base_pointer(
+        &mut self,
+        name: &str,
+        index: &Expr,
+        fields: &[String],
+    ) -> CustResult<PointerValue> {
+        let array = self.find_struct_element_array_field(name, index, fields)?;
+        Ok(PointerValue::ArrayBase {
+            array,
+            source_name: Some(Self::field_path_label(fields).to_string()),
+        })
+    }
+
     fn checked_struct_element_index(&mut self, name: &str, index: &Expr) -> CustResult<usize> {
         let index_value = self.eval(index)?;
         let len = match self.find_variable(name) {
@@ -7665,6 +7755,17 @@ impl Interpreter {
                 index,
                 fields,
             } => self.find_struct_element_field_pointer(name, index, fields),
+            Expr::AddressOfStructArrayField {
+                name,
+                fields,
+                index,
+            } => self.find_struct_array_field_pointer(name, fields, index),
+            Expr::AddressOfStructElementArrayField {
+                name,
+                index,
+                fields,
+                array_index,
+            } => self.find_struct_element_array_field_pointer(name, index, fields, array_index),
             Expr::AddressOfScalarLiteral { ty, init } => {
                 self.make_scalar_compound_literal_pointer(*ty, init)
             }
@@ -7753,7 +7854,23 @@ impl Interpreter {
                 ))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
-            Expr::StructGet { name, fields } => self.read_direct_struct_pointer_field(name, fields),
+            Expr::StructGet { name, fields } => {
+                match self.find_struct_array_field_base_pointer(name, fields) {
+                    Ok(pointer) => Ok(pointer),
+                    Err(_) => self.read_direct_struct_pointer_field(name, fields),
+                }
+            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => match self.find_struct_element_array_field_base_pointer(name, index, fields) {
+                Ok(pointer) => Ok(pointer),
+                Err(_) => Err(CustError::new(format!(
+                    "struct field '{}' is not a pointer",
+                    Self::field_path_label(fields)
+                ))),
+            },
             Expr::StructPtrGet { pointer, fields } => {
                 let pointer = self.eval_pointer(pointer)?;
                 self.read_struct_pointer_pointer_field(&pointer, fields)
@@ -8465,6 +8582,8 @@ impl Interpreter {
             | Expr::AddressOfArray { .. }
             | Expr::AddressOfStructField { .. }
             | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfStructArrayField { .. }
+            | Expr::AddressOfStructElementArrayField { .. }
             | Expr::AddressOfScalarLiteral { .. }
             | Expr::AddressOfAggregateLiteral { .. }
             | Expr::StringLiteral(_)
@@ -8764,6 +8883,8 @@ impl Interpreter {
             | Expr::AddressOfArray { .. }
             | Expr::AddressOfStructField { .. }
             | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfStructArrayField { .. }
+            | Expr::AddressOfStructElementArrayField { .. }
             | Expr::AddressOfScalarLiteral { .. }
             | Expr::AddressOfAggregateLiteral { .. } => Ok(POINTER_SIZE),
             Expr::Deref(pointer) => self.sizeof_deref(pointer),
@@ -9927,6 +10048,8 @@ impl Interpreter {
             | Expr::AddressOfArray { .. }
             | Expr::AddressOfStructField { .. }
             | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfStructArrayField { .. }
+            | Expr::AddressOfStructElementArrayField { .. }
             | Expr::AddressOfScalarLiteral { .. }
             | Expr::AddressOfAggregateLiteral { .. } => {
                 Err(CustError::new("pointer value used as scalar"))

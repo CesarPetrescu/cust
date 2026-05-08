@@ -677,6 +677,13 @@ fn supports_struct_array_fields() {
 }
 
 #[test]
+fn supports_struct_array_field_decay_and_element_address_of() {
+    let program = include_str!("fixtures/valid/struct_array_field_decay.c");
+
+    assert_eq!(interpret(program).unwrap(), 55);
+}
+
+#[test]
 fn supports_arrays_of_structs() {
     let program = include_str!("fixtures/valid/struct_arrays.c");
 
