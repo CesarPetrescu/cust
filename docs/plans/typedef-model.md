@@ -17,7 +17,9 @@ Add a deliberately scoped, preprocessor-free `typedef` milestone that improves C
 - Aggregate typedef definitions that name the tag and alias together at top level or inside a block:
   - `typedef struct Point { int x; int y; } Point;`
   - `typedef union Number { int value; char tag; } Number;`
+  - anonymous aggregate typedef definitions are also supported: `typedef struct { int x; int y; } Point;` and `typedef union { int value; char tag; } Number;`
   - the aggregate tag is registered before the alias, the alias remains parser-only metadata for the existing safe struct/union runtime model, and block-local tags/aliases are only visible until their block exits.
+  - anonymous aggregate typedefs create a unique internal type identity without adding a source-level tag; diagnostics display the typedef alias name for that anonymous type.
   - block-local aggregate typedef definitions may shadow outer aggregate tags with the same spelling; Cust assigns unique internal type identities while preserving source-level tag lookup rules.
 - Named enum aliases after a prior enum declaration:
   - `enum Status { READY = 1, BUSY };`
@@ -54,8 +56,7 @@ This means aliases do not create distinct types: `Count` behaves exactly like `i
 ## Unsupported forms for this milestone
 
 - Pointer-to-pointer aliases such as `typedef int **IntPtrPtr;` and `typedef IntPtr *IntPtrPtr;` are intentionally rejected with `pointer-to-pointer typedef aliases are not supported`.
-- Pointer-returning functions remain unsupported even when the return type is spelled through a pointer typedef alias.
-- Anonymous struct/union typedefs such as `typedef struct { int x; } Point;` are not supported.
+- Pointer-to-pointer return types remain unsupported even when spelled through pointer typedef aliases; one-level pointer-returning functions through pointer typedef aliases are supported by the pointer-return milestone.
 - Anonymous enum typedefs such as `typedef enum { READY } Status;` and enum-typed variables without a typedef alias are not supported.
 - Function pointer typedefs, array typedefs, and unsupported declaration-level type qualifier combinations remain future work; aggregate typedef use now follows the implemented struct/enum alias and nested-struct-field subset.
 
@@ -63,6 +64,7 @@ This means aliases do not create distinct types: `Count` behaves exactly like `i
 
 - `tests/fixtures/valid/typedef_aliases.c` covers scalar and struct aliases in globals, locals, arrays, pointer declarations, prototypes, function parameters/returns, `sizeof(alias)`, and struct copy/field access.
 - `tests/fixtures/valid/typedef_aggregate_definitions.c` covers top-level `typedef struct Name { ... } Alias;` and `typedef union Name { ... } Alias;` definitions feeding aggregate declarations, arrays, pointer decay/indexing, by-value parameters/returns, designated initializers, and union logical scalar sharing.
+- `tests/fixtures/valid/anonymous_aggregate_typedefs.c` covers anonymous `typedef struct { ... } Alias;` and `typedef union { ... } Alias;` definitions feeding alias-spelled declarations, arrays, pointer parameters/decay, aggregate returns, designated initializers, and deterministic Cust `sizeof(alias)` / `sizeof(alias *)`.
 - `tests/fixtures/valid/block_scoped_aggregate_typedef_definitions.c` covers block-local aggregate typedef definitions, alias use in the declaring block, nested block union typedef definitions, and scope cleanup.
 - `tests/fixtures/valid/block_scoped_typedefs.c` covers nested block aliases, alias shadowing between `int`/`char`/`struct` aliases, scoped `sizeof(alias)`, and restoration of the outer alias after leaving a block.
 - `tests/fixtures/valid/aggregate_tag_shadowing.c` covers block-local aggregate typedef definitions that shadow outer struct and union tags while preserving the outer aliases after the block exits.
@@ -77,6 +79,7 @@ This means aliases do not create distinct types: `Count` behaves exactly like `i
 - `tests/fixtures/invalid/block_aggregate_typedef_alias_out_of_scope.c` covers block-local aggregate typedef tag/alias expiry after scope exit.
 - `tests/fixtures/compat/valid/typedef_aliases.c` verifies a native C compiler oracle for alias use while avoiding Cust-vs-native ABI `sizeof(int)`/struct-padding differences.
 - `tests/fixtures/compat/valid/typedef_aggregate_definitions.c` verifies top-level aggregate typedef definitions against a native C compiler oracle while avoiding ABI-sensitive layout assertions.
+- `tests/fixtures/compat/valid/anonymous_aggregate_typedefs.c` verifies anonymous aggregate typedef definitions against a native C compiler oracle while avoiding ABI-sensitive struct-size assertions.
 - `tests/fixtures/compat/valid/block_scoped_aggregate_typedef_definitions.c` verifies block-local aggregate typedef definitions against a native C compiler oracle while avoiding ABI-sensitive layout assertions.
 - `tests/fixtures/compat/valid/aggregate_tag_shadowing.c` verifies block-local aggregate tag shadowing against a native C compiler oracle while avoiding ABI-sensitive layout assertions.
 - `tests/fixtures/compat/valid/block_scoped_typedefs.c` verifies block-scoped alias shadowing against a native C compiler oracle without ABI-sensitive struct-size assertions.

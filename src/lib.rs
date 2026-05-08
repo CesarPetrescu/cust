@@ -1555,11 +1555,14 @@ impl Parser {
 
     fn parse_typedef_decl(&mut self) -> CustResult<()> {
         self.expect(Token::Typedef)?;
-        let (alias, alias_context) = if self.is_aggregate_definition() {
-            let (type_name, _) = self.parse_aggregate_definition_body(false)?;
+        let (alias, alias_context, anonymous_aggregate) = if self
+            .starts_typedef_aggregate_definition()
+        {
+            let (type_name, _, is_anonymous) = self.parse_aggregate_definition_body(false, true)?;
             (
                 TypeAlias::Struct(type_name),
                 "typedef alias name after aggregate definition",
+                is_anonymous,
             )
         } else {
             let base_type = self.parse_decl_type("typedef struct type name")?;
@@ -1589,10 +1592,20 @@ impl Parser {
                     DeclType::Pointer(pointee) => TypeAlias::Pointer(pointee),
                 }
             };
-            (alias, "typedef alias name after type")
+            (alias, "typedef alias name after type", false)
         };
         let alias_name = self.expect_ident_after(alias_context)?;
         self.expect_semicolon_after("typedef declaration")?;
+        let anonymous_type_name = match (anonymous_aggregate, &alias) {
+            (true, TypeAlias::Struct(type_name)) => Some(type_name.clone()),
+            _ => None,
+        };
+        if let Some(struct_type) = anonymous_type_name
+            .as_ref()
+            .and_then(|type_name| self.struct_types.get_mut(type_name))
+        {
+            struct_type.display_name = alias_name.clone();
+        }
         let current_scope = self
             .type_alias_scopes
             .last_mut()
@@ -2416,43 +2429,77 @@ impl Parser {
     }
 
     fn parse_aggregate_definition(&mut self) -> CustResult<()> {
-        self.parse_aggregate_definition_body(true)?;
+        self.parse_aggregate_definition_body(true, false)?;
         Ok(())
+    }
+
+    fn starts_typedef_aggregate_definition(&self) -> bool {
+        matches!(
+            (
+                self.peek(),
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                self.tokens.get(self.pos + 2).map(|token| &token.kind)
+            ),
+            (Token::Struct | Token::Union, Some(Token::LBrace), _)
+                | (
+                    Token::Struct | Token::Union,
+                    Some(Token::Ident(_)),
+                    Some(Token::LBrace)
+                )
+        )
     }
 
     fn parse_aggregate_definition_body(
         &mut self,
         require_semicolon: bool,
-    ) -> CustResult<(String, AggregateKind)> {
+        allow_anonymous: bool,
+    ) -> CustResult<(String, AggregateKind, bool)> {
         let kind = match self.advance().kind {
             Token::Struct => AggregateKind::Struct,
             Token::Union => AggregateKind::Union,
             token => unreachable!("expected aggregate keyword, found {token:?}"),
         };
         let keyword = kind.keyword();
-        let type_name = self.expect_ident_after(&format!("{keyword} name"))?;
-        self.expect_opening_brace_after(&format!("{keyword} name"))?;
-        if self
-            .aggregate_type_scopes
-            .last()
-            .expect("parser always has an aggregate type scope")
-            .contains_key(&type_name)
-        {
-            return Err(CustError::new(format!(
-                "{keyword} '{type_name}' already declared"
-            )));
-        }
-        let internal_type_name = if self.struct_types.contains_key(&type_name) {
-            let name = format!("{}#{}", type_name, self.next_aggregate_type_id);
+        let (type_name, is_anonymous) = if allow_anonymous && self.check(&Token::LBrace) {
+            let anonymous_id = self.next_aggregate_type_id;
             self.next_aggregate_type_id += 1;
-            name
+            (format!("__anonymous_{keyword}#{anonymous_id}"), true)
         } else {
-            type_name.clone()
+            (self.expect_ident_after(&format!("{keyword} name"))?, false)
         };
-        self.aggregate_type_scopes
-            .last_mut()
-            .expect("parser always has an aggregate type scope")
-            .insert(type_name.clone(), internal_type_name.clone());
+        let opening_brace_context = if is_anonymous {
+            "anonymous aggregate typedef".to_string()
+        } else {
+            format!("{keyword} name")
+        };
+        self.expect_opening_brace_after(&opening_brace_context)?;
+        let internal_type_name = if is_anonymous {
+            type_name.clone()
+        } else {
+            if self
+                .aggregate_type_scopes
+                .last()
+                .expect("parser always has an aggregate type scope")
+                .contains_key(&type_name)
+            {
+                return Err(CustError::new(format!(
+                    "{keyword} '{type_name}' already declared"
+                )));
+            }
+            if self.struct_types.contains_key(&type_name) {
+                let name = format!("{}#{}", type_name, self.next_aggregate_type_id);
+                self.next_aggregate_type_id += 1;
+                name
+            } else {
+                type_name.clone()
+            }
+        };
+        if !is_anonymous {
+            self.aggregate_type_scopes
+                .last_mut()
+                .expect("parser always has an aggregate type scope")
+                .insert(type_name.clone(), internal_type_name.clone());
+        }
         let mut fields = Vec::new();
         let mut names = HashSet::new();
         while !self.check(&Token::RBrace) {
@@ -2568,7 +2615,7 @@ impl Parser {
                 display_name: type_name.clone(),
             },
         );
-        Ok((internal_type_name, kind))
+        Ok((internal_type_name, kind, is_anonymous))
     }
 
     fn parse_aggregate_var_decl(&mut self) -> CustResult<Stmt> {

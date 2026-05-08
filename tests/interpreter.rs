@@ -238,6 +238,13 @@ fn supports_typedef_aggregate_definitions() {
 }
 
 #[test]
+fn supports_anonymous_aggregate_typedef_definitions() {
+    let program = include_str!("fixtures/valid/anonymous_aggregate_typedefs.c");
+
+    assert_eq!(interpret(program).unwrap(), 65);
+}
+
+#[test]
 fn supports_block_scoped_typedef_aggregate_definitions() {
     let program = include_str!("fixtures/valid/block_scoped_aggregate_typedef_definitions.c");
 
