@@ -71,6 +71,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/struct_arrays.c",
     "tests/fixtures/compat/valid/struct_pointer_fields.c",
     "tests/fixtures/compat/valid/struct_pointer_field_arithmetic.c",
+    "tests/fixtures/compat/valid/struct_pointer_arrow_field_arithmetic.c",
     "tests/fixtures/compat/valid/struct_pointer_field_const_pointee.c",
     "tests/fixtures/compat/valid/struct_initializers.c",
     "tests/fixtures/compat/valid/structs.c",

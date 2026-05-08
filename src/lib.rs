@@ -6825,6 +6825,108 @@ impl Interpreter {
         }
     }
 
+    fn read_struct_pointer_pointer_field(
+        &self,
+        pointer: &PointerValue,
+        path: &[String],
+    ) -> CustResult<PointerValue> {
+        let (type_name, fields) = self.find_struct_pointer_fields(pointer)?;
+        let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
+        match field_value {
+            StructFieldValue::Pointer { pointer, .. } => Ok(pointer.clone()),
+            StructFieldValue::Scalar { .. } => Err(CustError::new(format!(
+                "struct field '{}' is not a pointer",
+                Self::field_path_label(path)
+            ))),
+            StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                "struct field '{}' is an array",
+                Self::field_path_label(path)
+            ))),
+            StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                "struct field '{}' is a struct '{type_name}'",
+                Self::field_path_label(path)
+            ))),
+        }
+    }
+
+    fn struct_pointer_pointer_field_points_to_const(
+        &self,
+        pointer: &PointerValue,
+        path: &[String],
+    ) -> CustResult<bool> {
+        let (type_name, fields) = self.find_struct_pointer_fields(pointer)?;
+        let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
+        match field_value {
+            StructFieldValue::Pointer {
+                points_to_const, ..
+            } => Ok(*points_to_const),
+            _ => Ok(false),
+        }
+    }
+
+    fn struct_pointer_pointer_field_type(
+        &self,
+        pointer: &PointerValue,
+        path: &[String],
+    ) -> CustResult<Option<PointeeType>> {
+        let (type_name, fields) = self.find_struct_pointer_fields(pointer)?;
+        let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
+        match field_value {
+            StructFieldValue::Pointer { ty, .. } => Ok(Some(ty.clone())),
+            _ => Ok(None),
+        }
+    }
+
+    fn assign_struct_pointer_pointer_field(
+        &mut self,
+        pointer: &PointerValue,
+        path: &[String],
+        value: PointerValue,
+    ) -> CustResult<()> {
+        self.ensure_struct_pointer_target_mutable(pointer)?;
+        if let Some(expected) = self.struct_pointer_pointer_field_type(pointer, path)? {
+            self.ensure_pointer_type_matches(&expected, &value)?;
+        }
+        let (type_name, fields) = self.find_struct_pointer_fields_mut(pointer)?;
+        let (_, field_value) = Self::nested_field_value_mut(&type_name, fields, path)?;
+        if field_value.is_const() {
+            return Err(CustError::new(format!(
+                "cannot assign to const struct field '{}'",
+                Self::field_path_label(path)
+            )));
+        }
+        match field_value {
+            StructFieldValue::Pointer { pointer, .. } => {
+                *pointer = value;
+                Ok(())
+            }
+            StructFieldValue::Scalar { .. } => Err(CustError::new(format!(
+                "struct field '{}' is not a pointer",
+                Self::field_path_label(path)
+            ))),
+            StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                "struct field '{}' is an array",
+                Self::field_path_label(path)
+            ))),
+            StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                "struct field '{}' is a struct '{type_name}'",
+                Self::field_path_label(path)
+            ))),
+        }
+    }
+
+    fn offset_struct_pointer_pointer_field(
+        &mut self,
+        pointer: &PointerValue,
+        path: &[String],
+        offset: i64,
+    ) -> CustResult<(PointerValue, PointerValue)> {
+        let current = self.read_struct_pointer_pointer_field(pointer, path)?;
+        let updated = self.offset_array_pointer(&current, offset)?;
+        self.assign_struct_pointer_pointer_field(pointer, path, updated.clone())?;
+        Ok((current, updated))
+    }
+
     fn assign_struct_pointer_field(
         &mut self,
         pointer: &PointerValue,
@@ -7139,6 +7241,10 @@ impl Interpreter {
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::StructGet { name, fields } => self.read_direct_struct_pointer_field(name, fields),
+            Expr::StructPtrGet { pointer, fields } => {
+                let pointer = self.eval_pointer(pointer)?;
+                self.read_struct_pointer_pointer_field(&pointer, fields)
+            }
             Expr::StructSet {
                 name,
                 fields,
@@ -7152,12 +7258,50 @@ impl Interpreter {
                 self.assign_direct_struct_pointer_field(name, fields, pointer.clone())?;
                 Ok(pointer)
             }
+            Expr::StructPtrSet {
+                pointer,
+                fields,
+                value,
+            } => {
+                let target_pointer = self.eval_pointer(pointer)?;
+                let target_points_to_const =
+                    self.struct_pointer_pointer_field_points_to_const(&target_pointer, fields)?;
+                self.ensure_pointer_conversion_preserves_const(target_points_to_const, value)?;
+                let value_pointer = self.eval_pointer(value)?;
+                self.assign_struct_pointer_pointer_field(
+                    &target_pointer,
+                    fields,
+                    value_pointer.clone(),
+                )?;
+                Ok(value_pointer)
+            }
             Expr::StructCompoundSet {
                 name,
                 fields,
                 op,
                 value,
             } => self.compound_assign_direct_struct_pointer_field(name, fields, *op, value),
+            Expr::StructPtrCompoundSet {
+                pointer,
+                fields,
+                op,
+                value,
+            } => {
+                let offset = self.eval(value)?;
+                let offset = match op {
+                    CompoundOp::Add => offset,
+                    CompoundOp::Sub => -offset,
+                    CompoundOp::BitAnd
+                    | CompoundOp::BitOr
+                    | CompoundOp::BitXor
+                    | CompoundOp::ShiftLeft
+                    | CompoundOp::ShiftRight => return Err(Self::pointer_compound_error(*op)),
+                };
+                let target_pointer = self.eval_pointer(pointer)?;
+                let (_, updated) =
+                    self.offset_struct_pointer_pointer_field(&target_pointer, fields, offset)?;
+                Ok(updated)
+            }
             Expr::CompoundAssign { name, op, value } => {
                 let pointer = match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => pointer,
@@ -7195,6 +7339,16 @@ impl Interpreter {
             Expr::Increment { target, op, prefix } => match target.as_ref() {
                 Expr::StructGet { name, fields } => {
                     self.increment_direct_struct_pointer_field(name, fields, *op, *prefix)
+                }
+                Expr::StructPtrGet { pointer, fields } => {
+                    let target_pointer = self.eval_pointer(pointer)?;
+                    let offset = match op {
+                        IncrementOp::Inc => 1,
+                        IncrementOp::Dec => -1,
+                    };
+                    let (current, updated) =
+                        self.offset_struct_pointer_pointer_field(&target_pointer, fields, offset)?;
+                    if *prefix { Ok(updated) } else { Ok(current) }
                 }
                 Expr::Var(name) => {
                     let pointer = match self.find_variable(name).cloned() {
@@ -7910,13 +8064,20 @@ impl Interpreter {
         }
         if matches!(
             expr,
-            Expr::CompoundAssign {
-                op: CompoundOp::Add | CompoundOp::Sub,
-                ..
-            } | Expr::StructCompoundSet {
-                op: CompoundOp::Add | CompoundOp::Sub,
-                ..
-            } | Expr::Increment { .. }
+            Expr::StructPtrSet { .. }
+                | Expr::CompoundAssign {
+                    op: CompoundOp::Add | CompoundOp::Sub,
+                    ..
+                }
+                | Expr::StructCompoundSet {
+                    op: CompoundOp::Add | CompoundOp::Sub,
+                    ..
+                }
+                | Expr::StructPtrCompoundSet {
+                    op: CompoundOp::Add | CompoundOp::Sub,
+                    ..
+                }
+                | Expr::Increment { .. }
         ) && self.eval_pointer(expr).is_ok()
         {
             return Ok(());

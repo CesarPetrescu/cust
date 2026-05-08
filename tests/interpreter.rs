@@ -539,6 +539,13 @@ fn supports_struct_pointer_field_arithmetic() {
 }
 
 #[test]
+fn supports_struct_pointer_arrow_field_arithmetic() {
+    let program = include_str!("fixtures/valid/struct_pointer_arrow_field_arithmetic.c");
+
+    assert_eq!(interpret(program).unwrap(), 112);
+}
+
+#[test]
 fn supports_struct_pointer_fields_with_const_pointee_views() {
     let program = include_str!("fixtures/valid/struct_pointer_field_const_pointee.c");
 
