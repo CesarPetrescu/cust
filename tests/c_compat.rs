@@ -9,6 +9,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/anonymous_enum_typedefs.c",
     "tests/fixtures/compat/valid/arithmetic_control_flow.c",
     "tests/fixtures/compat/valid/array_initializers.c",
+    "tests/fixtures/compat/valid/array_compound_literals.c",
     "tests/fixtures/compat/valid/designated_initializers.c",
     "tests/fixtures/compat/valid/direct_enum_types.c",
     "tests/fixtures/compat/valid/path_designated_initializers.c",

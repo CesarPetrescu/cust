@@ -278,6 +278,11 @@ enum Expr {
         type_name: String,
         init: Vec<StructInitializer>,
     },
+    ArrayLiteral {
+        elem_type: CType,
+        len: Option<usize>,
+        init: Vec<ArrayInitializer>,
+    },
     AggregateFieldGet {
         aggregate: Box<Expr>,
         fields: Vec<String>,
@@ -2287,6 +2292,70 @@ impl Parser {
         Ok(values)
     }
 
+    fn parse_array_compound_initializer(
+        &mut self,
+        len: Option<usize>,
+    ) -> CustResult<Vec<ArrayInitializer>> {
+        self.expect_opening_brace_after("array compound literal initializer")?;
+        let mut values = Vec::new();
+        let mut next_positional_index = 0usize;
+        if self.matches(&Token::RBrace) {
+            return Ok(values);
+        }
+        loop {
+            if self.check(&Token::LBracket) {
+                let index = match len {
+                    Some(len) => self
+                        .parse_array_designator_index_with_context("array compound literal", len)?,
+                    None => self.parse_unbounded_array_designator_index()?,
+                };
+                self.expect_assign_after("array designator")?;
+                let value = self.parse_scalar_initializer_expr("array compound literal element")?;
+                next_positional_index = index + 1;
+                values.push(ArrayInitializer::Designated { index, value });
+            } else {
+                if matches!(len, Some(len) if next_positional_index == len) {
+                    return Err(CustError::new(
+                        "too many initializers for array compound literal",
+                    ));
+                }
+                values.push(ArrayInitializer::Expr(
+                    self.parse_scalar_initializer_expr("array compound literal element")?,
+                ));
+                next_positional_index += 1;
+            }
+            if self.matches(&Token::RBrace) {
+                break;
+            }
+            if self.matches(&Token::Comma) {
+                if self.matches(&Token::RBrace) {
+                    break;
+                }
+                continue;
+            }
+            self.expect_closing_brace_after("array compound literal initializer")?;
+        }
+        Ok(values)
+    }
+
+    fn parse_unbounded_array_designator_index(&mut self) -> CustResult<usize> {
+        self.expect(Token::LBracket)?;
+        let found = self.advance();
+        let index = match &found.kind {
+            Token::Number(value) if *value >= 0 => usize::try_from(*value).map_err(|_| {
+                Self::error_at("array designator index is too large".to_string(), &found)
+            })?,
+            token => {
+                return Err(Self::error_at(
+                    format!("expected array designator index, found {token:?}"),
+                    &found,
+                ));
+            }
+        };
+        self.expect_closing_bracket_after("array designator")?;
+        Ok(index)
+    }
+
     fn parse_array_designator_index(&mut self, name: &str, len: usize) -> CustResult<usize> {
         self.parse_array_designator_index_with_context(&format!("array '{name}'"), len)
     }
@@ -3637,6 +3706,20 @@ impl Parser {
                 ));
             }
         };
+        if self.matches(&Token::LBracket) {
+            let len = if self.check(&Token::RBracket) {
+                None
+            } else {
+                Some(self.expect_array_len()?)
+            };
+            self.expect_closing_bracket_after("array compound literal type")?;
+            self.expect_closing_paren_after("cast type")?;
+            return Ok(Expr::ArrayLiteral {
+                elem_type: ty,
+                len,
+                init: self.parse_array_compound_initializer(len)?,
+            });
+        }
         self.expect_closing_paren_after("cast type")?;
         let expr = if self.check(&Token::LBrace) {
             self.parse_scalar_initializer_expr("scalar compound literal")?
@@ -5510,6 +5593,37 @@ impl Interpreter {
         Ok(Value::Array(Rc::new(RefCell::new(array))))
     }
 
+    fn make_array_compound_literal(
+        &mut self,
+        len: Option<usize>,
+        elem_type: CType,
+        init: &[ArrayInitializer],
+    ) -> CustResult<Rc<RefCell<ArrayValue>>> {
+        let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
+        let Value::Array(array) = self.make_array_value(len, elem_type, init, false)? else {
+            unreachable!("make_array_value always returns Value::Array")
+        };
+        Ok(array)
+    }
+
+    fn infer_array_initializer_len(init: &[ArrayInitializer]) -> usize {
+        let mut len = 0usize;
+        let mut next_positional_index = 0usize;
+        for initializer in init {
+            match initializer {
+                ArrayInitializer::Expr(_) => {
+                    len = len.max(next_positional_index + 1);
+                    next_positional_index += 1;
+                }
+                ArrayInitializer::Designated { index, .. } => {
+                    len = len.max(index + 1);
+                    next_positional_index = index + 1;
+                }
+            }
+        }
+        len
+    }
+
     fn make_struct_value(
         &mut self,
         type_name: &str,
@@ -7201,6 +7315,14 @@ impl Interpreter {
                 array: Rc::new(RefCell::new(ArrayValue::read_only(values.clone()))),
                 source_name: None,
             }),
+            Expr::ArrayLiteral {
+                elem_type,
+                len,
+                init,
+            } => Ok(PointerValue::ArrayBase {
+                array: self.make_array_compound_literal(*len, *elem_type, init)?,
+                source_name: None,
+            }),
             Expr::Call { name, args } => match self.call_function(name, args)? {
                 Some(ReturnValue::Pointer { pointer, .. }) => Ok(pointer),
                 Some(ReturnValue::Scalar(_)) => Err(CustError::new(format!(
@@ -7976,7 +8098,8 @@ impl Interpreter {
             | Expr::AddressOfArray { .. }
             | Expr::AddressOfStructField { .. }
             | Expr::AddressOfStructElementField { .. }
-            | Expr::StringLiteral(_) => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
+            | Expr::StringLiteral(_)
+            | Expr::ArrayLiteral { .. } => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
             Expr::Assign { name, .. } => match self.find_variable(name).cloned() {
                 Some(Value::Pointer { .. }) => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
                 Some(Value::Scalar { .. }) => Ok(self.eval(expr)? != 0),
@@ -8238,6 +8361,7 @@ impl Interpreter {
         match expr {
             Expr::Number(_) => Ok(INT_SIZE),
             Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
+            Expr::ArrayLiteral { .. } => Ok(POINTER_SIZE),
             Expr::SizeOfType(_) | Expr::SizeOfValue(_) => Ok(INT_SIZE),
             Expr::Var(name) => self.sizeof_variable(name),
             Expr::StructGet { name, fields } => self.sizeof_struct_field(name, fields),
@@ -9390,6 +9514,7 @@ impl Interpreter {
         match expr {
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
+            Expr::ArrayLiteral { .. } => Err(CustError::new("pointer value used as scalar")),
             Expr::StructGet { name, fields } => self.read_struct_field(name, fields),
             Expr::StructArrayGet {
                 name,

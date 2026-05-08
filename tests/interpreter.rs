@@ -140,6 +140,13 @@ fn supports_scalar_compound_literals_in_expression_contexts() {
 }
 
 #[test]
+fn supports_array_compound_literals_as_pointer_expressions() {
+    let program = include_str!("fixtures/valid/array_compound_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 40);
+}
+
+#[test]
 fn rejects_scalar_compound_literals_with_too_many_initializers() {
     let program = include_str!("fixtures/invalid/scalar_compound_literal_too_many_initializers.c");
 
@@ -147,6 +154,17 @@ fn rejects_scalar_compound_literals_with_too_many_initializers() {
     assert_eq!(
         err.to_string(),
         "too many initializers for scalar compound literal"
+    );
+}
+
+#[test]
+fn rejects_array_compound_literals_longer_than_declared_length() {
+    let program = include_str!("fixtures/invalid/array_compound_literal_too_many_initializers.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "too many initializers for array compound literal"
     );
 }
 
