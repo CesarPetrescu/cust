@@ -308,6 +308,7 @@ enum DeclType {
 struct StructTypeDef {
     fields: Vec<StructFieldDef>,
     kind: AggregateKind,
+    display_name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1270,10 +1271,11 @@ struct Parser {
     tokens: Vec<LocatedToken>,
     pos: usize,
     struct_types: HashMap<String, StructTypeDef>,
-    aggregate_type_scopes: Vec<HashSet<String>>,
+    aggregate_type_scopes: Vec<HashMap<String, String>>,
     enum_type_scopes: Vec<HashSet<String>>,
     type_alias_scopes: Vec<HashMap<String, TypeAlias>>,
     next_static_local_id: usize,
+    next_aggregate_type_id: usize,
 }
 
 impl Parser {
@@ -1282,10 +1284,11 @@ impl Parser {
             tokens,
             pos: 0,
             struct_types: HashMap::new(),
-            aggregate_type_scopes: vec![HashSet::new()],
+            aggregate_type_scopes: vec![HashMap::new()],
             enum_type_scopes: vec![HashSet::new()],
             type_alias_scopes: vec![HashMap::new()],
             next_static_local_id: 0,
+            next_aggregate_type_id: 0,
         }
     }
 
@@ -1453,11 +1456,11 @@ impl Parser {
             .any(|scope| scope.contains(name))
     }
 
-    fn aggregate_type_is_declared(&self, name: &str) -> bool {
+    fn resolve_aggregate_type(&self, name: &str) -> Option<String> {
         self.aggregate_type_scopes
             .iter()
             .rev()
-            .any(|scope| scope.contains(name))
+            .find_map(|scope| scope.get(name).cloned())
     }
 
     fn parse_decl_type(&mut self, context: &str) -> CustResult<DeclType> {
@@ -1472,12 +1475,12 @@ impl Parser {
                     "struct"
                 };
                 let type_name = self.expect_ident_after(context)?;
-                if !self.aggregate_type_is_declared(&type_name) {
+                let Some(internal_type_name) = self.resolve_aggregate_type(&type_name) else {
                     return Err(CustError::new(format!(
                         "undefined {keyword} type '{type_name}'"
                     )));
-                }
-                Ok(DeclType::Struct(type_name))
+                };
+                Ok(DeclType::Struct(internal_type_name))
             }
             Token::Enum => {
                 let type_name_token = self.advance();
@@ -1846,7 +1849,7 @@ impl Parser {
         self.expect_opening_brace_after(context)?;
         self.type_alias_scopes.push(HashMap::new());
         self.enum_type_scopes.push(HashSet::new());
-        self.aggregate_type_scopes.push(HashSet::new());
+        self.aggregate_type_scopes.push(HashMap::new());
         let mut statements = Vec::new();
         let result = (|| {
             while !self.check(&Token::RBrace) {
@@ -2429,6 +2432,27 @@ impl Parser {
         let keyword = kind.keyword();
         let type_name = self.expect_ident_after(&format!("{keyword} name"))?;
         self.expect_opening_brace_after(&format!("{keyword} name"))?;
+        if self
+            .aggregate_type_scopes
+            .last()
+            .expect("parser always has an aggregate type scope")
+            .contains_key(&type_name)
+        {
+            return Err(CustError::new(format!(
+                "{keyword} '{type_name}' already declared"
+            )));
+        }
+        let internal_type_name = if self.struct_types.contains_key(&type_name) {
+            let name = format!("{}#{}", type_name, self.next_aggregate_type_id);
+            self.next_aggregate_type_id += 1;
+            name
+        } else {
+            type_name.clone()
+        };
+        self.aggregate_type_scopes
+            .last_mut()
+            .expect("parser always has an aggregate type scope")
+            .insert(type_name.clone(), internal_type_name.clone());
         let mut fields = Vec::new();
         let mut names = HashSet::new();
         while !self.check(&Token::RBrace) {
@@ -2448,14 +2472,13 @@ impl Parser {
                 let field_keyword = field_kind.keyword();
                 let field_type_name =
                     self.expect_ident_after(&format!("{field_keyword} field type"))?;
-                if !self.aggregate_type_is_declared(&field_type_name)
-                    && field_type_name != type_name
-                {
+                let Some(field_internal_type_name) = self.resolve_aggregate_type(&field_type_name)
+                else {
                     return Err(CustError::new(format!(
                         "undefined {field_keyword} type '{field_type_name}'"
                     )));
-                }
-                DeclType::Struct(field_type_name)
+                };
+                DeclType::Struct(field_internal_type_name)
             } else {
                 self.parse_decl_type(&format!("{keyword} field type"))?
             };
@@ -2537,24 +2560,15 @@ impl Parser {
         if require_semicolon {
             self.expect_semicolon_after(&format!("{keyword} declaration"))?;
         }
-        if self.struct_types.contains_key(&type_name) {
-            return Err(CustError::new(format!(
-                "{keyword} '{type_name}' already declared"
-            )));
-        }
-        self.struct_types
-            .insert(type_name.clone(), StructTypeDef { fields, kind });
-        if !self
-            .aggregate_type_scopes
-            .last_mut()
-            .expect("parser always has an aggregate type scope")
-            .insert(type_name.clone())
-        {
-            return Err(CustError::new(format!(
-                "{keyword} '{type_name}' already declared"
-            )));
-        }
-        Ok((type_name, kind))
+        self.struct_types.insert(
+            internal_type_name.clone(),
+            StructTypeDef {
+                fields,
+                kind,
+                display_name: type_name.clone(),
+            },
+        );
+        Ok((internal_type_name, kind))
     }
 
     fn parse_aggregate_var_decl(&mut self) -> CustResult<Stmt> {
@@ -2565,11 +2579,12 @@ impl Parser {
         };
         let keyword = kind.keyword();
         let type_name = self.expect_ident_after(&format!("{keyword} type name"))?;
-        if !self.aggregate_type_is_declared(&type_name) {
+        let Some(internal_type_name) = self.resolve_aggregate_type(&type_name) else {
             return Err(CustError::new(format!(
                 "undefined struct type '{type_name}'"
             )));
-        }
+        };
+        let type_name = internal_type_name;
         if self.matches(&Token::Star) {
             let is_const = self.matches(&Token::Const);
             let name = self.expect_ident_after("struct pointer name after '*'")?;
@@ -4587,7 +4602,9 @@ impl Interpreter {
             ) if &type_name == expected_type => Ok(Some(ReturnValue::Struct { type_name, fields })),
             (ReturnType::Struct(expected_type), Some(ReturnValue::Struct { type_name, .. })) => {
                 Err(CustError::new(format!(
-                    "struct function '{function_name}' expected return struct '{expected_type}', got struct '{type_name}'"
+                    "struct function '{function_name}' expected return struct '{}', got struct '{}'",
+                    self.aggregate_label(expected_type),
+                    self.aggregate_label(&type_name)
                 )))
             }
             (ReturnType::Struct(_), Some(ReturnValue::Scalar(_))) => Err(CustError::new(format!(
@@ -4699,7 +4716,9 @@ impl Interpreter {
                 Ok(Value::Struct { type_name, fields })
             }
             Some((type_name, _)) => Err(CustError::new(format!(
-                "function '{function_name}' struct parameter '{param_name}' expected struct '{expected_type}', got struct '{type_name}'"
+                "function '{function_name}' struct parameter '{param_name}' expected struct '{}', got struct '{}'",
+                self.aggregate_label(expected_type),
+                self.aggregate_label(&type_name)
             ))),
             None => Err(CustError::new(format!(
                 "function '{function_name}' struct parameter '{param_name}' requires a struct argument"
@@ -4888,17 +4907,33 @@ impl Interpreter {
         Ok(())
     }
 
+    fn aggregate_label(&self, type_name: &str) -> String {
+        Self::aggregate_label_from(&self.struct_types, type_name)
+    }
+
+    fn aggregate_label_from(
+        struct_types: &HashMap<String, StructTypeDef>,
+        type_name: &str,
+    ) -> String {
+        struct_types
+            .get(type_name)
+            .map(|aggregate| aggregate.display_name.clone())
+            .unwrap_or_else(|| type_name.to_string())
+    }
+
     fn pointee_label(&self, ty: &PointeeType) -> String {
         match ty {
             PointeeType::Scalar(CType::Int) => "int".to_string(),
             PointeeType::Scalar(CType::Char) => "char".to_string(),
             PointeeType::Struct(type_name) => {
-                let keyword = self
-                    .struct_types
-                    .get(type_name)
+                let aggregate = self.struct_types.get(type_name);
+                let keyword = aggregate
                     .map(|aggregate| aggregate.kind.keyword())
                     .unwrap_or("struct");
-                format!("{keyword} '{type_name}'")
+                let display_name = aggregate
+                    .map(|aggregate| aggregate.display_name.as_str())
+                    .unwrap_or(type_name);
+                format!("{keyword} '{display_name}'")
             }
         }
     }
@@ -5175,7 +5210,9 @@ impl Interpreter {
                     ..
                 } => {
                     return Err(CustError::new(format!(
-                        "cannot assign struct '{rhs_type}' to struct '{type_name}'"
+                        "cannot assign struct '{}' to struct '{}'",
+                        self.aggregate_label(&rhs_type),
+                        self.aggregate_label(type_name)
                     )));
                 }
                 ReturnValue::Scalar(_) => {
@@ -6481,6 +6518,7 @@ impl Interpreter {
             }
         };
 
+        let struct_types = self.struct_types.clone();
         match self.find_variable_mut(name) {
             Some(Value::Struct { type_name, fields }) if *type_name == rhs_type => {
                 if fields.values().any(StructFieldValue::is_const) {
@@ -6492,7 +6530,9 @@ impl Interpreter {
                 Ok(())
             }
             Some(Value::Struct { type_name, .. }) => Err(CustError::new(format!(
-                "cannot assign struct '{rhs_type}' to struct '{type_name}'"
+                "cannot assign struct '{}' to struct '{}'",
+                Self::aggregate_label_from(&struct_types, &rhs_type),
+                Self::aggregate_label_from(&struct_types, type_name)
             ))),
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),

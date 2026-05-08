@@ -245,6 +245,13 @@ fn supports_block_scoped_typedef_aggregate_definitions() {
 }
 
 #[test]
+fn supports_aggregate_tag_shadowing_with_distinct_type_identities() {
+    let program = include_str!("fixtures/valid/aggregate_tag_shadowing.c");
+
+    assert_eq!(interpret(program).unwrap(), 49);
+}
+
+#[test]
 fn rejects_block_scoped_aggregate_typedef_alias_after_scope_exit() {
     let program = include_str!("fixtures/invalid/block_aggregate_typedef_alias_out_of_scope.c");
 

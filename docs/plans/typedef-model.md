@@ -18,6 +18,7 @@ Add a deliberately scoped, preprocessor-free `typedef` milestone that improves C
   - `typedef struct Point { int x; int y; } Point;`
   - `typedef union Number { int value; char tag; } Number;`
   - the aggregate tag is registered before the alias, the alias remains parser-only metadata for the existing safe struct/union runtime model, and block-local tags/aliases are only visible until their block exits.
+  - block-local aggregate typedef definitions may shadow outer aggregate tags with the same spelling; Cust assigns unique internal type identities while preserving source-level tag lookup rules.
 - Named enum aliases after a prior enum declaration:
   - `enum Status { READY = 1, BUSY };`
   - `typedef enum Status Status;`
@@ -44,7 +45,7 @@ Typedef aliases are resolved during parsing into existing Cust type metadata:
 
 - scalar aliases resolve to `CType::Int` or `CType::Char`;
 - enum aliases resolve to `CType::Int` and use existing enum constant runtime storage;
-- struct aliases resolve to the underlying struct type name;
+- struct aliases resolve to the underlying parser aggregate type identity, which may differ from the source tag spelling when a block-local aggregate typedef shadows an outer tag;
 - pointer aliases and pointer declarations through aliases still use existing `PointeeType` values;
 - no alias information is stored in runtime scopes or values.
 
@@ -55,7 +56,6 @@ This means aliases do not create distinct types: `Count` behaves exactly like `i
 - Pointer-to-pointer aliases such as `typedef int **IntPtrPtr;` and `typedef IntPtr *IntPtrPtr;` are intentionally rejected with `pointer-to-pointer typedef aliases are not supported`.
 - Pointer-returning functions remain unsupported even when the return type is spelled through a pointer typedef alias.
 - Anonymous struct/union typedefs such as `typedef struct { int x; } Point;` are not supported.
-- Block-scoped aggregate typedef definitions are supported only for unique aggregate tag names. Re-declaring an aggregate tag that has already been defined elsewhere is still rejected to avoid ambiguous runtime type metadata.
 - Anonymous enum typedefs such as `typedef enum { READY } Status;` and enum-typed variables without a typedef alias are not supported.
 - Function pointer typedefs, array typedefs, and unsupported declaration-level type qualifier combinations remain future work; aggregate typedef use now follows the implemented struct/enum alias and nested-struct-field subset.
 
@@ -65,6 +65,7 @@ This means aliases do not create distinct types: `Count` behaves exactly like `i
 - `tests/fixtures/valid/typedef_aggregate_definitions.c` covers top-level `typedef struct Name { ... } Alias;` and `typedef union Name { ... } Alias;` definitions feeding aggregate declarations, arrays, pointer decay/indexing, by-value parameters/returns, designated initializers, and union logical scalar sharing.
 - `tests/fixtures/valid/block_scoped_aggregate_typedef_definitions.c` covers block-local aggregate typedef definitions, alias use in the declaring block, nested block union typedef definitions, and scope cleanup.
 - `tests/fixtures/valid/block_scoped_typedefs.c` covers nested block aliases, alias shadowing between `int`/`char`/`struct` aliases, scoped `sizeof(alias)`, and restoration of the outer alias after leaving a block.
+- `tests/fixtures/valid/aggregate_tag_shadowing.c` covers block-local aggregate typedef definitions that shadow outer struct and union tags while preserving the outer aliases after the block exits.
 - `tests/fixtures/invalid/typedef_missing_alias_name.c` covers the exact missing-alias diagnostic.
 - `tests/fixtures/invalid/block_typedef_alias_out_of_scope.c` covers block-local alias expiry after scope exit.
 - `tests/fixtures/valid/pointer_typedef_aliases.c` covers `int *`, `char *`, and `struct Point *` aliases in declarations, parameters, function calls, struct-pointer field access, and `sizeof(pointer_alias)`.
@@ -77,6 +78,7 @@ This means aliases do not create distinct types: `Count` behaves exactly like `i
 - `tests/fixtures/compat/valid/typedef_aliases.c` verifies a native C compiler oracle for alias use while avoiding Cust-vs-native ABI `sizeof(int)`/struct-padding differences.
 - `tests/fixtures/compat/valid/typedef_aggregate_definitions.c` verifies top-level aggregate typedef definitions against a native C compiler oracle while avoiding ABI-sensitive layout assertions.
 - `tests/fixtures/compat/valid/block_scoped_aggregate_typedef_definitions.c` verifies block-local aggregate typedef definitions against a native C compiler oracle while avoiding ABI-sensitive layout assertions.
+- `tests/fixtures/compat/valid/aggregate_tag_shadowing.c` verifies block-local aggregate tag shadowing against a native C compiler oracle while avoiding ABI-sensitive layout assertions.
 - `tests/fixtures/compat/valid/block_scoped_typedefs.c` verifies block-scoped alias shadowing against a native C compiler oracle without ABI-sensitive struct-size assertions.
 - `tests/fixtures/compat/valid/pointer_typedef_aliases.c` verifies pointer alias declarations and calls against a native C compiler oracle while avoiding ABI-sensitive pointer-size assertions.
 - `tests/fixtures/compat/valid/sizeof_const_types.c` verifies const-qualified `sizeof` type contexts against a native C compiler oracle using only same-ABI relative comparisons.
@@ -87,4 +89,4 @@ This means aliases do not create distinct types: `Count` behaves exactly like `i
 1. Add declaration-level const-qualified aliases/pointers only after a separate const-pointer design, because `sizeof(const alias)` is parser-only and does not create runtime qualifier metadata.
 2. Add precise diagnostics for pointer-returning functions spelled with pointer typedef aliases if a user-facing fixture discovers an unclear location.
 3. Consider anonymous enum typedef declarations only if Cust later needs enum tags/types beyond integer aliases.
-4. Consider true aggregate tag shadowing only with unique internal type identities; Cust currently preserves lexical visibility for block tags but rejects repeated aggregate tag names globally to keep runtime type metadata unambiguous.
+4. Continue expanding block-scoped type-system fixtures if future C-subset work exposes gaps in diagnostic wording or runtime metadata isolation.

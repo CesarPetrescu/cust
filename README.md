@@ -94,7 +94,7 @@ Features:
 - `int main() { ... }` or `int main(void) { ... }` plus additional `int`, `char`, `void`, or supported `struct` function definitions/prototypes
 - function calls with scalar/struct/pointer arguments, local function parameters, and C-style empty `void` parameter lists
 - integer, character, and string literals
-- declarations: initialized or zero/default-initialized `int`/`char` scalars, arrays, supported pointer variables, first-pass `const int` / `const char` scalars and arrays, typedef aliases, structs, and enum constants, such as `int x = 1;`, `int y;`, `char c;`, `const int limit = 5;`, `int xs[3];`, `char text[4];`, `int *p;`, `typedef int Count;`, `struct Point { int x; char y; };`, `typedef struct Pair { int left; int right; } Pair;`, and `enum State { READY = 1, RUNNING };`
+- declarations: initialized or zero/default-initialized `int`/`char` scalars, arrays, supported pointer variables, first-pass `const int` / `const char` scalars and arrays, typedef aliases, structs, unions, and enum constants, such as `int x = 1;`, `int y;`, `char c;`, `const int limit = 5;`, `int xs[3];`, `char text[4];`, `int *p;`, `typedef int Count;`, `struct Point { int x; char y; };`, `typedef struct Pair { int left; int right; } Pair;`, block-local aggregate typedef definitions that may shadow outer tags, and `enum State { READY = 1, RUNNING };`
 - assignment statements and assignment expressions for scalar, array-index, and dereferenced pointer lvalues, such as `x = x + 1;`, `y = (x = 4);`, `xs[0] = (xs[1] = 7);`, and `*p = value;`
 - one-dimensional `int`/`char` arrays with indexed reads/writes
 - scalar pointers such as `int *p = &x;`, `*p`, and `*p = value;`
@@ -190,17 +190,17 @@ docker compose run --rm cust
 
 ## v0.1 limitations
 
-Cust is not a full C implementation yet. Missing features include richer pointer support, structs, preprocessor support, includes, standard library calls, floating-point values, and many richer C-subset compatibility rules. Cust is an interpreter: it executes user programs itself. Native compilers such as GCC/Clang may be used only as an optional test oracle to compare expected behavior for supported fixtures, never as Cust's execution path or as an implementation shortcut.
+Cust is not a full C implementation yet. Missing features include preprocessor support, includes, standard library calls, floating-point values, multiple pointer levels, and many richer C-subset compatibility rules. Cust is an interpreter: it executes user programs itself. Native compilers such as GCC/Clang may be used only as an optional test oracle to compare expected behavior for supported fixtures, never as Cust's execution path or as an implementation shortcut.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and [docs/v0.1.md](docs/v0.1.md) for implementation details and safety notes.
 
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next language design: choose the next larger C-subset area (for example prototypes/declarations or a deliberately scoped richer pointer milestone) and define acceptance fixtures before implementation.
-- Product quality: add a root `LICENSE` file once the project-owner confirms the intended license.
-- Longer term: consider structs/unions, prototypes/declarations, multiple pointer levels, preprocessor support, standard-library calls, and floating-point values.
+- Next language design: choose the next larger C-subset area from `status/todo.md` and define acceptance fixtures before implementation.
+- Product quality: refresh release-oriented docs when the implemented language surface changes.
+- Longer term: consider preprocessor support, includes, standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures.
 
 ## License
 
-MIT or project-owner choice. Add a `LICENSE` file before publishing releases.
+GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`). See [LICENSE](LICENSE).
