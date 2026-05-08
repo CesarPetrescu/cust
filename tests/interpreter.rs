@@ -214,6 +214,13 @@ fn supports_aggregate_initializer_expressions_from_returned_structs_and_unions()
 }
 
 #[test]
+fn supports_aggregate_compound_literals_in_expression_contexts() {
+    let program = include_str!("fixtures/valid/aggregate_compound_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 55);
+}
+
+#[test]
 fn supports_conditional_and_comma_expressions_for_aggregates() {
     let program = include_str!("fixtures/valid/aggregate_conditional_expressions.c");
 

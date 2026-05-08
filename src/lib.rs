@@ -274,6 +274,14 @@ enum Expr {
         ty: CType,
         expr: Box<Expr>,
     },
+    AggregateLiteral {
+        type_name: String,
+        init: Vec<StructInitializer>,
+    },
+    AggregateFieldGet {
+        aggregate: Box<Expr>,
+        fields: Vec<String>,
+    },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
     BitwiseNot(Box<Expr>),
@@ -3607,10 +3615,20 @@ impl Parser {
         let ty = match decl_type {
             DeclType::Scalar(ty) => ty,
             DeclType::Struct(_) => {
-                return Err(Self::error_at(
-                    "aggregate casts are not supported".to_string(),
-                    &type_token,
-                ));
+                let DeclType::Struct(type_name) = decl_type else {
+                    unreachable!("decl_type was already matched as aggregate")
+                };
+                self.expect_closing_paren_after("cast type")?;
+                if !self.check(&Token::LBrace) {
+                    return Err(Self::error_at(
+                        "aggregate casts are not supported".to_string(),
+                        &type_token,
+                    ));
+                }
+                return Ok(Expr::AggregateLiteral {
+                    init: self.parse_struct_initializer(&type_name)?,
+                    type_name,
+                });
             }
             DeclType::Pointer(_) => {
                 return Err(Self::error_at(
@@ -3790,6 +3808,17 @@ impl Parser {
                     } => {
                         fields.push(field);
                         Expr::StructPtrGet { pointer, fields }
+                    }
+                    Expr::AggregateLiteral { .. } => Expr::AggregateFieldGet {
+                        aggregate: Box::new(expr),
+                        fields: vec![field],
+                    },
+                    Expr::AggregateFieldGet {
+                        aggregate,
+                        mut fields,
+                    } => {
+                        fields.push(field);
+                        Expr::AggregateFieldGet { aggregate, fields }
                     }
                     _ => {
                         return Err(Self::error_at(
@@ -4869,12 +4898,15 @@ impl Interpreter {
                     }
                 }
             }
-            Expr::Deref(_) | Expr::Call { .. } | Expr::Conditional { .. } | Expr::Comma(_, _) => {
-                match self.eval_struct_expr(arg_expr)? {
-                    ReturnValue::Struct { type_name, fields } => Some((type_name, fields)),
-                    ReturnValue::Scalar(_) | ReturnValue::Pointer { .. } => None,
-                }
-            }
+            Expr::Deref(_)
+            | Expr::Call { .. }
+            | Expr::Conditional { .. }
+            | Expr::Comma(_, _)
+            | Expr::AggregateLiteral { .. }
+            | Expr::AggregateFieldGet { .. } => match self.eval_struct_expr(arg_expr)? {
+                ReturnValue::Struct { type_name, fields } => Some((type_name, fields)),
+                ReturnValue::Scalar(_) | ReturnValue::Pointer { .. } => None,
+            },
             _ => None,
         };
 
@@ -8013,6 +8045,8 @@ impl Interpreter {
             | Expr::BitwiseNot(_)
             | Expr::LogicalNot(_)
             | Expr::Cast { .. }
+            | Expr::AggregateLiteral { .. }
+            | Expr::AggregateFieldGet { .. }
             | Expr::SizeOfType(_)
             | Expr::SizeOfValue(_)
             | Expr::CompoundAssign { .. }
@@ -8261,6 +8295,18 @@ impl Interpreter {
             } => self.sizeof_struct_pointer_field(pointer, fields),
             Expr::Increment { target, .. } => self.sizeof_expr(target),
             Expr::Cast { ty, .. } => Ok(ty.size()),
+            Expr::AggregateLiteral { type_name, .. } => self
+                .struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.size(&self.struct_types))
+                .transpose()?
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                let Expr::AggregateLiteral { type_name, .. } = aggregate.as_ref() else {
+                    return Err(CustError::new("expected struct expression"));
+                };
+                self.sizeof_aggregate_field_type(type_name, fields)
+            }
             Expr::Call { name, .. } => match self.functions.get(name) {
                 Some(function) => function
                     .return_type
@@ -8278,6 +8324,49 @@ impl Interpreter {
             | Expr::Comma(_, _)
             | Expr::Binary(_, _, _) => Ok(INT_SIZE),
         }
+    }
+
+    fn sizeof_aggregate_field_type(&self, type_name: &str, path: &[String]) -> CustResult<i64> {
+        let mut current_type_name = type_name.to_string();
+        for (index, field_name) in path.iter().enumerate() {
+            let struct_type = self.struct_types.get(&current_type_name).ok_or_else(|| {
+                CustError::new(format!("undefined struct type '{current_type_name}'"))
+            })?;
+            let field = struct_type
+                .fields
+                .iter()
+                .find(|field| field.name == *field_name)
+                .ok_or_else(|| {
+                    CustError::new(format!(
+                        "struct '{current_type_name}' has no field '{field_name}'"
+                    ))
+                })?;
+            let is_last = index + 1 == path.len();
+            match &field.ty {
+                StructFieldType::Scalar(ty) if is_last => return Ok(ty.size()),
+                StructFieldType::Array(elem_type, len) if is_last => {
+                    return Ok(*len as i64 * elem_type.size());
+                }
+                StructFieldType::Struct(nested_type) if is_last => {
+                    return self
+                        .struct_types
+                        .get(nested_type)
+                        .map(|struct_type| struct_type.size(&self.struct_types))
+                        .transpose()?
+                        .ok_or_else(|| {
+                            CustError::new(format!("undefined struct type '{nested_type}'"))
+                        });
+                }
+                StructFieldType::Struct(nested_type) => current_type_name = nested_type.clone(),
+                StructFieldType::Pointer(_) if is_last => return Ok(POINTER_SIZE),
+                _ => return Err(CustError::new("expected struct expression")),
+            }
+        }
+        self.struct_types
+            .get(type_name)
+            .map(|struct_type| struct_type.size(&self.struct_types))
+            .transpose()?
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))
     }
 
     fn struct_field_value_size(&self, field_value: &StructFieldValue) -> CustResult<i64> {
@@ -8690,6 +8779,32 @@ impl Interpreter {
             Expr::DerefSet { pointer, value } => {
                 self.eval_struct_pointer_assignment_expr(pointer, value)
             }
+            Expr::AggregateLiteral { type_name, init } => Ok(ReturnValue::Struct {
+                type_name: type_name.clone(),
+                fields: self.make_struct_fields(type_name, init)?,
+            }),
+            Expr::AggregateFieldGet {
+                aggregate,
+                fields: path,
+            } => match self.eval_struct_expr(aggregate)? {
+                ReturnValue::Struct { type_name, fields } => {
+                    let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
+                    match field_value {
+                        StructFieldValue::Struct {
+                            type_name, fields, ..
+                        } => Ok(ReturnValue::Struct {
+                            type_name: type_name.clone(),
+                            fields: StructFieldValue::deep_clone_fields(fields),
+                        }),
+                        StructFieldValue::Scalar { .. }
+                        | StructFieldValue::Array { .. }
+                        | StructFieldValue::Pointer { .. } => {
+                            Err(CustError::new("expected struct expression"))
+                        }
+                    }
+                }
+                _ => Err(CustError::new("expected struct expression")),
+            },
             Expr::Var(name) => match self.find_variable(name).cloned() {
                 Some(Value::Struct { type_name, fields }) => Ok(ReturnValue::Struct {
                     type_name,
@@ -9494,6 +9609,24 @@ impl Interpreter {
                 ))),
             },
             Expr::Cast { expr, .. } => self.eval(expr),
+            Expr::AggregateLiteral { .. } => Err(CustError::new("struct value used as scalar")),
+            Expr::AggregateFieldGet {
+                aggregate,
+                fields: path,
+            } => match self.eval_struct_expr(aggregate)? {
+                ReturnValue::Struct { type_name, fields } => {
+                    let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
+                    match field_value {
+                        StructFieldValue::Scalar { value, .. } => Ok(*value),
+                        StructFieldValue::Array { .. }
+                        | StructFieldValue::Struct { .. }
+                        | StructFieldValue::Pointer { .. } => {
+                            Err(CustError::new("struct field used as scalar expression"))
+                        }
+                    }
+                }
+                _ => Err(CustError::new("expected struct expression")),
+            },
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::BitwiseNot(inner) => Ok(!self.eval(inner)?),
