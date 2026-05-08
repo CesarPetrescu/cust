@@ -154,6 +154,13 @@ fn supports_aggregate_array_compound_literals_as_pointer_expressions() {
 }
 
 #[test]
+fn supports_addressable_scalar_and_aggregate_compound_literals() {
+    let program = include_str!("fixtures/valid/addressable_compound_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 61);
+}
+
+#[test]
 fn rejects_aggregate_array_compound_literals_longer_than_declared_length() {
     let program =
         include_str!("fixtures/invalid/aggregate_array_compound_literal_too_many_initializers.c");

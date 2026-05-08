@@ -274,7 +274,19 @@ enum Expr {
         ty: CType,
         expr: Box<Expr>,
     },
+    ScalarLiteral {
+        ty: CType,
+        init: Box<Expr>,
+    },
+    AddressOfScalarLiteral {
+        ty: CType,
+        init: Box<Expr>,
+    },
     AggregateLiteral {
+        type_name: String,
+        init: Vec<StructInitializer>,
+    },
+    AddressOfAggregateLiteral {
         type_name: String,
         init: Vec<StructInitializer>,
     },
@@ -3709,7 +3721,7 @@ impl Parser {
             Ok(Expr::Deref(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Amp) {
             let operator = self.previous().clone();
-            let target = self.parse_postfix()?;
+            let target = self.parse_unary()?;
             Self::address_of_expr(target, &operator)
         } else if self.check(&Token::LParen) && self.starts_cast_type_after_lparen() {
             self.parse_cast()
@@ -3791,14 +3803,15 @@ impl Parser {
             });
         }
         self.expect_closing_paren_after("cast type")?;
-        let expr = if self.check(&Token::LBrace) {
-            self.parse_scalar_initializer_expr("scalar compound literal")?
-        } else {
-            self.parse_unary()?
-        };
+        if self.check(&Token::LBrace) {
+            return Ok(Expr::ScalarLiteral {
+                ty,
+                init: Box::new(self.parse_scalar_initializer_expr("scalar compound literal")?),
+            });
+        }
         Ok(Expr::Cast {
             ty,
-            expr: Box::new(expr),
+            expr: Box::new(self.parse_unary()?),
         })
     }
 
@@ -3816,6 +3829,10 @@ impl Parser {
                 index,
                 fields,
             }),
+            Expr::ScalarLiteral { ty, init } => Ok(Expr::AddressOfScalarLiteral { ty, init }),
+            Expr::AggregateLiteral { type_name, init } => {
+                Ok(Expr::AddressOfAggregateLiteral { type_name, init })
+            }
             _ => Err(Self::error_at(
                 "invalid address-of target".to_string(),
                 operator,
@@ -5213,6 +5230,10 @@ impl Interpreter {
                 }
                 _ => Ok(None),
             },
+            Expr::AddressOfScalarLiteral { ty, .. } => Ok(Some(PointeeType::Scalar(*ty))),
+            Expr::AddressOfAggregateLiteral { type_name, .. } => {
+                Ok(Some(PointeeType::Struct(type_name.clone())))
+            }
             Expr::AddressOfArray { name, .. } => match self.find_variable(name) {
                 Some(Value::Array(array)) => {
                     Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
@@ -5810,6 +5831,50 @@ impl Interpreter {
             name,
             index: 0,
         })
+    }
+
+    fn make_scalar_compound_literal_pointer(
+        &mut self,
+        ty: CType,
+        init: &Expr,
+    ) -> CustResult<PointerValue> {
+        let value = self.eval(init)?;
+        let scope_id = self
+            .scopes
+            .last()
+            .expect("compound literal evaluation requires a current scope")
+            .id;
+        let name = format!("__cust_compound_scalar#{}", self.next_compound_literal_id);
+        self.next_compound_literal_id += 1;
+        self.current_scope_mut()
+            .insert(name.clone(), Value::Scalar { value, ty });
+        Ok(PointerValue::Scalar { scope_id, name })
+    }
+
+    fn make_aggregate_compound_literal_pointer(
+        &mut self,
+        type_name: &str,
+        init: &[StructInitializer],
+    ) -> CustResult<PointerValue> {
+        let fields = self.make_struct_fields(type_name, init)?;
+        let scope_id = self
+            .scopes
+            .last()
+            .expect("compound literal evaluation requires a current scope")
+            .id;
+        let name = format!(
+            "__cust_compound_aggregate#{}",
+            self.next_compound_literal_id
+        );
+        self.next_compound_literal_id += 1;
+        self.current_scope_mut().insert(
+            name.clone(),
+            Value::Struct {
+                type_name: type_name.to_string(),
+                fields,
+            },
+        );
+        Ok(PointerValue::Struct { scope_id, name })
     }
 
     fn make_struct_fields(
@@ -7427,6 +7492,12 @@ impl Interpreter {
                 index,
                 fields,
             } => self.find_struct_element_field_pointer(name, index, fields),
+            Expr::AddressOfScalarLiteral { ty, init } => {
+                self.make_scalar_compound_literal_pointer(*ty, init)
+            }
+            Expr::AddressOfAggregateLiteral { type_name, init } => {
+                self.make_aggregate_compound_literal_pointer(type_name, init)
+            }
             Expr::StringLiteral(values) => Ok(PointerValue::ArrayBase {
                 array: Rc::new(RefCell::new(ArrayValue::read_only(values.clone()))),
                 source_name: None,
@@ -8221,6 +8292,8 @@ impl Interpreter {
             | Expr::AddressOfArray { .. }
             | Expr::AddressOfStructField { .. }
             | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfScalarLiteral { .. }
+            | Expr::AddressOfAggregateLiteral { .. }
             | Expr::StringLiteral(_)
             | Expr::ArrayLiteral { .. }
             | Expr::AggregateArrayLiteral { .. } => {
@@ -8299,6 +8372,7 @@ impl Interpreter {
             | Expr::BitwiseNot(_)
             | Expr::LogicalNot(_)
             | Expr::Cast { .. }
+            | Expr::ScalarLiteral { .. }
             | Expr::AggregateLiteral { .. }
             | Expr::AggregateFieldGet { .. }
             | Expr::SizeOfType(_)
@@ -8516,7 +8590,9 @@ impl Interpreter {
             Expr::AddressOf(_)
             | Expr::AddressOfArray { .. }
             | Expr::AddressOfStructField { .. }
-            | Expr::AddressOfStructElementField { .. } => Ok(POINTER_SIZE),
+            | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfScalarLiteral { .. }
+            | Expr::AddressOfAggregateLiteral { .. } => Ok(POINTER_SIZE),
             Expr::Deref(pointer) => self.sizeof_deref(pointer),
             Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
                 self.sizeof_assignment_result(name)
@@ -8549,7 +8625,7 @@ impl Interpreter {
                 pointer, fields, ..
             } => self.sizeof_struct_pointer_field(pointer, fields),
             Expr::Increment { target, .. } => self.sizeof_expr(target),
-            Expr::Cast { ty, .. } => Ok(ty.size()),
+            Expr::Cast { ty, .. } | Expr::ScalarLiteral { ty, .. } => Ok(ty.size()),
             Expr::AggregateLiteral { type_name, .. } => self
                 .struct_types
                 .get(type_name)
@@ -9677,7 +9753,9 @@ impl Interpreter {
             Expr::AddressOf(_)
             | Expr::AddressOfArray { .. }
             | Expr::AddressOfStructField { .. }
-            | Expr::AddressOfStructElementField { .. } => {
+            | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfScalarLiteral { .. }
+            | Expr::AddressOfAggregateLiteral { .. } => {
                 Err(CustError::new("pointer value used as scalar"))
             }
             Expr::Assign { name, value } => self.eval_assignment_expr(name, value),
@@ -9867,6 +9945,7 @@ impl Interpreter {
                 ))),
             },
             Expr::Cast { expr, .. } => self.eval(expr),
+            Expr::ScalarLiteral { init, .. } => self.eval(init),
             Expr::AggregateLiteral { .. } => Err(CustError::new("struct value used as scalar")),
             Expr::AggregateFieldGet {
                 aggregate,
