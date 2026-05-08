@@ -235,6 +235,21 @@ fn supports_aggregate_array_decay_to_pointer_parameters() {
 }
 
 #[test]
+fn supports_aggregate_pointer_dereference_values_and_assignment() {
+    let program = include_str!("fixtures/valid/aggregate_pointer_dereference.c");
+
+    assert_eq!(interpret(program).unwrap(), 165);
+}
+
+#[test]
+fn rejects_aggregate_pointer_dereference_assignment_through_const_views() {
+    let program = include_str!("fixtures/invalid/const_aggregate_pointer_deref_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
+}
+
+#[test]
 fn supports_unsized_array_parameters_as_pointer_parameters() {
     let program = include_str!("fixtures/valid/unsized_array_parameters.c");
 

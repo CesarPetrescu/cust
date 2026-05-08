@@ -4854,6 +4854,12 @@ impl Interpreter {
                     }
                 }
             }
+            Expr::Deref(_) | Expr::Call { .. } | Expr::Conditional { .. } | Expr::Comma(_, _) => {
+                match self.eval_struct_expr(arg_expr)? {
+                    ReturnValue::Struct { type_name, fields } => Some((type_name, fields)),
+                    ReturnValue::Scalar(_) | ReturnValue::Pointer { .. } => None,
+                }
+            }
             _ => None,
         };
 
@@ -6685,6 +6691,35 @@ impl Interpreter {
         }
     }
 
+    fn assign_struct_pointer_copy(&mut self, pointer: &Expr, rhs: &Expr) -> CustResult<()> {
+        self.ensure_pointer_expr_pointee_mutable(pointer)?;
+        let pointer = self.eval_pointer(pointer)?;
+        let (rhs_type, rhs_fields) = match self.eval_struct_expr(rhs)? {
+            ReturnValue::Struct { type_name, fields } => (type_name, fields),
+            ReturnValue::Scalar(_) | ReturnValue::Pointer { .. } => {
+                return Err(CustError::new("struct assignment requires struct value"));
+            }
+        };
+
+        self.ensure_struct_pointer_target_mutable(&pointer)?;
+        let struct_types = self.struct_types.clone();
+        let (target_type, target_fields) = self.find_struct_pointer_fields_mut(&pointer)?;
+        if target_type != rhs_type {
+            return Err(CustError::new(format!(
+                "cannot assign struct '{}' to struct '{}'",
+                Self::aggregate_label_from(&struct_types, &rhs_type),
+                Self::aggregate_label_from(&struct_types, &target_type)
+            )));
+        }
+        if target_fields.values().any(StructFieldValue::is_const) {
+            return Err(CustError::new(format!(
+                "cannot assign to struct '{target_type}' with const fields"
+            )));
+        }
+        *target_fields = rhs_fields;
+        Ok(())
+    }
+
     fn eval_struct_set(&mut self, name: &str, fields: &[String], value: &Expr) -> CustResult<i64> {
         if self.struct_field_is_pointer(name, fields) {
             return Err(CustError::new("pointer value used as scalar"));
@@ -7623,6 +7658,21 @@ impl Interpreter {
                 self.assign_struct_copy(name, value)?;
                 return Ok(());
             }
+            Expr::DerefSet { pointer, value } => {
+                if match pointer.as_ref() {
+                    Expr::Var(name) => matches!(
+                        self.find_variable(name),
+                        Some(Value::Pointer {
+                            ty: PointeeType::Struct(_),
+                            ..
+                        })
+                    ),
+                    _ => false,
+                } {
+                    self.assign_struct_pointer_copy(pointer, value)?;
+                    return Ok(());
+                }
+            }
             _ => {}
         }
         if matches!(
@@ -8298,6 +8348,14 @@ impl Interpreter {
                     }
                 }
             }
+            Expr::Deref(pointer) => {
+                let pointer = self.eval_pointer(pointer)?;
+                let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
+                Ok(ReturnValue::Struct {
+                    type_name,
+                    fields: StructFieldValue::deep_clone_fields(fields),
+                })
+            }
             Expr::Call { name, args } => match self.call_function(name, args)? {
                 Some(ReturnValue::Struct { type_name, fields }) => {
                     Ok(ReturnValue::Struct { type_name, fields })
@@ -8591,6 +8649,19 @@ impl Interpreter {
                 }
             }
             Stmt::DerefAssign { pointer, value } => {
+                if match pointer {
+                    Expr::Var(name) => matches!(
+                        self.find_variable(name),
+                        Some(Value::Pointer {
+                            ty: PointeeType::Struct(_),
+                            ..
+                        })
+                    ),
+                    _ => false,
+                } {
+                    self.assign_struct_pointer_copy(pointer, value)?;
+                    return Ok(ExecFlow::None);
+                }
                 self.ensure_pointer_expr_pointee_mutable(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;
                 let value = self.eval(value)?;
