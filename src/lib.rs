@@ -1355,7 +1355,9 @@ impl Parser {
             {
                 globals.push(self.parse_var_decl()?);
             } else if self.check(&Token::Typedef) {
-                self.parse_typedef_decl()?;
+                if let Some(stmt) = self.parse_typedef_decl()? {
+                    globals.push(stmt);
+                }
             } else if self.check(&Token::Enum) {
                 globals.push(self.parse_enum_decl()?);
             } else if matches!(self.peek(), Token::Struct | Token::Union) {
@@ -1553,8 +1555,9 @@ impl Parser {
         }
     }
 
-    fn parse_typedef_decl(&mut self) -> CustResult<()> {
+    fn parse_typedef_decl(&mut self) -> CustResult<Option<Stmt>> {
         self.expect(Token::Typedef)?;
+        let mut enum_constants = None;
         let (alias, alias_context, anonymous_aggregate) = if self
             .starts_typedef_aggregate_definition()
         {
@@ -1563,6 +1566,14 @@ impl Parser {
                 TypeAlias::Struct(type_name),
                 "typedef alias name after aggregate definition",
                 is_anonymous,
+            )
+        } else if self.starts_typedef_enum_definition() {
+            let constants = self.parse_enum_decl_body(false)?;
+            enum_constants = Some(constants);
+            (
+                TypeAlias::Scalar(CType::Int),
+                "typedef alias name after enum definition",
+                false,
             )
         } else {
             let base_type = self.parse_decl_type("typedef struct type name")?;
@@ -1615,7 +1626,7 @@ impl Parser {
                 "typedef alias '{alias_name}' already declared"
             )));
         }
-        Ok(())
+        Ok(enum_constants.map(|constants| Stmt::EnumDecl { constants }))
     }
 
     fn starts_function_definition(&self) -> bool {
@@ -1898,10 +1909,10 @@ impl Parser {
             Token::Static => self.parse_static_local_decl(),
             Token::Int | Token::Char | Token::Const => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
-            Token::Typedef => {
-                self.parse_typedef_decl()?;
-                Ok(Stmt::Empty)
-            }
+            Token::Typedef => match self.parse_typedef_decl()? {
+                Some(stmt) => Ok(stmt),
+                None => Ok(Stmt::Empty),
+            },
             Token::Enum => self.parse_enum_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             Token::Return => self.parse_return(),
@@ -2449,6 +2460,18 @@ impl Parser {
         )
     }
 
+    fn starts_typedef_enum_definition(&self) -> bool {
+        matches!(
+            (
+                self.peek(),
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                self.tokens.get(self.pos + 2).map(|token| &token.kind)
+            ),
+            (Token::Enum, Some(Token::LBrace), _)
+                | (Token::Enum, Some(Token::Ident(_)), Some(Token::LBrace))
+        )
+    }
+
     fn parse_aggregate_definition_body(
         &mut self,
         require_semicolon: bool,
@@ -2691,6 +2714,11 @@ impl Parser {
     }
 
     fn parse_enum_decl(&mut self) -> CustResult<Stmt> {
+        let constants = self.parse_enum_decl_body(true)?;
+        Ok(Stmt::EnumDecl { constants })
+    }
+
+    fn parse_enum_decl_body(&mut self, require_semicolon: bool) -> CustResult<Vec<EnumConstant>> {
         self.expect(Token::Enum)?;
         let enum_tag = if let Token::Ident(name) = self.peek().clone() {
             self.advance();
@@ -2754,7 +2782,9 @@ impl Parser {
             }
         }
         self.expect(Token::RBrace)?;
-        self.expect_semicolon_after("enum declaration")?;
+        if require_semicolon {
+            self.expect_semicolon_after("enum declaration")?;
+        }
         match enum_tag {
             Some(enum_tag)
                 if !self
@@ -2769,7 +2799,7 @@ impl Parser {
             }
             _ => {}
         }
-        Ok(Stmt::EnumDecl { constants })
+        Ok(constants)
     }
 
     fn parse_enum_constant_value(&mut self) -> CustResult<i64> {

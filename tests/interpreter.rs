@@ -906,6 +906,13 @@ fn supports_enum_typedef_aliases_as_integer_types() {
 }
 
 #[test]
+fn supports_anonymous_enum_typedefs_as_integer_types() {
+    let program = include_str!("fixtures/valid/anonymous_enum_typedefs.c");
+
+    assert_eq!(interpret(program).unwrap(), 36);
+}
+
+#[test]
 fn rejects_typedef_aliases_to_unknown_enum_tags() {
     let program = include_str!("fixtures/invalid/typedef_unknown_enum.c");
     let err = interpret(program).unwrap_err();
