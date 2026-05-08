@@ -1363,7 +1363,11 @@ impl Parser {
                     globals.push(stmt);
                 }
             } else if self.check(&Token::Enum) {
-                globals.push(self.parse_enum_decl()?);
+                if self.starts_typedef_enum_definition() {
+                    globals.push(self.parse_enum_decl()?);
+                } else {
+                    globals.push(self.parse_var_decl()?);
+                }
             } else if matches!(self.peek(), Token::Struct | Token::Union) {
                 if self.is_aggregate_definition() {
                     self.parse_aggregate_definition()?;
@@ -1650,6 +1654,15 @@ impl Parser {
         }
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(Token::Int | Token::Char | Token::Void) => index += 1,
+            Some(Token::Enum) => {
+                if !matches!(
+                    self.tokens.get(index + 1).map(|token| &token.kind),
+                    Some(Token::Ident(_))
+                ) {
+                    return false;
+                }
+                index += 2;
+            }
             Some(Token::Struct | Token::Union) => {
                 if !matches!(
                     self.tokens.get(index + 1).map(|token| &token.kind),
@@ -1945,7 +1958,13 @@ impl Parser {
                 Some(stmt) => Ok(stmt),
                 None => Ok(Stmt::Empty),
             },
-            Token::Enum => self.parse_enum_decl(),
+            Token::Enum => {
+                if self.starts_typedef_enum_definition() {
+                    self.parse_enum_decl()
+                } else {
+                    self.parse_var_decl()
+                }
+            }
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             Token::Return => self.parse_return(),
             Token::LBrace => Ok(Stmt::Block(self.parse_block_after("block statement")?)),
@@ -3609,6 +3628,7 @@ impl Parser {
                     | Token::Char
                     | Token::Struct
                     | Token::Union
+                    | Token::Enum
                     | Token::Const
                     | Token::Void
             ) || self.current_alias().is_some()
@@ -3624,7 +3644,7 @@ impl Parser {
                     if is_const_qualified
                         && !matches!(
                             self.peek(),
-                            Token::Int | Token::Char | Token::Struct | Token::Union
+                            Token::Int | Token::Char | Token::Struct | Token::Union | Token::Enum
                         )
                         && self.current_alias().is_none()
                     {

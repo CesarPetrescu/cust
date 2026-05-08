@@ -133,6 +133,13 @@ fn supports_scalar_cast_expressions() {
 }
 
 #[test]
+fn supports_direct_enum_type_declarations_parameters_returns_and_sizeof() {
+    let program = include_str!("fixtures/valid/direct_enum_types.c");
+
+    assert_eq!(interpret(program).unwrap(), 24);
+}
+
+#[test]
 fn rejects_aggregate_cast_expressions() {
     let program = include_str!("fixtures/invalid/aggregate_cast_unsupported.c");
 
