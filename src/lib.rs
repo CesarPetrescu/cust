@@ -2213,7 +2213,7 @@ impl Parser {
             });
         }
         let expr = if self.matches(&Token::Assign) {
-            self.parse_expr()?
+            self.parse_scalar_initializer_expr(&format!("variable '{name}'"))?
         } else if self.check(&Token::Semi) {
             self.advance();
             return Ok(Stmt::VarDecl {
@@ -2252,7 +2252,8 @@ impl Parser {
             if self.check(&Token::LBracket) {
                 let index = self.parse_array_designator_index(name, len)?;
                 self.expect_assign_after("array designator")?;
-                let value = self.parse_assignment_expr()?;
+                let value =
+                    self.parse_scalar_initializer_expr(&format!("array '{name}' element"))?;
                 next_positional_index = index + 1;
                 values.push(ArrayInitializer::Designated { index, value });
             } else {
@@ -2261,7 +2262,9 @@ impl Parser {
                         "too many initializers for array '{name}'"
                     )));
                 }
-                values.push(ArrayInitializer::Expr(self.parse_assignment_expr()?));
+                values.push(ArrayInitializer::Expr(self.parse_scalar_initializer_expr(
+                    &format!("array '{name}' element"),
+                )?));
                 next_positional_index += 1;
             }
             if self.matches(&Token::RBrace) {
@@ -2409,7 +2412,10 @@ impl Parser {
                     self.expect_assign_after("array designator")?;
                     StructInitializer::Array(vec![ArrayInitializer::Designated {
                         index,
-                        value: self.parse_assignment_expr()?,
+                        value: self.parse_scalar_initializer_expr(&format!(
+                            "array field '{}' element",
+                            field.name
+                        ))?,
                     }])
                 }
                 _ => {
@@ -2437,8 +2443,31 @@ impl Parser {
             StructFieldType::Struct(nested_type) if self.check(&Token::LBrace) => Ok(
                 StructInitializer::Struct(self.parse_struct_initializer(nested_type)?),
             ),
+            StructFieldType::Scalar(_) if self.check(&Token::LBrace) => {
+                Ok(StructInitializer::Expr(
+                    self.parse_scalar_initializer_expr(&format!("struct field '{}'", field.name))?,
+                ))
+            }
             _ => Ok(StructInitializer::Expr(self.parse_assignment_expr()?)),
         }
+    }
+
+    fn parse_scalar_initializer_expr(&mut self, context: &str) -> CustResult<Expr> {
+        if !self.check(&Token::LBrace) {
+            return self.parse_assignment_expr();
+        }
+        self.expect_opening_brace_after(context)?;
+        let expr = self.parse_assignment_expr()?;
+        if self.matches(&Token::Comma) {
+            if self.matches(&Token::RBrace) {
+                return Ok(expr);
+            }
+            return Err(CustError::new(format!(
+                "too many initializers for {context}"
+            )));
+        }
+        self.expect_closing_brace_after(context)?;
+        Ok(expr)
     }
 
     fn parse_struct_array_initializer(

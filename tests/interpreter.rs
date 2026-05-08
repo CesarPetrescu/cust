@@ -158,6 +158,13 @@ fn supports_scalar_array_initializers() {
 }
 
 #[test]
+fn supports_braced_scalar_initializers_in_declarations_and_aggregates() {
+    let program = include_str!("fixtures/valid/braced_scalar_initializers.c");
+
+    assert_eq!(interpret(program).unwrap(), 70);
+}
+
+#[test]
 fn supports_designated_array_and_struct_initializers() {
     let program = include_str!("fixtures/valid/designated_initializers.c");
 

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-08 autonomous struct-pointer arrow field arithmetic run after focused `slot->p` pointer-field and C compiler-oracle tests passed; full local and Docker verification is recorded in `status/current-state.md`. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-05-08 autonomous braced scalar initializer run after focused braced-initializer interpreter coverage and the existing C compiler-oracle suite passed; full local and Docker verification is recorded in `status/current-state.md`. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 
