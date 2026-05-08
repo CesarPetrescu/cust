@@ -98,6 +98,25 @@ fn supports_octal_and_hex_escape_sequences() {
 }
 
 #[test]
+fn supports_char_arrays_initialized_from_string_literals() {
+    let program = include_str!("fixtures/valid/char_array_string_initializers.c");
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn reports_char_array_string_initializer_too_long() {
+    let program = include_str!("fixtures/invalid/char_array_string_initializer_too_long.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "initializer string for char array 'short_text' is too long"
+    );
+}
+
+#[test]
 fn reports_hex_escape_sequences_without_digits() {
     let program = include_str!("fixtures/invalid/hex_escape_without_digits.c");
 

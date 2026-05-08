@@ -406,6 +406,7 @@ enum StructArrayInitializer {
 enum ArrayInitializer {
     Expr(Expr),
     Designated { index: usize, value: Expr },
+    StringLiteral(Vec<i64>),
 }
 
 impl StructFieldType {
@@ -2333,7 +2334,7 @@ impl Parser {
             let len = self.expect_array_len()?;
             self.expect_closing_bracket_after("array length")?;
             let init = if self.matches(&Token::Assign) {
-                self.parse_array_initializer(&name, len)?
+                self.parse_array_initializer_or_string(&name, len, ty)?
             } else {
                 Vec::new()
             };
@@ -2371,6 +2372,32 @@ impl Parser {
             expr,
             is_const: leading_const,
         })
+    }
+
+    fn parse_array_initializer_or_string(
+        &mut self,
+        name: &str,
+        len: usize,
+        elem_type: CType,
+    ) -> CustResult<Vec<ArrayInitializer>> {
+        if let Token::StringLiteral(values) = self.peek().clone() {
+            self.advance();
+            if elem_type != CType::Char {
+                return Err(CustError::new(format!(
+                    "string literal initializer requires char array '{name}'"
+                )));
+            }
+            let too_long =
+                values.len() > len && !(values.len() == len + 1 && values.last() == Some(&0));
+            if too_long {
+                return Err(CustError::new(format!(
+                    "initializer string for char array '{name}' is too long"
+                )));
+            }
+            return Ok(vec![ArrayInitializer::StringLiteral(values)]);
+        }
+
+        self.parse_array_initializer(name, len)
     }
 
     fn parse_array_initializer(
@@ -5788,6 +5815,12 @@ impl Interpreter {
                     array.elements[*index] = self.eval(value)?;
                     next_positional_index = *index + 1;
                 }
+                ArrayInitializer::StringLiteral(values) => {
+                    for (index, value) in values.iter().take(len).enumerate() {
+                        array.elements[index] = *value;
+                    }
+                    next_positional_index = values.len().min(len);
+                }
             }
         }
         array.read_only = read_only;
@@ -5819,6 +5852,10 @@ impl Interpreter {
                 ArrayInitializer::Designated { index, .. } => {
                     len = len.max(index + 1);
                     next_positional_index = index + 1;
+                }
+                ArrayInitializer::StringLiteral(values) => {
+                    len = len.max(values.len());
+                    next_positional_index = values.len();
                 }
             }
         }
@@ -6116,6 +6153,14 @@ impl Interpreter {
                         ArrayInitializer::Designated { index, value } => {
                             array.elements[*index] = self.eval(value)?;
                             next_positional_index = *index + 1;
+                        }
+                        ArrayInitializer::StringLiteral(values) => {
+                            for (index, value) in
+                                values.iter().take(array.elements.len()).enumerate()
+                            {
+                                array.elements[index] = *value;
+                            }
+                            next_positional_index = values.len().min(array.elements.len());
                         }
                     }
                 }
