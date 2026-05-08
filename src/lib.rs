@@ -953,38 +953,16 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                         }
                         '\\' => {
                             advance_position('\\', &mut line, &mut column, &mut i);
-                            let Some(escape_char) = chars.get(i).copied() else {
-                                return Err(lexer_error_with_context(
-                                    "unterminated string literal",
-                                    source,
-                                    start_line,
-                                    start_column,
-                                ));
-                            };
-                            let escaped = match escape_char {
-                                'a' => '\x07',
-                                'b' => '\x08',
-                                'f' => '\x0c',
-                                'n' => '\n',
-                                'r' => '\r',
-                                't' => '\t',
-                                'v' => '\x0b',
-                                '0' => '\0',
-                                '\\' => '\\',
-                                '\'' => '\'',
-                                '"' => '"',
-                                '?' => '?',
-                                other => {
-                                    return Err(lexer_error_with_context(
-                                        format!("unsupported string escape '\\{other}'"),
-                                        source,
-                                        start_line,
-                                        start_column,
-                                    ));
-                                }
-                            };
-                            advance_position(escape_char, &mut line, &mut column, &mut i);
-                            values.push(escaped as i64);
+                            let escaped = parse_escape_sequence(
+                                source,
+                                &chars,
+                                &mut line,
+                                &mut column,
+                                &mut i,
+                                (start_line, start_column),
+                                "string",
+                            )?;
+                            values.push(escaped);
                         }
                         '\n' => {
                             return Err(lexer_error_with_context(
@@ -1009,68 +987,15 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 let value = match chars.get(i).copied() {
                     Some('\\') => {
                         advance_position('\\', &mut line, &mut column, &mut i);
-                        match chars.get(i).copied() {
-                            Some('a') => {
-                                advance_position('a', &mut line, &mut column, &mut i);
-                                '\x07' as i64
-                            }
-                            Some('b') => {
-                                advance_position('b', &mut line, &mut column, &mut i);
-                                '\x08' as i64
-                            }
-                            Some('f') => {
-                                advance_position('f', &mut line, &mut column, &mut i);
-                                '\x0c' as i64
-                            }
-                            Some('n') => {
-                                advance_position('n', &mut line, &mut column, &mut i);
-                                '\n' as i64
-                            }
-                            Some('r') => {
-                                advance_position('r', &mut line, &mut column, &mut i);
-                                '\r' as i64
-                            }
-                            Some('t') => {
-                                advance_position('t', &mut line, &mut column, &mut i);
-                                '\t' as i64
-                            }
-                            Some('v') => {
-                                advance_position('v', &mut line, &mut column, &mut i);
-                                '\x0b' as i64
-                            }
-                            Some('0') => {
-                                advance_position('0', &mut line, &mut column, &mut i);
-                                '\0' as i64
-                            }
-                            Some('\\') => {
-                                advance_position('\\', &mut line, &mut column, &mut i);
-                                '\\' as i64
-                            }
-                            Some('\'') => {
-                                advance_position('\'', &mut line, &mut column, &mut i);
-                                '\'' as i64
-                            }
-                            Some('?') => {
-                                advance_position('?', &mut line, &mut column, &mut i);
-                                '?' as i64
-                            }
-                            Some(other) => {
-                                return Err(lexer_error_with_context(
-                                    format!("unsupported character escape '\\{other}'"),
-                                    source,
-                                    start_line,
-                                    start_column,
-                                ));
-                            }
-                            None => {
-                                return Err(lexer_error_with_context(
-                                    "unterminated character literal",
-                                    source,
-                                    start_line,
-                                    start_column,
-                                ));
-                            }
-                        }
+                        parse_escape_sequence(
+                            source,
+                            &chars,
+                            &mut line,
+                            &mut column,
+                            &mut i,
+                            (start_line, start_column),
+                            "character",
+                        )?
                     }
                     Some('\n') | None => {
                         return Err(lexer_error_with_context(
@@ -1354,6 +1279,123 @@ fn lexer_error_with_context(
 
 fn push_token(tokens: &mut Vec<LocatedToken>, kind: Token, line: usize, column: usize) {
     tokens.push(LocatedToken::new(kind, line, column));
+}
+
+fn parse_escape_sequence(
+    source: &str,
+    chars: &[char],
+    line: &mut usize,
+    column: &mut usize,
+    i: &mut usize,
+    literal_start: (usize, usize),
+    literal_kind: &str,
+) -> CustResult<i64> {
+    let (literal_start_line, literal_start_column) = literal_start;
+    let Some(escape_char) = chars.get(*i).copied() else {
+        return Err(lexer_error_with_context(
+            format!("unterminated {literal_kind} literal"),
+            source,
+            literal_start_line,
+            literal_start_column,
+        ));
+    };
+
+    match escape_char {
+        'a' => {
+            advance_position('a', line, column, i);
+            Ok(0x07)
+        }
+        'b' => {
+            advance_position('b', line, column, i);
+            Ok(0x08)
+        }
+        'f' => {
+            advance_position('f', line, column, i);
+            Ok(0x0c)
+        }
+        'n' => {
+            advance_position('n', line, column, i);
+            Ok('\n' as i64)
+        }
+        'r' => {
+            advance_position('r', line, column, i);
+            Ok('\r' as i64)
+        }
+        't' => {
+            advance_position('t', line, column, i);
+            Ok('\t' as i64)
+        }
+        'v' => {
+            advance_position('v', line, column, i);
+            Ok(0x0b)
+        }
+        '\\' => {
+            advance_position('\\', line, column, i);
+            Ok('\\' as i64)
+        }
+        '\'' => {
+            advance_position('\'', line, column, i);
+            Ok('\'' as i64)
+        }
+        '"' => {
+            advance_position('"', line, column, i);
+            Ok('"' as i64)
+        }
+        '?' => {
+            advance_position('?', line, column, i);
+            Ok('?' as i64)
+        }
+        'x' => {
+            advance_position('x', line, column, i);
+            let digits_start = *i;
+            let mut value = 0i64;
+            while let Some(digit) = chars.get(*i).copied().filter(char::is_ascii_hexdigit) {
+                let digit_value = digit.to_digit(16).expect("hex digit should have value") as i64;
+                value = value
+                    .checked_mul(16)
+                    .and_then(|base| base.checked_add(digit_value))
+                    .ok_or_else(|| {
+                        lexer_error_with_context(
+                            "escape sequence value out of range",
+                            source,
+                            literal_start_line,
+                            literal_start_column,
+                        )
+                    })?;
+                advance_position(digit, line, column, i);
+            }
+            if *i == digits_start {
+                return Err(lexer_error_with_context(
+                    "hex escape sequence requires at least one digit",
+                    source,
+                    literal_start_line,
+                    literal_start_column,
+                ));
+            }
+            Ok(value)
+        }
+        '0'..='7' => {
+            let mut value = 0i64;
+            for _ in 0..3 {
+                let Some(digit) = chars.get(*i).copied() else {
+                    break;
+                };
+                if !matches!(digit, '0'..='7') {
+                    break;
+                }
+                let digit_value = digit.to_digit(8).expect("octal digit should have value") as i64;
+                value = value * 8 + digit_value;
+                advance_position(digit, line, column, i);
+            }
+            Ok(value)
+        }
+        other => Err(lexer_error_with_context(
+            format!("unsupported {literal_kind} escape '\\{other}'"),
+            source,
+            literal_start_line,
+            literal_start_column,
+        )),
+    }
 }
 
 fn advance_position(c: char, line: &mut usize, column: &mut usize, i: &mut usize) {

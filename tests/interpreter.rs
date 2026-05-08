@@ -91,6 +91,25 @@ fn supports_standard_simple_escape_sequences() {
 }
 
 #[test]
+fn supports_octal_and_hex_escape_sequences() {
+    let program = include_str!("fixtures/valid/numeric_escape_sequences.c");
+
+    assert_eq!(interpret(program).unwrap(), 124);
+}
+
+#[test]
+fn reports_hex_escape_sequences_without_digits() {
+    let program = include_str!("fixtures/invalid/hex_escape_without_digits.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "hex escape sequence requires at least one digit at line 2, column 12\n    return '\\x';\n           ^"
+    );
+}
+
+#[test]
 fn reports_invalid_octal_integer_digits() {
     let program = include_str!("fixtures/invalid/invalid_octal_integer_literal.c");
 

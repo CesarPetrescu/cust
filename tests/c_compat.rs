@@ -58,6 +58,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/mixed_pointer_string_array_conformance.c",
     "tests/fixtures/compat/valid/nested_struct_fields.c",
     "tests/fixtures/compat/valid/nested_struct_initializers.c",
+    "tests/fixtures/compat/valid/numeric_escape_sequences.c",
     "tests/fixtures/compat/valid/pointer_array_elements.c",
     "tests/fixtures/compat/valid/pointer_arithmetic.c",
     "tests/fixtures/compat/valid/pointer_parameters_and_arrays.c",
