@@ -2380,24 +2380,36 @@ impl Parser {
         len: usize,
         elem_type: CType,
     ) -> CustResult<Vec<ArrayInitializer>> {
-        if let Token::StringLiteral(values) = self.peek().clone() {
-            self.advance();
-            if elem_type != CType::Char {
-                return Err(CustError::new(format!(
-                    "string literal initializer requires char array '{name}'"
-                )));
-            }
-            let too_long =
-                values.len() > len && !(values.len() == len + 1 && values.last() == Some(&0));
-            if too_long {
-                return Err(CustError::new(format!(
-                    "initializer string for char array '{name}' is too long"
-                )));
-            }
-            return Ok(vec![ArrayInitializer::StringLiteral(values)]);
+        if let Some(init) = self.parse_string_literal_array_initializer(name, len, elem_type)? {
+            return Ok(init);
         }
 
         self.parse_array_initializer(name, len)
+    }
+
+    fn parse_string_literal_array_initializer(
+        &mut self,
+        name: &str,
+        len: usize,
+        elem_type: CType,
+    ) -> CustResult<Option<Vec<ArrayInitializer>>> {
+        let Token::StringLiteral(values) = self.peek().clone() else {
+            return Ok(None);
+        };
+        self.advance();
+        if elem_type != CType::Char {
+            return Err(CustError::new(format!(
+                "string literal initializer requires char array '{name}'"
+            )));
+        }
+        let too_long =
+            values.len() > len && !(values.len() == len + 1 && values.last() == Some(&0));
+        if too_long {
+            return Err(CustError::new(format!(
+                "initializer string for char array '{name}' is too long"
+            )));
+        }
+        Ok(Some(vec![ArrayInitializer::StringLiteral(values)]))
     }
 
     fn parse_array_initializer(
@@ -2664,9 +2676,17 @@ impl Parser {
         field: &StructFieldDef,
     ) -> CustResult<StructInitializer> {
         match &field.ty {
-            StructFieldType::Array(_, len) if self.check(&Token::LBrace) => Ok(
+            StructFieldType::Array(elem_type, len) if self.check(&Token::LBrace) => Ok(
                 StructInitializer::Array(self.parse_array_initializer(&field.name, *len)?),
             ),
+            StructFieldType::Array(elem_type, len)
+                if matches!(self.peek(), Token::StringLiteral(_)) =>
+            {
+                let init = self
+                    .parse_string_literal_array_initializer(&field.name, *len, *elem_type)?
+                    .expect("string literal token was checked before parsing");
+                Ok(StructInitializer::Array(init))
+            }
             StructFieldType::Struct(nested_type) if self.check(&Token::LBrace) => Ok(
                 StructInitializer::Struct(self.parse_struct_initializer(nested_type)?),
             ),

@@ -80,6 +80,8 @@ Prioritized backlog for autonomous implementation.
 - [x] C numeric escape sequences in character and string literals; acceptance: octal escapes such as `\\101` consume up to three octal digits, hexadecimal escapes such as `\\x2a` consume one or more hexadecimal digits, values are stored in Cust's deterministic integer byte model for character literals and NUL-terminated string literals, missing hexadecimal digits report a targeted lexer diagnostic with source/caret context, and interpreter plus C compiler-oracle fixtures cover supported behavior.
 - [x] Fixed-size `char` array initialization from string literals; acceptance: `char word[4] = "cat";` copies the NUL terminator when it fits, `char exact[3] = "dog";` accepts C's exact-size non-NUL-terminated initialization, shorter strings zero-fill trailing elements, const/static char arrays preserve existing read-only/persistent storage behavior, too-long initializer strings report `initializer string for char array '<name>' is too long`, and interpreter plus C compiler-oracle fixtures cover supported behavior while avoiding native `-Werror=unterminated-string-initialization` forms in the oracle.
 
+- [x] Fixed-size `char` array initialization from string literals inside supported aggregate fields; acceptance: struct/union `char[N]` fields can use positional string-literal initializers, field designators such as `.text = "hi"`, nested path designators such as `.label.text = "A\\x2a"`, and struct-array element initializers, preserving zero-fill, exact too-long diagnostics, and C compiler-oracle coverage for warning-free forms.
+
 ## P2 — data types
 
 - [x] `char` literals, declarations, and function parameters

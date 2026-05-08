@@ -105,6 +105,13 @@ fn supports_char_arrays_initialized_from_string_literals() {
 }
 
 #[test]
+fn supports_struct_char_array_fields_initialized_from_string_literals() {
+    let program = include_str!("fixtures/valid/struct_char_array_string_initializers.c");
+
+    assert_eq!(interpret(program).unwrap(), 11);
+}
+
+#[test]
 fn reports_char_array_string_initializer_too_long() {
     let program = include_str!("fixtures/invalid/char_array_string_initializer_too_long.c");
 
@@ -113,6 +120,18 @@ fn reports_char_array_string_initializer_too_long() {
     assert_eq!(
         err.to_string(),
         "initializer string for char array 'short_text' is too long"
+    );
+}
+
+#[test]
+fn reports_struct_char_array_string_initializer_too_long() {
+    let program = include_str!("fixtures/invalid/struct_char_array_string_initializer_too_long.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "initializer string for char array 'text' is too long"
     );
 }
 
