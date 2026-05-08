@@ -6659,13 +6659,14 @@ impl Interpreter {
     }
 
     fn assign_struct_copy(&mut self, name: &str, rhs: &Expr) -> CustResult<()> {
+        self.eval_struct_assignment_expr(name, rhs).map(|_| ())
+    }
+
+    fn eval_struct_assignment_expr(&mut self, name: &str, rhs: &Expr) -> CustResult<ReturnValue> {
         self.ensure_variable_mutable(name)?;
         let (rhs_type, rhs_fields) = match self.eval_struct_expr(rhs)? {
             ReturnValue::Struct { type_name, fields } => (type_name, fields),
-            ReturnValue::Scalar(_) => {
-                return Err(CustError::new("struct assignment requires struct value"));
-            }
-            ReturnValue::Pointer { .. } => {
+            ReturnValue::Scalar(_) | ReturnValue::Pointer { .. } => {
                 return Err(CustError::new("struct assignment requires struct value"));
             }
         };
@@ -6678,8 +6679,11 @@ impl Interpreter {
                         "cannot assign to struct '{type_name}' with const fields"
                     )));
                 }
-                *fields = rhs_fields;
-                Ok(())
+                *fields = StructFieldValue::deep_clone_fields(&rhs_fields);
+                Ok(ReturnValue::Struct {
+                    type_name: rhs_type,
+                    fields: rhs_fields,
+                })
             }
             Some(Value::Struct { type_name, .. }) => Err(CustError::new(format!(
                 "cannot assign struct '{}' to struct '{}'",
@@ -6692,6 +6696,15 @@ impl Interpreter {
     }
 
     fn assign_struct_pointer_copy(&mut self, pointer: &Expr, rhs: &Expr) -> CustResult<()> {
+        self.eval_struct_pointer_assignment_expr(pointer, rhs)
+            .map(|_| ())
+    }
+
+    fn eval_struct_pointer_assignment_expr(
+        &mut self,
+        pointer: &Expr,
+        rhs: &Expr,
+    ) -> CustResult<ReturnValue> {
         self.ensure_pointer_expr_pointee_mutable(pointer)?;
         let pointer = self.eval_pointer(pointer)?;
         let (rhs_type, rhs_fields) = match self.eval_struct_expr(rhs)? {
@@ -6716,8 +6729,11 @@ impl Interpreter {
                 "cannot assign to struct '{target_type}' with const fields"
             )));
         }
-        *target_fields = rhs_fields;
-        Ok(())
+        *target_fields = StructFieldValue::deep_clone_fields(&rhs_fields);
+        Ok(ReturnValue::Struct {
+            type_name: rhs_type,
+            fields: rhs_fields,
+        })
     }
 
     fn eval_struct_set(&mut self, name: &str, fields: &[String], value: &Expr) -> CustResult<i64> {
@@ -8298,6 +8314,10 @@ impl Interpreter {
             Expr::Comma(left, right) => {
                 self.eval_discard(left)?;
                 self.eval_struct_expr(right)
+            }
+            Expr::Assign { name, value } => self.eval_struct_assignment_expr(name, value),
+            Expr::DerefSet { pointer, value } => {
+                self.eval_struct_pointer_assignment_expr(pointer, value)
             }
             Expr::Var(name) => match self.find_variable(name).cloned() {
                 Some(Value::Struct { type_name, fields }) => Ok(ReturnValue::Struct {

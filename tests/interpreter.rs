@@ -242,6 +242,24 @@ fn supports_aggregate_pointer_dereference_values_and_assignment() {
 }
 
 #[test]
+fn supports_aggregate_assignment_expressions_returning_copies() {
+    let program = include_str!("fixtures/valid/aggregate_assignment_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 66);
+}
+
+#[test]
+fn rejects_aggregate_assignment_expression_type_mismatches() {
+    let program = include_str!("fixtures/invalid/aggregate_assignment_expression_type_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign struct 'Size' to struct 'Point'"
+    );
+}
+
+#[test]
 fn rejects_aggregate_pointer_dereference_assignment_through_const_views() {
     let program = include_str!("fixtures/invalid/const_aggregate_pointer_deref_assignment.c");
 
