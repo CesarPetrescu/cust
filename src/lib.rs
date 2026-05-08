@@ -871,11 +871,47 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 let start = i;
                 let start_line = line;
                 let start_column = column;
-                while i < chars.len() && chars[i].is_ascii_digit() {
-                    advance_position(chars[i], &mut line, &mut column, &mut i);
-                }
-                let text: String = chars[start..i].iter().collect();
-                let value = text.parse::<i64>().map_err(|_| {
+                let (digits_start, radix) = if chars[i] == '0'
+                    && matches!(chars.get(i + 1), Some('x') | Some('X'))
+                {
+                    advance_position('0', &mut line, &mut column, &mut i);
+                    let prefix = chars[i];
+                    advance_position(prefix, &mut line, &mut column, &mut i);
+                    let digits_start = i;
+                    while i < chars.len() && chars[i].is_ascii_hexdigit() {
+                        advance_position(chars[i], &mut line, &mut column, &mut i);
+                    }
+                    if digits_start == i {
+                        return Err(lexer_error_with_context(
+                            "expected hexadecimal digits after integer literal prefix",
+                            source,
+                            start_line,
+                            start_column,
+                        ));
+                    }
+                    (digits_start, 16)
+                } else if chars[i] == '0' {
+                    advance_position('0', &mut line, &mut column, &mut i);
+                    while i < chars.len() && chars[i].is_ascii_digit() {
+                        if !matches!(chars[i], '0'..='7') {
+                            return Err(lexer_error_with_context(
+                                format!("invalid digit '{}' in octal integer literal", chars[i]),
+                                source,
+                                start_line,
+                                start_column,
+                            ));
+                        }
+                        advance_position(chars[i], &mut line, &mut column, &mut i);
+                    }
+                    (start, 8)
+                } else {
+                    while i < chars.len() && chars[i].is_ascii_digit() {
+                        advance_position(chars[i], &mut line, &mut column, &mut i);
+                    }
+                    (start, 10)
+                };
+                let text: String = chars[digits_start..i].iter().collect();
+                let value = i64::from_str_radix(&text, radix).map_err(|_| {
                     lexer_error_with_context(
                         "integer literal out of range",
                         source,

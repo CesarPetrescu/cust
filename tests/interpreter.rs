@@ -77,6 +77,25 @@ fn reports_source_context_for_out_of_range_integer_literal() {
 }
 
 #[test]
+fn supports_hexadecimal_and_octal_integer_literals() {
+    let program = include_str!("fixtures/valid/integer_literal_bases.c");
+
+    assert_eq!(interpret(program).unwrap(), 106);
+}
+
+#[test]
+fn reports_invalid_octal_integer_digits() {
+    let program = include_str!("fixtures/invalid/invalid_octal_integer_literal.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "invalid digit '8' in octal integer literal at line 2, column 12\n    return 08;\n           ^"
+    );
+}
+
+#[test]
 fn supports_c_style_block_comments_as_whitespace() {
     let program = include_str!("fixtures/valid/block_comments.c");
 
