@@ -3638,9 +3638,14 @@ impl Parser {
             }
         };
         self.expect_closing_paren_after("cast type")?;
+        let expr = if self.check(&Token::LBrace) {
+            self.parse_scalar_initializer_expr("scalar compound literal")?
+        } else {
+            self.parse_unary()?
+        };
         Ok(Expr::Cast {
             ty,
-            expr: Box::new(self.parse_unary()?),
+            expr: Box::new(expr),
         })
     }
 

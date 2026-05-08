@@ -133,6 +133,24 @@ fn supports_scalar_cast_expressions() {
 }
 
 #[test]
+fn supports_scalar_compound_literals_in_expression_contexts() {
+    let program = include_str!("fixtures/valid/scalar_compound_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 45);
+}
+
+#[test]
+fn rejects_scalar_compound_literals_with_too_many_initializers() {
+    let program = include_str!("fixtures/invalid/scalar_compound_literal_too_many_initializers.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "too many initializers for scalar compound literal"
+    );
+}
+
+#[test]
 fn supports_direct_enum_type_declarations_parameters_returns_and_sizeof() {
     let program = include_str!("fixtures/valid/direct_enum_types.c");
 
