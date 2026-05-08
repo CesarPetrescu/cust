@@ -962,12 +962,18 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                                 ));
                             };
                             let escaped = match escape_char {
+                                'a' => '\x07',
+                                'b' => '\x08',
+                                'f' => '\x0c',
                                 'n' => '\n',
+                                'r' => '\r',
                                 't' => '\t',
+                                'v' => '\x0b',
                                 '0' => '\0',
                                 '\\' => '\\',
                                 '\'' => '\'',
                                 '"' => '"',
+                                '?' => '?',
                                 other => {
                                     return Err(lexer_error_with_context(
                                         format!("unsupported string escape '\\{other}'"),
@@ -1004,13 +1010,33 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     Some('\\') => {
                         advance_position('\\', &mut line, &mut column, &mut i);
                         match chars.get(i).copied() {
+                            Some('a') => {
+                                advance_position('a', &mut line, &mut column, &mut i);
+                                '\x07' as i64
+                            }
+                            Some('b') => {
+                                advance_position('b', &mut line, &mut column, &mut i);
+                                '\x08' as i64
+                            }
+                            Some('f') => {
+                                advance_position('f', &mut line, &mut column, &mut i);
+                                '\x0c' as i64
+                            }
                             Some('n') => {
                                 advance_position('n', &mut line, &mut column, &mut i);
                                 '\n' as i64
                             }
+                            Some('r') => {
+                                advance_position('r', &mut line, &mut column, &mut i);
+                                '\r' as i64
+                            }
                             Some('t') => {
                                 advance_position('t', &mut line, &mut column, &mut i);
                                 '\t' as i64
+                            }
+                            Some('v') => {
+                                advance_position('v', &mut line, &mut column, &mut i);
+                                '\x0b' as i64
                             }
                             Some('0') => {
                                 advance_position('0', &mut line, &mut column, &mut i);
@@ -1023,6 +1049,10 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                             Some('\'') => {
                                 advance_position('\'', &mut line, &mut column, &mut i);
                                 '\'' as i64
+                            }
+                            Some('?') => {
+                                advance_position('?', &mut line, &mut column, &mut i);
+                                '?' as i64
                             }
                             Some(other) => {
                                 return Err(lexer_error_with_context(
