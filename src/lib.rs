@@ -1680,7 +1680,8 @@ impl Parser {
         let return_type = self.parse_function_return_type()?;
         let name = self.expect_ident_after("function name after return type")?;
         self.expect_opening_paren_after("function name")?;
-        let params = self.parse_params()?;
+        let allow_unnamed_params = self.parameter_list_is_prototype();
+        let params = self.parse_params(allow_unnamed_params)?;
         self.expect_closing_paren_after("function parameters")?;
         if self.matches(&Token::Semi) {
             return Ok((
@@ -1697,6 +1698,23 @@ impl Parser {
                 body,
             }),
         ))
+    }
+
+    fn parameter_list_is_prototype(&self) -> bool {
+        let mut cursor = self.pos;
+        while let Some(token) = self.tokens.get(cursor) {
+            match token.kind {
+                Token::RParen => {
+                    return matches!(
+                        self.tokens.get(cursor + 1).map(|next| &next.kind),
+                        Some(Token::Semi)
+                    );
+                }
+                Token::Eof => return false,
+                _ => cursor += 1,
+            }
+        }
+        false
     }
 
     fn parse_function_return_type(&mut self) -> CustResult<ReturnType> {
@@ -1734,7 +1752,7 @@ impl Parser {
         Ok(Self::decl_type_to_return_type(decl_type))
     }
 
-    fn parse_params(&mut self) -> CustResult<Vec<Param>> {
+    fn parse_params(&mut self, allow_unnamed: bool) -> CustResult<Vec<Param>> {
         let mut params = Vec::new();
         if self.check(&Token::RParen) {
             return Ok(params);
@@ -1768,7 +1786,11 @@ impl Parser {
                 ));
             }
             let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer(_));
-            let name = if has_explicit_star {
+            let name = if allow_unnamed
+                && matches!(self.peek(), Token::Comma | Token::RParen | Token::LBracket)
+            {
+                format!("__cust_prototype_param_{}", params.len())
+            } else if has_explicit_star {
                 match &decl_type {
                     DeclType::Scalar(_) => self.expect_ident_after("parameter name after '*'")?,
                     DeclType::Struct(_) => {

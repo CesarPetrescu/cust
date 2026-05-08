@@ -850,6 +850,13 @@ fn supports_function_prototypes_before_definitions() {
 }
 
 #[test]
+fn supports_unnamed_function_prototype_parameters() {
+    let program = include_str!("fixtures/valid/unnamed_prototype_parameters.c");
+
+    assert_eq!(interpret(program).unwrap(), 47);
+}
+
+#[test]
 fn supports_char_return_functions_and_prototypes() {
     let program = include_str!("fixtures/valid/char_return_functions.c");
 
