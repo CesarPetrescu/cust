@@ -532,6 +532,13 @@ fn supports_struct_pointer_fields() {
 }
 
 #[test]
+fn supports_struct_pointer_field_arithmetic() {
+    let program = include_str!("fixtures/valid/struct_pointer_field_arithmetic.c");
+
+    assert_eq!(interpret(program).unwrap(), 101);
+}
+
+#[test]
 fn supports_struct_pointer_fields_with_const_pointee_views() {
     let program = include_str!("fixtures/valid/struct_pointer_field_const_pointee.c");
 
@@ -557,6 +564,17 @@ fn rejects_struct_pointer_field_const_discard() {
     assert_eq!(
         err.to_string(),
         "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_struct_pointer_field_type_mismatch() {
+    let program = include_str!("fixtures/invalid/struct_pointer_field_type_mismatch.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot convert pointer to struct 'Size' to pointer to struct 'Point'"
     );
 }
 

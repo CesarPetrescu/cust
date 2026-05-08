@@ -6017,6 +6017,9 @@ impl Interpreter {
         value: PointerValue,
     ) -> CustResult<()> {
         self.ensure_variable_mutable(name)?;
+        if let Some(expected) = self.direct_struct_pointer_field_type(name, path)? {
+            self.ensure_pointer_type_matches(&expected, &value)?;
+        }
         match self.find_variable_mut(name) {
             Some(Value::Struct { type_name, fields }) => {
                 let (_, field_value) = Self::nested_field_value_mut(type_name, fields, path)?;
@@ -6048,6 +6051,72 @@ impl Interpreter {
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
+    }
+
+    fn direct_struct_pointer_field_type(
+        &self,
+        name: &str,
+        path: &[String],
+    ) -> CustResult<Option<PointeeType>> {
+        match self.find_variable(name) {
+            Some(Value::Struct { type_name, fields }) => {
+                let (_, field_value) = Self::nested_field_value(type_name, fields, path)?;
+                match field_value {
+                    StructFieldValue::Pointer { ty, .. } => Ok(Some(ty.clone())),
+                    _ => Ok(None),
+                }
+            }
+            Some(_) => Ok(None),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn offset_direct_struct_pointer_field(
+        &mut self,
+        name: &str,
+        path: &[String],
+        offset: i64,
+    ) -> CustResult<(PointerValue, PointerValue)> {
+        let current = self.read_direct_struct_pointer_field(name, path)?;
+        let updated = self.offset_array_pointer(&current, offset)?;
+        self.assign_direct_struct_pointer_field(name, path, updated.clone())?;
+        Ok((current, updated))
+    }
+
+    fn compound_assign_direct_struct_pointer_field(
+        &mut self,
+        name: &str,
+        path: &[String],
+        op: CompoundOp,
+        value: &Expr,
+    ) -> CustResult<PointerValue> {
+        let offset = self.eval(value)?;
+        let offset = match op {
+            CompoundOp::Add => offset,
+            CompoundOp::Sub => -offset,
+            CompoundOp::BitAnd
+            | CompoundOp::BitOr
+            | CompoundOp::BitXor
+            | CompoundOp::ShiftLeft
+            | CompoundOp::ShiftRight => return Err(Self::pointer_compound_error(op)),
+        };
+        let (_, updated) = self.offset_direct_struct_pointer_field(name, path, offset)?;
+        Ok(updated)
+    }
+
+    fn increment_direct_struct_pointer_field(
+        &mut self,
+        name: &str,
+        path: &[String],
+        op: IncrementOp,
+        prefix: bool,
+    ) -> CustResult<PointerValue> {
+        let offset = match op {
+            IncrementOp::Inc => 1,
+            IncrementOp::Dec => -1,
+        };
+        let (current, updated) = self.offset_direct_struct_pointer_field(name, path, offset)?;
+        if prefix { Ok(updated) } else { Ok(current) }
     }
 
     fn find_struct_array_field(
@@ -7083,6 +7152,12 @@ impl Interpreter {
                 self.assign_direct_struct_pointer_field(name, fields, pointer.clone())?;
                 Ok(pointer)
             }
+            Expr::StructCompoundSet {
+                name,
+                fields,
+                op,
+                value,
+            } => self.compound_assign_direct_struct_pointer_field(name, fields, *op, value),
             Expr::CompoundAssign { name, op, value } => {
                 let pointer = match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => pointer,
@@ -7118,6 +7193,9 @@ impl Interpreter {
                 Ok(pointer)
             }
             Expr::Increment { target, op, prefix } => match target.as_ref() {
+                Expr::StructGet { name, fields } => {
+                    self.increment_direct_struct_pointer_field(name, fields, *op, *prefix)
+                }
                 Expr::Var(name) => {
                     let pointer = match self.find_variable(name).cloned() {
                         Some(Value::Pointer { pointer, .. }) => pointer,
@@ -7833,6 +7911,9 @@ impl Interpreter {
         if matches!(
             expr,
             Expr::CompoundAssign {
+                op: CompoundOp::Add | CompoundOp::Sub,
+                ..
+            } | Expr::StructCompoundSet {
                 op: CompoundOp::Add | CompoundOp::Sub,
                 ..
             } | Expr::Increment { .. }
