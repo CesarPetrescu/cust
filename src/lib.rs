@@ -283,6 +283,11 @@ enum Expr {
         len: Option<usize>,
         init: Vec<ArrayInitializer>,
     },
+    AggregateArrayLiteral {
+        type_name: String,
+        len: Option<usize>,
+        init: Vec<StructArrayInitializer>,
+    },
     AggregateFieldGet {
         aggregate: Box<Expr>,
         fields: Vec<String>,
@@ -2594,6 +2599,57 @@ impl Parser {
         Ok(values)
     }
 
+    fn parse_aggregate_array_compound_initializer(
+        &mut self,
+        type_name: &str,
+        len: Option<usize>,
+    ) -> CustResult<Vec<StructArrayInitializer>> {
+        self.expect_opening_brace_after("aggregate array compound literal initializer")?;
+        let mut values = Vec::new();
+        let mut next_positional_index = 0usize;
+        if self.matches(&Token::RBrace) {
+            return Ok(values);
+        }
+        loop {
+            if self.check(&Token::LBracket) {
+                let index = match len {
+                    Some(len) => self.parse_array_designator_index_with_context(
+                        "aggregate array compound literal",
+                        len,
+                    )?,
+                    None => self.parse_unbounded_array_designator_index()?,
+                };
+                self.expect_assign_after("array designator")?;
+                values.push(StructArrayInitializer::Designated {
+                    index,
+                    value: self.parse_struct_initializer(type_name)?,
+                });
+                next_positional_index = index + 1;
+            } else {
+                if matches!(len, Some(len) if next_positional_index == len) {
+                    return Err(CustError::new(
+                        "too many initializers for aggregate array compound literal",
+                    ));
+                }
+                values.push(StructArrayInitializer::Element(
+                    self.parse_struct_initializer(type_name)?,
+                ));
+                next_positional_index += 1;
+            }
+            if self.matches(&Token::RBrace) {
+                break;
+            }
+            if self.matches(&Token::Comma) {
+                if self.matches(&Token::RBrace) {
+                    break;
+                }
+                continue;
+            }
+            self.expect_closing_brace_after("aggregate array compound literal initializer")?;
+        }
+        Ok(values)
+    }
+
     fn parse_aggregate_definition(&mut self) -> CustResult<()> {
         self.parse_aggregate_definition_body(true, false)?;
         Ok(())
@@ -3687,6 +3743,20 @@ impl Parser {
                 let DeclType::Struct(type_name) = decl_type else {
                     unreachable!("decl_type was already matched as aggregate")
                 };
+                if self.matches(&Token::LBracket) {
+                    let len = if self.check(&Token::RBracket) {
+                        None
+                    } else {
+                        Some(self.expect_array_len()?)
+                    };
+                    self.expect_closing_bracket_after("aggregate array compound literal type")?;
+                    self.expect_closing_paren_after("cast type")?;
+                    return Ok(Expr::AggregateArrayLiteral {
+                        init: self.parse_aggregate_array_compound_initializer(&type_name, len)?,
+                        len,
+                        type_name,
+                    });
+                }
                 self.expect_closing_paren_after("cast type")?;
                 if !self.check(&Token::LBrace) {
                     return Err(Self::error_at(
@@ -4502,6 +4572,7 @@ struct Interpreter {
     return_type_stack: Vec<ReturnType>,
     max_loop_iterations: Option<usize>,
     loop_iterations: usize,
+    next_compound_literal_id: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4719,6 +4790,7 @@ impl Interpreter {
             return_type_stack: Vec::new(),
             max_loop_iterations: options.max_loop_iterations,
             loop_iterations: 0,
+            next_compound_literal_id: 0,
         }
     }
 
@@ -5624,6 +5696,24 @@ impl Interpreter {
         len
     }
 
+    fn infer_struct_array_initializer_len(init: &[StructArrayInitializer]) -> usize {
+        let mut len = 0usize;
+        let mut next_positional_index = 0usize;
+        for initializer in init {
+            match initializer {
+                StructArrayInitializer::Element(_) => {
+                    len = len.max(next_positional_index + 1);
+                    next_positional_index += 1;
+                }
+                StructArrayInitializer::Designated { index, .. } => {
+                    len = len.max(index + 1);
+                    next_positional_index = index + 1;
+                }
+            }
+        }
+        len
+    }
+
     fn make_struct_value(
         &mut self,
         type_name: &str,
@@ -5693,6 +5783,32 @@ impl Interpreter {
             type_name: type_name.to_string(),
             elements,
             read_only,
+        })
+    }
+
+    fn make_aggregate_array_compound_literal(
+        &mut self,
+        type_name: &str,
+        len: Option<usize>,
+        init: &[StructArrayInitializer],
+    ) -> CustResult<PointerValue> {
+        let len = len.unwrap_or_else(|| Self::infer_struct_array_initializer_len(init));
+        let value = self.make_struct_array_value(type_name, len, init, false)?;
+        let scope_id = self
+            .scopes
+            .last()
+            .expect("compound literal evaluation requires a current scope")
+            .id;
+        let name = format!(
+            "__cust_compound_aggregate_array#{}",
+            self.next_compound_literal_id
+        );
+        self.next_compound_literal_id += 1;
+        self.current_scope_mut().insert(name.clone(), value);
+        Ok(PointerValue::StructElement {
+            scope_id,
+            name,
+            index: 0,
         })
     }
 
@@ -7323,6 +7439,11 @@ impl Interpreter {
                 array: self.make_array_compound_literal(*len, *elem_type, init)?,
                 source_name: None,
             }),
+            Expr::AggregateArrayLiteral {
+                type_name,
+                len,
+                init,
+            } => self.make_aggregate_array_compound_literal(type_name, *len, init),
             Expr::Call { name, args } => match self.call_function(name, args)? {
                 Some(ReturnValue::Pointer { pointer, .. }) => Ok(pointer),
                 Some(ReturnValue::Scalar(_)) => Err(CustError::new(format!(
@@ -7897,7 +8018,9 @@ impl Interpreter {
             | Expr::AddressOfArray { .. }
             | Expr::AddressOfStructField { .. }
             | Expr::AddressOfStructElementField { .. }
-            | Expr::StringLiteral(_) => true,
+            | Expr::StringLiteral(_)
+            | Expr::ArrayLiteral { .. }
+            | Expr::AggregateArrayLiteral { .. } => true,
             Expr::Var(name) | Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
                 matches!(
                     self.find_variable(name),
@@ -8099,7 +8222,10 @@ impl Interpreter {
             | Expr::AddressOfStructField { .. }
             | Expr::AddressOfStructElementField { .. }
             | Expr::StringLiteral(_)
-            | Expr::ArrayLiteral { .. } => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
+            | Expr::ArrayLiteral { .. }
+            | Expr::AggregateArrayLiteral { .. } => {
+                Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
+            }
             Expr::Assign { name, .. } => match self.find_variable(name).cloned() {
                 Some(Value::Pointer { .. }) => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
                 Some(Value::Scalar { .. }) => Ok(self.eval(expr)? != 0),
@@ -8361,7 +8487,7 @@ impl Interpreter {
         match expr {
             Expr::Number(_) => Ok(INT_SIZE),
             Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
-            Expr::ArrayLiteral { .. } => Ok(POINTER_SIZE),
+            Expr::ArrayLiteral { .. } | Expr::AggregateArrayLiteral { .. } => Ok(POINTER_SIZE),
             Expr::SizeOfType(_) | Expr::SizeOfValue(_) => Ok(INT_SIZE),
             Expr::Var(name) => self.sizeof_variable(name),
             Expr::StructGet { name, fields } => self.sizeof_struct_field(name, fields),
@@ -9514,7 +9640,9 @@ impl Interpreter {
         match expr {
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
-            Expr::ArrayLiteral { .. } => Err(CustError::new("pointer value used as scalar")),
+            Expr::ArrayLiteral { .. } | Expr::AggregateArrayLiteral { .. } => {
+                Err(CustError::new("pointer value used as scalar"))
+            }
             Expr::StructGet { name, fields } => self.read_struct_field(name, fields),
             Expr::StructArrayGet {
                 name,
