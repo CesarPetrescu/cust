@@ -1448,6 +1448,13 @@ impl Parser {
         }
     }
 
+    fn alias_at_index(&self, index: usize) -> Option<&TypeAlias> {
+        match self.tokens.get(index).map(|token| &token.kind) {
+            Some(Token::Ident(name)) => self.lookup_type_alias(name),
+            _ => None,
+        }
+    }
+
     fn lookup_type_alias(&self, name: &str) -> Option<&TypeAlias> {
         self.type_alias_scopes
             .iter()
@@ -1641,15 +1648,20 @@ impl Parser {
         ) {
             index += 1;
         }
-        if !matches!(
-            self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Int | Token::Char | Token::Void)
-        ) && self.current_alias().is_none()
-        {
-            return false;
+        match self.tokens.get(index).map(|token| &token.kind) {
+            Some(Token::Int | Token::Char | Token::Void) => index += 1,
+            Some(Token::Struct | Token::Union) => {
+                if !matches!(
+                    self.tokens.get(index + 1).map(|token| &token.kind),
+                    Some(Token::Ident(_))
+                ) {
+                    return false;
+                }
+                index += 2;
+            }
+            Some(Token::Ident(_)) if self.alias_at_index(index).is_some() => index += 1,
+            _ => return false,
         }
-
-        index += 1;
         while matches!(
             self.tokens.get(index).map(|token| &token.kind),
             Some(Token::Star | Token::Const)
@@ -1746,12 +1758,6 @@ impl Parser {
                 ty: pointee,
                 points_to_const: leading_const,
             });
-        }
-        if leading_const {
-            return Err(Self::error_at(
-                "const-qualified scalar return types are not supported".to_string(),
-                self.previous(),
-            ));
         }
         Ok(Self::decl_type_to_return_type(decl_type))
     }

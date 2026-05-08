@@ -922,6 +922,13 @@ fn supports_char_return_functions_and_prototypes() {
 }
 
 #[test]
+fn supports_const_qualified_return_types() {
+    let program = include_str!("fixtures/valid/const_return_types.c");
+
+    assert_eq!(interpret(program).unwrap(), 142);
+}
+
+#[test]
 fn supports_struct_declarations_and_member_access() {
     let program = include_str!("fixtures/valid/structs.c");
 

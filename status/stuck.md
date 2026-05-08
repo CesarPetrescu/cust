@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-08 autonomous sizeof-pointer-expression run after focused `sizeof(*pointer_expr)` and C compiler-oracle tests passed; full local and Docker verification is recorded in `status/current-state.md`. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-05-08 autonomous const-return-type run after focused const return-type tests passed; full local and Docker verification is recorded in `status/current-state.md`. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 
