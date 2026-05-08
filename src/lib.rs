@@ -4985,6 +4985,119 @@ impl Interpreter {
         }
     }
 
+    fn pointer_expr_pointee_type(&self, expr: &Expr) -> CustResult<Option<PointeeType>> {
+        match expr {
+            Expr::Var(name) | Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
+                match self.find_variable(name) {
+                    Some(Value::Pointer { ty, .. }) => Ok(Some(ty.clone())),
+                    Some(Value::Array(array)) => {
+                        Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
+                    }
+                    Some(Value::StructArray { type_name, .. }) => {
+                        Ok(Some(PointeeType::Struct(type_name.clone())))
+                    }
+                    _ => Ok(None),
+                }
+            }
+            Expr::AddressOf(name) => match self.find_variable(name) {
+                Some(Value::Scalar { ty, .. }) => Ok(Some(PointeeType::Scalar(*ty))),
+                Some(Value::Struct { type_name, .. }) => {
+                    Ok(Some(PointeeType::Struct(type_name.clone())))
+                }
+                _ => Ok(None),
+            },
+            Expr::AddressOfArray { name, .. } => match self.find_variable(name) {
+                Some(Value::Array(array)) => {
+                    Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
+                }
+                Some(Value::Pointer { ty, .. }) => Ok(Some(ty.clone())),
+                _ => Ok(None),
+            },
+            Expr::AddressOfStructField { name, fields }
+            | Expr::StructGet { name, fields }
+            | Expr::StructSet { name, fields, .. } => match self.find_variable(name) {
+                Some(Value::Struct {
+                    type_name,
+                    fields: field_map,
+                }) => match Self::nested_field_value(type_name, field_map, fields)? {
+                    (_, StructFieldValue::Scalar { ty, .. }) => Ok(Some(PointeeType::Scalar(*ty))),
+                    (_, StructFieldValue::Array { value, .. }) => {
+                        Ok(Some(PointeeType::Scalar(value.borrow().elem_type)))
+                    }
+                    (_, StructFieldValue::Struct { type_name, .. }) => {
+                        Ok(Some(PointeeType::Struct(type_name.clone())))
+                    }
+                    (_, StructFieldValue::Pointer { ty, .. }) => Ok(Some(ty.clone())),
+                },
+                _ => Ok(None),
+            },
+            Expr::AddressOfStructElementField { name, fields, .. } => {
+                match self.find_variable(name) {
+                    Some(Value::StructArray {
+                        type_name,
+                        elements,
+                        ..
+                    }) => {
+                        let Some(first_element) = elements.first() else {
+                            return Ok(None);
+                        };
+                        match Self::nested_field_value(type_name, first_element, fields)? {
+                            (_, StructFieldValue::Scalar { ty, .. }) => {
+                                Ok(Some(PointeeType::Scalar(*ty)))
+                            }
+                            (_, StructFieldValue::Array { value, .. }) => {
+                                Ok(Some(PointeeType::Scalar(value.borrow().elem_type)))
+                            }
+                            (_, StructFieldValue::Struct { type_name, .. }) => {
+                                Ok(Some(PointeeType::Struct(type_name.clone())))
+                            }
+                            (_, StructFieldValue::Pointer { ty, .. }) => Ok(Some(ty.clone())),
+                        }
+                    }
+                    _ => Ok(None),
+                }
+            }
+            Expr::StringLiteral(_) => Ok(Some(PointeeType::Scalar(CType::Char))),
+            Expr::Call { name, .. } => match self
+                .functions
+                .get(name)
+                .map(|function| &function.return_type)
+            {
+                Some(ReturnType::Pointer { ty, .. }) => Ok(Some(ty.clone())),
+                _ => Ok(None),
+            },
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let then_type = self.pointer_expr_pointee_type(then_expr)?;
+                let else_type = self.pointer_expr_pointee_type(else_expr)?;
+                Ok(then_type.or(else_type))
+            }
+            Expr::Comma(_, right) => self.pointer_expr_pointee_type(right),
+            Expr::Binary(left, BinaryOp::Add, right) => {
+                let left_type = self.pointer_expr_pointee_type(left)?;
+                if left_type.is_some() {
+                    Ok(left_type)
+                } else {
+                    self.pointer_expr_pointee_type(right)
+                }
+            }
+            Expr::Binary(left, BinaryOp::Sub, right) => {
+                let left_type = self.pointer_expr_pointee_type(left)?;
+                let right_type = self.pointer_expr_pointee_type(right)?;
+                if left_type.is_some() && right_type.is_none() {
+                    Ok(left_type)
+                } else {
+                    Ok(None)
+                }
+            }
+            Expr::Increment { target, .. } => self.pointer_expr_pointee_type(target),
+            _ => Ok(None),
+        }
+    }
+
     fn pointer_expr_points_to_const(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Var(name) => self.pointer_variable_points_to_const(name),
@@ -8083,10 +8196,11 @@ impl Interpreter {
     }
 
     fn sizeof_deref(&self, pointer: &Expr) -> CustResult<i64> {
+        if let Some(ty) = self.pointer_expr_pointee_type(pointer)? {
+            return ty.size(&self.struct_types);
+        }
         match pointer {
             Expr::Var(name) => match self.find_variable(name) {
-                Some(Value::Pointer { ty, .. }) => Ok(ty.size(&self.struct_types)?),
-                Some(Value::Array(array)) => Ok(array.borrow().elem_type.size()),
                 Some(Value::Scalar { .. }) => Err(CustError::new(format!(
                     "variable '{name}' is not a pointer"
                 ))),
@@ -8094,10 +8208,10 @@ impl Interpreter {
                     CustError::new(format!("struct variable '{name}' used as pointer")),
                 ),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
+                Some(Value::Pointer { .. } | Value::Array(_)) => {
+                    unreachable!("pointer-like variables should have returned a pointee type")
+                }
             },
-            Expr::AddressOf(name) => self.sizeof_variable(name),
-            Expr::AddressOfArray { name, .. } => self.sizeof_indexed_value(name),
-            Expr::StringLiteral(_) => Ok(CHAR_SIZE),
             _ => Ok(INT_SIZE),
         }
     }

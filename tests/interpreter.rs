@@ -112,6 +112,13 @@ fn supports_sizeof_aggregate_type_names() {
 }
 
 #[test]
+fn supports_sizeof_pointer_expressions_without_evaluating_operands() {
+    let program = include_str!("fixtures/valid/sizeof_pointer_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
 fn supports_uninitialized_scalar_and_pointer_declarations() {
     let program = include_str!("fixtures/valid/uninitialized_declarations.c");
 
