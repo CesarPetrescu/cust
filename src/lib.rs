@@ -270,6 +270,10 @@ enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+    Cast {
+        ty: CType,
+        expr: Box<Expr>,
+    },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
     BitwiseNot(Box<Expr>),
@@ -3522,9 +3526,52 @@ impl Parser {
             let operator = self.previous().clone();
             let target = self.parse_postfix()?;
             Self::address_of_expr(target, &operator)
+        } else if self.check(&Token::LParen) && self.starts_cast_type_after_lparen() {
+            self.parse_cast()
         } else {
             self.parse_postfix()
         }
+    }
+
+    fn starts_cast_type_after_lparen(&self) -> bool {
+        match self.tokens.get(self.pos + 1).map(|token| &token.kind) {
+            Some(Token::Int | Token::Char | Token::Struct | Token::Union | Token::Const) => true,
+            Some(Token::Ident(name)) => self.lookup_type_alias(name).is_some(),
+            _ => false,
+        }
+    }
+
+    fn parse_cast(&mut self) -> CustResult<Expr> {
+        self.expect(Token::LParen)?;
+        self.matches(&Token::Const);
+        let type_token = self.peek_located().clone();
+        let decl_type = self.parse_decl_type("cast type")?;
+        if self.matches(&Token::Star) {
+            return Err(Self::error_at(
+                "pointer casts are not supported".to_string(),
+                self.previous(),
+            ));
+        }
+        let ty = match decl_type {
+            DeclType::Scalar(ty) => ty,
+            DeclType::Struct(_) => {
+                return Err(Self::error_at(
+                    "aggregate casts are not supported".to_string(),
+                    &type_token,
+                ));
+            }
+            DeclType::Pointer(_) => {
+                return Err(Self::error_at(
+                    "pointer casts are not supported".to_string(),
+                    &type_token,
+                ));
+            }
+        };
+        self.expect_closing_paren_after("cast type")?;
+        Ok(Expr::Cast {
+            ty,
+            expr: Box::new(self.parse_unary()?),
+        })
     }
 
     fn address_of_expr(target: Expr, operator: &LocatedToken) -> CustResult<Expr> {
@@ -7554,6 +7601,7 @@ impl Interpreter {
             | Expr::UnaryMinus(_)
             | Expr::BitwiseNot(_)
             | Expr::LogicalNot(_)
+            | Expr::Cast { .. }
             | Expr::SizeOfType(_)
             | Expr::SizeOfValue(_)
             | Expr::CompoundAssign { .. }
@@ -7776,6 +7824,7 @@ impl Interpreter {
                 pointer, fields, ..
             } => self.sizeof_struct_pointer_field(pointer, fields),
             Expr::Increment { target, .. } => self.sizeof_expr(target),
+            Expr::Cast { ty, .. } => Ok(ty.size()),
             Expr::Call { name, .. } => match self.functions.get(name) {
                 Some(function) => function
                     .return_type
@@ -8982,6 +9031,7 @@ impl Interpreter {
                     "void function '{name}' used as scalar expression"
                 ))),
             },
+            Expr::Cast { expr, .. } => self.eval(expr),
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::BitwiseNot(inner) => Ok(!self.eval(inner)?),

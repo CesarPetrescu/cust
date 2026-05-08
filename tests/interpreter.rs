@@ -119,6 +119,24 @@ fn supports_uninitialized_scalar_and_pointer_declarations() {
 }
 
 #[test]
+fn supports_scalar_cast_expressions() {
+    let program = include_str!("fixtures/valid/scalar_cast_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn rejects_aggregate_cast_expressions() {
+    let program = include_str!("fixtures/invalid/aggregate_cast_unsupported.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "aggregate casts are not supported at line 5, column 13"
+    );
+}
+
+#[test]
 fn supports_scalar_array_initializers() {
     let program = include_str!("fixtures/valid/array_initializers.c");
 

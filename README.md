@@ -95,7 +95,8 @@ Features:
 - function calls with scalar/struct/union/pointer arguments, local function parameters, and C-style empty `void` parameter lists
 - integer, character, and string literals
 - declarations: initialized or zero/default-initialized `int`/`char` scalars, arrays, supported pointer variables, first-pass `const int` / `const char` scalars and arrays, typedef aliases, structs, unions, and enum constants, such as `int x = 1;`, `int y;`, `char c;`, `const int limit = 5;`, `int xs[3];`, `char text[4];`, `int *p;`, `typedef int Count;`, `struct Point { int x; char y; };`, `typedef struct Pair { int left; int right; } Pair;`, `typedef enum { READY = 1, RUNNING } State;`, block-local aggregate typedef definitions that may shadow outer tags, and `enum StateTag { READY_TAG = 1, RUNNING_TAG };`
-- assignment statements and assignment expressions for scalar, array-index, and dereferenced pointer lvalues, such as `x = x + 1;`, `y = (x = 4);`, `xs[0] = (xs[1] = 7);`, and `*p = value;`
+- assignment statements and assignment expressions for scalar, array-index, field, and dereferenced pointer lvalues, such as `x = x + 1;`, `y = (x = 4);`, `xs[0] = (xs[1] = 7);`, `point.x += 1;`, and `*p = value;`
+- scalar cast expressions for supported scalar types and typedef aliases, such as `(int)expr`, `(char)expr`, and `(Count)expr`
 - one-dimensional `int`/`char` arrays with indexed reads/writes
 - scalar pointers such as `int *p = &x;`, `*p`, and `*p = value;`
 - pointer parameters with array/string decay, pointer indexing (`p[i]`), and array-element addresses such as `&values[1]`
@@ -190,7 +191,7 @@ docker compose run --rm cust
 
 ## v0.1 limitations
 
-Cust is not a full C implementation yet. Missing features include preprocessor support, includes, standard library calls, floating-point values, multiple pointer levels, and many richer C-subset compatibility rules. Cust is an interpreter: it executes user programs itself. Native compilers such as GCC/Clang may be used only as an optional test oracle to compare expected behavior for supported fixtures, never as Cust's execution path or as an implementation shortcut.
+Cust is not a full C implementation yet. Missing features include preprocessor support, includes, standard library calls, floating-point values, multiple pointer levels, richer casts (including pointer and aggregate casts), native ABI layout compatibility, function pointers, and many broader C-subset compatibility rules. Cust is an interpreter: it executes user programs itself. Native compilers such as GCC/Clang may be used only as an optional test oracle to compare expected behavior for supported fixtures, never as Cust's execution path or as an implementation shortcut.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and [docs/v0.1.md](docs/v0.1.md) for implementation details and safety notes.
 
