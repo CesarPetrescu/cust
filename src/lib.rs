@@ -5640,6 +5640,43 @@ impl Interpreter {
         }
     }
 
+    fn aggregate_literal_field_metadata(
+        &self,
+        aggregate: &Expr,
+        path: &[String],
+    ) -> CustResult<Option<(StructFieldType, bool, bool)>> {
+        let Expr::AggregateLiteral { type_name, .. } = aggregate else {
+            return Ok(None);
+        };
+        let mut current_type_name = type_name;
+        for (index, field_name) in path.iter().enumerate() {
+            let Some(struct_type) = self.struct_types.get(current_type_name) else {
+                return Err(CustError::new(format!(
+                    "undefined struct type '{current_type_name}'"
+                )));
+            };
+            let Some(field) = struct_type
+                .fields
+                .iter()
+                .find(|field| field.name == *field_name)
+            else {
+                return Ok(None);
+            };
+            if index + 1 == path.len() {
+                return Ok(Some((
+                    field.ty.clone(),
+                    field.is_const,
+                    field.points_to_const,
+                )));
+            }
+            match &field.ty {
+                StructFieldType::Struct(nested_type) => current_type_name = nested_type,
+                _ => return Ok(None),
+            }
+        }
+        Ok(None)
+    }
+
     fn pointer_expr_pointee_type(&self, expr: &Expr) -> CustResult<Option<PointeeType>> {
         match expr {
             Expr::Var(name) | Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
@@ -5664,6 +5701,18 @@ impl Interpreter {
             Expr::AddressOfScalarLiteral { ty, .. } => Ok(Some(PointeeType::Scalar(*ty))),
             Expr::AddressOfAggregateLiteral { type_name, .. } => {
                 Ok(Some(PointeeType::Struct(type_name.clone())))
+            }
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                match self.aggregate_literal_field_metadata(aggregate, fields)? {
+                    Some((StructFieldType::Pointer(ty), _, _)) => Ok(Some(ty)),
+                    Some((StructFieldType::Array(elem_type, _), _, _)) => {
+                        Ok(Some(PointeeType::Scalar(elem_type)))
+                    }
+                    Some((StructFieldType::StructArray(type_name, _), _, _)) => {
+                        Ok(Some(PointeeType::Struct(type_name)))
+                    }
+                    _ => Ok(None),
+                }
             }
             Expr::AddressOfArray { name, .. } => match self.find_variable(name) {
                 Some(Value::Array(array)) => {
@@ -5835,6 +5884,12 @@ impl Interpreter {
                 self.direct_struct_array_field_points_to_const(name, fields)
                     || self.struct_pointer_field_points_to_const(name, fields)
             }
+            Expr::AggregateFieldGet { aggregate, fields } => self
+                .aggregate_literal_field_metadata(aggregate, fields)
+                .ok()
+                .flatten()
+                .map(|(_, _, points_to_const)| points_to_const)
+                .unwrap_or(false),
             Expr::StructElementGet { name, fields, .. } => {
                 self.struct_array_element_field_points_to_const(name, fields)
             }
@@ -8747,6 +8802,9 @@ impl Interpreter {
                 len,
                 init,
             } => self.make_aggregate_array_compound_literal(type_name, *len, init),
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                self.eval_aggregate_literal_field_pointer(aggregate, fields)
+            }
             Expr::Call { name, args } => match self.call_function(name, args)? {
                 Some(ReturnValue::Pointer { pointer, .. }) => Ok(pointer),
                 Some(ReturnValue::Scalar(_)) => Err(CustError::new(format!(
@@ -9377,6 +9435,16 @@ impl Interpreter {
                 )
             }
             Expr::StructGet { name, fields } => self.struct_field_is_pointer(name, fields),
+            Expr::AggregateFieldGet { aggregate, fields } => matches!(
+                self.aggregate_literal_field_metadata(aggregate, fields),
+                Ok(Some((
+                    StructFieldType::Pointer(_)
+                        | StructFieldType::Array(_, _)
+                        | StructFieldType::StructArray(_, _),
+                    _,
+                    _
+                )))
+            ),
             Expr::StructSet { name, fields, .. } => self.struct_field_is_pointer(name, fields),
             Expr::Increment { target, .. } => self.expr_is_pointer_value(target),
             Expr::Call { name, .. } => matches!(
@@ -9845,6 +9913,31 @@ impl Interpreter {
                     | StructFieldValue::StructArray { .. }
                     | StructFieldValue::Pointer { .. } => {
                         Err(CustError::new("struct field used as scalar expression"))
+                    }
+                }
+            }
+            _ => Err(CustError::new("expected struct expression")),
+        }
+    }
+
+    fn eval_aggregate_literal_field_pointer(
+        &mut self,
+        aggregate: &Expr,
+        path: &[String],
+    ) -> CustResult<PointerValue> {
+        match self.eval_struct_expr(aggregate)? {
+            ReturnValue::Struct { type_name, fields } => {
+                let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
+                match field_value {
+                    StructFieldValue::Pointer { pointer, .. } => Ok(pointer.clone()),
+                    StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
+                        array: Rc::clone(value),
+                        source_name: None,
+                    }),
+                    StructFieldValue::Scalar { .. }
+                    | StructFieldValue::Struct { .. }
+                    | StructFieldValue::StructArray { .. } => {
+                        Err(CustError::new("struct field is not a pointer"))
                     }
                 }
             }

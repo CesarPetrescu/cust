@@ -4,12 +4,12 @@ Last updated: 2026-05-09
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-09 autonomous aggregate compound-literal field-lvalue run. This run added C-compatible scalar-field lvalue operations on aggregate compound literals for direct assignment, compound assignment, and prefix/postfix increment/decrement, including nested scalar fields and const-field rejection. Aggregate compound-literal initializers are evaluated before the lvalue operation so side effects are preserved, while the temporary remains interpreter-local. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_field_lvalues.c`, invalid fixture `tests/fixtures/invalid/aggregate_compound_literal_const_field_assignment.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_field_lvalues.c`, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-09 autonomous aggregate compound-literal pointer-field run. This run added pointer-valued field reads on aggregate compound literals, so supported pointer fields such as `((struct Cursor){values + 1}).p` now evaluate as pointer expressions in pointer declarations, calls, dereferences, pointer arithmetic, and equality/truthiness contexts while preserving pointer pointee metadata and const-discard inference. The metadata path also recognizes array-valued fields on aggregate compound literals as pointer-capable expressions through the existing array-base pointer model. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_pointer_fields.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_pointer_fields.c`, focused interpreter and compiler-oracle tests, recursion-depth regression, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
 ```bash
-cargo test --test interpreter aggregate_compound_literal -- --nocapture
+cargo test --test interpreter supports_pointer_fields_on_aggregate_compound_literals -- --nocapture
 cargo test --test c_compat -- --nocapture
 cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
 cargo fmt --check

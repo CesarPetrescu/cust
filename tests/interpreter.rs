@@ -492,6 +492,13 @@ fn supports_aggregate_compound_literal_field_lvalues() {
 }
 
 #[test]
+fn supports_pointer_fields_on_aggregate_compound_literals() {
+    let program = include_str!("fixtures/valid/aggregate_compound_literal_pointer_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 12);
+}
+
+#[test]
 fn rejects_assignment_to_const_fields_on_aggregate_compound_literals() {
     let program =
         include_str!("fixtures/invalid/aggregate_compound_literal_const_field_assignment.c",);
