@@ -4,15 +4,14 @@ Last updated: 2026-05-09
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-09 autonomous aggregate compound-literal array-field run. This run added aggregate-array field decay on aggregate compound literals, so supported fields such as `((struct Line){{{1, 2}, {3, 4}}}).points` now evaluate as `struct Point *` / `union T *` pointer expressions by installing hidden current-scope aggregate-array storage and reusing Cust's existing safe aggregate-array pointer machinery. The run also locked in const-discard diagnostics for const pointer fields and const scalar/aggregate array fields on aggregate compound literals. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_array_fields.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_array_fields.c`, invalid fixtures for aggregate compound-literal pointer/array-field const discard, focused interpreter and compiler-oracle tests, recursion-depth regression, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-09 autonomous aggregate compound-literal array-field indexing/address-of run. This run closed the next aggregate compound-literal parity gap: scalar array fields on aggregate compound literals can now be indexed directly (`((struct Packet){{1, 2, 3}}).values[1]`), their elements can be addressed and passed to pointer parameters (`&((struct Packet){{4, 5, 6}}).values[2]`), embedded aggregate-array fields can be indexed and followed by field access (`((struct Line){{{1, 2}, {3, 4}}}).points[1].y`), and aggregate-array field elements can be addressed (`&((struct Line){{{5, 6}}}).points[0]`). The parser lowers postfix indexing of aggregate compound-literal array fields through existing pointer-decay/arithmetic/dereference machinery, and pointer arithmetic now classifies literal integer offsets before pointer probing so `pointer + 0` does not look like adding a null pointer. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_array_field_indexing.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_array_field_indexing.c`, invalid const-discard fixture `tests/fixtures/invalid/aggregate_compound_literal_array_field_element_const_discard.c`, focused interpreter and compiler-oracle tests, recursion-depth regression, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
 ```bash
-cargo test --test interpreter supports_array_fields_on_aggregate_compound_literals -- --nocapture
-cargo test --test interpreter rejects_const_discard_from_array_fields_on_aggregate_compound_literals -- --nocapture
-cargo test --test interpreter aggregate_compound_literal -- --nocapture
-cargo test --test c_compat -- --nocapture
+cargo test --test interpreter supports_direct_indexing_and_address_of_array_fields_on_aggregate_compound_literals -- --nocapture
+cargo test --test interpreter rejects_const_discard_from_array_field_elements_on_aggregate_compound_literals -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
 cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
 cargo fmt --check
 cargo clippy -- -D warnings
@@ -21,7 +20,7 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-Note: an attempted focused command with two Cargo test-name filters failed because Cargo accepts only one substring filter; the correct aggregate-compound-literal substring command above was run afterward and passed.
+Note: an attempted focused command with a substring that did not match any test (`aggregate_compound_literal_array_field`) ran 0 tests; the two exact focused interpreter test names above were run afterward and passed.
 
 ## Repository
 

@@ -4307,6 +4307,11 @@ impl Parser {
                         fields,
                         index: Box::new(index),
                     },
+                    Expr::AggregateFieldGet { .. } => Expr::Deref(Box::new(Expr::Binary(
+                        Box::new(expr),
+                        BinaryOp::Add,
+                        Box::new(index),
+                    ))),
                     _ => {
                         return Err(Self::error_at(
                             "invalid array index target".to_string(),
@@ -9056,6 +9061,18 @@ impl Interpreter {
         op: BinaryOp,
         right: &Expr,
     ) -> CustResult<PointerValue> {
+        if let Expr::Number(offset) = right {
+            let pointer = self.eval_pointer(left)?;
+            return match op {
+                BinaryOp::Add => self.offset_array_pointer(&pointer, *offset),
+                BinaryOp::Sub => self.offset_array_pointer(&pointer, -*offset),
+                _ => unreachable!("only pointer add/sub reach pointer arithmetic"),
+            };
+        }
+        if let (BinaryOp::Add, Expr::Number(offset)) = (op, left) {
+            let pointer = self.eval_pointer(right)?;
+            return self.offset_array_pointer(&pointer, *offset);
+        }
         match (self.eval_pointer(left), self.eval_pointer(right)) {
             (Ok(pointer), Err(_)) => {
                 let offset = self.eval(right)?;

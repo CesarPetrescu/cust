@@ -506,6 +506,13 @@ fn supports_array_fields_on_aggregate_compound_literals() {
 }
 
 #[test]
+fn supports_direct_indexing_and_address_of_array_fields_on_aggregate_compound_literals() {
+    let program = include_str!("fixtures/valid/aggregate_compound_literal_array_field_indexing.c");
+
+    assert_eq!(interpret(program).unwrap(), 42);
+}
+
+#[test]
 fn rejects_assignment_to_const_fields_on_aggregate_compound_literals() {
     let program =
         include_str!("fixtures/invalid/aggregate_compound_literal_const_field_assignment.c",);
@@ -533,6 +540,19 @@ fn rejects_const_discard_from_pointer_fields_on_aggregate_compound_literals() {
 fn rejects_const_discard_from_array_fields_on_aggregate_compound_literals() {
     let program =
         include_str!("fixtures/invalid/aggregate_compound_literal_array_field_const_discard.c",);
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_const_discard_from_array_field_elements_on_aggregate_compound_literals() {
+    let program = include_str!(
+        "fixtures/invalid/aggregate_compound_literal_array_field_element_const_discard.c",
+    );
 
     let err = interpret(program).unwrap_err();
     assert_eq!(
