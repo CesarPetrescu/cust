@@ -86,6 +86,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Nested scalar array-field decay and `&field[index]` parity through nested struct fields; acceptance: `one.inner.values`, `boxes[i].inner.values`, and `ptr->inner.values` decay to existing scalar pointer/array parameter paths, matching `&...values[j]` forms create aliasing array-element pointers, const root structs and const struct arrays preserve pointer-to-const conversion diagnostics, and interpreter plus C compiler-oracle fixtures cover the subset.
 
 - [x] Address-of dereference pointer identity expressions for the supported one-level pointer subset; acceptance: `&*p`, `&*(values + 1)`, and `&*null_ptr` preserve the underlying interpreter-owned pointer metadata without dereferencing the pointee, work in pointer declarations/parameters, and include interpreter plus C compiler-oracle coverage for warning-free non-null native cases.
+- [x] Aggregate-array fields inside supported structs; acceptance: `struct Line { struct Point points[2]; };` stores zero/default initialized embedded struct-array elements, recursively brace-initializes positional/designated element fields, supports scalar field reads and lvalue assignment/compound assignment through `line.points[i].field`, preserves deep-copy/by-value isolation for containing structs, and includes interpreter plus compiler-oracle fixtures without native struct layout assumptions.
 
 ## P2 — data types
 

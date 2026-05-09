@@ -119,6 +119,13 @@ fn supports_struct_char_array_fields_initialized_from_string_literals() {
 }
 
 #[test]
+fn supports_struct_aggregate_array_fields() {
+    let program = include_str!("fixtures/valid/struct_aggregate_array_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 25);
+}
+
+#[test]
 fn reports_char_array_string_initializer_too_long() {
     let program = include_str!("fixtures/invalid/char_array_string_initializer_too_long.c");
 
