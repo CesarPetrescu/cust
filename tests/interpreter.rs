@@ -542,6 +542,13 @@ fn supports_field_access_on_union_valued_expressions() {
 }
 
 #[test]
+fn supports_sizeof_fields_on_aggregate_valued_expressions() {
+    let program = include_str!("fixtures/valid/sizeof_aggregate_expression_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 28);
+}
+
+#[test]
 fn rejects_union_function_used_as_scalar_expression() {
     let program = include_str!("fixtures/invalid/union_function_used_as_scalar.c");
 

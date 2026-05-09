@@ -10181,10 +10181,8 @@ impl Interpreter {
             | Expr::AggregateFieldCompoundSet {
                 aggregate, fields, ..
             } => {
-                let Expr::AggregateLiteral { type_name, .. } = aggregate.as_ref() else {
-                    return Err(CustError::new("expected struct expression"));
-                };
-                self.sizeof_aggregate_field_type(type_name, fields)
+                let type_name = self.aggregate_expr_type_name(aggregate)?;
+                self.sizeof_aggregate_field_type(&type_name, fields)
             }
             Expr::Call { name, .. } => match self.functions.get(name) {
                 Some(function) => function
@@ -10203,6 +10201,101 @@ impl Interpreter {
             | Expr::Comma(_, _)
             | Expr::Binary(_, _, _) => Ok(INT_SIZE),
         }
+    }
+
+    fn aggregate_expr_type_name(&self, expr: &Expr) -> CustResult<String> {
+        match expr {
+            Expr::AggregateLiteral { type_name, .. } => Ok(type_name.clone()),
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                let type_name = self.aggregate_expr_type_name(aggregate)?;
+                self.aggregate_field_type_name(&type_name, fields)
+            }
+            Expr::Var(name) | Expr::Assign { name, .. } => match self.find_variable(name) {
+                Some(Value::Struct { type_name, .. }) => Ok(type_name.clone()),
+                Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            Expr::StructGet { name, fields } => match self.find_variable(name) {
+                Some(Value::Struct { type_name, .. }) => {
+                    self.aggregate_field_type_name(type_name, fields)
+                }
+                Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            Expr::ArrayGet { name, .. } => match self.find_variable(name) {
+                Some(Value::StructArray { type_name, .. }) => Ok(type_name.clone()),
+                Some(Value::Pointer {
+                    ty: PointeeType::Struct(type_name),
+                    ..
+                }) => Ok(type_name.clone()),
+                _ => Err(CustError::new("expected struct expression")),
+            },
+            Expr::Deref(pointer) | Expr::DerefSet { pointer, .. } => {
+                match self.pointer_expr_pointee_type(pointer)? {
+                    Some(PointeeType::Struct(type_name)) => Ok(type_name),
+                    _ => Err(CustError::new("expected struct expression")),
+                }
+            }
+            Expr::Call { name, .. } => match self.functions.get(name) {
+                Some(function) => match &function.return_type {
+                    ReturnType::Struct(type_name) => Ok(type_name.clone()),
+                    ReturnType::Scalar(_) => Err(CustError::new(format!(
+                        "scalar function '{name}' used as struct expression"
+                    ))),
+                    ReturnType::Pointer { .. } => Err(CustError::new(format!(
+                        "pointer function '{name}' used as struct expression"
+                    ))),
+                    ReturnType::Void => Err(CustError::new(format!(
+                        "void function '{name}' used as struct expression"
+                    ))),
+                },
+                None => Err(CustError::new(format!("undefined function '{name}'"))),
+            },
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let then_type = self.aggregate_expr_type_name(then_expr)?;
+                let else_type = self.aggregate_expr_type_name(else_expr)?;
+                if then_type == else_type {
+                    Ok(then_type)
+                } else {
+                    Err(CustError::new(format!(
+                        "conditional branches have mismatched aggregate types: {} vs {}",
+                        self.aggregate_label(&then_type),
+                        self.aggregate_label(&else_type)
+                    )))
+                }
+            }
+            Expr::Comma(_, right) => self.aggregate_expr_type_name(right),
+            _ => Err(CustError::new("expected struct expression")),
+        }
+    }
+
+    fn aggregate_field_type_name(&self, type_name: &str, path: &[String]) -> CustResult<String> {
+        let mut current_type_name = type_name.to_string();
+        for (index, field_name) in path.iter().enumerate() {
+            let struct_type = self.struct_types.get(&current_type_name).ok_or_else(|| {
+                CustError::new(format!("undefined struct type '{current_type_name}'"))
+            })?;
+            let field = struct_type
+                .fields
+                .iter()
+                .find(|field| field.name == *field_name)
+                .ok_or_else(|| {
+                    CustError::new(format!(
+                        "struct '{current_type_name}' has no field '{field_name}'"
+                    ))
+                })?;
+            let is_last = index + 1 == path.len();
+            match &field.ty {
+                StructFieldType::Struct(nested_type) if is_last => return Ok(nested_type.clone()),
+                StructFieldType::Struct(nested_type) => current_type_name = nested_type.clone(),
+                _ => return Err(CustError::new("expected struct expression")),
+            }
+        }
+        Ok(current_type_name)
     }
 
     fn sizeof_aggregate_field_type(&self, type_name: &str, path: &[String]) -> CustResult<i64> {

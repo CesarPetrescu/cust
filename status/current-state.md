@@ -4,7 +4,21 @@ Last updated: 2026-05-09
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-09 autonomous scalar-context diagnostic run. This run closed a concrete diagnostics polish gap from the open parser/error-message track: pointer-returning calls used where a scalar is required now report the function-specific `pointer function '<name>' used as scalar expression`, and union compound literal values used as scalars now report `union value used as scalar` instead of the struct-specific fallback. Coverage includes invalid fixtures `tests/fixtures/invalid/pointer_function_used_as_scalar.c` and `tests/fixtures/invalid/union_value_used_as_scalar.c`, focused interpreter tests, the full local verification gate, and required Docker verification. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-09 autonomous `sizeof` aggregate-expression field run. This run closed a concrete aggregate/non-evaluating-context parity gap: `sizeof` can now query fields selected from aggregate-valued expressions such as aggregate assignment results, aggregate-valued conditionals/comma expressions, aggregate-returning calls, and matching union-valued expression results without evaluating assignments, comma-left operands, or function calls inside the `sizeof` operand. Coverage includes `tests/fixtures/valid/sizeof_aggregate_expression_fields.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/sizeof_aggregate_expression_fields.c`, focused interpreter and C compiler-oracle tests, the full local verification gate, and required Docker verification. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_sizeof_fields_on_aggregate_valued_expressions -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-09 autonomous scalar-context diagnostic run. This run closed a concrete diagnostics polish gap from the open parser/error-message track: pointer-returning calls used where a scalar is required now report the function-specific `pointer function '<name>' used as scalar expression`, and union compound literal values used as scalars now report `union value used as scalar` instead of the struct-specific fallback. Coverage includes invalid fixtures `tests/fixtures/invalid/pointer_function_used_as_scalar.c` and `tests/fixtures/invalid/union_value_used_as_scalar.c`, focused interpreter tests, the full local verification gate, and required Docker verification. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
