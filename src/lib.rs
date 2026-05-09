@@ -4394,7 +4394,12 @@ impl Parser {
                         }),
                         fields: vec![field],
                     },
-                    Expr::AggregateLiteral { .. } => Expr::AggregateFieldGet {
+                    Expr::AggregateLiteral { .. }
+                    | Expr::Assign { .. }
+                    | Expr::DerefSet { .. }
+                    | Expr::Conditional { .. }
+                    | Expr::Comma(_, _)
+                    | Expr::Call { .. } => Expr::AggregateFieldGet {
                         aggregate: Box::new(expr),
                         fields: vec![field],
                     },

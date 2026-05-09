@@ -513,6 +513,28 @@ fn supports_direct_indexing_and_address_of_array_fields_on_aggregate_compound_li
 }
 
 #[test]
+fn supports_lvalue_writes_to_array_fields_on_aggregate_compound_literals() {
+    let program = include_str!("fixtures/valid/aggregate_compound_literal_array_field_lvalues.c");
+
+    assert_eq!(interpret(program).unwrap(), 39);
+}
+
+#[test]
+fn supports_lvalue_writes_to_aggregate_array_fields_on_aggregate_compound_literals() {
+    let program =
+        include_str!("fixtures/valid/aggregate_compound_literal_aggregate_array_field_lvalues.c");
+
+    assert_eq!(interpret(program).unwrap(), 55);
+}
+
+#[test]
+fn supports_field_access_on_aggregate_valued_expressions() {
+    let program = include_str!("fixtures/valid/aggregate_expr_field_access.c");
+
+    assert_eq!(interpret(program).unwrap(), 31);
+}
+
+#[test]
 fn rejects_assignment_to_const_fields_on_aggregate_compound_literals() {
     let program =
         include_str!("fixtures/invalid/aggregate_compound_literal_const_field_assignment.c",);
