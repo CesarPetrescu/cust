@@ -5942,6 +5942,16 @@ impl Interpreter {
                 self.pointer_variable_points_to_const(name)
                     || self.pointer_expr_points_to_const(value)
             }
+            Expr::Call { name, .. } => self
+                .functions
+                .get(name)
+                .and_then(|function| match function.return_type {
+                    ReturnType::Pointer {
+                        points_to_const, ..
+                    } => Some(points_to_const),
+                    _ => None,
+                })
+                .unwrap_or(false),
             Expr::StructSet {
                 name,
                 fields,

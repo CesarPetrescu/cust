@@ -791,6 +791,18 @@ fn rejects_pointer_return_const_discard() {
 }
 
 #[test]
+fn rejects_const_pointer_returning_call_to_mutable_pointer() {
+    let program = include_str!("fixtures/invalid/pointer_return_call_const_discard.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
 fn rejects_const_aggregate_array_decay_to_mutable_pointer() {
     let program = include_str!("fixtures/invalid/const_aggregate_array_decay_discard.c");
 

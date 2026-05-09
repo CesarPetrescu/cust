@@ -4,7 +4,23 @@ Last updated: 2026-05-09
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-09 autonomous `sizeof` aggregate-expression array-field run. This run closed a non-evaluating-context aggregate parity gap: `sizeof` now reports full array-object sizes for scalar and embedded aggregate-array fields selected from aggregate-valued expression results, including aggregate-returning calls, aggregate assignment results, aggregate-valued conditionals, and nested aggregate field paths such as `sizeof(make_box(40).line.points)`, without evaluating calls, assignments, or unselected branches inside the operand. Coverage includes `tests/fixtures/valid/sizeof_aggregate_expression_array_fields.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/sizeof_aggregate_expression_array_fields.c`, focused interpreter and C compiler-oracle tests, the full local verification gate, and required Docker verification. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-09 autonomous const pointer-returning call conversion run. This run closed a pointer const-correctness gap: pointer-returning function calls with `const T *` return types now carry their declared pointee-const metadata through pointer conversion checks, so binding a `const int *` returning call directly to `int *` reports `cannot discard const qualifier from pointer target` instead of silently allowing a mutable view. Coverage includes invalid fixture `tests/fixtures/invalid/pointer_return_call_const_discard.c`, focused RED/GREEN interpreter tests, the full local verification gate, and required Docker verification. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter rejects_const_pointer_returning_call_to_mutable_pointer -- --nocapture
+cargo test --test interpreter rejects_pointer_return_const_discard -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-09 autonomous `sizeof` aggregate-expression array-field run. This run closed a non-evaluating-context aggregate parity gap: `sizeof` now reports full array-object sizes for scalar and embedded aggregate-array fields selected from aggregate-valued expression results, including aggregate-returning calls, aggregate assignment results, aggregate-valued conditionals, and nested aggregate field paths such as `sizeof(make_box(40).line.points)`, without evaluating calls, assignments, or unselected branches inside the operand. Coverage includes `tests/fixtures/valid/sizeof_aggregate_expression_array_fields.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/sizeof_aggregate_expression_array_fields.c`, focused interpreter and C compiler-oracle tests, the full local verification gate, and required Docker verification. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
