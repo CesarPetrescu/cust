@@ -10331,6 +10331,17 @@ impl Interpreter {
                 }
                 StructFieldType::Struct(nested_type) => current_type_name = nested_type.clone(),
                 StructFieldType::Pointer(_) if is_last => return Ok(POINTER_SIZE),
+                StructFieldType::StructArray(element_type, len) if is_last => {
+                    let element_size = self
+                        .struct_types
+                        .get(element_type)
+                        .map(|struct_type| struct_type.size(&self.struct_types))
+                        .transpose()?
+                        .ok_or_else(|| {
+                            CustError::new(format!("undefined struct type '{element_type}'"))
+                        })?;
+                    return Ok(element_size * *len as i64);
+                }
                 _ => return Err(CustError::new("expected struct expression")),
             }
         }

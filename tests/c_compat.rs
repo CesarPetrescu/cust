@@ -30,6 +30,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/aggregate_expr_field_access.c",
     "tests/fixtures/compat/valid/union_expr_field_access.c",
     "tests/fixtures/compat/valid/sizeof_aggregate_expression_fields.c",
+    "tests/fixtures/compat/valid/sizeof_aggregate_expression_array_fields.c",
     "tests/fixtures/compat/valid/aggregate_pointer_arithmetic.c",
     "tests/fixtures/compat/valid/aggregate_pointer_indexing.c",
     "tests/fixtures/compat/valid/aggregate_pointer_indexed_values.c",
