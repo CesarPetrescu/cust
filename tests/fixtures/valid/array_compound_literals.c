@@ -20,5 +20,8 @@ int main(void) {
     char *letters = (char[]){'a', 'b', 0};
     total += first_char(letters) - 196;
 
+    char *word = (char[]){"cat"};
+    total += first_char(word) - 313;
+
     return total;
 }

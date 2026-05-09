@@ -81,6 +81,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/static_local_storage.c",
     "tests/fixtures/compat/valid/struct_aggregate_array_field_decay.c",
     "tests/fixtures/compat/valid/struct_pointer_aggregate_array_field_decay.c",
+    "tests/fixtures/compat/valid/nested_aggregate_array_field_decay.c",
     "tests/fixtures/compat/valid/struct_array_field_decay.c",
     "tests/fixtures/compat/valid/struct_pointer_array_field_decay.c",
     "tests/fixtures/compat/valid/nested_struct_array_field_decay.c",

@@ -163,6 +163,24 @@ fn rejects_struct_pointer_aggregate_array_field_decay_that_discards_const() {
 }
 
 #[test]
+fn supports_nested_aggregate_array_field_decay_and_address_of() {
+    let program = include_str!("fixtures/valid/nested_aggregate_array_field_decay.c");
+
+    assert_eq!(interpret(program).unwrap(), 81);
+}
+
+#[test]
+fn rejects_nested_aggregate_array_field_decay_that_discards_const() {
+    let program = include_str!("fixtures/invalid/nested_aggregate_array_field_const_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
 fn reports_char_array_string_initializer_too_long() {
     let program = include_str!("fixtures/invalid/char_array_string_initializer_too_long.c");
 
@@ -325,6 +343,17 @@ fn rejects_array_compound_literals_longer_than_declared_length() {
     assert_eq!(
         err.to_string(),
         "too many initializers for array compound literal"
+    );
+}
+
+#[test]
+fn rejects_array_compound_literal_string_initializers_that_are_too_long() {
+    let program = include_str!("fixtures/invalid/array_compound_literal_string_too_long.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "initializer string for char array compound literal is too long"
     );
 }
 

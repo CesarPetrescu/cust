@@ -2512,6 +2512,7 @@ impl Parser {
     fn parse_array_compound_initializer(
         &mut self,
         len: Option<usize>,
+        elem_type: CType,
     ) -> CustResult<Vec<ArrayInitializer>> {
         self.expect_opening_brace_after("array compound literal initializer")?;
         let mut values = Vec::new();
@@ -2530,6 +2531,24 @@ impl Parser {
                 let value = self.parse_scalar_initializer_expr("array compound literal element")?;
                 next_positional_index = index + 1;
                 values.push(ArrayInitializer::Designated { index, value });
+            } else if let Token::StringLiteral(string_values) = self.peek().clone() {
+                self.advance();
+                if elem_type != CType::Char {
+                    return Err(CustError::new(
+                        "string literal initializer requires char array compound literal",
+                    ));
+                }
+                let too_long = len.is_some_and(|len| {
+                    string_values.len() > len
+                        && !(string_values.len() == len + 1 && string_values.last() == Some(&0))
+                });
+                if too_long {
+                    return Err(CustError::new(
+                        "initializer string for char array compound literal is too long",
+                    ));
+                }
+                next_positional_index = string_values.len();
+                values.push(ArrayInitializer::StringLiteral(string_values));
             } else {
                 if matches!(len, Some(len) if next_positional_index == len) {
                     return Err(CustError::new(
@@ -4063,7 +4082,7 @@ impl Parser {
             return Ok(Expr::ArrayLiteral {
                 elem_type: ty,
                 len,
-                init: self.parse_array_compound_initializer(len)?,
+                init: self.parse_array_compound_initializer(len, ty)?,
             });
         }
         self.expect_closing_paren_after("cast type")?;
