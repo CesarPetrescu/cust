@@ -85,6 +85,8 @@ Prioritized backlog for autonomous implementation.
 - [x] Arrow (`->`) scalar array-field decay/index/address-of parity for struct pointers; acceptance: `slot->values` and `slot->label` decay to existing scalar pointer/array parameter paths, `slot->values[i]` reads/writes embedded array elements, `&slot->values[i]` creates aliasing array-element pointers, const struct-pointer views reject mutable pointer decay, and interpreter plus C compiler-oracle fixtures cover the supported subset.
 - [x] Nested scalar array-field decay and `&field[index]` parity through nested struct fields; acceptance: `one.inner.values`, `boxes[i].inner.values`, and `ptr->inner.values` decay to existing scalar pointer/array parameter paths, matching `&...values[j]` forms create aliasing array-element pointers, const root structs and const struct arrays preserve pointer-to-const conversion diagnostics, and interpreter plus C compiler-oracle fixtures cover the subset.
 
+- [x] Address-of dereference pointer identity expressions for the supported one-level pointer subset; acceptance: `&*p`, `&*(values + 1)`, and `&*null_ptr` preserve the underlying interpreter-owned pointer metadata without dereferencing the pointee, work in pointer declarations/parameters, and include interpreter plus C compiler-oracle coverage for warning-free non-null native cases.
+
 ## P2 — data types
 
 - [x] `char` literals, declarations, and function parameters

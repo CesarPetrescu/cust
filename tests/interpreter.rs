@@ -105,6 +105,13 @@ fn supports_char_arrays_initialized_from_string_literals() {
 }
 
 #[test]
+fn supports_address_of_dereference_as_pointer_identity() {
+    let program = include_str!("fixtures/valid/address_of_dereference.c");
+
+    assert_eq!(interpret(program).unwrap(), 31);
+}
+
+#[test]
 fn supports_struct_char_array_fields_initialized_from_string_literals() {
     let program = include_str!("fixtures/valid/struct_char_array_string_initializers.c");
 
