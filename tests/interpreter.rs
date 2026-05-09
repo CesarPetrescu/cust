@@ -126,6 +126,24 @@ fn supports_struct_aggregate_array_fields() {
 }
 
 #[test]
+fn supports_struct_aggregate_array_field_decay_and_address_of() {
+    let program = include_str!("fixtures/valid/struct_aggregate_array_field_decay.c");
+
+    assert_eq!(interpret(program).unwrap(), 71);
+}
+
+#[test]
+fn rejects_struct_aggregate_array_field_decay_that_discards_const() {
+    let program = include_str!("fixtures/invalid/struct_aggregate_array_field_const_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
 fn reports_char_array_string_initializer_too_long() {
     let program = include_str!("fixtures/invalid/char_array_string_initializer_too_long.c");
 

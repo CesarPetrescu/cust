@@ -5091,6 +5091,13 @@ enum PointerValue {
         name: String,
         index: usize,
     },
+    StructFieldElement {
+        scope_id: usize,
+        name: String,
+        element_index: Option<usize>,
+        fields: Vec<String>,
+        index: usize,
+    },
     StructField {
         scope_id: usize,
         name: String,
@@ -5597,7 +5604,9 @@ impl Interpreter {
                         Ok(Some(PointeeType::Struct(type_name.clone())))
                     }
                     (_, StructFieldValue::Pointer { ty, .. }) => Ok(Some(ty.clone())),
-                    (_, StructFieldValue::StructArray { .. }) => Ok(None),
+                    (_, StructFieldValue::StructArray { type_name, .. }) => {
+                        Ok(Some(PointeeType::Struct(type_name.clone())))
+                    }
                 },
                 _ => Ok(None),
             },
@@ -5623,7 +5632,9 @@ impl Interpreter {
                                 Ok(Some(PointeeType::Struct(type_name.clone())))
                             }
                             (_, StructFieldValue::Pointer { ty, .. }) => Ok(Some(ty.clone())),
-                            (_, StructFieldValue::StructArray { .. }) => Ok(None),
+                            (_, StructFieldValue::StructArray { type_name, .. }) => {
+                                Ok(Some(PointeeType::Struct(type_name.clone())))
+                            }
                         }
                     }
                     _ => Ok(None),
@@ -5885,6 +5896,18 @@ impl Interpreter {
                     ))),
                 }
             }
+            PointerValue::StructFieldElement {
+                scope_id,
+                name,
+                element_index,
+                fields,
+                ..
+            } => match self.struct_field_by_scope(*scope_id, name, *element_index, fields)? {
+                StructFieldValue::StructArray { type_name, .. } => {
+                    Ok(Some(PointeeType::Struct(type_name.clone())))
+                }
+                _ => Ok(None),
+            },
             PointerValue::StructField {
                 scope_id,
                 name,
@@ -5899,7 +5922,9 @@ impl Interpreter {
                     Ok(Some(PointeeType::Struct(type_name.clone())))
                 }
                 StructFieldValue::Pointer { ty, .. } => Ok(Some(ty.clone())),
-                StructFieldValue::StructArray { .. } => Ok(None),
+                StructFieldValue::StructArray { type_name, .. } => {
+                    Ok(Some(PointeeType::Struct(type_name.clone())))
+                }
             },
         }
     }
@@ -7157,6 +7182,23 @@ impl Interpreter {
         fields: &[String],
         index: &Expr,
     ) -> CustResult<PointerValue> {
+        if self
+            .direct_struct_aggregate_array_field_type(name, fields)?
+            .is_some()
+        {
+            let index =
+                self.checked_struct_aggregate_array_field_index(name, None, fields, index)?;
+            let scope_id = self
+                .find_variable_scope_id(name)
+                .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
+            return Ok(PointerValue::StructFieldElement {
+                scope_id,
+                name: name.to_string(),
+                element_index: None,
+                fields: fields.to_vec(),
+                index,
+            });
+        }
         let (array, index) = self.checked_struct_array_index(name, fields, index)?;
         Ok(PointerValue::ArrayElement {
             array,
@@ -7170,6 +7212,21 @@ impl Interpreter {
         name: &str,
         fields: &[String],
     ) -> CustResult<PointerValue> {
+        if self
+            .direct_struct_aggregate_array_field_type(name, fields)?
+            .is_some()
+        {
+            let scope_id = self
+                .find_variable_scope_id(name)
+                .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
+            return Ok(PointerValue::StructFieldElement {
+                scope_id,
+                name: name.to_string(),
+                element_index: None,
+                fields: fields.to_vec(),
+                index: 0,
+            });
+        }
         let array = self.find_struct_array_field(name, fields)?;
         Ok(PointerValue::ArrayBase {
             array,
@@ -7204,6 +7261,152 @@ impl Interpreter {
             array,
             source_name: Some(Self::field_path_label(fields).to_string()),
         })
+    }
+
+    fn direct_struct_aggregate_array_field_type(
+        &self,
+        name: &str,
+        fields: &[String],
+    ) -> CustResult<Option<String>> {
+        let Some(scope_id) = self.find_variable_scope_id(name) else {
+            return Err(CustError::new(format!("undefined variable '{name}'")));
+        };
+        match self.struct_field_by_scope(scope_id, name, None, fields)? {
+            StructFieldValue::StructArray { type_name, .. } => Ok(Some(type_name.clone())),
+            _ => Ok(None),
+        }
+    }
+
+    fn checked_struct_aggregate_array_field_index(
+        &mut self,
+        name: &str,
+        element_index: Option<usize>,
+        fields: &[String],
+        index: &Expr,
+    ) -> CustResult<usize> {
+        let scope_id = self
+            .find_variable_scope_id(name)
+            .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
+        let index_value = self.eval(index)?;
+        let len = match self.struct_field_by_scope(scope_id, name, element_index, fields)? {
+            StructFieldValue::StructArray { elements, .. } => elements.len(),
+            _ => {
+                return Err(CustError::new(format!(
+                    "struct field '{}' is not a struct array",
+                    Self::field_path_label(fields)
+                )));
+            }
+        };
+        let Ok(index) = usize::try_from(index_value) else {
+            return Err(CustError::new(format!(
+                "struct array field '{}' index {index_value} out of bounds for length {len}",
+                Self::field_path_label(fields)
+            )));
+        };
+        if index >= len {
+            return Err(CustError::new(format!(
+                "struct array field '{}' index {index_value} out of bounds for length {len}",
+                Self::field_path_label(fields)
+            )));
+        }
+        Ok(index)
+    }
+
+    fn struct_field_array_pointer_at(
+        &self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        fields: &[String],
+        index: i64,
+    ) -> CustResult<PointerValue> {
+        let field_value = self.struct_field_by_scope(scope_id, name, element_index, fields)?;
+        let len = match field_value {
+            StructFieldValue::StructArray { elements, .. } => elements.len(),
+            _ => {
+                return Err(CustError::new(format!(
+                    "struct field '{}' is not a struct array",
+                    Self::field_path_label(fields)
+                )));
+            }
+        };
+        let Ok(index_usize) = usize::try_from(index) else {
+            return Err(CustError::new(format!(
+                "struct array field pointer index {index} out of bounds for length {len}"
+            )));
+        };
+        if index_usize >= len {
+            return Err(CustError::new(format!(
+                "struct array field pointer index {index} out of bounds for length {len}"
+            )));
+        }
+        Ok(PointerValue::StructFieldElement {
+            scope_id,
+            name: name.to_string(),
+            element_index,
+            fields: fields.to_vec(),
+            index: index_usize,
+        })
+    }
+
+    fn struct_field_array_element_fields(
+        &self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        fields: &[String],
+        index: usize,
+    ) -> CustResult<(String, &HashMap<String, StructFieldValue>)> {
+        match self.struct_field_by_scope(scope_id, name, element_index, fields)? {
+            StructFieldValue::StructArray {
+                type_name,
+                elements,
+                ..
+            } => elements
+                .get(index)
+                .map(|element| (type_name.clone(), element))
+                .ok_or_else(|| {
+                    CustError::new(format!(
+                        "struct array field pointer index {index} out of bounds for length {}",
+                        elements.len()
+                    ))
+                }),
+            _ => Err(CustError::new(format!(
+                "struct field '{}' is not a struct array",
+                Self::field_path_label(fields)
+            ))),
+        }
+    }
+
+    fn struct_field_array_element_fields_mut(
+        &mut self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        fields: &[String],
+        index: usize,
+    ) -> CustResult<(String, &mut HashMap<String, StructFieldValue>)> {
+        match self.struct_field_by_scope_mut(scope_id, name, element_index, fields)? {
+            StructFieldValue::StructArray {
+                type_name,
+                elements,
+                ..
+            } => {
+                let len = elements.len();
+                elements
+                    .get_mut(index)
+                    .map(|element| (type_name.clone(), element))
+                    .ok_or_else(|| {
+                        CustError::new(format!(
+                            "struct array field pointer index {index} out of bounds for length {len}"
+                        ))
+                    })
+            }
+            _ => Err(CustError::new(format!(
+                "struct field '{}' is not a struct array",
+                Self::field_path_label(fields)
+            ))),
+        }
     }
 
     fn find_struct_pointer_array_field(
@@ -7320,7 +7523,9 @@ impl Interpreter {
         let index_value = self.eval(index)?;
         let pointer = self.offset_array_pointer(&pointer, index_value)?;
         match pointer {
-            PointerValue::StructElement { .. } => Ok(Some(pointer)),
+            PointerValue::StructElement { .. } | PointerValue::StructFieldElement { .. } => {
+                Ok(Some(pointer))
+            }
             _ => Err(CustError::new("struct pointer is not indexable")),
         }
     }
@@ -7848,6 +8053,19 @@ impl Interpreter {
                     ))),
                 }
             }
+            PointerValue::StructFieldElement {
+                scope_id,
+                name,
+                element_index,
+                fields,
+                index,
+            } => self.struct_field_array_element_fields(
+                *scope_id,
+                name,
+                *element_index,
+                fields,
+                *index,
+            ),
             PointerValue::StructField { .. } => {
                 Err(CustError::new("pointer does not reference a struct"))
             }
@@ -7917,6 +8135,19 @@ impl Interpreter {
                     ))),
                 }
             }
+            PointerValue::StructFieldElement {
+                scope_id,
+                name,
+                element_index,
+                fields,
+                index,
+            } => self.struct_field_array_element_fields_mut(
+                *scope_id,
+                name,
+                *element_index,
+                fields,
+                *index,
+            ),
             PointerValue::StructField { .. } => {
                 Err(CustError::new("pointer does not reference a struct"))
             }
@@ -8632,6 +8863,19 @@ impl Interpreter {
                 name,
                 index,
             } => self.struct_array_pointer_at(*scope_id, name, *index as i64 + offset),
+            PointerValue::StructFieldElement {
+                scope_id,
+                name,
+                element_index,
+                fields,
+                index,
+            } => self.struct_field_array_pointer_at(
+                *scope_id,
+                name,
+                *element_index,
+                fields,
+                *index as i64 + offset,
+            ),
             PointerValue::ArrayBase { array, source_name } => {
                 self.array_pointer_at(array, source_name.clone(), offset)
             }
@@ -8731,7 +8975,9 @@ impl Interpreter {
                     ))),
                 }
             }
-            PointerValue::Struct { .. } | PointerValue::StructElement { .. } => {
+            PointerValue::Struct { .. }
+            | PointerValue::StructElement { .. }
+            | PointerValue::StructFieldElement { .. } => {
                 Err(CustError::new("struct pointer used as scalar"))
             }
             PointerValue::StructField {
@@ -8799,7 +9045,9 @@ impl Interpreter {
             PointerValue::ArrayBase { .. } | PointerValue::ArrayElement { .. } => {
                 self.assign_pointer_index(pointer, 0, value)
             }
-            PointerValue::Struct { .. } | PointerValue::StructElement { .. } => {
+            PointerValue::Struct { .. }
+            | PointerValue::StructElement { .. }
+            | PointerValue::StructFieldElement { .. } => {
                 Err(CustError::new("struct pointer used as scalar"))
             }
             PointerValue::StructField {
@@ -8847,7 +9095,9 @@ impl Interpreter {
             PointerValue::Scalar { .. } | PointerValue::StructField { .. } => {
                 Err(CustError::new("scalar pointer is not indexable"))
             }
-            PointerValue::Struct { .. } | PointerValue::StructElement { .. } => {
+            PointerValue::Struct { .. }
+            | PointerValue::StructElement { .. }
+            | PointerValue::StructFieldElement { .. } => {
                 Err(CustError::new("struct pointer is not indexable"))
             }
             PointerValue::ArrayBase { array, source_name } => {
@@ -9095,6 +9345,7 @@ impl Interpreter {
             PointerValue::Scalar { .. }
             | PointerValue::Struct { .. }
             | PointerValue::StructElement { .. }
+            | PointerValue::StructFieldElement { .. }
             | PointerValue::StructField { .. } => {
                 Err(CustError::new("scalar pointer arithmetic is not supported"))
             }
