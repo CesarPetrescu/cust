@@ -11614,9 +11614,9 @@ impl Interpreter {
             }
             Expr::Call { name, args } => match self.call_function(name, args)? {
                 Some(ReturnValue::Scalar(value)) => Ok(value),
-                Some(ReturnValue::Pointer { .. }) => {
-                    Err(CustError::new("pointer value used as scalar"))
-                }
+                Some(ReturnValue::Pointer { .. }) => Err(CustError::new(format!(
+                    "pointer function '{name}' used as scalar expression"
+                ))),
                 Some(ReturnValue::Struct { type_name, .. }) => {
                     let aggregate_kind = self.aggregate_kind_label(&type_name);
                     Err(CustError::new(format!(
@@ -11629,7 +11629,12 @@ impl Interpreter {
             },
             Expr::Cast { expr, .. } => self.eval(expr),
             Expr::ScalarLiteral { init, .. } => self.eval(init),
-            Expr::AggregateLiteral { .. } => Err(CustError::new("struct value used as scalar")),
+            Expr::AggregateLiteral { type_name, .. } => {
+                let aggregate_kind = self.aggregate_kind_label(type_name);
+                Err(CustError::new(format!(
+                    "{aggregate_kind} value used as scalar"
+                )))
+            }
             Expr::AggregateFieldGet {
                 aggregate,
                 fields: path,

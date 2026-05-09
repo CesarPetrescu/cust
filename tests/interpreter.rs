@@ -553,6 +553,25 @@ fn rejects_union_function_used_as_scalar_expression() {
 }
 
 #[test]
+fn rejects_pointer_function_used_as_scalar_expression() {
+    let program = include_str!("fixtures/invalid/pointer_function_used_as_scalar.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "pointer function 'choose' used as scalar expression"
+    );
+}
+
+#[test]
+fn rejects_union_values_used_as_scalar_expressions() {
+    let program = include_str!("fixtures/invalid/union_value_used_as_scalar.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "union value used as scalar");
+}
+
+#[test]
 fn rejects_assignment_to_const_fields_on_aggregate_compound_literals() {
     let program =
         include_str!("fixtures/invalid/aggregate_compound_literal_const_field_assignment.c",);

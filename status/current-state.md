@@ -4,7 +4,21 @@ Last updated: 2026-05-09
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-09 autonomous union-valued expression field-access run. This run closed the next aggregate expression parity gap by adding direct coverage for `.` field access after union-valued expression results: union compound literals, union assignment expressions, union-valued conditional/comma expressions, union-returning calls, and aggregate pointer-dereference assignment results such as `((*(&left) = make_number(6))).value`. It also fixed a union diagnostic wording gap so naked union-returning calls used as scalar expressions now report `union function 'make_number' used as scalar expression` instead of the previous struct-specific wording. Coverage includes `tests/fixtures/valid/union_expr_field_access.c`, invalid diagnostic fixture `tests/fixtures/invalid/union_function_used_as_scalar.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/union_expr_field_access.c`, focused interpreter tests, the C compiler-oracle suite, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-09 autonomous scalar-context diagnostic run. This run closed a concrete diagnostics polish gap from the open parser/error-message track: pointer-returning calls used where a scalar is required now report the function-specific `pointer function '<name>' used as scalar expression`, and union compound literal values used as scalars now report `union value used as scalar` instead of the struct-specific fallback. Coverage includes invalid fixtures `tests/fixtures/invalid/pointer_function_used_as_scalar.c` and `tests/fixtures/invalid/union_value_used_as_scalar.c`, focused interpreter tests, the full local verification gate, and required Docker verification. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter rejects_pointer_function_used_as_scalar_expression -- --nocapture
+cargo test --test interpreter rejects_union_values_used_as_scalar_expressions -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-09 autonomous union-valued expression field-access run. This run closed the next aggregate expression parity gap by adding direct coverage for `.` field access after union-valued expression results: union compound literals, union assignment expressions, union-valued conditional/comma expressions, union-returning calls, and aggregate pointer-dereference assignment results such as `((*(&left) = make_number(6))).value`. It also fixed a union diagnostic wording gap so naked union-returning calls used as scalar expressions now report `union function 'make_number' used as scalar expression` instead of the previous struct-specific wording. Coverage includes `tests/fixtures/valid/union_expr_field_access.c`, invalid diagnostic fixture `tests/fixtures/invalid/union_function_used_as_scalar.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/union_expr_field_access.c`, focused interpreter tests, the C compiler-oracle suite, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
