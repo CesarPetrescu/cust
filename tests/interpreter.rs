@@ -485,6 +485,25 @@ fn supports_aggregate_compound_literals_in_expression_contexts() {
 }
 
 #[test]
+fn supports_aggregate_compound_literal_field_lvalues() {
+    let program = include_str!("fixtures/valid/aggregate_compound_literal_field_lvalues.c");
+
+    assert_eq!(interpret(program).unwrap(), 46);
+}
+
+#[test]
+fn rejects_assignment_to_const_fields_on_aggregate_compound_literals() {
+    let program =
+        include_str!("fixtures/invalid/aggregate_compound_literal_const_field_assignment.c",);
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'magic'"
+    );
+}
+
+#[test]
 fn supports_conditional_and_comma_expressions_for_aggregates() {
     let program = include_str!("fixtures/valid/aggregate_conditional_expressions.c");
 

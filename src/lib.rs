@@ -357,6 +357,17 @@ enum Expr {
         aggregate: Box<Expr>,
         fields: Vec<String>,
     },
+    AggregateFieldSet {
+        aggregate: Box<Expr>,
+        fields: Vec<String>,
+        value: Box<Expr>,
+    },
+    AggregateFieldCompoundSet {
+        aggregate: Box<Expr>,
+        fields: Vec<String>,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
     BitwiseNot(Box<Expr>),
@@ -3753,6 +3764,14 @@ impl Parser {
                     op,
                     value: Box::new(value),
                 }),
+                Expr::AggregateFieldGet { aggregate, fields } => {
+                    Ok(Expr::AggregateFieldCompoundSet {
+                        aggregate,
+                        fields,
+                        op,
+                        value: Box::new(value),
+                    })
+                }
                 _ => Err(Self::error_at(
                     "invalid compound assignment target".to_string(),
                     &operator,
@@ -3844,6 +3863,11 @@ impl Parser {
                 Expr::ScalarLiteral { ty, init } => Ok(Expr::ScalarLiteralSet {
                     ty,
                     init,
+                    value: Box::new(value),
+                }),
+                Expr::AggregateFieldGet { aggregate, fields } => Ok(Expr::AggregateFieldSet {
+                    aggregate,
+                    fields,
                     value: Box::new(value),
                 }),
                 _ => Err(Self::error_at(
@@ -4418,7 +4442,8 @@ impl Parser {
             | Expr::Deref(_)
             | Expr::StructGet { .. }
             | Expr::StructPtrGet { .. }
-            | Expr::ScalarLiteral { .. } => Ok(Expr::Increment {
+            | Expr::ScalarLiteral { .. }
+            | Expr::AggregateFieldGet { .. } => Ok(Expr::Increment {
                 target: Box::new(target),
                 op,
                 prefix,
@@ -9636,6 +9661,8 @@ impl Interpreter {
             | Expr::ScalarLiteral { .. }
             | Expr::AggregateLiteral { .. }
             | Expr::AggregateFieldGet { .. }
+            | Expr::AggregateFieldSet { .. }
+            | Expr::AggregateFieldCompoundSet { .. }
             | Expr::SizeOfType(_)
             | Expr::SizeOfValue(_)
             | Expr::CompoundAssign { .. }
@@ -9799,6 +9826,30 @@ impl Interpreter {
 
     fn increment_result(current: i64, updated: i64, prefix: bool) -> i64 {
         if prefix { updated } else { current }
+    }
+
+    fn eval_aggregate_literal_field_scalar(
+        &mut self,
+        aggregate: &Expr,
+        path: &[String],
+    ) -> CustResult<(i64, bool)> {
+        match self.eval_struct_expr(aggregate)? {
+            ReturnValue::Struct { type_name, fields } => {
+                let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
+                match field_value {
+                    StructFieldValue::Scalar {
+                        value, is_const, ..
+                    } => Ok((*value, *is_const)),
+                    StructFieldValue::Array { .. }
+                    | StructFieldValue::Struct { .. }
+                    | StructFieldValue::StructArray { .. }
+                    | StructFieldValue::Pointer { .. } => {
+                        Err(CustError::new("struct field used as scalar expression"))
+                    }
+                }
+            }
+            _ => Err(CustError::new("expected struct expression")),
+        }
     }
 
     fn checked_shift_left(lhs: i64, rhs: i64) -> CustResult<i64> {
@@ -9967,7 +10018,13 @@ impl Interpreter {
                 .map(|struct_type| struct_type.size(&self.struct_types))
                 .transpose()?
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
-            Expr::AggregateFieldGet { aggregate, fields } => {
+            Expr::AggregateFieldGet { aggregate, fields }
+            | Expr::AggregateFieldSet {
+                aggregate, fields, ..
+            }
+            | Expr::AggregateFieldCompoundSet {
+                aggregate, fields, ..
+            } => {
                 let Expr::AggregateLiteral { type_name, .. } = aggregate.as_ref() else {
                     return Err(CustError::new("expected struct expression"));
                 };
@@ -10366,6 +10423,18 @@ impl Interpreter {
             }
             Expr::ScalarLiteral { init, .. } => {
                 let current = self.eval(init)?;
+                let updated = Self::apply_increment_op(current, op);
+                Ok(Self::increment_result(current, updated, prefix))
+            }
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                let (current, is_const) =
+                    self.eval_aggregate_literal_field_scalar(aggregate, fields)?;
+                if is_const {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
                 let updated = Self::apply_increment_op(current, op);
                 Ok(Self::increment_result(current, updated, prefix))
             }
@@ -11186,6 +11255,37 @@ impl Interpreter {
                 let rhs = self.eval(value)?;
                 Self::apply_compound_op(current, *op, rhs)
             }
+            Expr::AggregateFieldSet {
+                aggregate,
+                fields,
+                value,
+            } => {
+                let (_, is_const) = self.eval_aggregate_literal_field_scalar(aggregate, fields)?;
+                if is_const {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
+                self.eval(value)
+            }
+            Expr::AggregateFieldCompoundSet {
+                aggregate,
+                fields,
+                op,
+                value,
+            } => {
+                let (current, is_const) =
+                    self.eval_aggregate_literal_field_scalar(aggregate, fields)?;
+                if is_const {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
+                let rhs = self.eval(value)?;
+                Self::apply_compound_op(current, *op, rhs)
+            }
             Expr::Increment { target, op, prefix } => {
                 self.eval_increment_expr(target, *op, *prefix)
             }
@@ -11374,21 +11474,9 @@ impl Interpreter {
             Expr::AggregateFieldGet {
                 aggregate,
                 fields: path,
-            } => match self.eval_struct_expr(aggregate)? {
-                ReturnValue::Struct { type_name, fields } => {
-                    let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
-                    match field_value {
-                        StructFieldValue::Scalar { value, .. } => Ok(*value),
-                        StructFieldValue::Array { .. }
-                        | StructFieldValue::Struct { .. }
-                        | StructFieldValue::StructArray { .. }
-                        | StructFieldValue::Pointer { .. } => {
-                            Err(CustError::new("struct field used as scalar expression"))
-                        }
-                    }
-                }
-                _ => Err(CustError::new("expected struct expression")),
-            },
+            } => self
+                .eval_aggregate_literal_field_scalar(aggregate, path)
+                .map(|(value, _)| value),
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::BitwiseNot(inner) => Ok(!self.eval(inner)?),
