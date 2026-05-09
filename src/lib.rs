@@ -9649,6 +9649,35 @@ impl Interpreter {
         }
     }
 
+    fn pointer_ordering(
+        &self,
+        left: &PointerValue,
+        op: BinaryOp,
+        right: &PointerValue,
+    ) -> CustResult<i64> {
+        let difference = self.pointer_difference(left, right).map_err(|error| {
+            let message = error.to_string();
+            if message == "cannot subtract pointers to different arrays" {
+                CustError::new("cannot compare pointers to different arrays")
+            } else if message == "scalar pointer arithmetic is not supported"
+                || message == "null pointer arithmetic is not supported"
+            {
+                CustError::new("pointer ordering comparisons are not supported")
+            } else {
+                error
+            }
+        })?;
+        let ordering = difference.cmp(&0);
+        let result = match op {
+            BinaryOp::Lt => ordering.is_lt(),
+            BinaryOp::Le => !ordering.is_gt(),
+            BinaryOp::Gt => ordering.is_gt(),
+            BinaryOp::Ge => !ordering.is_lt(),
+            _ => unreachable!("only ordering operators reach pointer_ordering"),
+        };
+        Ok(result as i64)
+    }
+
     fn pointer_difference(&self, left: &PointerValue, right: &PointerValue) -> CustResult<i64> {
         match (left, right) {
             (
@@ -11834,9 +11863,17 @@ impl Interpreter {
                 }
                 BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
                     if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
-                        return Err(CustError::new(
-                            "pointer ordering comparisons are not supported",
-                        ));
+                        match (self.eval_pointer(left), self.eval_pointer(right)) {
+                            (Ok(left_pointer), Ok(right_pointer)) => {
+                                return self.pointer_ordering(&left_pointer, *op, &right_pointer);
+                            }
+                            (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
+                                return Err(CustError::new(
+                                    "pointer ordering comparisons are not supported",
+                                ));
+                            }
+                            (Err(error), Err(_)) => return Err(error),
+                        }
                     }
                     let lhs = self.eval(left)?;
                     let rhs = self.eval(right)?;

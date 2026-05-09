@@ -98,6 +98,13 @@ fn supports_adjacent_string_literal_concatenation() {
 }
 
 #[test]
+fn supports_static_local_unions() {
+    let program = include_str!("fixtures/valid/static_local_unions.c");
+
+    assert_eq!(interpret(program).unwrap(), 21);
+}
+
+#[test]
 fn supports_octal_and_hex_escape_sequences() {
     let program = include_str!("fixtures/valid/numeric_escape_sequences.c");
 
@@ -123,6 +130,24 @@ fn supports_c_style_reverse_subscript_expressions() {
     let program = include_str!("fixtures/valid/reverse_subscript.c");
 
     assert_eq!(interpret(program).unwrap(), 29);
+}
+
+#[test]
+fn supports_pointer_ordering_within_same_array_storage() {
+    let program = include_str!("fixtures/valid/pointer_ordering.c");
+
+    assert_eq!(interpret(program).unwrap(), 26);
+}
+
+#[test]
+fn rejects_pointer_ordering_between_different_arrays() {
+    let program = include_str!("fixtures/invalid/pointer_ordering_different_arrays.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot compare pointers to different arrays"
+    );
 }
 
 #[test]

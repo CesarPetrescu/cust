@@ -4,7 +4,24 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous adjacent string-literal concatenation run. This run closed a C lexical/expression conformance gap: Cust now concatenates adjacent string literal tokens by removing the intermediate NUL terminator and preserving a single final NUL byte. Concatenation works for ordinary string literal pointer expressions, direct string indexing, `sizeof("..." "...")`, char-array string initializers, char-array compound literal string initializers, and pointer/array-parameter call paths. Coverage includes `tests/fixtures/valid/string_literal_concatenation.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/string_literal_concatenation.c`, and the compat fixture list. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous pointer-ordering run. This run closes a C pointer/conformance gap: Cust now supports relational pointer comparisons (`<`, `<=`, `>`, `>=`) for pointers into the same supported array storage, including scalar arrays, string literal storage, and struct/union array element pointers, by reusing interpreter-owned pointer-difference metadata. Comparisons between different arrays report `cannot compare pointers to different arrays`; scalar/null pointer ordering remains deliberately unsupported with the existing `pointer ordering comparisons are not supported` diagnostic. Coverage includes `tests/fixtures/valid/pointer_ordering.c`, invalid fixture `tests/fixtures/invalid/pointer_ordering_different_arrays.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/pointer_ordering.c`, and focused regression coverage for the pre-existing scalar-pointer ordering diagnostic. The run also added warning-free static-local union coverage (`tests/fixtures/valid/static_local_unions.c` plus compiler-oracle fixture) after discovering the behavior was already implemented but uncovered. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_pointer_ordering_within_same_array_storage -- --nocapture
+cargo test --test interpreter rejects_pointer_ordering_between_different_arrays -- --nocapture
+cargo test --test interpreter rejects_pointer_ordering_comparisons -- --nocapture
+cargo test --test interpreter supports_static_local_unions -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous adjacent string-literal concatenation run. This run closed a C lexical/expression conformance gap: Cust now concatenates adjacent string literal tokens by removing the intermediate NUL terminator and preserving a single final NUL byte. Concatenation works for ordinary string literal pointer expressions, direct string indexing, `sizeof("..." "...")`, char-array string initializers, char-array compound literal string initializers, and pointer/array-parameter call paths. Coverage includes `tests/fixtures/valid/string_literal_concatenation.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/string_literal_concatenation.c`, and the compat fixture list. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
