@@ -4192,6 +4192,11 @@ impl Parser {
             Expr::AggregateLiteral { type_name, init } => {
                 Ok(Expr::AddressOfAggregateLiteral { type_name, init })
             }
+            Expr::StringGet { values, index } => Ok(Expr::Binary(
+                Box::new(Expr::StringLiteral(values)),
+                BinaryOp::Add,
+                index,
+            )),
             Expr::Deref(pointer) => Ok(*pointer),
             _ => Err(Self::error_at(
                 "invalid address-of target".to_string(),

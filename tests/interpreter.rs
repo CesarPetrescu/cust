@@ -2651,6 +2651,13 @@ fn supports_string_literal_decay_to_pointer_parameters_for_reads() {
 }
 
 #[test]
+fn supports_address_of_string_literal_elements() {
+    let program = include_str!("fixtures/valid/string_literal_element_address.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn supports_array_element_address_of_and_pointer_reads_writes() {
     let program = include_str!("fixtures/valid/pointer_array_elements.c");
 
@@ -2982,6 +2989,18 @@ fn rejects_pointer_ordering_comparisons() {
 #[test]
 fn rejects_writes_through_string_literal_pointer_parameters() {
     let program = include_str!("fixtures/invalid/pointer_string_write.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot modify read-only array through pointer"
+    );
+}
+
+#[test]
+fn rejects_writes_through_string_literal_element_addresses() {
+    let program = include_str!("fixtures/invalid/string_literal_element_address_write.c");
 
     let err = interpret(program).unwrap_err();
 
