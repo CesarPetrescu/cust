@@ -4,7 +4,22 @@ Last updated: 2026-05-09
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-09 autonomous aggregate-valued expression field-access run. This run closed the next compound-literal/aggregate parity gap: scalar array fields on aggregate compound literals now have explicit assignment, compound-assignment, prefix, and postfix increment fixture coverage; embedded aggregate-array fields on aggregate compound literals have scalar-field write coverage through indexed elements; and the parser now allows `.` field access after grouped aggregate-valued expression results that `eval_struct_expr` already understands, including aggregate assignment expressions, aggregate pointer dereference assignment results, aggregate-valued conditional/comma expressions, and aggregate-returning calls (`(((struct Line){{...}}).points[0] = replacement).x`, `(left = right).x`, `(cond ? left : replacement).y`, `(marker = marker + 1, right).x`, and `make_point(5).y`). Coverage includes `tests/fixtures/valid/aggregate_compound_literal_array_field_lvalues.c`, `tests/fixtures/valid/aggregate_compound_literal_aggregate_array_field_lvalues.c`, `tests/fixtures/valid/aggregate_expr_field_access.c`, native compiler-oracle fixtures for the C-compatible cases, focused interpreter tests, the C compiler-oracle suite, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-09 autonomous union-valued expression field-access run. This run closed the next aggregate expression parity gap by adding direct coverage for `.` field access after union-valued expression results: union compound literals, union assignment expressions, union-valued conditional/comma expressions, union-returning calls, and aggregate pointer-dereference assignment results such as `((*(&left) = make_number(6))).value`. It also fixed a union diagnostic wording gap so naked union-returning calls used as scalar expressions now report `union function 'make_number' used as scalar expression` instead of the previous struct-specific wording. Coverage includes `tests/fixtures/valid/union_expr_field_access.c`, invalid diagnostic fixture `tests/fixtures/invalid/union_function_used_as_scalar.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/union_expr_field_access.c`, focused interpreter tests, the C compiler-oracle suite, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_field_access_on_union_valued_expressions -- --nocapture
+cargo test --test interpreter rejects_union_function_used_as_scalar_expression -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-09 autonomous aggregate-valued expression field-access run. This run closed the next compound-literal/aggregate parity gap: scalar array fields on aggregate compound literals now have explicit assignment, compound-assignment, prefix, and postfix increment fixture coverage; embedded aggregate-array fields on aggregate compound literals have scalar-field write coverage through indexed elements; and the parser now allows `.` field access after grouped aggregate-valued expression results that `eval_struct_expr` already understands, including aggregate assignment expressions, aggregate pointer dereference assignment results, aggregate-valued conditional/comma expressions, and aggregate-returning calls (`(((struct Line){{...}}).points[0] = replacement).x`, `(left = right).x`, `(cond ? left : replacement).y`, `(marker = marker + 1, right).x`, and `make_point(5).y`). Coverage includes `tests/fixtures/valid/aggregate_compound_literal_array_field_lvalues.c`, `tests/fixtures/valid/aggregate_compound_literal_aggregate_array_field_lvalues.c`, `tests/fixtures/valid/aggregate_expr_field_access.c`, native compiler-oracle fixtures for the C-compatible cases, focused interpreter tests, the C compiler-oracle suite, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

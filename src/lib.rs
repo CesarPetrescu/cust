@@ -5251,6 +5251,13 @@ impl Interpreter {
         }
     }
 
+    fn aggregate_kind_label(&self, type_name: &str) -> &'static str {
+        self.struct_types
+            .get(type_name)
+            .map(|aggregate| aggregate.kind.keyword())
+            .unwrap_or("struct")
+    }
+
     fn run(&mut self, program: &Program) -> CustResult<i64> {
         self.functions = program.functions.clone();
         self.struct_types = program.struct_types.clone();
@@ -11610,9 +11617,12 @@ impl Interpreter {
                 Some(ReturnValue::Pointer { .. }) => {
                     Err(CustError::new("pointer value used as scalar"))
                 }
-                Some(ReturnValue::Struct { .. }) => Err(CustError::new(format!(
-                    "struct function '{name}' used as scalar expression"
-                ))),
+                Some(ReturnValue::Struct { type_name, .. }) => {
+                    let aggregate_kind = self.aggregate_kind_label(&type_name);
+                    Err(CustError::new(format!(
+                        "{aggregate_kind} function '{name}' used as scalar expression"
+                    )))
+                }
                 None => Err(CustError::new(format!(
                     "void function '{name}' used as scalar expression"
                 ))),

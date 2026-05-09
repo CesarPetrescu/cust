@@ -535,6 +535,24 @@ fn supports_field_access_on_aggregate_valued_expressions() {
 }
 
 #[test]
+fn supports_field_access_on_union_valued_expressions() {
+    let program = include_str!("fixtures/valid/union_expr_field_access.c");
+
+    assert_eq!(interpret(program).unwrap(), 23);
+}
+
+#[test]
+fn rejects_union_function_used_as_scalar_expression() {
+    let program = include_str!("fixtures/invalid/union_function_used_as_scalar.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "union function 'make_number' used as scalar expression"
+    );
+}
+
+#[test]
 fn rejects_assignment_to_const_fields_on_aggregate_compound_literals() {
     let program =
         include_str!("fixtures/invalid/aggregate_compound_literal_const_field_assignment.c",);
