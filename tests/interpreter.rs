@@ -499,6 +499,13 @@ fn supports_pointer_fields_on_aggregate_compound_literals() {
 }
 
 #[test]
+fn supports_array_fields_on_aggregate_compound_literals() {
+    let program = include_str!("fixtures/valid/aggregate_compound_literal_array_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 21);
+}
+
+#[test]
 fn rejects_assignment_to_const_fields_on_aggregate_compound_literals() {
     let program =
         include_str!("fixtures/invalid/aggregate_compound_literal_const_field_assignment.c",);
@@ -507,6 +514,30 @@ fn rejects_assignment_to_const_fields_on_aggregate_compound_literals() {
     assert_eq!(
         err.to_string(),
         "cannot assign to const struct field 'magic'"
+    );
+}
+
+#[test]
+fn rejects_const_discard_from_pointer_fields_on_aggregate_compound_literals() {
+    let program =
+        include_str!("fixtures/invalid/aggregate_compound_literal_pointer_field_const_discard.c",);
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_const_discard_from_array_fields_on_aggregate_compound_literals() {
+    let program =
+        include_str!("fixtures/invalid/aggregate_compound_literal_array_field_const_discard.c",);
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
     );
 }
 

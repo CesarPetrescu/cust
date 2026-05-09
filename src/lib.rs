@@ -5888,7 +5888,11 @@ impl Interpreter {
                 .aggregate_literal_field_metadata(aggregate, fields)
                 .ok()
                 .flatten()
-                .map(|(_, _, points_to_const)| points_to_const)
+                .map(|(field_type, is_const, points_to_const)| match field_type {
+                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => is_const,
+                    StructFieldType::Pointer(_) => points_to_const,
+                    StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
+                })
                 .unwrap_or(false),
             Expr::StructElementGet { name, fields, .. } => {
                 self.struct_array_element_field_points_to_const(name, fields)
@@ -9934,9 +9938,39 @@ impl Interpreter {
                         array: Rc::clone(value),
                         source_name: None,
                     }),
-                    StructFieldValue::Scalar { .. }
-                    | StructFieldValue::Struct { .. }
-                    | StructFieldValue::StructArray { .. } => {
+                    StructFieldValue::StructArray {
+                        type_name,
+                        elements,
+                        is_const,
+                    } => {
+                        let scope_id = self
+                            .scopes
+                            .last()
+                            .expect("compound literal evaluation requires a current scope")
+                            .id;
+                        let name = format!(
+                            "__cust_compound_aggregate_field_array#{}",
+                            self.next_compound_literal_id
+                        );
+                        self.next_compound_literal_id += 1;
+                        self.current_scope_mut().insert(
+                            name.clone(),
+                            Value::StructArray {
+                                type_name: type_name.clone(),
+                                elements: elements
+                                    .iter()
+                                    .map(StructFieldValue::deep_clone_fields)
+                                    .collect(),
+                                read_only: *is_const,
+                            },
+                        );
+                        Ok(PointerValue::StructElement {
+                            scope_id,
+                            name,
+                            index: 0,
+                        })
+                    }
+                    StructFieldValue::Scalar { .. } | StructFieldValue::Struct { .. } => {
                         Err(CustError::new("struct field is not a pointer"))
                     }
                 }

@@ -4,12 +4,14 @@ Last updated: 2026-05-09
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-09 autonomous aggregate compound-literal pointer-field run. This run added pointer-valued field reads on aggregate compound literals, so supported pointer fields such as `((struct Cursor){values + 1}).p` now evaluate as pointer expressions in pointer declarations, calls, dereferences, pointer arithmetic, and equality/truthiness contexts while preserving pointer pointee metadata and const-discard inference. The metadata path also recognizes array-valued fields on aggregate compound literals as pointer-capable expressions through the existing array-base pointer model. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_pointer_fields.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_pointer_fields.c`, focused interpreter and compiler-oracle tests, recursion-depth regression, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-09 autonomous aggregate compound-literal array-field run. This run added aggregate-array field decay on aggregate compound literals, so supported fields such as `((struct Line){{{1, 2}, {3, 4}}}).points` now evaluate as `struct Point *` / `union T *` pointer expressions by installing hidden current-scope aggregate-array storage and reusing Cust's existing safe aggregate-array pointer machinery. The run also locked in const-discard diagnostics for const pointer fields and const scalar/aggregate array fields on aggregate compound literals. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_array_fields.c`, native compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_array_fields.c`, invalid fixtures for aggregate compound-literal pointer/array-field const discard, focused interpreter and compiler-oracle tests, recursion-depth regression, and the full local/Docker verification gate. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
 ```bash
-cargo test --test interpreter supports_pointer_fields_on_aggregate_compound_literals -- --nocapture
+cargo test --test interpreter supports_array_fields_on_aggregate_compound_literals -- --nocapture
+cargo test --test interpreter rejects_const_discard_from_array_fields_on_aggregate_compound_literals -- --nocapture
+cargo test --test interpreter aggregate_compound_literal -- --nocapture
 cargo test --test c_compat -- --nocapture
 cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
 cargo fmt --check
@@ -18,6 +20,8 @@ cargo test
 docker compose run --rm test
 docker compose run --rm cust
 ```
+
+Note: an attempted focused command with two Cargo test-name filters failed because Cargo accepts only one substring filter; the correct aggregate-compound-literal substring command above was run afterward and passed.
 
 ## Repository
 
