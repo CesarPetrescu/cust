@@ -76,7 +76,7 @@ Last updated: 2026-05-09
 - logical operators `&&`, `||`, and `!` with C-style integer truth values and short-circuit evaluation for `&&`/`||`
 - comments: `//` line comments and `/* ... */` block comments; unterminated block comments report a lexer source-line/caret diagnostic at the opening `/*`.
 
-- Pointer parameters now accept scalar-array fields by decay for direct structs, struct-array elements, and struct pointers, so `use(packet.values)`, `use(packets[i].values)`, and `use(slot->values)` create interpreter-owned array-base pointers; `&packet.values[i]`, `&packets[n].values[i]`, and `&slot->values[i]` create array-element pointers that alias the embedded field storage and preserve existing const/read-only diagnostics.
+- Pointer parameters now accept scalar-array fields by decay for direct structs, struct-array elements, struct pointers, and nested struct paths, so `use(packet.values)`, `use(packets[i].values)`, `use(slot->values)`, `use(one.inner.values)`, `use(boxes[i].inner.values)`, and `use(ptr->inner.values)` create interpreter-owned array-base pointers; `&packet.values[i]`, `&packets[n].values[i]`, `&slot->values[i]`, `&one.inner.values[i]`, `&boxes[n].inner.values[i]`, and `&ptr->inner.values[i]` create array-element pointers that alias the embedded field storage and preserve existing const/read-only diagnostics, including const root structs that make nested array-field decay a pointer-to-const conversion.
 
 ## Test/tooling coverage
 
@@ -95,6 +95,18 @@ Last updated: 2026-05-09
 - Parser diagnostics now include targeted missing-`(` messages after function names and `if`/`while`/`for` keywords, targeted missing-semicolon messages after `break`, `continue`, and `for` conditions, targeted missing-`=` messages after variable/pointer declarations and scalar/indexed/dereference assignments, targeted missing-name/type messages for function names, variable/pointer declarations, and parameter lists, unmatched closing delimiter messages for stray `)`/`]` in statements and extra `}` at top level, context-aware unterminated-block messages (for example after a function header or `if` condition), explicit empty-array-length diagnostics before `]` in declarations, negative array-length diagnostics, explicit rejection of `break`/`continue` in non-body `for` clauses, pointer-parameter malformed-list coverage, explicit unsupported pointer-return/pointer-array/parser diagnostics, explicit unsupported pointer-to-pointer parameter/declaration diagnostics, delimiter-aware trailing-comma diagnostics for function parameter/call lists, and duplicate `switch` case/default label diagnostics.
 
 ## Verified commands
+
+```bash
+cargo test --test interpreter nested_struct_array_field -- --nocapture
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+All passed after the 2026-05-09 autonomous nested struct array-field decay const-propagation run. This run added a regression for nested scalar array-field decay and element address-of across direct struct variables, struct-array elements, and struct pointers (`one.inner.values`, `boxes[i].inner.values`, `ptr->inner.values`, and matching `&...values[j]` forms), plus negative regressions proving `const struct Box box; mutate(box.inner.values);` and `const struct Box boxes[1]; mutate(boxes[0].inner.values);` reject mutable pointer decay with `cannot discard const qualifier from pointer target`. The implementation adds direct nested array-field and struct-array element const inference while preserving pointer-field `points_to_const` behavior. Coverage includes `tests/fixtures/valid/nested_struct_array_field_decay.c`, invalid fixtures `tests/fixtures/invalid/nested_struct_array_field_const_discard.c` and `tests/fixtures/invalid/nested_struct_array_element_field_const_discard.c`, native C compiler-oracle fixture `tests/fixtures/compat/valid/nested_struct_array_field_decay.c`, and `tests/interpreter.rs` / `tests/c_compat.rs` wiring. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 ```bash
 cargo test --test interpreter struct_pointer_array_field -- --nocapture

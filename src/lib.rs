@@ -5628,7 +5628,11 @@ impl Interpreter {
                 })
                 .unwrap_or(false),
             Expr::StructGet { name, fields } => {
-                self.struct_pointer_field_points_to_const(name, fields)
+                self.direct_struct_array_field_points_to_const(name, fields)
+                    || self.struct_pointer_field_points_to_const(name, fields)
+            }
+            Expr::StructElementGet { name, fields, .. } => {
+                self.struct_array_element_field_points_to_const(name, fields)
             }
             Expr::StructPtrGet { pointer, .. }
             | Expr::StructPtrArrayGet { pointer, .. }
@@ -6577,6 +6581,58 @@ impl Interpreter {
             }
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn nested_field_path_is_const(
+        fields_map: &HashMap<String, StructFieldValue>,
+        path: &[String],
+    ) -> CustResult<bool> {
+        let Some((field, rest)) = path.split_first() else {
+            return Err(CustError::new("expected struct field"));
+        };
+        let value = fields_map
+            .get(field)
+            .ok_or_else(|| CustError::new(format!("struct has no field '{field}'")))?;
+        if value.is_const() {
+            return Ok(true);
+        }
+        if rest.is_empty() {
+            return Ok(false);
+        }
+        match value {
+            StructFieldValue::Struct { fields, .. } => {
+                Self::nested_field_path_is_const(fields, rest)
+            }
+            StructFieldValue::Scalar { .. }
+            | StructFieldValue::Array { .. }
+            | StructFieldValue::Pointer { .. } => Ok(false),
+        }
+    }
+
+    fn direct_struct_array_field_points_to_const(&self, name: &str, path: &[String]) -> bool {
+        let root_is_const = self.is_const_variable(name);
+        match self.find_variable(name) {
+            Some(Value::Struct { fields, .. }) => {
+                root_is_const || Self::nested_field_path_is_const(fields, path).unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    fn struct_array_element_field_points_to_const(&self, name: &str, path: &[String]) -> bool {
+        match self.find_variable(name) {
+            Some(Value::StructArray {
+                elements,
+                read_only,
+                ..
+            }) => {
+                *read_only
+                    || elements.first().is_some_and(|fields| {
+                        Self::nested_field_path_is_const(fields, path).unwrap_or(false)
+                    })
+            }
+            _ => false,
         }
     }
 

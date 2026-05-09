@@ -691,8 +691,38 @@ fn supports_struct_pointer_array_field_decay_and_element_address_of() {
 }
 
 #[test]
+fn supports_nested_struct_array_field_decay_and_element_address_of() {
+    let program = include_str!("fixtures/valid/nested_struct_array_field_decay.c");
+
+    assert_eq!(interpret(program).unwrap(), 41);
+}
+
+#[test]
 fn rejects_struct_pointer_array_field_decay_that_discards_const() {
     let program = include_str!("fixtures/invalid/struct_pointer_array_field_const_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_nested_struct_array_field_decay_that_discards_const() {
+    let program = include_str!("fixtures/invalid/nested_struct_array_field_const_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_nested_struct_array_element_field_decay_that_discards_const() {
+    let program =
+        include_str!("fixtures/invalid/nested_struct_array_element_field_const_discard.c");
 
     let err = interpret(program).unwrap_err();
     assert_eq!(
