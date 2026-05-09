@@ -99,6 +99,7 @@ Prioritized backlog for autonomous implementation.
 
 - [x] C reverse-subscript expression parity for the supported one-level pointer/array subset; acceptance: `i[p]` now works like `p[i]` for scalar array variables, pointer variables/parameters, string literals and `char *` pointers, scalar-array compound literals, and aggregate array pointers followed by field access such as `1[points].y`; writes such as `2[values] = 9` reuse existing dereference lvalue handling, with interpreter and C compiler-oracle coverage.
 - [x] Address-of string-literal element expressions; acceptance: direct `&"text"[i]` now creates the same read-only interpreter-owned string array-element pointer as grouped/reverse forms, works in pointer declarations and reads with relative indexing, rejects writes through the produced pointer with `cannot modify read-only array through pointer`, and includes interpreter plus C compiler-oracle coverage.
+- [x] Adjacent string literal concatenation; acceptance: tokens such as `"he" "llo"` concatenate into one NUL-terminated read-only byte array for ordinary string pointer expressions, direct indexing, `sizeof`, char-array initializers, char-array compound literals, and pointer/array-parameter calls, with interpreter plus C compiler-oracle coverage.
 
 ## P2 — data types
 

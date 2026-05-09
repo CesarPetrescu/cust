@@ -2472,6 +2472,7 @@ impl Parser {
             return Ok(None);
         };
         self.advance();
+        let values = self.concatenate_adjacent_string_literals(values);
         if elem_type != CType::Char {
             return Err(CustError::new(format!(
                 "string literal initializer requires char array '{name}'"
@@ -2555,6 +2556,7 @@ impl Parser {
                 values.push(ArrayInitializer::Designated { index, value });
             } else if let Token::StringLiteral(string_values) = self.peek().clone() {
                 self.advance();
+                let string_values = self.concatenate_adjacent_string_literals(string_values);
                 if elem_type != CType::Char {
                     return Err(CustError::new(
                         "string literal initializer requires char array compound literal",
@@ -4474,6 +4476,7 @@ impl Parser {
         match found.kind.clone() {
             Token::Number(value) => Ok(Expr::Number(value)),
             Token::StringLiteral(values) => {
+                let values = self.concatenate_adjacent_string_literals(values);
                 if self.matches(&Token::LBracket) {
                     let index = self.parse_index_expr()?;
                     self.expect_closing_bracket_after("string literal index")?;
@@ -4517,6 +4520,17 @@ impl Parser {
                 &found,
             )),
         }
+    }
+
+    fn concatenate_adjacent_string_literals(&mut self, mut values: Vec<i64>) -> Vec<i64> {
+        while let Token::StringLiteral(next_values) = self.peek().clone() {
+            self.advance();
+            if values.last() == Some(&0) {
+                values.pop();
+            }
+            values.extend(next_values);
+        }
+        values
     }
 
     fn parse_call_args(&mut self) -> CustResult<Vec<Expr>> {

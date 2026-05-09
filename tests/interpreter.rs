@@ -91,6 +91,13 @@ fn supports_standard_simple_escape_sequences() {
 }
 
 #[test]
+fn supports_adjacent_string_literal_concatenation() {
+    let program = include_str!("fixtures/valid/string_literal_concatenation.c");
+
+    assert_eq!(interpret(program).unwrap(), 23);
+}
+
+#[test]
 fn supports_octal_and_hex_escape_sequences() {
     let program = include_str!("fixtures/valid/numeric_escape_sequences.c");
 
