@@ -133,8 +133,40 @@ fn supports_struct_aggregate_array_field_decay_and_address_of() {
 }
 
 #[test]
+fn supports_union_aggregate_array_field_decay_and_address_of() {
+    let program = include_str!("fixtures/valid/union_aggregate_array_field_decay.c");
+
+    assert_eq!(interpret(program).unwrap(), 66);
+}
+
+#[test]
+fn supports_struct_pointer_union_array_field_decay_and_address_of() {
+    let program = include_str!("fixtures/valid/struct_pointer_union_array_field_decay.c");
+
+    assert_eq!(interpret(program).unwrap(), 42);
+}
+
+#[test]
+fn reports_array_compound_literal_sizes_without_evaluating_initializers() {
+    let program = include_str!("fixtures/valid/sizeof_array_compound_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 54);
+}
+
+#[test]
 fn rejects_struct_aggregate_array_field_decay_that_discards_const() {
     let program = include_str!("fixtures/invalid/struct_aggregate_array_field_const_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_union_array_field_decay_that_discards_const() {
+    let program = include_str!("fixtures/invalid/union_array_field_const_discard.c");
 
     let err = interpret(program).unwrap_err();
     assert_eq!(

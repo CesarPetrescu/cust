@@ -98,6 +98,20 @@ Last updated: 2026-05-09
 ## Verified commands
 
 ```bash
+cargo test --test interpreter reports_array_compound_literal_sizes_without_evaluating_initializers -- --nocapture
+cargo test --test interpreter union_aggregate_array_field -- --nocapture
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+All passed after the 2026-05-09 autonomous `sizeof` array compound-literal and union array-field decay fixture run. This run fixed `sizeof((T[]){...})` / `sizeof((T[N]){...})` for scalar and aggregate array compound literals so Cust reports the array object size using inferred or fixed lengths without evaluating initializer side effects, instead of treating those expression forms as pointer-sized in non-evaluating `sizeof` contexts. It also locked in direct and struct-pointer embedded union-array field pointer decay/address-of coverage (`bag.numbers`, `&bag.numbers[i]`, `bag->numbers`, `&bag->numbers[i]`, and `bag->numbers + n`) plus const-discard diagnostics. Coverage includes `tests/fixtures/valid/sizeof_array_compound_literals.c`, `tests/fixtures/valid/union_aggregate_array_field_decay.c`, `tests/fixtures/valid/struct_pointer_union_array_field_decay.c`, invalid fixture `tests/fixtures/invalid/union_array_field_const_discard.c`, native C compiler-oracle fixtures, and `tests/interpreter.rs` / `tests/c_compat.rs` wiring. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+```bash
 cargo test --test interpreter array_compound_literal -- --nocapture
 cargo test --test interpreter nested_aggregate_array_field -- --nocapture
 cargo test --test c_compat -- --nocapture

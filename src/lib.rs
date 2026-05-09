@@ -9794,7 +9794,30 @@ impl Interpreter {
         match expr {
             Expr::Number(_) => Ok(INT_SIZE),
             Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
-            Expr::ArrayLiteral { .. } | Expr::AggregateArrayLiteral { .. } => Ok(POINTER_SIZE),
+            Expr::ArrayLiteral {
+                elem_type,
+                len,
+                init,
+            } => {
+                let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
+                Ok(len as i64 * elem_type.size())
+            }
+            Expr::AggregateArrayLiteral {
+                type_name,
+                len,
+                init,
+            } => {
+                let len = len.unwrap_or_else(|| Self::infer_struct_array_initializer_len(init));
+                let element_size = self
+                    .struct_types
+                    .get(type_name)
+                    .map(|struct_type| struct_type.size(&self.struct_types))
+                    .transpose()?
+                    .ok_or_else(|| {
+                        CustError::new(format!("undefined struct type '{type_name}'"))
+                    })?;
+                Ok(len as i64 * element_size)
+            }
             Expr::SizeOfType(_) | Expr::SizeOfValue(_) => Ok(INT_SIZE),
             Expr::Var(name) => self.sizeof_variable(name),
             Expr::StructGet { name, fields } => self.sizeof_struct_field(name, fields),
