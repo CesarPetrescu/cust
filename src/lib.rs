@@ -9681,6 +9681,51 @@ impl Interpreter {
     fn pointer_difference(&self, left: &PointerValue, right: &PointerValue) -> CustResult<i64> {
         match (left, right) {
             (
+                PointerValue::StructFieldElement {
+                    scope_id: left_scope,
+                    name: left_name,
+                    element_index: left_element_index,
+                    fields: left_fields,
+                    index: left_index,
+                },
+                PointerValue::StructFieldElement {
+                    scope_id: right_scope,
+                    name: right_name,
+                    element_index: right_element_index,
+                    fields: right_fields,
+                    index: right_index,
+                },
+            ) => {
+                if left_scope != right_scope
+                    || left_name != right_name
+                    || left_element_index != right_element_index
+                    || left_fields != right_fields
+                {
+                    return Err(CustError::new(
+                        "cannot subtract pointers to different arrays",
+                    ));
+                }
+                self.struct_field_array_pointer_at(
+                    *left_scope,
+                    left_name,
+                    *left_element_index,
+                    left_fields,
+                    *left_index as i64,
+                )?;
+                self.struct_field_array_pointer_at(
+                    *right_scope,
+                    right_name,
+                    *right_element_index,
+                    right_fields,
+                    *right_index as i64,
+                )?;
+                Ok(*left_index as i64 - *right_index as i64)
+            }
+            (PointerValue::StructFieldElement { .. }, _)
+            | (_, PointerValue::StructFieldElement { .. }) => Err(CustError::new(
+                "cannot subtract pointers to different arrays",
+            )),
+            (
                 PointerValue::StructElement {
                     scope_id: left_scope,
                     name: left_name,

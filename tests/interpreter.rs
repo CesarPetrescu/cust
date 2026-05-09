@@ -140,6 +140,24 @@ fn supports_pointer_ordering_within_same_array_storage() {
 }
 
 #[test]
+fn supports_pointer_ordering_within_embedded_aggregate_array_fields() {
+    let program = include_str!("fixtures/valid/struct_field_pointer_ordering.c");
+
+    assert_eq!(interpret(program).unwrap(), 21);
+}
+
+#[test]
+fn rejects_pointer_ordering_between_different_embedded_aggregate_array_fields() {
+    let program = include_str!("fixtures/invalid/struct_field_pointer_ordering_different_fields.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot compare pointers to different arrays"
+    );
+}
+
+#[test]
 fn rejects_pointer_ordering_between_different_arrays() {
     let program = include_str!("fixtures/invalid/pointer_ordering_different_arrays.c");
 

@@ -4,7 +4,22 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous pointer-ordering run. This run closes a C pointer/conformance gap: Cust now supports relational pointer comparisons (`<`, `<=`, `>`, `>=`) for pointers into the same supported array storage, including scalar arrays, string literal storage, and struct/union array element pointers, by reusing interpreter-owned pointer-difference metadata. Comparisons between different arrays report `cannot compare pointers to different arrays`; scalar/null pointer ordering remains deliberately unsupported with the existing `pointer ordering comparisons are not supported` diagnostic. Coverage includes `tests/fixtures/valid/pointer_ordering.c`, invalid fixture `tests/fixtures/invalid/pointer_ordering_different_arrays.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/pointer_ordering.c`, and focused regression coverage for the pre-existing scalar-pointer ordering diagnostic. The run also added warning-free static-local union coverage (`tests/fixtures/valid/static_local_unions.c` plus compiler-oracle fixture) after discovering the behavior was already implemented but uncovered. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous embedded aggregate-array field pointer-ordering run. This run closes the pointer-ordering parity gap for pointers into embedded aggregate-array fields: `line.points < &line.points[2]`, `line.points + 1 <= &line.points[2]`, and nested field paths such as `box.line.points` now compare through the same-array pointer-ordering path by teaching `pointer_difference` to recognize matching `StructFieldElement` owner/path/index metadata. Comparisons between different embedded aggregate-array fields report `cannot compare pointers to different arrays`. Coverage includes `tests/fixtures/valid/struct_field_pointer_ordering.c`, invalid fixture `tests/fixtures/invalid/struct_field_pointer_ordering_different_fields.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_pointer_ordering.c`, and focused RED/GREEN interpreter tests. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_pointer_ordering_within_embedded_aggregate_array_fields -- --nocapture
+cargo test --test interpreter rejects_pointer_ordering_between_different_embedded_aggregate_array_fields -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous pointer-ordering run. This run closes a C pointer/conformance gap: Cust now supports relational pointer comparisons (`<`, `<=`, `>`, `>=`) for pointers into the same supported array storage, including scalar arrays, string literal storage, and struct/union array element pointers, by reusing interpreter-owned pointer-difference metadata. Comparisons between different arrays report `cannot compare pointers to different arrays`; scalar/null pointer ordering remains deliberately unsupported with the existing `pointer ordering comparisons are not supported` diagnostic. Coverage includes `tests/fixtures/valid/pointer_ordering.c`, invalid fixture `tests/fixtures/invalid/pointer_ordering_different_arrays.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/pointer_ordering.c`, and focused regression coverage for the pre-existing scalar-pointer ordering diagnostic. The run also added warning-free static-local union coverage (`tests/fixtures/valid/static_local_unions.c` plus compiler-oracle fixture) after discovering the behavior was already implemented but uncovered. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
