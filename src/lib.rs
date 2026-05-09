@@ -320,6 +320,17 @@ enum Expr {
         ty: CType,
         init: Box<Expr>,
     },
+    ScalarLiteralSet {
+        ty: CType,
+        init: Box<Expr>,
+        value: Box<Expr>,
+    },
+    ScalarLiteralCompoundSet {
+        ty: CType,
+        init: Box<Expr>,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
     AddressOfScalarLiteral {
         ty: CType,
         init: Box<Expr>,
@@ -3736,6 +3747,12 @@ impl Parser {
                     op,
                     value: Box::new(value),
                 }),
+                Expr::ScalarLiteral { ty, init } => Ok(Expr::ScalarLiteralCompoundSet {
+                    ty,
+                    init,
+                    op,
+                    value: Box::new(value),
+                }),
                 _ => Err(Self::error_at(
                     "invalid compound assignment target".to_string(),
                     &operator,
@@ -3822,6 +3839,11 @@ impl Parser {
                 Expr::StructPtrGet { pointer, fields } => Ok(Expr::StructPtrSet {
                     pointer,
                     fields,
+                    value: Box::new(value),
+                }),
+                Expr::ScalarLiteral { ty, init } => Ok(Expr::ScalarLiteralSet {
+                    ty,
+                    init,
                     value: Box::new(value),
                 }),
                 _ => Err(Self::error_at(
@@ -4007,7 +4029,8 @@ impl Parser {
             let target = self.parse_unary()?;
             Self::address_of_expr(target, &operator)
         } else if self.check(&Token::LParen) && self.starts_cast_type_after_lparen() {
-            self.parse_cast()
+            let expr = self.parse_cast()?;
+            self.parse_postfix_suffix(expr)
         } else {
             self.parse_postfix()
         }
@@ -4226,7 +4249,11 @@ impl Parser {
     }
 
     fn parse_postfix(&mut self) -> CustResult<Expr> {
-        let mut expr = self.parse_primary()?;
+        let expr = self.parse_primary()?;
+        self.parse_postfix_suffix(expr)
+    }
+
+    fn parse_postfix_suffix(&mut self, mut expr: Expr) -> CustResult<Expr> {
         loop {
             if self.matches(&Token::LBracket) {
                 let index = self.parse_index_expr()?;
@@ -4390,7 +4417,8 @@ impl Parser {
             | Expr::StructPtrArrayGet { .. }
             | Expr::Deref(_)
             | Expr::StructGet { .. }
-            | Expr::StructPtrGet { .. } => Ok(Expr::Increment {
+            | Expr::StructPtrGet { .. }
+            | Expr::ScalarLiteral { .. } => Ok(Expr::Increment {
                 target: Box::new(target),
                 op,
                 prefix,
@@ -9611,6 +9639,8 @@ impl Interpreter {
             | Expr::SizeOfType(_)
             | Expr::SizeOfValue(_)
             | Expr::CompoundAssign { .. }
+            | Expr::ScalarLiteralSet { .. }
+            | Expr::ScalarLiteralCompoundSet { .. }
             | Expr::Increment { .. }
             | Expr::Conditional { .. }
             | Expr::Binary(_, _, _) => Ok(self.eval(expr)? != 0),
@@ -9927,7 +9957,10 @@ impl Interpreter {
                 pointer, fields, ..
             } => self.sizeof_struct_pointer_field(pointer, fields),
             Expr::Increment { target, .. } => self.sizeof_expr(target),
-            Expr::Cast { ty, .. } | Expr::ScalarLiteral { ty, .. } => Ok(ty.size()),
+            Expr::Cast { ty, .. }
+            | Expr::ScalarLiteral { ty, .. }
+            | Expr::ScalarLiteralSet { ty, .. }
+            | Expr::ScalarLiteralCompoundSet { ty, .. } => Ok(ty.size()),
             Expr::AggregateLiteral { type_name, .. } => self
                 .struct_types
                 .get(type_name)
@@ -10329,6 +10362,11 @@ impl Interpreter {
                 let current = self.deref_pointer(&pointer)?;
                 let updated = Self::apply_increment_op(current, op);
                 self.assign_deref_pointer(&pointer, updated)?;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
+            Expr::ScalarLiteral { init, .. } => {
+                let current = self.eval(init)?;
+                let updated = Self::apply_increment_op(current, op);
                 Ok(Self::increment_result(current, updated, prefix))
             }
             _ => Err(CustError::new("invalid increment/decrement target")),
@@ -11136,6 +11174,17 @@ impl Interpreter {
             Expr::Assign { name, value } => self.eval_assignment_expr(name, value),
             Expr::CompoundAssign { name, op, value } => {
                 self.eval_compound_assignment_expr(name, *op, value)
+            }
+            Expr::ScalarLiteralSet { init, value, .. } => {
+                self.eval(init)?;
+                self.eval(value)
+            }
+            Expr::ScalarLiteralCompoundSet {
+                init, op, value, ..
+            } => {
+                let current = self.eval(init)?;
+                let rhs = self.eval(value)?;
+                Self::apply_compound_op(current, *op, rhs)
             }
             Expr::Increment { target, op, prefix } => {
                 self.eval_increment_expr(target, *op, *prefix)

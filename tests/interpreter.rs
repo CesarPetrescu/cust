@@ -324,6 +324,13 @@ fn supports_scalar_compound_literals_in_expression_contexts() {
 }
 
 #[test]
+fn supports_scalar_compound_literals_as_modifiable_lvalues() {
+    let program = include_str!("fixtures/valid/scalar_compound_literal_lvalues.c");
+
+    assert_eq!(interpret(program).unwrap(), 36);
+}
+
+#[test]
 fn supports_array_compound_literals_as_pointer_expressions() {
     let program = include_str!("fixtures/valid/array_compound_literals.c");
 

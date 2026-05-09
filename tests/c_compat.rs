@@ -72,6 +72,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/single_statement_control_bodies.c",
     "tests/fixtures/compat/valid/scalar_cast_expressions.c",
     "tests/fixtures/compat/valid/scalar_compound_literals.c",
+    "tests/fixtures/compat/valid/scalar_compound_literal_lvalues.c",
     "tests/fixtures/compat/valid/sizeof_aggregate_types.c",
     "tests/fixtures/compat/valid/sizeof_const_types.c",
     "tests/fixtures/compat/valid/sizeof_operator.c",
