@@ -77,7 +77,7 @@ Last updated: 2026-05-09
 - comments: `//` line comments and `/* ... */` block comments; unterminated block comments report a lexer source-line/caret diagnostic at the opening `/*`.
 
 - Pointer parameters now accept scalar-array fields by decay for direct structs, struct-array elements, struct pointers, and nested struct paths, so `use(packet.values)`, `use(packets[i].values)`, `use(slot->values)`, `use(one.inner.values)`, `use(boxes[i].inner.values)`, and `use(ptr->inner.values)` create interpreter-owned array-base pointers; `&packet.values[i]`, `&packets[n].values[i]`, `&slot->values[i]`, `&one.inner.values[i]`, `&boxes[n].inner.values[i]`, and `&ptr->inner.values[i]` create array-element pointers that alias the embedded field storage and preserve existing const/read-only diagnostics, including const root structs that make nested array-field decay a pointer-to-const conversion.
-- Struct fields can now embed one-dimensional arrays of supported aggregate types such as `struct Line { struct Point points[2]; };`; Cust zero-initializes or brace-initializes each element, reads scalar fields with `line.points[i].x`, mutates scalar fields with assignment/compound assignment such as `line.points[0].y = line.points[1].x` and `line.points[1].x += 2`, deep-clones embedded aggregate-array fields for by-value struct parameters/copies, and reports deterministic Cust sizes without relying on native struct padding. Embedded aggregate-array fields also decay to aggregate pointers in pointer contexts (`mutate(line.points)`), support element address-of (`struct Point *p = &line.points[1]`), pointer arithmetic (`line.points + 2`), and pointer-indexed field access in callees while preserving const-discard diagnostics for const containing structs.
+- Struct fields can now embed one-dimensional arrays of supported aggregate types such as `struct Line { struct Point points[2]; };`; Cust zero-initializes or brace-initializes each element, reads scalar fields with `line.points[i].x`, mutates scalar fields with assignment/compound assignment such as `line.points[0].y = line.points[1].x` and `line.points[1].x += 2`, deep-clones embedded aggregate-array fields for by-value struct parameters/copies, and reports deterministic Cust sizes without relying on native struct padding. Embedded aggregate-array fields also decay to aggregate pointers in pointer contexts (`mutate(line.points)`), support element address-of (`struct Point *p = &line.points[1]`), pointer arithmetic (`line.points + 2`), and pointer-indexed field access in callees while preserving const-discard diagnostics for const containing structs. The same aggregate-array field pointer behavior now works through struct pointers (`mutate(slot->points)`, `&slot->points[i]`, `slot->points + n`, and `slot->points[i].field`) while preserving const-discard diagnostics for const struct-pointer views.
 
 ## Test/tooling coverage
 
@@ -98,17 +98,17 @@ Last updated: 2026-05-09
 ## Verified commands
 
 ```bash
-cargo test --test interpreter struct_aggregate_array_field -- --nocapture
+cargo test --test interpreter struct_pointer_aggregate_array_field -- --nocapture
 cargo test --test c_compat -- --nocapture
-cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
 cargo fmt --check
 cargo clippy -- -D warnings
 cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
 docker compose run --rm test
 docker compose run --rm cust
 ```
 
-All passed after the 2026-05-09 autonomous embedded aggregate-array field decay run. This run extended embedded `struct T field[N]` fields with aggregate pointer decay (`line.points`), element address-of (`&line.points[i]`), pointer arithmetic (`line.points + n`), and callee-side pointer-indexed field access while preserving const-discard diagnostics for const containing structs. Coverage includes `tests/fixtures/valid/struct_aggregate_array_field_decay.c`, invalid fixture `tests/fixtures/invalid/struct_aggregate_array_field_const_discard.c`, native fixture `tests/fixtures/compat/valid/struct_aggregate_array_field_decay.c`, and focused interpreter regressions. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-09 autonomous struct-pointer embedded aggregate-array field decay run. This run extended embedded `struct T field[N]` aggregate-array field pointer decay from direct structs to struct-pointer paths: `slot->points` decays into aggregate pointer contexts, `&slot->points[i]` returns an aliasing aggregate pointer, `slot->points + n` reuses bounded aggregate-array field pointer arithmetic, and `slot->points[i].field` reads/writes through the containing struct pointer while preserving const-discard diagnostics for const struct-pointer views. Coverage includes `tests/fixtures/valid/struct_pointer_aggregate_array_field_decay.c`, invalid fixture `tests/fixtures/invalid/struct_pointer_aggregate_array_field_const_discard.c`, native fixture `tests/fixtures/compat/valid/struct_pointer_aggregate_array_field_decay.c`, and focused interpreter regressions. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 ```bash
 cargo test --test interpreter supports_struct_aggregate_array_fields -- --nocapture

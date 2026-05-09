@@ -4307,6 +4307,18 @@ impl Parser {
                         fields.push(field);
                         Expr::StructPtrGet { pointer, fields }
                     }
+                    Expr::StructPtrArrayGet {
+                        pointer,
+                        fields,
+                        index,
+                    } => Expr::StructPtrGet {
+                        pointer: Box::new(Expr::StructPtrArrayGet {
+                            pointer,
+                            fields,
+                            index,
+                        }),
+                        fields: vec![field],
+                    },
                     Expr::AggregateLiteral { .. } => Expr::AggregateFieldGet {
                         aggregate: Box::new(expr),
                         fields: vec![field],
@@ -5676,6 +5688,9 @@ impl Interpreter {
                         }
                         StructFieldType::Struct(nested_type) => {
                             current_type_name = nested_type.clone();
+                        }
+                        StructFieldType::StructArray(type_name, _) if is_last => {
+                            return Ok(Some(PointeeType::Struct(type_name.clone())));
                         }
                         StructFieldType::Pointer(ty) if is_last => return Ok(Some(ty.clone())),
                         _ => return Ok(None),
@@ -7435,6 +7450,77 @@ impl Interpreter {
         }
     }
 
+    fn struct_pointer_source(
+        pointer: &PointerValue,
+    ) -> CustResult<Option<(usize, String, Option<usize>)>> {
+        match pointer {
+            PointerValue::Struct { scope_id, name } => Ok(Some((*scope_id, name.clone(), None))),
+            PointerValue::StructElement {
+                scope_id,
+                name,
+                index,
+            } => Ok(Some((*scope_id, name.clone(), Some(*index)))),
+            PointerValue::StructFieldElement { .. } => Ok(None),
+            PointerValue::Null => Err(CustError::new("null pointer dereference")),
+            _ => Err(CustError::new("pointer does not reference a struct")),
+        }
+    }
+
+    fn find_struct_pointer_aggregate_array_field_base_pointer(
+        &self,
+        pointer: &PointerValue,
+        fields: &[String],
+    ) -> CustResult<Option<PointerValue>> {
+        let Some((scope_id, name, element_index)) = Self::struct_pointer_source(pointer)? else {
+            return Ok(None);
+        };
+        match self.struct_field_by_scope(scope_id, &name, element_index, fields)? {
+            StructFieldValue::StructArray { .. } => Ok(Some(PointerValue::StructFieldElement {
+                scope_id,
+                name,
+                element_index,
+                fields: fields.to_vec(),
+                index: 0,
+            })),
+            _ => Ok(None),
+        }
+    }
+
+    fn find_struct_pointer_aggregate_array_field_pointer(
+        &mut self,
+        pointer: &PointerValue,
+        fields: &[String],
+        index: &Expr,
+    ) -> CustResult<Option<PointerValue>> {
+        let Some((scope_id, name, element_index)) = Self::struct_pointer_source(pointer)? else {
+            return Ok(None);
+        };
+        let index_value = self.eval(index)?;
+        let len = match self.struct_field_by_scope(scope_id, &name, element_index, fields)? {
+            StructFieldValue::StructArray { elements, .. } => elements.len(),
+            _ => return Ok(None),
+        };
+        let Ok(index) = usize::try_from(index_value) else {
+            return Err(CustError::new(format!(
+                "struct array field '{}' index {index_value} out of bounds for length {len}",
+                Self::field_path_label(fields)
+            )));
+        };
+        if index >= len {
+            return Err(CustError::new(format!(
+                "struct array field '{}' index {index_value} out of bounds for length {len}",
+                Self::field_path_label(fields)
+            )));
+        }
+        Ok(Some(PointerValue::StructFieldElement {
+            scope_id,
+            name,
+            element_index,
+            fields: fields.to_vec(),
+            index,
+        }))
+    }
+
     fn checked_struct_pointer_array_index(
         &mut self,
         pointer: &PointerValue,
@@ -7465,6 +7551,11 @@ impl Interpreter {
         fields: &[String],
         index: &Expr,
     ) -> CustResult<PointerValue> {
+        if let Some(pointer) =
+            self.find_struct_pointer_aggregate_array_field_pointer(pointer, fields, index)?
+        {
+            return Ok(pointer);
+        }
         let (array, index) = self.checked_struct_pointer_array_index(pointer, fields, index)?;
         Ok(PointerValue::ArrayElement {
             array,
@@ -7478,6 +7569,11 @@ impl Interpreter {
         pointer: &PointerValue,
         fields: &[String],
     ) -> CustResult<PointerValue> {
+        if let Some(pointer) =
+            self.find_struct_pointer_aggregate_array_field_base_pointer(pointer, fields)?
+        {
+            return Ok(pointer);
+        }
         let array = self.find_struct_pointer_array_field(pointer, fields)?;
         Ok(PointerValue::ArrayBase {
             array,
