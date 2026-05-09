@@ -76,6 +76,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/pointer_parameters_and_arrays.c",
     "tests/fixtures/compat/valid/pointer_return_functions.c",
     "tests/fixtures/compat/valid/pointer_truthiness_and_equality.c",
+    "tests/fixtures/compat/valid/reverse_subscript.c",
     "tests/fixtures/compat/valid/pointer_typedef_aliases.c",
     "tests/fixtures/compat/valid/pointers_scalars.c",
     "tests/fixtures/compat/valid/single_statement_control_bodies.c",

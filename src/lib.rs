@@ -4312,12 +4312,11 @@ impl Parser {
                         BinaryOp::Add,
                         Box::new(index),
                     ))),
-                    _ => {
-                        return Err(Self::error_at(
-                            "invalid array index target".to_string(),
-                            self.previous(),
-                        ));
-                    }
+                    _ => Expr::Deref(Box::new(Expr::Binary(
+                        Box::new(expr),
+                        BinaryOp::Add,
+                        Box::new(index),
+                    ))),
                 };
             } else if self.matches(&Token::Dot) {
                 let field = self.expect_ident_after("struct field name after '.'")?;

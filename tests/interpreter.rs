@@ -112,6 +112,13 @@ fn supports_address_of_dereference_as_pointer_identity() {
 }
 
 #[test]
+fn supports_c_style_reverse_subscript_expressions() {
+    let program = include_str!("fixtures/valid/reverse_subscript.c");
+
+    assert_eq!(interpret(program).unwrap(), 29);
+}
+
+#[test]
 fn supports_struct_char_array_fields_initialized_from_string_literals() {
     let program = include_str!("fixtures/valid/struct_char_array_string_initializers.c");
 
