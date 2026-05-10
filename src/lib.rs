@@ -6980,6 +6980,76 @@ impl Interpreter {
         }
     }
 
+    fn nested_struct_field<'a>(
+        type_name: &str,
+        fields_map: &'a HashMap<String, StructFieldValue>,
+        path: &[String],
+    ) -> CustResult<(String, &'a HashMap<String, StructFieldValue>)> {
+        let Some((field, rest)) = path.split_first() else {
+            return Err(CustError::new("expected struct field"));
+        };
+        let value = fields_map.get(field).ok_or_else(|| {
+            CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+        })?;
+        match value {
+            StructFieldValue::Struct {
+                type_name, fields, ..
+            } if rest.is_empty() => Ok((type_name.clone(), fields)),
+            StructFieldValue::Struct {
+                type_name, fields, ..
+            } => Self::nested_struct_field(type_name, fields, rest),
+            StructFieldValue::Scalar { .. }
+            | StructFieldValue::Array { .. }
+            | StructFieldValue::StructArray { .. }
+            | StructFieldValue::Pointer { .. } => {
+                if rest.is_empty() {
+                    Err(CustError::new("pointer does not reference a struct"))
+                } else {
+                    Err(CustError::new(format!(
+                        "struct field '{field}' is not a struct"
+                    )))
+                }
+            }
+        }
+    }
+
+    fn nested_struct_field_mut<'a>(
+        type_name: &str,
+        fields_map: &'a mut HashMap<String, StructFieldValue>,
+        path: &[String],
+    ) -> CustResult<(String, &'a mut HashMap<String, StructFieldValue>)> {
+        let Some((field, rest)) = path.split_first() else {
+            return Err(CustError::new("expected struct field"));
+        };
+        let value = fields_map.get_mut(field).ok_or_else(|| {
+            CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+        })?;
+        if rest.is_empty() {
+            return match value {
+                StructFieldValue::Struct {
+                    type_name, fields, ..
+                } => Ok((type_name.clone(), fields)),
+                StructFieldValue::Scalar { .. }
+                | StructFieldValue::Array { .. }
+                | StructFieldValue::StructArray { .. }
+                | StructFieldValue::Pointer { .. } => {
+                    Err(CustError::new("pointer does not reference a struct"))
+                }
+            };
+        }
+        match value {
+            StructFieldValue::Struct {
+                type_name, fields, ..
+            } => Self::nested_struct_field_mut(type_name, fields, rest),
+            StructFieldValue::Scalar { .. }
+            | StructFieldValue::Array { .. }
+            | StructFieldValue::StructArray { .. }
+            | StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                "struct field '{field}' is not a struct"
+            ))),
+        }
+    }
+
     fn read_struct_field(&self, name: &str, path: &[String]) -> CustResult<i64> {
         match self.find_variable(name) {
             Some(Value::Struct { type_name, fields }) => {
@@ -8664,6 +8734,23 @@ impl Interpreter {
                 } => Ok((type_name.clone(), fields)),
                 _ => Err(CustError::new("pointer does not reference a struct")),
             },
+            PointerValue::StructFieldElementField {
+                scope_id,
+                name,
+                element_index,
+                array_fields,
+                index,
+                fields,
+            } => {
+                let (element_type_name, element_fields) = self.struct_field_array_element_fields(
+                    *scope_id,
+                    name,
+                    *element_index,
+                    array_fields,
+                    *index,
+                )?;
+                Self::nested_struct_field(&element_type_name, element_fields, fields)
+            }
             _ => Err(CustError::new("pointer does not reference a struct")),
         }
     }
@@ -8754,6 +8841,24 @@ impl Interpreter {
                 } => Ok((type_name.clone(), fields)),
                 _ => Err(CustError::new("pointer does not reference a struct")),
             },
+            PointerValue::StructFieldElementField {
+                scope_id,
+                name,
+                element_index,
+                array_fields,
+                index,
+                fields,
+            } => {
+                let (element_type_name, element_fields) = self
+                    .struct_field_array_element_fields_mut(
+                        *scope_id,
+                        name,
+                        *element_index,
+                        array_fields,
+                        *index,
+                    )?;
+                Self::nested_struct_field_mut(&element_type_name, element_fields, fields)
+            }
             _ => Err(CustError::new("pointer does not reference a struct")),
         }
     }

@@ -4,7 +4,22 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous embedded aggregate-array element scalar-field address run. This run closes the next pointer/aggregate parity gap: scalar fields reached through pointers into embedded aggregate-array fields can now be addressed directly, e.g. `struct Point *p = line.points + 1; int *x = &p->x;`, with the resulting pointer aliasing the original containing struct storage through helper calls and dereference writes. The interpreter adds a dedicated `PointerValue::StructFieldElementField` target to preserve the embedded aggregate-array owner/path/index metadata while exposing scalar-field pointer semantics. Coverage includes `tests/fixtures/valid/struct_field_element_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_element_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-embedded-aggregate-array-element-field-addresses.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous embedded aggregate-array element aggregate-field address run. This run closes the aggregate counterpart to the previous scalar-field pointer gap: aggregate-valued fields reached through pointers into embedded aggregate-array fields can now be addressed directly, e.g. `struct Segment *second = drawing.segments + 1; struct Point *start = &second->start;`, and the resulting struct pointer supports `->` reads/writes that alias the original containing struct storage. The interpreter now routes aggregate-valued `PointerValue::StructFieldElementField` targets through both immutable and mutable struct-pointer field resolution, with helper traversal returning owned type-name metadata to avoid borrowing temporary element type strings. Coverage includes `tests/fixtures/valid/struct_field_element_aggregate_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_element_aggregate_field_addresses.c`, focused RED/GREEN interpreter coverage, C compiler-oracle verification, and a reference note in `references/cust-embedded-aggregate-array-element-aggregate-field-addresses.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_addresses_of_aggregate_fields_through_embedded_aggregate_array_pointers -- --nocapture
+cargo test --test interpreter supports_addresses_of_fields_through_embedded_aggregate_array_pointers -- --nocapture
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous embedded aggregate-array element scalar-field address run. This run closes the next pointer/aggregate parity gap: scalar fields reached through pointers into embedded aggregate-array fields can now be addressed directly, e.g. `struct Point *p = line.points + 1; int *x = &p->x;`, with the resulting pointer aliasing the original containing struct storage through helper calls and dereference writes. The interpreter adds a dedicated `PointerValue::StructFieldElementField` target to preserve the embedded aggregate-array owner/path/index metadata while exposing scalar-field pointer semantics. Coverage includes `tests/fixtures/valid/struct_field_element_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_element_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-embedded-aggregate-array-element-field-addresses.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
