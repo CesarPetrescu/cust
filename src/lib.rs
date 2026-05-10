@@ -37,6 +37,8 @@ enum Token {
     Char,
     Signed,
     Unsigned,
+    Long,
+    Short,
     Const,
     Static,
     Void,
@@ -1132,6 +1134,8 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "char" => Token::Char,
                     "signed" => Token::Signed,
                     "unsigned" => Token::Unsigned,
+                    "long" => Token::Long,
+                    "short" => Token::Short,
                     "const" => Token::Const,
                     "static" => Token::Static,
                     "void" => Token::Void,
@@ -1609,7 +1613,13 @@ impl Parser {
                 }
             } else if matches!(
                 self.peek(),
-                Token::Int | Token::Char | Token::Signed | Token::Unsigned | Token::Const
+                Token::Int
+                    | Token::Char
+                    | Token::Signed
+                    | Token::Unsigned
+                    | Token::Long
+                    | Token::Short
+                    | Token::Const
             ) || self.current_alias().is_some()
             {
                 globals.push(self.parse_var_decl()?);
@@ -1741,13 +1751,19 @@ impl Parser {
             Token::Int => Ok(DeclType::Scalar(CType::Int)),
             Token::Char => Ok(DeclType::Scalar(CType::Char)),
             Token::Signed | Token::Unsigned => {
-                if self.matches(&Token::Int) {
-                    Ok(DeclType::Scalar(CType::Int))
-                } else if self.matches(&Token::Char) {
+                if self.matches(&Token::Char) {
                     Ok(DeclType::Scalar(CType::Char))
                 } else {
+                    self.matches(&Token::Int);
+                    if self.matches(&Token::Long) || self.matches(&Token::Short) {
+                        self.matches(&Token::Int);
+                    }
                     Ok(DeclType::Scalar(CType::Int))
                 }
+            }
+            Token::Long | Token::Short => {
+                self.matches(&Token::Int);
+                Ok(DeclType::Scalar(CType::Int))
             }
             Token::Struct | Token::Union => {
                 let keyword = if matches!(found.kind, Token::Union) {
@@ -1918,6 +1934,15 @@ impl Parser {
         }
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(Token::Int | Token::Char | Token::Void) => index += 1,
+            Some(Token::Long | Token::Short) => {
+                index += 1;
+                if matches!(
+                    self.tokens.get(index).map(|token| &token.kind),
+                    Some(Token::Int)
+                ) {
+                    index += 1;
+                }
+            }
             Some(Token::Signed | Token::Unsigned) => {
                 index += 1;
                 if matches!(
@@ -1925,6 +1950,17 @@ impl Parser {
                     Some(Token::Int | Token::Char)
                 ) {
                     index += 1;
+                } else if matches!(
+                    self.tokens.get(index).map(|token| &token.kind),
+                    Some(Token::Long | Token::Short)
+                ) {
+                    index += 1;
+                    if matches!(
+                        self.tokens.get(index).map(|token| &token.kind),
+                        Some(Token::Int)
+                    ) {
+                        index += 1;
+                    }
                 }
             }
             Some(Token::Enum) => {
@@ -1967,7 +2003,7 @@ impl Parser {
     fn starts_malformed_function_definition(&self) -> bool {
         if !matches!(
             self.peek(),
-            Token::Int | Token::Char | Token::Signed | Token::Unsigned
+            Token::Int | Token::Char | Token::Signed | Token::Unsigned | Token::Long | Token::Short
         ) {
             return false;
         }
@@ -2248,9 +2284,13 @@ impl Parser {
         match self.peek() {
             Token::Semi => self.parse_empty(),
             Token::Static => self.parse_static_local_decl(),
-            Token::Int | Token::Char | Token::Signed | Token::Unsigned | Token::Const => {
-                self.parse_var_decl()
-            }
+            Token::Int
+            | Token::Char
+            | Token::Signed
+            | Token::Unsigned
+            | Token::Long
+            | Token::Short
+            | Token::Const => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Typedef => match self.parse_typedef_decl()? {
                 Some(stmt) => Ok(stmt),
@@ -2330,9 +2370,13 @@ impl Parser {
         let id = self.next_static_local_id;
         self.next_static_local_id += 1;
         let decl = match self.peek() {
-            Token::Int | Token::Char | Token::Signed | Token::Unsigned | Token::Const => {
-                self.parse_var_decl()?
-            }
+            Token::Int
+            | Token::Char
+            | Token::Signed
+            | Token::Unsigned
+            | Token::Long
+            | Token::Short
+            | Token::Const => self.parse_var_decl()?,
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
             Token::Struct | Token::Union => self.parse_aggregate_var_decl()?,
             token => {
@@ -3641,7 +3685,13 @@ impl Parser {
             None
         } else if matches!(
             self.peek(),
-            Token::Int | Token::Char | Token::Signed | Token::Unsigned | Token::Const
+            Token::Int
+                | Token::Char
+                | Token::Signed
+                | Token::Unsigned
+                | Token::Long
+                | Token::Short
+                | Token::Const
         ) || self.current_alias().is_some()
         {
             Some(Box::new(self.parse_var_decl()?))
@@ -4196,6 +4246,8 @@ impl Parser {
                 | Token::Char
                 | Token::Signed
                 | Token::Unsigned
+                | Token::Long
+                | Token::Short
                 | Token::Struct
                 | Token::Union
                 | Token::Const,
@@ -4369,6 +4421,8 @@ impl Parser {
                     | Token::Char
                     | Token::Signed
                     | Token::Unsigned
+                    | Token::Long
+                    | Token::Short
                     | Token::Struct
                     | Token::Union
                     | Token::Enum
@@ -4391,6 +4445,8 @@ impl Parser {
                                 | Token::Char
                                 | Token::Signed
                                 | Token::Unsigned
+                                | Token::Long
+                                | Token::Short
                                 | Token::Struct
                                 | Token::Union
                                 | Token::Enum
