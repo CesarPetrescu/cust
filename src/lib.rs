@@ -343,6 +343,10 @@ enum Expr {
         type_name: String,
         init: Vec<StructInitializer>,
     },
+    AddressOfAggregateField {
+        aggregate: Box<Expr>,
+        fields: Vec<String>,
+    },
     ArrayLiteral {
         elem_type: CType,
         len: Option<usize>,
@@ -4212,6 +4216,9 @@ impl Parser {
             Expr::AggregateLiteral { type_name, init } => {
                 Ok(Expr::AddressOfAggregateLiteral { type_name, init })
             }
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                Ok(Expr::AddressOfAggregateField { aggregate, fields })
+            }
             Expr::StringGet { values, index } => Ok(Expr::Binary(
                 Box::new(Expr::StringLiteral(values)),
                 BinaryOp::Add,
@@ -5755,6 +5762,22 @@ impl Interpreter {
             Expr::AddressOfAggregateLiteral { type_name, .. } => {
                 Ok(Some(PointeeType::Struct(type_name.clone())))
             }
+            Expr::AddressOfAggregateField { aggregate, fields } => {
+                match self.aggregate_literal_field_metadata(aggregate, fields)? {
+                    Some((StructFieldType::Scalar(ty), _, _)) => Ok(Some(PointeeType::Scalar(ty))),
+                    Some((StructFieldType::Array(elem_type, _), _, _)) => {
+                        Ok(Some(PointeeType::Scalar(elem_type)))
+                    }
+                    Some((StructFieldType::Struct(type_name), _, _)) => {
+                        Ok(Some(PointeeType::Struct(type_name)))
+                    }
+                    Some((StructFieldType::StructArray(type_name, _), _, _)) => {
+                        Ok(Some(PointeeType::Struct(type_name)))
+                    }
+                    Some((StructFieldType::Pointer(ty), _, _)) => Ok(Some(ty)),
+                    None => Ok(None),
+                }
+            }
             Expr::AggregateFieldGet { aggregate, fields } => {
                 match self.aggregate_literal_field_metadata(aggregate, fields)? {
                     Some((StructFieldType::Pointer(ty), _, _)) => Ok(Some(ty)),
@@ -5945,6 +5968,16 @@ impl Interpreter {
                     StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => is_const,
                     StructFieldType::Pointer(_) => points_to_const,
                     StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
+                })
+                .unwrap_or(false),
+            Expr::AddressOfAggregateField { aggregate, fields } => self
+                .aggregate_literal_field_metadata(aggregate, fields)
+                .ok()
+                .flatten()
+                .map(|(field_type, is_const, points_to_const)| match field_type {
+                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => is_const,
+                    StructFieldType::Pointer(_) => points_to_const,
+                    StructFieldType::Scalar(_) | StructFieldType::Struct(_) => is_const,
                 })
                 .unwrap_or(false),
             Expr::StructElementGet { name, fields, .. } => {
@@ -6518,6 +6551,49 @@ impl Interpreter {
             },
         );
         Ok(PointerValue::Struct { scope_id, name })
+    }
+
+    fn make_aggregate_compound_literal_field_pointer(
+        &mut self,
+        aggregate: &Expr,
+        fields: &[String],
+    ) -> CustResult<PointerValue> {
+        let Expr::AggregateLiteral { type_name, init } = aggregate else {
+            return Err(CustError::new(
+                "invalid address-of target for aggregate expression field",
+            ));
+        };
+        match self.make_aggregate_compound_literal_pointer(type_name, init)? {
+            PointerValue::Struct { scope_id, name } => {
+                match self.struct_field_by_scope(scope_id, &name, None, fields)? {
+                    StructFieldValue::Scalar { .. } => Ok(PointerValue::StructField {
+                        scope_id,
+                        name,
+                        element_index: None,
+                        fields: fields.to_vec(),
+                    }),
+                    StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
+                        array: Rc::clone(value),
+                        source_name: Some(Self::field_path_label(fields).to_string()),
+                    }),
+                    StructFieldValue::Struct { .. } => Err(CustError::new(format!(
+                        "struct field '{}' requires field access",
+                        Self::field_path_label(fields)
+                    ))),
+                    StructFieldValue::StructArray { .. } => Err(CustError::new(format!(
+                        "struct field '{}' requires indexed field access",
+                        Self::field_path_label(fields)
+                    ))),
+                    StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                        "pointer field '{}' cannot be addressed in this pointer milestone",
+                        Self::field_path_label(fields)
+                    ))),
+                }
+            }
+            _ => Err(CustError::new(
+                "aggregate compound literal did not produce a struct pointer",
+            )),
+        }
     }
 
     fn make_struct_fields(
@@ -8852,6 +8928,9 @@ impl Interpreter {
             Expr::AddressOfAggregateLiteral { type_name, init } => {
                 self.make_aggregate_compound_literal_pointer(type_name, init)
             }
+            Expr::AddressOfAggregateField { aggregate, fields } => {
+                self.make_aggregate_compound_literal_field_pointer(aggregate, fields)
+            }
             Expr::StringLiteral(values) => Ok(PointerValue::ArrayBase {
                 array: Rc::new(RefCell::new(ArrayValue::read_only(values.clone()))),
                 source_name: None,
@@ -9879,6 +9958,7 @@ impl Interpreter {
             | Expr::AddressOfStructPtrArrayField { .. }
             | Expr::AddressOfScalarLiteral { .. }
             | Expr::AddressOfAggregateLiteral { .. }
+            | Expr::AddressOfAggregateField { .. }
             | Expr::StringLiteral(_)
             | Expr::ArrayLiteral { .. }
             | Expr::AggregateArrayLiteral { .. } => {
@@ -10355,7 +10435,8 @@ impl Interpreter {
             | Expr::AddressOfStructElementArrayField { .. }
             | Expr::AddressOfStructPtrArrayField { .. }
             | Expr::AddressOfScalarLiteral { .. }
-            | Expr::AddressOfAggregateLiteral { .. } => Ok(POINTER_SIZE),
+            | Expr::AddressOfAggregateLiteral { .. }
+            | Expr::AddressOfAggregateField { .. } => Ok(POINTER_SIZE),
             Expr::Deref(pointer) => self.sizeof_deref(pointer),
             Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
                 self.sizeof_assignment_result(name)
@@ -11721,7 +11802,8 @@ impl Interpreter {
             | Expr::AddressOfStructElementArrayField { .. }
             | Expr::AddressOfStructPtrArrayField { .. }
             | Expr::AddressOfScalarLiteral { .. }
-            | Expr::AddressOfAggregateLiteral { .. } => {
+            | Expr::AddressOfAggregateLiteral { .. }
+            | Expr::AddressOfAggregateField { .. } => {
                 Err(CustError::new("pointer value used as scalar"))
             }
             Expr::Assign { name, value } => self.eval_assignment_expr(name, value),

@@ -4,7 +4,21 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous parenthesized pointer declarator diagnostic run. This run expands the remaining parser recovery/error-message track for unsupported C declarator forms that previously fell through to generic missing-name diagnostics: function/parameter declarators such as `int sum(int (*row)[3])` now report `parenthesized pointer parameters are not supported`, and local declarations such as `int (*row)[3];` report `parenthesized pointer declarations are not supported` at the opening parenthesis. Coverage includes invalid fixtures `tests/fixtures/invalid/parenthesized_pointer_parameter.c` and `tests/fixtures/invalid/parenthesized_pointer_declaration.c` plus focused RED/GREEN exact-diagnostic interpreter tests. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous aggregate compound-literal scalar-field address run. This run closes another compound-literal lvalue/addressability parity gap: scalar fields selected from aggregate compound literals can now be addressed directly (`&((struct Point){4, 8}).x`), including nested scalar fields (`&((struct Box){{2, 3}, 4}).inner.y`) and union scalar fields (`&((union Number){7}).value`). The parser now lowers address-of over aggregate field selections to a dedicated `AddressOfAggregateField` expression; the interpreter creates hidden current-scope compound-literal aggregate storage and returns a safe `PointerValue::StructField` to the selected scalar field, preserving pointer type and const metadata. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-aggregate-compound-literal-field-addresses.md`.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_addresses_of_aggregate_compound_literal_scalar_fields -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous parenthesized pointer declarator diagnostic run. This run expands the remaining parser recovery/error-message track for unsupported C declarator forms that previously fell through to generic missing-name diagnostics: function/parameter declarators such as `int sum(int (*row)[3])` now report `parenthesized pointer parameters are not supported`, and local declarations such as `int (*row)[3];` report `parenthesized pointer declarations are not supported` at the opening parenthesis. Coverage includes invalid fixtures `tests/fixtures/invalid/parenthesized_pointer_parameter.c` and `tests/fixtures/invalid/parenthesized_pointer_declaration.c` plus focused RED/GREEN exact-diagnostic interpreter tests. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
