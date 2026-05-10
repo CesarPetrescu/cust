@@ -126,6 +126,13 @@ fn supports_bool_type_spellings() {
 }
 
 #[test]
+fn supports_auto_and_register_local_storage_class_specifiers() {
+    let program = include_str!("fixtures/valid/auto_register_storage_class.c");
+
+    assert_eq!(interpret(program).unwrap(), 23);
+}
+
+#[test]
 fn supports_standard_simple_escape_sequences() {
     let program = include_str!("fixtures/valid/standard_escape_sequences.c");
 

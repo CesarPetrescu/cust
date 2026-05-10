@@ -1,10 +1,24 @@
 # Cust Current State
 
-Last updated: 2026-05-10
+Last updated: 2026-05-11
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous `_Bool` type-spelling run. Ideation considered newly discovered malformed-program parser diagnostics, additional C-compatible compound-literal edge fixtures, aggregate-kind-specific diagnostic polish, `_Bool` syntax parity after the recent scalar type-spelling work, and standard-library-like builtins. The selected work package closes another small scalar C syntax conformance gap from the roadmap: Cust now lexes and parses C99 `_Bool` as a deterministic scalar type with Cust-defined size 1. `_Bool` works across globals, locals, static locals, `for` declarations, function returns/prototypes/parameters, pointer declarations/parameters, typedef aliases, scalar casts, and `sizeof` scalar/pointer/one-dimensional array type operands. This is syntax/type-spelling parity over Cust's deterministic scalar model, not a broader native C integer-conversion/range implementation. Coverage includes `tests/fixtures/valid/bool_type_spellings.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/bool_type_spellings.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-bool-type-spellings.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-11 autonomous `auto`/`register` local storage-class run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge fixtures, aggregate-kind diagnostic polish, array typedefs, top-level `extern`/storage-class work, and small C storage-class syntax parity. The selected work package closes a safe local declaration conformance gap: Cust now lexes and parses `auto` and `register` as block-scope/local declaration prefixes for ordinary automatic storage. The specifiers work for scalar, pointer, aggregate, and `for` initializer declarations by lowering to the existing local declaration paths; runtime behavior remains Cust's deterministic interpreter-owned local storage model and does not attempt native register allocation or address-taking restrictions. Coverage includes `tests/fixtures/valid/auto_register_storage_class.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/auto_register_storage_class.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-auto-register-storage-class.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_auto_and_register_local_storage_class_specifiers -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous `_Bool` type-spelling run. Ideation considered newly discovered malformed-program parser diagnostics, additional C-compatible compound-literal edge fixtures, aggregate-kind-specific diagnostic polish, `_Bool` syntax parity after the recent scalar type-spelling work, and standard-library-like builtins. The selected work package closes another small scalar C syntax conformance gap from the roadmap: Cust now lexes and parses C99 `_Bool` as a deterministic scalar type with Cust-defined size 1. `_Bool` works across globals, locals, static locals, `for` declarations, function returns/prototypes/parameters, pointer declarations/parameters, typedef aliases, scalar casts, and `sizeof` scalar/pointer/one-dimensional array type operands. This is syntax/type-spelling parity over Cust's deterministic scalar model, not a broader native C integer-conversion/range implementation. Coverage includes `tests/fixtures/valid/bool_type_spellings.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/bool_type_spellings.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-bool-type-spellings.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

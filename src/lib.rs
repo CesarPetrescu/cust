@@ -42,6 +42,8 @@ enum Token {
     Short,
     Const,
     Static,
+    Auto,
+    Register,
     Void,
     Enum,
     Struct,
@@ -1143,6 +1145,8 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "short" => Token::Short,
                     "const" => Token::Const,
                     "static" => Token::Static,
+                    "auto" => Token::Auto,
+                    "register" => Token::Register,
                     "void" => Token::Void,
                     "enum" => Token::Enum,
                     "struct" => Token::Struct,
@@ -2337,6 +2341,7 @@ impl Parser {
         match self.peek() {
             Token::Semi => self.parse_empty(),
             Token::Static => self.parse_static_local_decl(),
+            Token::Auto | Token::Register => self.parse_auto_register_local_decl(),
             Token::Int
             | Token::Char
             | Token::Bool
@@ -2445,6 +2450,31 @@ impl Parser {
             id,
             decl: Box::new(decl),
         })
+    }
+
+    fn parse_auto_register_local_decl(&mut self) -> CustResult<Stmt> {
+        let specifier = match self.peek() {
+            Token::Auto => "auto",
+            Token::Register => "register",
+            _ => unreachable!("caller checked storage-class token"),
+        };
+        self.advance();
+        match self.peek() {
+            Token::Int
+            | Token::Char
+            | Token::Bool
+            | Token::Signed
+            | Token::Unsigned
+            | Token::Long
+            | Token::Short
+            | Token::Const => self.parse_var_decl(),
+            Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
+            Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
+            token => Err(Self::error_at(
+                format!("expected declaration after {specifier}, found {token:?}"),
+                self.peek_located(),
+            )),
+        }
     }
 
     fn parse_var_decl(&mut self) -> CustResult<Stmt> {
@@ -3738,6 +3768,8 @@ impl Parser {
 
         let init = if self.matches(&Token::Semi) {
             None
+        } else if matches!(self.peek(), Token::Auto | Token::Register) {
+            Some(Box::new(self.parse_auto_register_local_decl()?))
         } else if matches!(
             self.peek(),
             Token::Int
