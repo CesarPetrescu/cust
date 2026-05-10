@@ -4,7 +4,21 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous `sizeof` array type-name run. This run closes a small C `sizeof` type-operand parity gap: one-dimensional scalar and aggregate array type names now parse in `sizeof(...)`, e.g. `sizeof(int[3])`, `sizeof(char[4])`, `sizeof(const int[2])`, `sizeof(struct Pair[2])`, and typedef-spelled aggregate arrays such as `sizeof(Number[3])`. Cust computes these sizes with its deterministic interpreter model by multiplying the element type size by the parsed positive length, without creating or evaluating runtime storage. Pointer-array and multidimensional array type operands remain outside the supported subset with targeted diagnostics. Coverage includes `tests/fixtures/valid/sizeof_array_types.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/sizeof_array_types.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, and a reference note in `references/cust-sizeof-array-type-names.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous signed/unsigned integer type-spelling run. This run closes a small C declaration/type-operand conformance gap: Cust now lexes and parses `signed`, `signed int`, `unsigned`, and `unsigned int` as parser-level spellings for the existing deterministic integer storage model. These spellings work across globals, locals, static locals, `for` initializer declarations, function returns, parameters/prototypes, pointer declarations/parameters, typedef aliases, scalar casts, and `sizeof` type operands including one-dimensional array type names such as `sizeof(const unsigned int[2])`. Runtime scalar storage and Cust-defined integer size remain unchanged (`i64`, `sizeof(int) == 8`); this is syntax/conformance parity rather than native unsigned wraparound semantics. Coverage includes `tests/fixtures/valid/signed_unsigned_int_types.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/signed_unsigned_int_types.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, and required Docker verification. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_signed_unsigned_int_type_spellings -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous `sizeof` array type-name run. This run closes a small C `sizeof` type-operand parity gap: one-dimensional scalar and aggregate array type names now parse in `sizeof(...)`, e.g. `sizeof(int[3])`, `sizeof(char[4])`, `sizeof(const int[2])`, `sizeof(struct Pair[2])`, and typedef-spelled aggregate arrays such as `sizeof(Number[3])`. Cust computes these sizes with its deterministic interpreter model by multiplying the element type size by the parsed positive length, without creating or evaluating runtime storage. Pointer-array and multidimensional array type operands remain outside the supported subset with targeted diagnostics. Coverage includes `tests/fixtures/valid/sizeof_array_types.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/sizeof_array_types.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, and a reference note in `references/cust-sizeof-array-type-names.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

@@ -35,6 +35,8 @@ const POINTER_SIZE: i64 = 8;
 enum Token {
     Int,
     Char,
+    Signed,
+    Unsigned,
     Const,
     Static,
     Void,
@@ -1128,6 +1130,8 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 let kind = match text.as_str() {
                     "int" => Token::Int,
                     "char" => Token::Char,
+                    "signed" => Token::Signed,
+                    "unsigned" => Token::Unsigned,
                     "const" => Token::Const,
                     "static" => Token::Static,
                     "void" => Token::Void,
@@ -1603,8 +1607,10 @@ impl Parser {
                         }
                     }
                 }
-            } else if matches!(self.peek(), Token::Int | Token::Char | Token::Const)
-                || self.current_alias().is_some()
+            } else if matches!(
+                self.peek(),
+                Token::Int | Token::Char | Token::Signed | Token::Unsigned | Token::Const
+            ) || self.current_alias().is_some()
             {
                 globals.push(self.parse_var_decl()?);
             } else if self.check(&Token::Typedef) {
@@ -1734,6 +1740,23 @@ impl Parser {
         match found.kind.clone() {
             Token::Int => Ok(DeclType::Scalar(CType::Int)),
             Token::Char => Ok(DeclType::Scalar(CType::Char)),
+            Token::Signed | Token::Unsigned => {
+                let keyword = if matches!(found.kind, Token::Signed) {
+                    "signed"
+                } else {
+                    "unsigned"
+                };
+                if self.matches(&Token::Int) {
+                    Ok(DeclType::Scalar(CType::Int))
+                } else if self.check(&Token::Char) {
+                    Err(Self::error_at(
+                        format!("{keyword} char types are not supported"),
+                        self.peek_located(),
+                    ))
+                } else {
+                    Ok(DeclType::Scalar(CType::Int))
+                }
+            }
             Token::Struct | Token::Union => {
                 let keyword = if matches!(found.kind, Token::Union) {
                     "union"
@@ -1903,6 +1926,15 @@ impl Parser {
         }
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(Token::Int | Token::Char | Token::Void) => index += 1,
+            Some(Token::Signed | Token::Unsigned) => {
+                index += 1;
+                if matches!(
+                    self.tokens.get(index).map(|token| &token.kind),
+                    Some(Token::Int)
+                ) {
+                    index += 1;
+                }
+            }
             Some(Token::Enum) => {
                 if !matches!(
                     self.tokens.get(index + 1).map(|token| &token.kind),
@@ -1941,7 +1973,10 @@ impl Parser {
     }
 
     fn starts_malformed_function_definition(&self) -> bool {
-        if !matches!(self.peek(), Token::Int | Token::Char) {
+        if !matches!(
+            self.peek(),
+            Token::Int | Token::Char | Token::Signed | Token::Unsigned
+        ) {
             return false;
         }
 
@@ -2221,7 +2256,9 @@ impl Parser {
         match self.peek() {
             Token::Semi => self.parse_empty(),
             Token::Static => self.parse_static_local_decl(),
-            Token::Int | Token::Char | Token::Const => self.parse_var_decl(),
+            Token::Int | Token::Char | Token::Signed | Token::Unsigned | Token::Const => {
+                self.parse_var_decl()
+            }
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Typedef => match self.parse_typedef_decl()? {
                 Some(stmt) => Ok(stmt),
@@ -2301,7 +2338,9 @@ impl Parser {
         let id = self.next_static_local_id;
         self.next_static_local_id += 1;
         let decl = match self.peek() {
-            Token::Int | Token::Char | Token::Const => self.parse_var_decl()?,
+            Token::Int | Token::Char | Token::Signed | Token::Unsigned | Token::Const => {
+                self.parse_var_decl()?
+            }
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
             Token::Struct | Token::Union => self.parse_aggregate_var_decl()?,
             token => {
@@ -3608,8 +3647,10 @@ impl Parser {
 
         let init = if self.matches(&Token::Semi) {
             None
-        } else if matches!(self.peek(), Token::Int | Token::Char | Token::Const)
-            || self.current_alias().is_some()
+        } else if matches!(
+            self.peek(),
+            Token::Int | Token::Char | Token::Signed | Token::Unsigned | Token::Const
+        ) || self.current_alias().is_some()
         {
             Some(Box::new(self.parse_var_decl()?))
         } else if self.starts_assignment_stmt() {
@@ -4158,7 +4199,15 @@ impl Parser {
 
     fn starts_cast_type_after_lparen(&self) -> bool {
         match self.tokens.get(self.pos + 1).map(|token| &token.kind) {
-            Some(Token::Int | Token::Char | Token::Struct | Token::Union | Token::Const) => true,
+            Some(
+                Token::Int
+                | Token::Char
+                | Token::Signed
+                | Token::Unsigned
+                | Token::Struct
+                | Token::Union
+                | Token::Const,
+            ) => true,
             Some(Token::Ident(name)) => self.lookup_type_alias(name).is_some(),
             _ => false,
         }
@@ -4326,6 +4375,8 @@ impl Parser {
                 self.peek(),
                 Token::Int
                     | Token::Char
+                    | Token::Signed
+                    | Token::Unsigned
                     | Token::Struct
                     | Token::Union
                     | Token::Enum
@@ -4344,7 +4395,13 @@ impl Parser {
                     if is_const_qualified
                         && !matches!(
                             self.peek(),
-                            Token::Int | Token::Char | Token::Struct | Token::Union | Token::Enum
+                            Token::Int
+                                | Token::Char
+                                | Token::Signed
+                                | Token::Unsigned
+                                | Token::Struct
+                                | Token::Union
+                                | Token::Enum
                         )
                         && self.current_alias().is_none()
                     {

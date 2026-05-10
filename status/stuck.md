@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-10 autonomous `sizeof` array type-name run after focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, and required Docker verification passed; full verification is recorded in `status/current-state.md`. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-05-10 autonomous signed/unsigned integer type-spelling run after focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, and required Docker verification passed; full verification is recorded in `status/current-state.md`. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 

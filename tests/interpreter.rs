@@ -91,6 +91,13 @@ fn supports_c_integer_literal_suffixes() {
 }
 
 #[test]
+fn supports_signed_unsigned_int_type_spellings() {
+    let program = include_str!("fixtures/valid/signed_unsigned_int_types.c");
+
+    assert_eq!(interpret(program).unwrap(), 22);
+}
+
+#[test]
 fn supports_standard_simple_escape_sequences() {
     let program = include_str!("fixtures/valid/standard_escape_sequences.c");
 
