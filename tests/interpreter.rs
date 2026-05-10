@@ -2397,6 +2397,42 @@ fn rejects_parenthesized_pointer_parameters_with_context() {
 }
 
 #[test]
+fn rejects_multidimensional_array_declarations_with_context() {
+    let program = include_str!("fixtures/invalid/multidimensional_array_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "multidimensional array declarations are not supported at line 2, column 16"
+    );
+}
+
+#[test]
+fn rejects_multidimensional_array_parameters_with_context() {
+    let program = include_str!("fixtures/invalid/multidimensional_array_parameter.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "multidimensional array parameters are not supported at line 1, column 22"
+    );
+}
+
+#[test]
+fn rejects_multidimensional_array_fields_with_context() {
+    let program = include_str!("fixtures/invalid/multidimensional_array_field.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "multidimensional array struct fields are not supported at line 2, column 16"
+    );
+}
+
+#[test]
 fn rejects_parenthesized_pointer_declarations_with_context() {
     let program = include_str!("fixtures/invalid/parenthesized_pointer_declaration.c");
 

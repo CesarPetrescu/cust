@@ -2078,6 +2078,12 @@ impl Parser {
                         self.expect_array_len()?;
                     }
                     self.expect_closing_bracket_after("array parameter length")?;
+                    if self.check(&Token::LBracket) {
+                        return Err(Self::error_at(
+                            "multidimensional array parameters are not supported".to_string(),
+                            self.peek_located(),
+                        ));
+                    }
                     ParamKind::Pointer
                 } else {
                     ParamKind::Struct
@@ -2088,6 +2094,12 @@ impl Parser {
                 } else {
                     self.expect_array_len()?;
                     self.expect_closing_bracket_after("array parameter length")?;
+                }
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "multidimensional array parameters are not supported".to_string(),
+                        self.peek_located(),
+                    ));
                 }
                 ParamKind::Pointer
             } else {
@@ -2381,6 +2393,12 @@ impl Parser {
             if self.matches(&Token::LBracket) {
                 let len = self.expect_array_len()?;
                 self.expect_closing_bracket_after("struct array length")?;
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "multidimensional array declarations are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 let DeclType::Struct(type_name) = &decl_type else {
                     unreachable!("struct declarations return above")
                 };
@@ -2434,6 +2452,12 @@ impl Parser {
         if self.matches(&Token::LBracket) {
             let len = self.expect_array_len()?;
             self.expect_closing_bracket_after("array length")?;
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "multidimensional array declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let init = if self.matches(&Token::Assign) {
                 self.parse_array_initializer_or_string(&name, len, ty)?
             } else {
@@ -3104,11 +3128,27 @@ impl Parser {
                     StructFieldType::Scalar(elem_type) => {
                         let len = self.expect_array_len()?;
                         self.expect_closing_bracket_after("struct array field length")?;
+                        if self.check(&Token::LBracket) {
+                            return Err(Self::error_at(
+                                format!(
+                                    "multidimensional array {keyword} fields are not supported"
+                                ),
+                                self.peek_located(),
+                            ));
+                        }
                         StructFieldType::Array(elem_type, len)
                     }
                     StructFieldType::Struct(type_name) => {
                         let len = self.expect_array_len()?;
                         self.expect_closing_bracket_after("struct array field length")?;
+                        if self.check(&Token::LBracket) {
+                            return Err(Self::error_at(
+                                format!(
+                                    "multidimensional array {keyword} fields are not supported"
+                                ),
+                                self.peek_located(),
+                            ));
+                        }
                         StructFieldType::StructArray(type_name, len)
                     }
                     StructFieldType::Pointer(_) => {

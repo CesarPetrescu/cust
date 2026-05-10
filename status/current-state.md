@@ -4,7 +4,20 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous embedded aggregate-array element aggregate-field address run. This run closes the aggregate counterpart to the previous scalar-field pointer gap: aggregate-valued fields reached through pointers into embedded aggregate-array fields can now be addressed directly, e.g. `struct Segment *second = drawing.segments + 1; struct Point *start = &second->start;`, and the resulting struct pointer supports `->` reads/writes that alias the original containing struct storage. The interpreter now routes aggregate-valued `PointerValue::StructFieldElementField` targets through both immutable and mutable struct-pointer field resolution, with helper traversal returning owned type-name metadata to avoid borrowing temporary element type strings. Coverage includes `tests/fixtures/valid/struct_field_element_aggregate_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_element_aggregate_field_addresses.c`, focused RED/GREEN interpreter coverage, C compiler-oracle verification, and a reference note in `references/cust-embedded-aggregate-array-element-aggregate-field-addresses.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous multidimensional array diagnostic run. This run expands the P0 parser recovery/error-message track for a newly discovered unsupported C declarator family: multidimensional scalar/aggregate array declarations, function parameter spellings, and aggregate fields now fail at the second `[` with targeted diagnostics instead of generic semicolon/list-boundary errors. Coverage includes invalid fixtures `tests/fixtures/invalid/multidimensional_array_declaration.c`, `tests/fixtures/invalid/multidimensional_array_parameter.c`, and `tests/fixtures/invalid/multidimensional_array_field.c`, plus focused RED/GREEN exact-diagnostic interpreter tests and a reference note in `references/cust-multidimensional-array-diagnostics.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter multidimensional_array -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous embedded aggregate-array element aggregate-field address run. This run closes the aggregate counterpart to the previous scalar-field pointer gap: aggregate-valued fields reached through pointers into embedded aggregate-array fields can now be addressed directly, e.g. `struct Segment *second = drawing.segments + 1; struct Point *start = &second->start;`, and the resulting struct pointer supports `->` reads/writes that alias the original containing struct storage. The interpreter now routes aggregate-valued `PointerValue::StructFieldElementField` targets through both immutable and mutable struct-pointer field resolution, with helper traversal returning owned type-name metadata to avoid borrowing temporary element type strings. Coverage includes `tests/fixtures/valid/struct_field_element_aggregate_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_element_aggregate_field_addresses.c`, focused RED/GREEN interpreter coverage, C compiler-oracle verification, and a reference note in `references/cust-embedded-aggregate-array-element-aggregate-field-addresses.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
