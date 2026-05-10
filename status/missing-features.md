@@ -101,6 +101,8 @@ Prioritized backlog for autonomous implementation.
 - [x] Address-of string-literal element expressions; acceptance: direct `&"text"[i]` now creates the same read-only interpreter-owned string array-element pointer as grouped/reverse forms, works in pointer declarations and reads with relative indexing, rejects writes through the produced pointer with `cannot modify read-only array through pointer`, and includes interpreter plus C compiler-oracle coverage.
 - [x] Adjacent string literal concatenation; acceptance: tokens such as `"he" "llo"` concatenate into one NUL-terminated read-only byte array for ordinary string pointer expressions, direct indexing, `sizeof`, char-array initializers, char-array compound literals, and pointer/array-parameter calls, with interpreter plus C compiler-oracle coverage.
 
+- [x] Embedded aggregate-array field pointer equality parity; acceptance: direct and nested embedded aggregate-array field pointers such as `line.points`, `&line.points[0]`, `line.points + 2`, `&line.points[2]`, and `box.line.points` compare equal/unequal by owner/path/index metadata instead of falling through to generic pointer inequality, with interpreter and C compiler-oracle fixtures.
+
 ## P2 — data types
 
 - [x] `char` literals, declarations, and function parameters

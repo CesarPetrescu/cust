@@ -147,6 +147,13 @@ fn supports_pointer_ordering_within_embedded_aggregate_array_fields() {
 }
 
 #[test]
+fn supports_pointer_equality_within_embedded_aggregate_array_fields() {
+    let program = include_str!("fixtures/valid/struct_field_pointer_equality.c");
+
+    assert_eq!(interpret(program).unwrap(), 31);
+}
+
+#[test]
 fn rejects_pointer_ordering_between_different_embedded_aggregate_array_fields() {
     let program = include_str!("fixtures/invalid/struct_field_pointer_ordering_different_fields.c");
 

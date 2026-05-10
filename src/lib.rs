@@ -9564,6 +9564,28 @@ impl Interpreter {
                 },
             ) => left_scope == right_scope && left_name == right_name && left_index == right_index,
             (
+                PointerValue::StructFieldElement {
+                    scope_id: left_scope,
+                    name: left_name,
+                    element_index: left_element,
+                    fields: left_fields,
+                    index: left_index,
+                },
+                PointerValue::StructFieldElement {
+                    scope_id: right_scope,
+                    name: right_name,
+                    element_index: right_element,
+                    fields: right_fields,
+                    index: right_index,
+                },
+            ) => {
+                left_scope == right_scope
+                    && left_name == right_name
+                    && left_element == right_element
+                    && left_fields == right_fields
+                    && left_index == right_index
+            }
+            (
                 PointerValue::StructField {
                     scope_id: left_scope,
                     name: left_name,

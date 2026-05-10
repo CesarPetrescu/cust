@@ -4,7 +4,21 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous embedded aggregate-array field pointer-ordering run. This run closes the pointer-ordering parity gap for pointers into embedded aggregate-array fields: `line.points < &line.points[2]`, `line.points + 1 <= &line.points[2]`, and nested field paths such as `box.line.points` now compare through the same-array pointer-ordering path by teaching `pointer_difference` to recognize matching `StructFieldElement` owner/path/index metadata. Comparisons between different embedded aggregate-array fields report `cannot compare pointers to different arrays`. Coverage includes `tests/fixtures/valid/struct_field_pointer_ordering.c`, invalid fixture `tests/fixtures/invalid/struct_field_pointer_ordering_different_fields.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_pointer_ordering.c`, and focused RED/GREEN interpreter tests. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous embedded aggregate-array field pointer-equality run. This run closes the equality counterpart to the prior embedded aggregate-array field pointer-ordering work: pointers such as `line.points`, `&line.points[0]`, `line.points + 2`, `&line.points[2]`, and nested `box.line.points` forms now compare equal/unequal by matching `StructFieldElement` owner scope/name, optional containing element, field path, and element index in `pointer_eq`. Coverage includes `tests/fixtures/valid/struct_field_pointer_equality.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_pointer_equality.c`, focused RED/GREEN interpreter tests, and a reference note in `references/cust-embedded-aggregate-array-field-pointer-equality.md`. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_pointer_equality_within_embedded_aggregate_array_fields -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous embedded aggregate-array field pointer-ordering run. This run closes the pointer-ordering parity gap for pointers into embedded aggregate-array fields: `line.points < &line.points[2]`, `line.points + 1 <= &line.points[2]`, and nested field paths such as `box.line.points` now compare through the same-array pointer-ordering path by teaching `pointer_difference` to recognize matching `StructFieldElement` owner/path/index metadata. Comparisons between different embedded aggregate-array fields report `cannot compare pointers to different arrays`. Coverage includes `tests/fixtures/valid/struct_field_pointer_ordering.c`, invalid fixture `tests/fixtures/invalid/struct_field_pointer_ordering_different_fields.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_pointer_ordering.c`, and focused RED/GREEN interpreter tests. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
