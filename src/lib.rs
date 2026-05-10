@@ -8203,20 +8203,18 @@ impl Interpreter {
             .find_variable_scope_id(name)
             .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
         match self.struct_field_by_scope(scope_id, name, Some(index), fields)? {
-            StructFieldValue::Scalar { .. } => Ok(PointerValue::StructField {
-                scope_id,
-                name: name.to_string(),
-                element_index: Some(index),
-                fields: fields.to_vec(),
-            }),
+            StructFieldValue::Scalar { .. } | StructFieldValue::Struct { .. } => {
+                Ok(PointerValue::StructField {
+                    scope_id,
+                    name: name.to_string(),
+                    element_index: Some(index),
+                    fields: fields.to_vec(),
+                })
+            }
             StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
                 array: Rc::clone(value),
                 source_name: Some(Self::field_path_label(fields).to_string()),
             }),
-            StructFieldValue::Struct { .. } => Err(CustError::new(format!(
-                "struct field '{}' requires field access",
-                Self::field_path_label(fields)
-            ))),
             StructFieldValue::StructArray { .. } => Err(CustError::new(format!(
                 "struct field '{}' requires indexed field access",
                 Self::field_path_label(fields)

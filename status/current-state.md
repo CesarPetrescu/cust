@@ -4,7 +4,22 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous direct embedded aggregate-array element field address run. This run closes the direct syntax counterpart to the recent pointer-through-embedded-array field address work: scalar fields selected after indexing embedded aggregate-array fields can now be addressed directly, e.g. `&line.points[1].x` and nested `&box.line.points[2].y`. The parser rewrites address-of over `StructFieldArrayElementGet` through the existing `AddressOfStructArrayField` plus `AddressOfStructPtrField` path, preserving the established `StructFieldElement` owner/path/index metadata and avoiding a new pointer target. Coverage includes `tests/fixtures/valid/struct_field_array_element_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_array_element_field_addresses.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, and a reference note in `references/cust-direct-embedded-aggregate-array-element-field-addresses.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous struct-array element aggregate-field address run. This run closes the aggregate counterpart to direct `&segments[i].field` addressability: aggregate-valued fields selected from ordinary struct-array elements can now be addressed directly, e.g. `struct Point *start = &segments[1].start;`, and the resulting struct pointer aliases the original array element field for `->` reads/writes and helper mutation. The runtime now lets `Interpreter::find_struct_element_field_pointer` return `PointerValue::StructField` for both scalar and aggregate-valued fields while preserving `element_index: Some(i)` metadata. The run also locks in direct embedded aggregate-array element aggregate-field syntax such as `&drawing.segments[1].start` and nested `&box.drawing.segments[0].end`, which was already supported through parser lowering. Coverage includes `tests/fixtures/valid/struct_array_element_aggregate_field_addresses.c`, `tests/fixtures/valid/struct_field_array_element_aggregate_field_addresses.c`, matching C compiler-oracle fixtures, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, and a reference note in `references/cust-struct-array-element-aggregate-field-addresses.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_addresses_of_struct_array_element_aggregate_fields -- --nocapture
+cargo test --test interpreter supports_direct_addresses_of_embedded_aggregate_array_element_aggregate_fields -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous direct embedded aggregate-array element field address run. This run closes the direct syntax counterpart to the recent pointer-through-embedded-array field address work: scalar fields selected after indexing embedded aggregate-array fields can now be addressed directly, e.g. `&line.points[1].x` and nested `&box.line.points[2].y`. The parser rewrites address-of over `StructFieldArrayElementGet` through the existing `AddressOfStructArrayField` plus `AddressOfStructPtrField` path, preserving the established `StructFieldElement` owner/path/index metadata and avoiding a new pointer target. Coverage includes `tests/fixtures/valid/struct_field_array_element_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_array_element_field_addresses.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, and a reference note in `references/cust-direct-embedded-aggregate-array-element-field-addresses.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
