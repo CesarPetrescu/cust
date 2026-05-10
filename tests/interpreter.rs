@@ -2349,6 +2349,30 @@ fn rejects_pointer_array_declarations_with_context() {
 }
 
 #[test]
+fn rejects_parenthesized_pointer_parameters_with_context() {
+    let program = include_str!("fixtures/invalid/parenthesized_pointer_parameter.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "parenthesized pointer parameters are not supported at line 1, column 13"
+    );
+}
+
+#[test]
+fn rejects_parenthesized_pointer_declarations_with_context() {
+    let program = include_str!("fixtures/invalid/parenthesized_pointer_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "parenthesized pointer declarations are not supported at line 2, column 9"
+    );
+}
+
+#[test]
 fn reports_missing_pointer_parameter_names_after_stars() {
     let program = "int identity(int *) { return 0; }\nint main() { return identity(0); }\n";
 

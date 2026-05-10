@@ -4,7 +4,20 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous aggregate compound-literal pointer-field lvalue run. This run closes a compound-literal/pointer lvalue parity gap: pointer-valued fields selected from aggregate compound literals now behave as pointer lvalues in pointer contexts, including assignment results (`(((struct Cursor){values}).p = values + 2)[-1]`), pointer compound assignment results (`((struct Cursor){values + 1}).p += 2`), and prefix/postfix increment/decrement results (`--((struct Cursor){values + 3}).p`, `((struct Cursor){values + 1}).p++`). Pointer field assignment preserves pointer-slot const diagnostics and pointee type/const conversion checks. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_pointer_field_lvalues.c`, invalid fixture `tests/fixtures/invalid/aggregate_compound_literal_const_pointer_field_assignment.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_pointer_field_lvalues.c`, focused RED/GREEN interpreter tests, and a reference note in `references/cust-aggregate-compound-literal-pointer-field-lvalues.md`. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous parenthesized pointer declarator diagnostic run. This run expands the remaining parser recovery/error-message track for unsupported C declarator forms that previously fell through to generic missing-name diagnostics: function/parameter declarators such as `int sum(int (*row)[3])` now report `parenthesized pointer parameters are not supported`, and local declarations such as `int (*row)[3];` report `parenthesized pointer declarations are not supported` at the opening parenthesis. Coverage includes invalid fixtures `tests/fixtures/invalid/parenthesized_pointer_parameter.c` and `tests/fixtures/invalid/parenthesized_pointer_declaration.c` plus focused RED/GREEN exact-diagnostic interpreter tests. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter parenthesized_pointer -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous aggregate compound-literal pointer-field lvalue run. This run closes a compound-literal/pointer lvalue parity gap: pointer-valued fields selected from aggregate compound literals now behave as pointer lvalues in pointer contexts, including assignment results (`(((struct Cursor){values}).p = values + 2)[-1]`), pointer compound assignment results (`((struct Cursor){values + 1}).p += 2`), and prefix/postfix increment/decrement results (`--((struct Cursor){values + 3}).p`, `((struct Cursor){values + 1}).p++`). Pointer field assignment preserves pointer-slot const diagnostics and pointee type/const conversion checks. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_pointer_field_lvalues.c`, invalid fixture `tests/fixtures/invalid/aggregate_compound_literal_const_pointer_field_assignment.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_pointer_field_lvalues.c`, focused RED/GREEN interpreter tests, and a reference note in `references/cust-aggregate-compound-literal-pointer-field-lvalues.md`. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

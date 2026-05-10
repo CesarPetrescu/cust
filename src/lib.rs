@@ -2021,6 +2021,15 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            if !has_explicit_star
+                && self.check(&Token::LParen)
+                && matches!(self.peek_next(), Token::Star)
+            {
+                return Err(Self::error_at(
+                    "parenthesized pointer parameters are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer(_));
             let name = if allow_unnamed
                 && matches!(self.peek(), Token::Comma | Token::RParen | Token::LBracket)
@@ -2278,6 +2287,15 @@ impl Parser {
         if has_explicit_star && self.check(&Token::Star) {
             return Err(Self::error_at(
                 "pointer-to-pointer declarations are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
+        if !has_explicit_star
+            && self.check(&Token::LParen)
+            && matches!(self.peek_next(), Token::Star)
+        {
+            return Err(Self::error_at(
+                "parenthesized pointer declarations are not supported".to_string(),
                 self.peek_located(),
             ));
         }
