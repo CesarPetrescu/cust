@@ -35,6 +35,7 @@ const POINTER_SIZE: i64 = 8;
 enum Token {
     Int,
     Char,
+    Bool,
     Signed,
     Unsigned,
     Long,
@@ -569,6 +570,7 @@ impl ReturnType {
         match self {
             ReturnType::Scalar(CType::Int) => "int",
             ReturnType::Scalar(CType::Char) => "char",
+            ReturnType::Scalar(CType::Bool) => "_Bool",
             ReturnType::Pointer { .. } => "pointer",
             ReturnType::Struct(_) => "struct",
             ReturnType::Void => "void",
@@ -594,6 +596,7 @@ impl ReturnType {
 enum CType {
     Int,
     Char,
+    Bool,
 }
 
 impl CType {
@@ -601,6 +604,7 @@ impl CType {
         match self {
             CType::Int => INT_SIZE,
             CType::Char => CHAR_SIZE,
+            CType::Bool => CHAR_SIZE,
         }
     }
 }
@@ -1132,6 +1136,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 let kind = match text.as_str() {
                     "int" => Token::Int,
                     "char" => Token::Char,
+                    "_Bool" => Token::Bool,
                     "signed" => Token::Signed,
                     "unsigned" => Token::Unsigned,
                     "long" => Token::Long,
@@ -1615,6 +1620,7 @@ impl Parser {
                 self.peek(),
                 Token::Int
                     | Token::Char
+                    | Token::Bool
                     | Token::Signed
                     | Token::Unsigned
                     | Token::Long
@@ -1750,6 +1756,7 @@ impl Parser {
         match found.kind.clone() {
             Token::Int => Ok(DeclType::Scalar(CType::Int)),
             Token::Char => Ok(DeclType::Scalar(CType::Char)),
+            Token::Bool => Ok(DeclType::Scalar(CType::Bool)),
             Token::Signed | Token::Unsigned => {
                 if self.matches(&Token::Char) {
                     Ok(DeclType::Scalar(CType::Char))
@@ -1941,7 +1948,7 @@ impl Parser {
             index += 1;
         }
         match self.tokens.get(index).map(|token| &token.kind) {
-            Some(Token::Int | Token::Char | Token::Void) => index += 1,
+            Some(Token::Int | Token::Char | Token::Bool | Token::Void) => index += 1,
             Some(Token::Long) => {
                 index += 1;
                 if matches!(
@@ -2043,7 +2050,13 @@ impl Parser {
     fn starts_malformed_function_definition(&self) -> bool {
         if !matches!(
             self.peek(),
-            Token::Int | Token::Char | Token::Signed | Token::Unsigned | Token::Long | Token::Short
+            Token::Int
+                | Token::Char
+                | Token::Bool
+                | Token::Signed
+                | Token::Unsigned
+                | Token::Long
+                | Token::Short
         ) {
             return false;
         }
@@ -2326,6 +2339,7 @@ impl Parser {
             Token::Static => self.parse_static_local_decl(),
             Token::Int
             | Token::Char
+            | Token::Bool
             | Token::Signed
             | Token::Unsigned
             | Token::Long
@@ -2412,6 +2426,7 @@ impl Parser {
         let decl = match self.peek() {
             Token::Int
             | Token::Char
+            | Token::Bool
             | Token::Signed
             | Token::Unsigned
             | Token::Long
@@ -3727,6 +3742,7 @@ impl Parser {
             self.peek(),
             Token::Int
                 | Token::Char
+                | Token::Bool
                 | Token::Signed
                 | Token::Unsigned
                 | Token::Long
@@ -4284,6 +4300,7 @@ impl Parser {
             Some(
                 Token::Int
                 | Token::Char
+                | Token::Bool
                 | Token::Signed
                 | Token::Unsigned
                 | Token::Long
@@ -4459,6 +4476,7 @@ impl Parser {
                 self.peek(),
                 Token::Int
                     | Token::Char
+                    | Token::Bool
                     | Token::Signed
                     | Token::Unsigned
                     | Token::Long
@@ -4483,6 +4501,7 @@ impl Parser {
                             self.peek(),
                             Token::Int
                                 | Token::Char
+                                | Token::Bool
                                 | Token::Signed
                                 | Token::Unsigned
                                 | Token::Long
@@ -6337,6 +6356,7 @@ impl Interpreter {
         match ty {
             PointeeType::Scalar(CType::Int) => "int".to_string(),
             PointeeType::Scalar(CType::Char) => "char".to_string(),
+            PointeeType::Scalar(CType::Bool) => "_Bool".to_string(),
             PointeeType::Struct(type_name) => {
                 let aggregate = self.struct_types.get(type_name);
                 let keyword = aggregate

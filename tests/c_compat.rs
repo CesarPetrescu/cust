@@ -93,6 +93,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/signed_unsigned_char_types.c",
     "tests/fixtures/compat/valid/long_short_type_spellings.c",
     "tests/fixtures/compat/valid/long_long_type_spellings.c",
+    "tests/fixtures/compat/valid/bool_type_spellings.c",
     "tests/fixtures/compat/valid/sizeof_aggregate_types.c",
     "tests/fixtures/compat/valid/sizeof_array_types.c",
     "tests/fixtures/compat/valid/sizeof_const_types.c",
