@@ -84,6 +84,13 @@ fn supports_hexadecimal_and_octal_integer_literals() {
 }
 
 #[test]
+fn supports_c_integer_literal_suffixes() {
+    let program = include_str!("fixtures/valid/integer_literal_suffixes.c");
+
+    assert_eq!(interpret(program).unwrap(), 122);
+}
+
+#[test]
 fn supports_standard_simple_escape_sequences() {
     let program = include_str!("fixtures/valid/standard_escape_sequences.c");
 

@@ -995,6 +995,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     (start, 10)
                 };
                 let text: String = chars[digits_start..i].iter().collect();
+                consume_integer_suffix(&chars, &mut line, &mut column, &mut i);
                 let value = i64::from_str_radix(&text, radix).map_err(|_| {
                     lexer_error_with_context(
                         "integer literal out of range",
@@ -1479,6 +1480,27 @@ fn parse_escape_sequence(
             literal_start_line,
             literal_start_column,
         )),
+    }
+}
+
+fn consume_integer_suffix(chars: &[char], line: &mut usize, column: &mut usize, i: &mut usize) {
+    if matches!(chars.get(*i), Some('u') | Some('U')) {
+        let suffix = chars[*i];
+        advance_position(suffix, line, column, i);
+    }
+
+    if matches!(chars.get(*i), Some('l') | Some('L')) {
+        let suffix = chars[*i];
+        advance_position(suffix, line, column, i);
+        if matches!(chars.get(*i), Some('l') | Some('L')) {
+            let suffix = chars[*i];
+            advance_position(suffix, line, column, i);
+        }
+    }
+
+    if matches!(chars.get(*i), Some('u') | Some('U')) {
+        let suffix = chars[*i];
+        advance_position(suffix, line, column, i);
     }
 }
 
