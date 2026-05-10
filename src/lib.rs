@@ -210,6 +210,10 @@ enum Expr {
         fields: Vec<String>,
         index: Box<Expr>,
     },
+    AddressOfStructPtrField {
+        pointer: Box<Expr>,
+        fields: Vec<String>,
+    },
     Deref(Box<Expr>),
     Assign {
         name: String,
@@ -4212,6 +4216,9 @@ impl Parser {
                 fields,
                 index,
             }),
+            Expr::StructPtrGet { pointer, fields } => {
+                Ok(Expr::AddressOfStructPtrField { pointer, fields })
+            }
             Expr::ScalarLiteral { ty, init } => Ok(Expr::AddressOfScalarLiteral { ty, init }),
             Expr::AggregateLiteral { type_name, init } => {
                 Ok(Expr::AddressOfAggregateLiteral { type_name, init })
@@ -5850,6 +5857,7 @@ impl Interpreter {
                 }
             }
             Expr::StructPtrGet { pointer, fields }
+            | Expr::AddressOfStructPtrField { pointer, fields }
             | Expr::AddressOfStructPtrArrayField {
                 pointer, fields, ..
             }
@@ -5985,6 +5993,7 @@ impl Interpreter {
             }
             Expr::StructPtrGet { pointer, .. }
             | Expr::StructPtrArrayGet { pointer, .. }
+            | Expr::AddressOfStructPtrField { pointer, .. }
             | Expr::AddressOfStructPtrArrayField { pointer, .. } => {
                 self.pointer_expr_points_to_const(pointer)
             }
@@ -8037,6 +8046,66 @@ impl Interpreter {
         }
     }
 
+    fn append_field_path(base: &[String], suffix: &[String]) -> Vec<String> {
+        base.iter()
+            .chain(suffix.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+    }
+
+    fn find_struct_pointer_field_pointer(
+        &mut self,
+        pointer: &PointerValue,
+        fields: &[String],
+    ) -> CustResult<PointerValue> {
+        let (scope_id, name, element_index, field_path) = match pointer {
+            PointerValue::Struct { scope_id, name } => {
+                (*scope_id, name.clone(), None, fields.to_vec())
+            }
+            PointerValue::StructElement {
+                scope_id,
+                name,
+                index,
+            } => (*scope_id, name.clone(), Some(*index), fields.to_vec()),
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields: base_fields,
+            } => (
+                *scope_id,
+                name.clone(),
+                *element_index,
+                Self::append_field_path(base_fields, fields),
+            ),
+            PointerValue::Null => return Err(CustError::new("null pointer dereference")),
+            _ => return Err(CustError::new("pointer does not reference a struct")),
+        };
+
+        match self.struct_field_by_scope(scope_id, &name, element_index, &field_path)? {
+            StructFieldValue::Scalar { .. } | StructFieldValue::Struct { .. } => {
+                Ok(PointerValue::StructField {
+                    scope_id,
+                    name,
+                    element_index,
+                    fields: field_path,
+                })
+            }
+            StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
+                array: Rc::clone(value),
+                source_name: Some(Self::field_path_label(&field_path).to_string()),
+            }),
+            StructFieldValue::StructArray { .. } => Err(CustError::new(format!(
+                "struct field '{}' requires indexed field access",
+                Self::field_path_label(&field_path)
+            ))),
+            StructFieldValue::Pointer { .. } => Err(CustError::new(format!(
+                "pointer field '{}' cannot be addressed in this pointer milestone",
+                Self::field_path_label(&field_path)
+            ))),
+        }
+    }
+
     fn struct_field_by_scope(
         &self,
         scope_id: usize,
@@ -8936,6 +9005,10 @@ impl Interpreter {
                 let pointer = self.eval_pointer(pointer)?;
                 self.find_struct_pointer_array_field_pointer(&pointer, fields, index)
             }
+            Expr::AddressOfStructPtrField { pointer, fields } => {
+                let pointer = self.eval_pointer(pointer)?;
+                self.find_struct_pointer_field_pointer(&pointer, fields)
+            }
             Expr::AddressOfScalarLiteral { ty, init } => {
                 self.make_scalar_compound_literal_pointer(*ty, init)
             }
@@ -9657,6 +9730,7 @@ impl Interpreter {
             | Expr::AddressOfArray { .. }
             | Expr::AddressOfStructField { .. }
             | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfStructPtrField { .. }
             | Expr::StringLiteral(_)
             | Expr::ArrayLiteral { .. }
             | Expr::AggregateArrayLiteral { .. } => true,
@@ -9969,6 +10043,7 @@ impl Interpreter {
             | Expr::AddressOfStructElementField { .. }
             | Expr::AddressOfStructArrayField { .. }
             | Expr::AddressOfStructElementArrayField { .. }
+            | Expr::AddressOfStructPtrField { .. }
             | Expr::AddressOfStructPtrArrayField { .. }
             | Expr::AddressOfScalarLiteral { .. }
             | Expr::AddressOfAggregateLiteral { .. }
@@ -10447,6 +10522,7 @@ impl Interpreter {
             | Expr::AddressOfStructElementField { .. }
             | Expr::AddressOfStructArrayField { .. }
             | Expr::AddressOfStructElementArrayField { .. }
+            | Expr::AddressOfStructPtrField { .. }
             | Expr::AddressOfStructPtrArrayField { .. }
             | Expr::AddressOfScalarLiteral { .. }
             | Expr::AddressOfAggregateLiteral { .. }
@@ -11814,6 +11890,7 @@ impl Interpreter {
             | Expr::AddressOfStructElementField { .. }
             | Expr::AddressOfStructArrayField { .. }
             | Expr::AddressOfStructElementArrayField { .. }
+            | Expr::AddressOfStructPtrField { .. }
             | Expr::AddressOfStructPtrArrayField { .. }
             | Expr::AddressOfScalarLiteral { .. }
             | Expr::AddressOfAggregateLiteral { .. }

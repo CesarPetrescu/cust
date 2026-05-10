@@ -4,7 +4,21 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous aggregate compound-literal aggregate-field address run. This run closes the aggregate counterpart to the prior scalar-field addressability feature: aggregate-valued fields selected from aggregate compound literals can now be addressed directly (`&((struct Box){{5, 7}, 9}).inner`) and used as safe struct pointers through `->`, including mutation through helper functions. The interpreter now allows `AddressOfAggregateField` to return a `PointerValue::StructField` for `StructFieldValue::Struct` selections and teaches struct-pointer field resolution to treat those field pointers as aggregate targets in both read and write paths. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_aggregate_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_aggregate_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-aggregate-compound-literal-aggregate-field-addresses.md`.
+All passed after the 2026-05-10 autonomous struct-pointer scalar field address run. This run closes a C pointer/aggregate parity gap: scalar fields reached through struct pointers can now be addressed directly (`&point_ptr->x`, `&box_ptr->inner.y`), and the resulting pointer aliases the original struct storage for helper calls and dereference writes. The interpreter now lowers `&` over `StructPtrGet` into `AddressOfStructPtrField`, resolves the underlying struct pointer, and returns existing safe `PointerValue::StructField` targets for ordinary struct pointers, struct-array element pointers, and nested aggregate-field pointers. Coverage includes `tests/fixtures/valid/struct_pointer_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_pointer_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-struct-pointer-field-addresses.md`.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_addresses_of_struct_pointer_scalar_fields -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous aggregate compound-literal aggregate-field address run. This run closes the aggregate counterpart to the prior scalar-field addressability feature: aggregate-valued fields selected from aggregate compound literals can now be addressed directly (`&((struct Box){{5, 7}, 9}).inner`) and used as safe struct pointers through `->`, including mutation through helper functions. The interpreter now allows `AddressOfAggregateField` to return a `PointerValue::StructField` for `StructFieldValue::Struct` selections and teaches struct-pointer field resolution to treat those field pointers as aggregate targets in both read and write paths. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_aggregate_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_aggregate_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-aggregate-compound-literal-aggregate-field-addresses.md`.
 
 Commands verified:
 
