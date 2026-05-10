@@ -112,6 +112,13 @@ fn supports_long_short_type_spellings() {
 }
 
 #[test]
+fn supports_long_long_type_spellings() {
+    let program = include_str!("fixtures/valid/long_long_type_spellings.c");
+
+    assert_eq!(interpret(program).unwrap(), 53);
+}
+
+#[test]
 fn supports_standard_simple_escape_sequences() {
     let program = include_str!("fixtures/valid/standard_escape_sequences.c");
 

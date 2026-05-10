@@ -1755,13 +1755,21 @@ impl Parser {
                     Ok(DeclType::Scalar(CType::Char))
                 } else {
                     self.matches(&Token::Int);
-                    if self.matches(&Token::Long) || self.matches(&Token::Short) {
+                    if self.matches(&Token::Long) {
+                        self.matches(&Token::Long);
+                        self.matches(&Token::Int);
+                    } else if self.matches(&Token::Short) {
                         self.matches(&Token::Int);
                     }
                     Ok(DeclType::Scalar(CType::Int))
                 }
             }
-            Token::Long | Token::Short => {
+            Token::Long => {
+                self.matches(&Token::Long);
+                self.matches(&Token::Int);
+                Ok(DeclType::Scalar(CType::Int))
+            }
+            Token::Short => {
                 self.matches(&Token::Int);
                 Ok(DeclType::Scalar(CType::Int))
             }
@@ -1934,7 +1942,22 @@ impl Parser {
         }
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(Token::Int | Token::Char | Token::Void) => index += 1,
-            Some(Token::Long | Token::Short) => {
+            Some(Token::Long) => {
+                index += 1;
+                if matches!(
+                    self.tokens.get(index).map(|token| &token.kind),
+                    Some(Token::Long)
+                ) {
+                    index += 1;
+                }
+                if matches!(
+                    self.tokens.get(index).map(|token| &token.kind),
+                    Some(Token::Int)
+                ) {
+                    index += 1;
+                }
+            }
+            Some(Token::Short) => {
                 index += 1;
                 if matches!(
                     self.tokens.get(index).map(|token| &token.kind),
@@ -1952,7 +1975,24 @@ impl Parser {
                     index += 1;
                 } else if matches!(
                     self.tokens.get(index).map(|token| &token.kind),
-                    Some(Token::Long | Token::Short)
+                    Some(Token::Long)
+                ) {
+                    index += 1;
+                    if matches!(
+                        self.tokens.get(index).map(|token| &token.kind),
+                        Some(Token::Long)
+                    ) {
+                        index += 1;
+                    }
+                    if matches!(
+                        self.tokens.get(index).map(|token| &token.kind),
+                        Some(Token::Int)
+                    ) {
+                        index += 1;
+                    }
+                } else if matches!(
+                    self.tokens.get(index).map(|token| &token.kind),
+                    Some(Token::Short)
                 ) {
                     index += 1;
                     if matches!(
