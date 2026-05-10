@@ -563,6 +563,13 @@ fn supports_pointer_fields_on_aggregate_compound_literals() {
 }
 
 #[test]
+fn supports_pointer_field_lvalues_on_aggregate_compound_literals() {
+    let program = include_str!("fixtures/valid/aggregate_compound_literal_pointer_field_lvalues.c");
+
+    assert_eq!(interpret(program).unwrap(), 24);
+}
+
+#[test]
 fn supports_array_fields_on_aggregate_compound_literals() {
     let program = include_str!("fixtures/valid/aggregate_compound_literal_array_fields.c");
 
@@ -671,6 +678,16 @@ fn rejects_const_discard_from_pointer_fields_on_aggregate_compound_literals() {
         err.to_string(),
         "cannot discard const qualifier from pointer target"
     );
+}
+
+#[test]
+fn rejects_assignment_to_const_pointer_fields_on_aggregate_compound_literals() {
+    let program = include_str!(
+        "fixtures/invalid/aggregate_compound_literal_const_pointer_field_assignment.c",
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign to const struct field 'p'");
 }
 
 #[test]

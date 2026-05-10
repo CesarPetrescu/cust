@@ -102,6 +102,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Adjacent string literal concatenation; acceptance: tokens such as `"he" "llo"` concatenate into one NUL-terminated read-only byte array for ordinary string pointer expressions, direct indexing, `sizeof`, char-array initializers, char-array compound literals, and pointer/array-parameter calls, with interpreter plus C compiler-oracle coverage.
 
 - [x] Embedded aggregate-array field pointer equality parity; acceptance: direct and nested embedded aggregate-array field pointers such as `line.points`, `&line.points[0]`, `line.points + 2`, `&line.points[2]`, and `box.line.points` compare equal/unequal by owner/path/index metadata instead of falling through to generic pointer inequality, with interpreter and C compiler-oracle fixtures.
+- [x] Aggregate compound-literal pointer-field lvalues; acceptance: pointer-valued fields selected from aggregate compound literals support assignment, pointer compound assignment, and prefix/postfix increment/decrement in pointer contexts (for example `(((struct Cursor){values}).p = values + 2)[-1]`, `((struct Cursor){values + 1}).p += 2`, `--((struct Cursor){values + 3}).p`, and `((struct Cursor){values + 1}).p++`), preserving pointer-slot const diagnostics and pointee type/const conversion checks with interpreter and C compiler-oracle fixtures.
 
 ## P2 — data types
 

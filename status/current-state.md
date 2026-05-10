@@ -4,7 +4,22 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous embedded aggregate-array field pointer-equality run. This run closes the equality counterpart to the prior embedded aggregate-array field pointer-ordering work: pointers such as `line.points`, `&line.points[0]`, `line.points + 2`, `&line.points[2]`, and nested `box.line.points` forms now compare equal/unequal by matching `StructFieldElement` owner scope/name, optional containing element, field path, and element index in `pointer_eq`. Coverage includes `tests/fixtures/valid/struct_field_pointer_equality.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_pointer_equality.c`, focused RED/GREEN interpreter tests, and a reference note in `references/cust-embedded-aggregate-array-field-pointer-equality.md`. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous aggregate compound-literal pointer-field lvalue run. This run closes a compound-literal/pointer lvalue parity gap: pointer-valued fields selected from aggregate compound literals now behave as pointer lvalues in pointer contexts, including assignment results (`(((struct Cursor){values}).p = values + 2)[-1]`), pointer compound assignment results (`((struct Cursor){values + 1}).p += 2`), and prefix/postfix increment/decrement results (`--((struct Cursor){values + 3}).p`, `((struct Cursor){values + 1}).p++`). Pointer field assignment preserves pointer-slot const diagnostics and pointee type/const conversion checks. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_pointer_field_lvalues.c`, invalid fixture `tests/fixtures/invalid/aggregate_compound_literal_const_pointer_field_assignment.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_pointer_field_lvalues.c`, focused RED/GREEN interpreter tests, and a reference note in `references/cust-aggregate-compound-literal-pointer-field-lvalues.md`. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_pointer_field_lvalues_on_aggregate_compound_literals -- --nocapture
+cargo test --test interpreter aggregate_compound_literal -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous embedded aggregate-array field pointer-equality run. This run closes the equality counterpart to the prior embedded aggregate-array field pointer-ordering work: pointers such as `line.points`, `&line.points[0]`, `line.points + 2`, `&line.points[2]`, and nested `box.line.points` forms now compare equal/unequal by matching `StructFieldElement` owner scope/name, optional containing element, field path, and element index in `pointer_eq`. Coverage includes `tests/fixtures/valid/struct_field_pointer_equality.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_pointer_equality.c`, focused RED/GREEN interpreter tests, and a reference note in `references/cust-embedded-aggregate-array-field-pointer-equality.md`. Docker Compose emitted a non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

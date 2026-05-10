@@ -8854,6 +8854,50 @@ impl Interpreter {
             Expr::AggregateFieldGet { aggregate, fields } => {
                 self.eval_aggregate_literal_field_pointer(aggregate, fields)
             }
+            Expr::AggregateFieldSet {
+                aggregate,
+                fields,
+                value,
+            } => {
+                let (_, expected_ty, is_const, points_to_const) =
+                    self.eval_aggregate_literal_pointer_field_metadata(aggregate, fields)?;
+                if is_const {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
+                self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
+                let pointer = self.eval_pointer(value)?;
+                self.ensure_pointer_type_matches(&expected_ty, &pointer)?;
+                Ok(pointer)
+            }
+            Expr::AggregateFieldCompoundSet {
+                aggregate,
+                fields,
+                op,
+                value,
+            } => {
+                let (current, _, is_const, _) =
+                    self.eval_aggregate_literal_pointer_field_metadata(aggregate, fields)?;
+                if is_const {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
+                let offset = self.eval(value)?;
+                let offset = match op {
+                    CompoundOp::Add => offset,
+                    CompoundOp::Sub => -offset,
+                    CompoundOp::BitAnd
+                    | CompoundOp::BitOr
+                    | CompoundOp::BitXor
+                    | CompoundOp::ShiftLeft
+                    | CompoundOp::ShiftRight => return Err(Self::pointer_compound_error(*op)),
+                };
+                self.offset_array_pointer(&current, offset)
+            }
             Expr::Call { name, args } => match self.call_function(name, args)? {
                 Some(ReturnValue::Pointer { pointer, .. }) => Ok(pointer),
                 Some(ReturnValue::Scalar(_)) => Err(CustError::new(format!(
@@ -9054,6 +9098,22 @@ impl Interpreter {
                     };
                     let (current, updated) =
                         self.offset_struct_pointer_pointer_field(&target_pointer, fields, offset)?;
+                    if *prefix { Ok(updated) } else { Ok(current) }
+                }
+                Expr::AggregateFieldGet { aggregate, fields } => {
+                    let (current, _, is_const, _) =
+                        self.eval_aggregate_literal_pointer_field_metadata(aggregate, fields)?;
+                    if is_const {
+                        return Err(CustError::new(format!(
+                            "cannot assign to const struct field '{}'",
+                            Self::field_path_label(fields)
+                        )));
+                    }
+                    let offset = match op {
+                        IncrementOp::Inc => 1,
+                        IncrementOp::Dec => -1,
+                    };
+                    let updated = self.offset_array_pointer(&current, offset)?;
                     if *prefix { Ok(updated) } else { Ok(current) }
                 }
                 Expr::Var(name) => {
@@ -10071,6 +10131,28 @@ impl Interpreter {
                     | StructFieldValue::Pointer { .. } => {
                         Err(CustError::new("struct field used as scalar expression"))
                     }
+                }
+            }
+            _ => Err(CustError::new("expected struct expression")),
+        }
+    }
+
+    fn eval_aggregate_literal_pointer_field_metadata(
+        &mut self,
+        aggregate: &Expr,
+        path: &[String],
+    ) -> CustResult<(PointerValue, PointeeType, bool, bool)> {
+        match self.eval_struct_expr(aggregate)? {
+            ReturnValue::Struct { type_name, fields } => {
+                let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
+                match field_value {
+                    StructFieldValue::Pointer {
+                        pointer,
+                        ty,
+                        is_const,
+                        points_to_const,
+                    } => Ok((pointer.clone(), ty.clone(), *is_const, *points_to_const)),
+                    _ => Err(CustError::new("struct field is not a pointer")),
                 }
             }
             _ => Err(CustError::new("expected struct expression")),
