@@ -438,6 +438,13 @@ fn supports_addresses_of_struct_pointer_scalar_fields() {
 }
 
 #[test]
+fn supports_addresses_of_fields_through_embedded_aggregate_array_pointers() {
+    let program = include_str!("fixtures/valid/struct_field_element_field_addresses.c");
+
+    assert_eq!(interpret(program).unwrap(), 110);
+}
+
+#[test]
 fn rejects_aggregate_array_compound_literals_longer_than_declared_length() {
     let program =
         include_str!("fixtures/invalid/aggregate_array_compound_literal_too_many_initializers.c");

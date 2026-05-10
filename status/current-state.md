@@ -4,7 +4,21 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous struct-pointer scalar field address run. This run closes a C pointer/aggregate parity gap: scalar fields reached through struct pointers can now be addressed directly (`&point_ptr->x`, `&box_ptr->inner.y`), and the resulting pointer aliases the original struct storage for helper calls and dereference writes. The interpreter now lowers `&` over `StructPtrGet` into `AddressOfStructPtrField`, resolves the underlying struct pointer, and returns existing safe `PointerValue::StructField` targets for ordinary struct pointers, struct-array element pointers, and nested aggregate-field pointers. Coverage includes `tests/fixtures/valid/struct_pointer_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_pointer_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-struct-pointer-field-addresses.md`.
+All passed after the 2026-05-10 autonomous embedded aggregate-array element scalar-field address run. This run closes the next pointer/aggregate parity gap: scalar fields reached through pointers into embedded aggregate-array fields can now be addressed directly, e.g. `struct Point *p = line.points + 1; int *x = &p->x;`, with the resulting pointer aliasing the original containing struct storage through helper calls and dereference writes. The interpreter adds a dedicated `PointerValue::StructFieldElementField` target to preserve the embedded aggregate-array owner/path/index metadata while exposing scalar-field pointer semantics. Coverage includes `tests/fixtures/valid/struct_field_element_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_element_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-embedded-aggregate-array-element-field-addresses.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_addresses_of_fields_through_embedded_aggregate_array_pointers -- --nocapture
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous struct-pointer scalar field address run. This run closes a C pointer/aggregate parity gap: scalar fields reached through struct pointers can now be addressed directly (`&point_ptr->x`, `&box_ptr->inner.y`), and the resulting pointer aliases the original struct storage for helper calls and dereference writes. The interpreter now lowers `&` over `StructPtrGet` into `AddressOfStructPtrField`, resolves the underlying struct pointer, and returns existing safe `PointerValue::StructField` targets for ordinary struct pointers, struct-array element pointers, and nested aggregate-field pointers. Coverage includes `tests/fixtures/valid/struct_pointer_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_pointer_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-struct-pointer-field-addresses.md`.
 
 Commands verified:
 

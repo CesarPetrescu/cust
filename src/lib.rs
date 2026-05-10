@@ -5248,6 +5248,14 @@ enum PointerValue {
         element_index: Option<usize>,
         fields: Vec<String>,
     },
+    StructFieldElementField {
+        scope_id: usize,
+        name: String,
+        element_index: Option<usize>,
+        array_fields: Vec<String>,
+        index: usize,
+        fields: Vec<String>,
+    },
     ArrayBase {
         array: Rc<RefCell<ArrayValue>>,
         source_name: Option<String>,
@@ -6159,6 +6167,35 @@ impl Interpreter {
                 }
                 _ => Ok(None),
             },
+            PointerValue::StructFieldElementField {
+                scope_id,
+                name,
+                element_index,
+                array_fields,
+                index,
+                fields,
+            } => {
+                let (type_name, element_fields) = self.struct_field_array_element_fields(
+                    *scope_id,
+                    name,
+                    *element_index,
+                    array_fields,
+                    *index,
+                )?;
+                match Self::nested_field_value(&type_name, element_fields, fields)?.1 {
+                    StructFieldValue::Scalar { ty, .. } => Ok(Some(PointeeType::Scalar(*ty))),
+                    StructFieldValue::Array { value, .. } => {
+                        Ok(Some(PointeeType::Scalar(value.borrow().elem_type)))
+                    }
+                    StructFieldValue::Struct { type_name, .. } => {
+                        Ok(Some(PointeeType::Struct(type_name.clone())))
+                    }
+                    StructFieldValue::Pointer { ty, .. } => Ok(Some(ty.clone())),
+                    StructFieldValue::StructArray { type_name, .. } => {
+                        Ok(Some(PointeeType::Struct(type_name.clone())))
+                    }
+                }
+            }
             PointerValue::StructField {
                 scope_id,
                 name,
@@ -8078,6 +8115,51 @@ impl Interpreter {
                 *element_index,
                 Self::append_field_path(base_fields, fields),
             ),
+            PointerValue::StructFieldElement {
+                scope_id,
+                name,
+                element_index,
+                fields: array_fields,
+                index,
+            } => {
+                let (type_name, element_fields) = self.struct_field_array_element_fields(
+                    *scope_id,
+                    name,
+                    *element_index,
+                    array_fields,
+                    *index,
+                )?;
+                match Self::nested_field_value(&type_name, element_fields, fields)?.1 {
+                    StructFieldValue::Scalar { .. } | StructFieldValue::Struct { .. } => {
+                        return Ok(PointerValue::StructFieldElementField {
+                            scope_id: *scope_id,
+                            name: name.clone(),
+                            element_index: *element_index,
+                            array_fields: array_fields.clone(),
+                            index: *index,
+                            fields: fields.to_vec(),
+                        });
+                    }
+                    StructFieldValue::Array { value, .. } => {
+                        return Ok(PointerValue::ArrayBase {
+                            array: Rc::clone(value),
+                            source_name: Some(Self::field_path_label(fields).to_string()),
+                        });
+                    }
+                    StructFieldValue::StructArray { .. } => {
+                        return Err(CustError::new(format!(
+                            "struct field '{}' requires indexed field access",
+                            Self::field_path_label(fields)
+                        )));
+                    }
+                    StructFieldValue::Pointer { .. } => {
+                        return Err(CustError::new(format!(
+                            "pointer field '{}' cannot be addressed in this pointer milestone",
+                            Self::field_path_label(fields)
+                        )));
+                    }
+                }
+            }
             PointerValue::Null => return Err(CustError::new("null pointer dereference")),
             _ => return Err(CustError::new("pointer does not reference a struct")),
         };
@@ -8227,6 +8309,78 @@ impl Interpreter {
         }
         match self.struct_field_by_scope_mut(scope_id, name, element_index, fields)? {
             StructFieldValue::Scalar { value: slot, .. } => {
+                *slot = value;
+                Ok(())
+            }
+            _ => Err(CustError::new(format!(
+                "struct field '{}' used as non-scalar pointer target",
+                Self::field_path_label(fields)
+            ))),
+        }
+    }
+
+    fn read_struct_field_element_field_pointer(
+        &self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        array_fields: &[String],
+        index: usize,
+        fields: &[String],
+    ) -> CustResult<i64> {
+        let (type_name, element_fields) = self.struct_field_array_element_fields(
+            scope_id,
+            name,
+            element_index,
+            array_fields,
+            index,
+        )?;
+        match Self::nested_field_value(&type_name, element_fields, fields)?.1 {
+            StructFieldValue::Scalar { value, .. } => Ok(*value),
+            _ => Err(CustError::new(format!(
+                "struct field '{}' used as non-scalar pointer target",
+                Self::field_path_label(fields)
+            ))),
+        }
+    }
+
+    fn assign_struct_field_element_field_pointer(
+        &mut self,
+        pointer: &PointerValue,
+        value: i64,
+    ) -> CustResult<()> {
+        let PointerValue::StructFieldElementField {
+            scope_id,
+            name,
+            element_index,
+            array_fields,
+            index,
+            fields,
+        } = pointer
+        else {
+            return Err(CustError::new(
+                "pointer does not reference an embedded struct field",
+            ));
+        };
+        if self.struct_field_points_to_const(*scope_id, name, *element_index, array_fields)? {
+            return Err(CustError::new("cannot assign through pointer to const"));
+        }
+        let (type_name, element_fields) = self.struct_field_array_element_fields_mut(
+            *scope_id,
+            name,
+            *element_index,
+            array_fields,
+            *index,
+        )?;
+        match Self::nested_field_value_mut(&type_name, element_fields, fields)?.1 {
+            StructFieldValue::Scalar {
+                value: slot,
+                is_const,
+                ..
+            } => {
+                if *is_const {
+                    return Err(CustError::new("cannot assign through pointer to const"));
+                }
                 *slot = value;
                 Ok(())
             }
@@ -9386,7 +9540,8 @@ impl Interpreter {
             PointerValue::Null => Err(CustError::new("null pointer arithmetic is not supported")),
             PointerValue::Scalar { .. }
             | PointerValue::Struct { .. }
-            | PointerValue::StructField { .. } => {
+            | PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. } => {
                 Err(CustError::new("scalar pointer arithmetic is not supported"))
             }
             PointerValue::StructElement {
@@ -9511,6 +9666,21 @@ impl Interpreter {
             | PointerValue::StructFieldElement { .. } => {
                 Err(CustError::new("struct pointer used as scalar"))
             }
+            PointerValue::StructFieldElementField {
+                scope_id,
+                name,
+                element_index,
+                array_fields,
+                index,
+                fields,
+            } => self.read_struct_field_element_field_pointer(
+                *scope_id,
+                name,
+                *element_index,
+                array_fields,
+                *index,
+                fields,
+            ),
             PointerValue::StructField {
                 scope_id,
                 name,
@@ -9581,6 +9751,9 @@ impl Interpreter {
             | PointerValue::StructFieldElement { .. } => {
                 Err(CustError::new("struct pointer used as scalar"))
             }
+            PointerValue::StructFieldElementField { .. } => {
+                self.assign_struct_field_element_field_pointer(pointer, value)
+            }
             PointerValue::StructField {
                 scope_id,
                 name,
@@ -9623,7 +9796,9 @@ impl Interpreter {
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, Option<String>, usize)> {
         match pointer {
             PointerValue::Null => Err(CustError::new("null pointer dereference")),
-            PointerValue::Scalar { .. } | PointerValue::StructField { .. } => {
+            PointerValue::Scalar { .. }
+            | PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. } => {
                 Err(CustError::new("scalar pointer is not indexable"))
             }
             PointerValue::Struct { .. }
@@ -9910,7 +10085,8 @@ impl Interpreter {
             | PointerValue::Struct { .. }
             | PointerValue::StructElement { .. }
             | PointerValue::StructFieldElement { .. }
-            | PointerValue::StructField { .. } => {
+            | PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. } => {
                 Err(CustError::new("scalar pointer arithmetic is not supported"))
             }
         }
