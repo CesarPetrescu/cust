@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-10 autonomous aggregate compound-literal scalar-field address run after focused RED/GREEN interpreter coverage, C compiler-oracle fixture verification, full local verification, and required Docker verification passed; full verification is recorded in `status/current-state.md`. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-05-10 autonomous aggregate compound-literal aggregate-field address run after focused RED/GREEN interpreter coverage, C compiler-oracle fixture verification, full local verification, and required Docker verification passed; full verification is recorded in `status/current-state.md`. Docker Compose emitted a non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 

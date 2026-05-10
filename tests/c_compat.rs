@@ -24,6 +24,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/aggregate_compound_literal_array_fields.c",
     "tests/fixtures/compat/valid/aggregate_compound_literal_array_field_indexing.c",
     "tests/fixtures/compat/valid/aggregate_compound_literal_array_field_lvalues.c",
+    "tests/fixtures/compat/valid/aggregate_compound_literal_aggregate_field_addresses.c",
     "tests/fixtures/compat/valid/aggregate_compound_literal_field_addresses.c",
     "tests/fixtures/compat/valid/aggregate_compound_literal_field_lvalues.c",
     "tests/fixtures/compat/valid/aggregate_compound_literal_pointer_fields.c",

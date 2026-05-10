@@ -4,7 +4,21 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous aggregate compound-literal scalar-field address run. This run closes another compound-literal lvalue/addressability parity gap: scalar fields selected from aggregate compound literals can now be addressed directly (`&((struct Point){4, 8}).x`), including nested scalar fields (`&((struct Box){{2, 3}, 4}).inner.y`) and union scalar fields (`&((union Number){7}).value`). The parser now lowers address-of over aggregate field selections to a dedicated `AddressOfAggregateField` expression; the interpreter creates hidden current-scope compound-literal aggregate storage and returns a safe `PointerValue::StructField` to the selected scalar field, preserving pointer type and const metadata. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-aggregate-compound-literal-field-addresses.md`.
+All passed after the 2026-05-10 autonomous aggregate compound-literal aggregate-field address run. This run closes the aggregate counterpart to the prior scalar-field addressability feature: aggregate-valued fields selected from aggregate compound literals can now be addressed directly (`&((struct Box){{5, 7}, 9}).inner`) and used as safe struct pointers through `->`, including mutation through helper functions. The interpreter now allows `AddressOfAggregateField` to return a `PointerValue::StructField` for `StructFieldValue::Struct` selections and teaches struct-pointer field resolution to treat those field pointers as aggregate targets in both read and write paths. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_aggregate_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_aggregate_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-aggregate-compound-literal-aggregate-field-addresses.md`.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_addresses_of_aggregate_compound_literal_aggregate_fields -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous aggregate compound-literal scalar-field address run. This run closes another compound-literal lvalue/addressability parity gap: scalar fields selected from aggregate compound literals can now be addressed directly (`&((struct Point){4, 8}).x`), including nested scalar fields (`&((struct Box){{2, 3}, 4}).inner.y`) and union scalar fields (`&((union Number){7}).value`). The parser now lowers address-of over aggregate field selections to a dedicated `AddressOfAggregateField` expression; the interpreter creates hidden current-scope compound-literal aggregate storage and returns a safe `PointerValue::StructField` to the selected scalar field, preserving pointer type and const metadata. Coverage includes `tests/fixtures/valid/aggregate_compound_literal_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/aggregate_compound_literal_field_addresses.c`, focused RED/GREEN interpreter coverage, and a reference note in `references/cust-aggregate-compound-literal-field-addresses.md`.
 
 Commands verified:
 

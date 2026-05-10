@@ -423,6 +423,14 @@ fn supports_addresses_of_aggregate_compound_literal_scalar_fields() {
 }
 
 #[test]
+fn supports_addresses_of_aggregate_compound_literal_aggregate_fields() {
+    let program =
+        include_str!("fixtures/valid/aggregate_compound_literal_aggregate_field_addresses.c");
+
+    assert_eq!(interpret(program).unwrap(), 51);
+}
+
+#[test]
 fn rejects_aggregate_array_compound_literals_longer_than_declared_length() {
     let program =
         include_str!("fixtures/invalid/aggregate_array_compound_literal_too_many_initializers.c");

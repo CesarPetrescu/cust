@@ -6566,20 +6566,18 @@ impl Interpreter {
         match self.make_aggregate_compound_literal_pointer(type_name, init)? {
             PointerValue::Struct { scope_id, name } => {
                 match self.struct_field_by_scope(scope_id, &name, None, fields)? {
-                    StructFieldValue::Scalar { .. } => Ok(PointerValue::StructField {
-                        scope_id,
-                        name,
-                        element_index: None,
-                        fields: fields.to_vec(),
-                    }),
+                    StructFieldValue::Scalar { .. } | StructFieldValue::Struct { .. } => {
+                        Ok(PointerValue::StructField {
+                            scope_id,
+                            name,
+                            element_index: None,
+                            fields: fields.to_vec(),
+                        })
+                    }
                     StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
                         array: Rc::clone(value),
                         source_name: Some(Self::field_path_label(fields).to_string()),
                     }),
-                    StructFieldValue::Struct { .. } => Err(CustError::new(format!(
-                        "struct field '{}' requires field access",
-                        Self::field_path_label(fields)
-                    ))),
                     StructFieldValue::StructArray { .. } => Err(CustError::new(format!(
                         "struct field '{}' requires indexed field access",
                         Self::field_path_label(fields)
@@ -8432,9 +8430,17 @@ impl Interpreter {
                 fields,
                 *index,
             ),
-            PointerValue::StructField { .. } => {
-                Err(CustError::new("pointer does not reference a struct"))
-            }
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => match self.struct_field_by_scope(*scope_id, name, *element_index, fields)? {
+                StructFieldValue::Struct {
+                    type_name, fields, ..
+                } => Ok((type_name.clone(), fields)),
+                _ => Err(CustError::new("pointer does not reference a struct")),
+            },
             _ => Err(CustError::new("pointer does not reference a struct")),
         }
     }
@@ -8514,9 +8520,17 @@ impl Interpreter {
                 fields,
                 *index,
             ),
-            PointerValue::StructField { .. } => {
-                Err(CustError::new("pointer does not reference a struct"))
-            }
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => match self.struct_field_by_scope_mut(*scope_id, name, *element_index, fields)? {
+                StructFieldValue::Struct {
+                    type_name, fields, ..
+                } => Ok((type_name.clone(), fields)),
+                _ => Err(CustError::new("pointer does not reference a struct")),
+            },
             _ => Err(CustError::new("pointer does not reference a struct")),
         }
     }
