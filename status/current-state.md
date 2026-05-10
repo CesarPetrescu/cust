@@ -4,7 +4,21 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous embedded aggregate-array element field pointer-equality run. This run closes a pointer identity parity gap left after `&p->field` support for pointers into embedded aggregate-array fields: independently computed scalar field pointers targeting the same embedded element field now compare equal, while sibling fields and different embedded elements compare unequal. The interpreter now includes `PointerValue::StructFieldElementField` in `Interpreter::pointer_eq`, comparing the full owner/path/index/field identity metadata. Coverage includes `tests/fixtures/valid/struct_field_element_field_pointer_equality.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_element_field_pointer_equality.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, and a reference note in `references/cust-embedded-aggregate-array-element-field-pointer-equality.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous direct embedded aggregate-array element field address run. This run closes the direct syntax counterpart to the recent pointer-through-embedded-array field address work: scalar fields selected after indexing embedded aggregate-array fields can now be addressed directly, e.g. `&line.points[1].x` and nested `&box.line.points[2].y`. The parser rewrites address-of over `StructFieldArrayElementGet` through the existing `AddressOfStructArrayField` plus `AddressOfStructPtrField` path, preserving the established `StructFieldElement` owner/path/index metadata and avoiding a new pointer target. Coverage includes `tests/fixtures/valid/struct_field_array_element_field_addresses.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_array_element_field_addresses.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, and a reference note in `references/cust-direct-embedded-aggregate-array-element-field-addresses.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_direct_addresses_of_embedded_aggregate_array_element_fields -- --nocapture
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous embedded aggregate-array element field pointer-equality run. This run closes a pointer identity parity gap left after `&p->field` support for pointers into embedded aggregate-array fields: independently computed scalar field pointers targeting the same embedded element field now compare equal, while sibling fields and different embedded elements compare unequal. The interpreter now includes `PointerValue::StructFieldElementField` in `Interpreter::pointer_eq`, comparing the full owner/path/index/field identity metadata. Coverage includes `tests/fixtures/valid/struct_field_element_field_pointer_equality.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/struct_field_element_field_pointer_equality.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, and a reference note in `references/cust-embedded-aggregate-array-element-field-pointer-equality.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

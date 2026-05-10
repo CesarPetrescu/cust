@@ -4278,6 +4278,19 @@ impl Parser {
                 fields,
                 index,
             }),
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            } => Ok(Expr::AddressOfStructPtrField {
+                pointer: Box::new(Expr::AddressOfStructArrayField {
+                    name,
+                    fields: array_fields,
+                    index,
+                }),
+                fields,
+            }),
             Expr::StructPtrGet { pointer, fields } => {
                 Ok(Expr::AddressOfStructPtrField { pointer, fields })
             }

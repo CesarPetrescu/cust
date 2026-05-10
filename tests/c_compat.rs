@@ -113,6 +113,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/struct_arrays.c",
     "tests/fixtures/compat/valid/struct_pointer_field_addresses.c",
     "tests/fixtures/compat/valid/struct_field_element_field_addresses.c",
+    "tests/fixtures/compat/valid/struct_field_array_element_field_addresses.c",
     "tests/fixtures/compat/valid/struct_field_element_aggregate_field_addresses.c",
     "tests/fixtures/compat/valid/struct_pointer_fields.c",
     "tests/fixtures/compat/valid/struct_pointer_field_arithmetic.c",

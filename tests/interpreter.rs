@@ -459,6 +459,13 @@ fn supports_addresses_of_fields_through_embedded_aggregate_array_pointers() {
 }
 
 #[test]
+fn supports_direct_addresses_of_embedded_aggregate_array_element_fields() {
+    let program = include_str!("fixtures/valid/struct_field_array_element_field_addresses.c");
+
+    assert_eq!(interpret(program).unwrap(), 221);
+}
+
+#[test]
 fn supports_addresses_of_aggregate_fields_through_embedded_aggregate_array_pointers() {
     let program = include_str!("fixtures/valid/struct_field_element_aggregate_field_addresses.c");
 
