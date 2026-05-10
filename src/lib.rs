@@ -42,6 +42,7 @@ enum Token {
     Short,
     Const,
     Static,
+    Extern,
     Auto,
     Register,
     Void,
@@ -1147,6 +1148,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "short" => Token::Short,
                     "const" => Token::Const,
                     "static" => Token::Static,
+                    "extern" => Token::Extern,
                     "auto" => Token::Auto,
                     "register" => Token::Register,
                     "void" => Token::Void,
@@ -1575,7 +1577,7 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            self.matches(&Token::Static);
+            let _storage_class = self.matches(&Token::Static) || self.matches(&Token::Extern);
             if self.starts_function_definition()
                 || self.starts_struct_function_declaration()
                 || self.starts_alias_function_declaration()
