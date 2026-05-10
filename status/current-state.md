@@ -4,7 +4,21 @@ Last updated: 2026-05-10
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-10 autonomous signed/unsigned integer type-spelling run. This run closes a small C declaration/type-operand conformance gap: Cust now lexes and parses `signed`, `signed int`, `unsigned`, and `unsigned int` as parser-level spellings for the existing deterministic integer storage model. These spellings work across globals, locals, static locals, `for` initializer declarations, function returns, parameters/prototypes, pointer declarations/parameters, typedef aliases, scalar casts, and `sizeof` type operands including one-dimensional array type names such as `sizeof(const unsigned int[2])`. Runtime scalar storage and Cust-defined integer size remain unchanged (`i64`, `sizeof(int) == 8`); this is syntax/conformance parity rather than native unsigned wraparound semantics. Coverage includes `tests/fixtures/valid/signed_unsigned_int_types.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/signed_unsigned_int_types.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, and required Docker verification. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-10 autonomous signed/unsigned char type-spelling run. Ideation considered newly discovered parser diagnostics, additional compound-literal parity fixtures, aggregate-kind-specific diagnostic polish, signed/unsigned char follow-up semantics, deterministic `long`/`short` type spellings, and standard-library-like builtins. The selected work package closes the safest concrete scalar conformance gap from the previous run: Cust now parses `signed char` and `unsigned char` as aliases for its existing deterministic `char` storage wherever ordinary `char` already participates in supported type syntax, including globals, locals, static locals, `for` declarations, function returns/prototypes/parameters, pointer declarations/parameters, typedef aliases, scalar casts, and `sizeof` scalar/pointer/one-dimensional array type operands. Runtime scalar storage and `sizeof(char) == 1` remain unchanged; this is syntax parity, not native signedness/range/wraparound semantics. Coverage includes `tests/fixtures/valid/signed_unsigned_char_types.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/signed_unsigned_char_types.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-signed-unsigned-char-types.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_signed_unsigned_char_type_spellings -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-10 autonomous signed/unsigned integer type-spelling run. This run closes a small C declaration/type-operand conformance gap: Cust now lexes and parses `signed`, `signed int`, `unsigned`, and `unsigned int` as parser-level spellings for the existing deterministic integer storage model. These spellings work across globals, locals, static locals, `for` initializer declarations, function returns, parameters/prototypes, pointer declarations/parameters, typedef aliases, scalar casts, and `sizeof` type operands including one-dimensional array type names such as `sizeof(const unsigned int[2])`. Runtime scalar storage and Cust-defined integer size remain unchanged (`i64`, `sizeof(int) == 8`); this is syntax/conformance parity rather than native unsigned wraparound semantics. Coverage includes `tests/fixtures/valid/signed_unsigned_int_types.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/signed_unsigned_int_types.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, and required Docker verification. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

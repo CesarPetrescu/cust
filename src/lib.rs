@@ -1741,18 +1741,10 @@ impl Parser {
             Token::Int => Ok(DeclType::Scalar(CType::Int)),
             Token::Char => Ok(DeclType::Scalar(CType::Char)),
             Token::Signed | Token::Unsigned => {
-                let keyword = if matches!(found.kind, Token::Signed) {
-                    "signed"
-                } else {
-                    "unsigned"
-                };
                 if self.matches(&Token::Int) {
                     Ok(DeclType::Scalar(CType::Int))
-                } else if self.check(&Token::Char) {
-                    Err(Self::error_at(
-                        format!("{keyword} char types are not supported"),
-                        self.peek_located(),
-                    ))
+                } else if self.matches(&Token::Char) {
+                    Ok(DeclType::Scalar(CType::Char))
                 } else {
                     Ok(DeclType::Scalar(CType::Int))
                 }
@@ -1930,7 +1922,7 @@ impl Parser {
                 index += 1;
                 if matches!(
                     self.tokens.get(index).map(|token| &token.kind),
-                    Some(Token::Int)
+                    Some(Token::Int | Token::Char)
                 ) {
                     index += 1;
                 }

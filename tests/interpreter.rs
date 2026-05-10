@@ -98,6 +98,13 @@ fn supports_signed_unsigned_int_type_spellings() {
 }
 
 #[test]
+fn supports_signed_unsigned_char_type_spellings() {
+    let program = include_str!("fixtures/valid/signed_unsigned_char_types.c");
+
+    assert_eq!(interpret(program).unwrap(), 23);
+}
+
+#[test]
 fn supports_standard_simple_escape_sequences() {
     let program = include_str!("fixtures/valid/standard_escape_sequences.c");
 
