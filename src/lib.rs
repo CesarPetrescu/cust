@@ -408,6 +408,7 @@ enum TypeAlias {
     Scalar(CType),
     Struct(String),
     Pointer(PointeeType),
+    Array(PointeeType, usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -415,6 +416,7 @@ enum DeclType {
     Scalar(CType),
     Struct(String),
     Pointer(PointeeType),
+    Array(PointeeType, usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1821,6 +1823,7 @@ impl Parser {
                 Some(TypeAlias::Scalar(ty)) => Ok(DeclType::Scalar(ty)),
                 Some(TypeAlias::Struct(type_name)) => Ok(DeclType::Struct(type_name)),
                 Some(TypeAlias::Pointer(pointee)) => Ok(DeclType::Pointer(pointee)),
+                Some(TypeAlias::Array(pointee, len)) => Ok(DeclType::Array(pointee, len)),
                 None => Err(Self::error_at(
                     format!("expected {context}, found Ident(\"{name}\")"),
                     &found,
@@ -1847,6 +1850,7 @@ impl Parser {
                 ty,
                 points_to_const: false,
             },
+            DeclType::Array(_, _) => unreachable!("array aliases are not valid return types"),
         }
     }
 
@@ -1858,6 +1862,10 @@ impl Parser {
                 PointeeType::Scalar(ty) => ParamType::Scalar(*ty),
                 PointeeType::Struct(type_name) => ParamType::Struct(type_name.clone()),
             },
+            DeclType::Array(pointee, _) => match pointee {
+                PointeeType::Scalar(ty) => ParamType::Scalar(*ty),
+                PointeeType::Struct(type_name) => ParamType::Struct(type_name.clone()),
+            },
         }
     }
 
@@ -1866,6 +1874,7 @@ impl Parser {
             DeclType::Scalar(ty) => PointeeType::Scalar(*ty),
             DeclType::Struct(type_name) => PointeeType::Struct(type_name.clone()),
             DeclType::Pointer(pointee) => pointee.clone(),
+            DeclType::Array(pointee, _) => pointee.clone(),
         }
     }
 
@@ -1909,17 +1918,54 @@ impl Parser {
                             self.previous(),
                         ));
                     }
+                    DeclType::Array(_, _) => {
+                        return Err(Self::error_at(
+                            "pointer-to-array typedef aliases are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
                 }
             } else {
                 match base_type {
                     DeclType::Scalar(ty) => TypeAlias::Scalar(ty),
                     DeclType::Struct(type_name) => TypeAlias::Struct(type_name),
                     DeclType::Pointer(pointee) => TypeAlias::Pointer(pointee),
+                    DeclType::Array(pointee, len) => TypeAlias::Array(pointee, len),
                 }
             };
             (alias, "typedef alias name after type", false)
         };
         let alias_name = self.expect_ident_after(alias_context)?;
+        let alias = if self.matches(&Token::LBracket) {
+            let len = self.expect_array_len()?;
+            self.expect_closing_bracket_after("typedef array length")?;
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "multidimensional array typedef aliases are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            match alias {
+                TypeAlias::Scalar(ty) => TypeAlias::Array(PointeeType::Scalar(ty), len),
+                TypeAlias::Struct(type_name) => {
+                    TypeAlias::Array(PointeeType::Struct(type_name), len)
+                }
+                TypeAlias::Pointer(_) => {
+                    return Err(Self::error_at(
+                        "pointer array typedef aliases are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
+                TypeAlias::Array(_, _) => {
+                    return Err(Self::error_at(
+                        "multidimensional array typedef aliases are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
+            }
+        } else {
+            alias
+        };
         self.expect_semicolon_after("typedef declaration")?;
         let anonymous_type_name = match (anonymous_aggregate, &alias) {
             (true, TypeAlias::Struct(type_name)) => Some(type_name.clone()),
@@ -2141,6 +2187,12 @@ impl Parser {
                 points_to_const: leading_const,
             });
         }
+        if matches!(decl_type, DeclType::Array(_, _)) {
+            return Err(Self::error_at(
+                "array return types are not supported".to_string(),
+                self.previous(),
+            ));
+        }
         Ok(Self::decl_type_to_return_type(decl_type))
     }
 
@@ -2171,6 +2223,12 @@ impl Parser {
                     self.previous(),
                 ));
             }
+            if matches!(decl_type, DeclType::Array(_, _)) && has_explicit_star {
+                return Err(Self::error_at(
+                    "pointer-to-array parameters are not supported".to_string(),
+                    self.previous(),
+                ));
+            }
             if has_explicit_star && self.check(&Token::Star) {
                 return Err(Self::error_at(
                     "pointer-to-pointer parameters are not supported".to_string(),
@@ -2186,7 +2244,8 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer(_));
+            let is_pointer = has_explicit_star
+                || matches!(decl_type, DeclType::Pointer(_) | DeclType::Array(_, _));
             let name = if allow_unnamed
                 && matches!(self.peek(), Token::Comma | Token::RParen | Token::LBracket)
             {
@@ -2200,6 +2259,9 @@ impl Parser {
                     DeclType::Pointer(_) => {
                         unreachable!("pointer aliases with explicit stars return above")
                     }
+                    DeclType::Array(_, _) => {
+                        unreachable!("array aliases with explicit stars return above")
+                    }
                 }
             } else {
                 match &decl_type {
@@ -2209,6 +2271,9 @@ impl Parser {
                     }
                     DeclType::Pointer(_) => {
                         self.expect_ident_after("pointer parameter name after type")?
+                    }
+                    DeclType::Array(_, _) => {
+                        self.expect_ident_after("array parameter name after type")?
                     }
                 }
             };
@@ -2512,6 +2577,12 @@ impl Parser {
             match &decl_type {
                 DeclType::Scalar(_) => self.expect_ident_after("pointer name after '*'")?,
                 DeclType::Struct(_) => self.expect_ident_after("struct pointer name after '*'")?,
+                DeclType::Array(_, _) => {
+                    return Err(Self::error_at(
+                        "pointer-to-array declarations are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
                 DeclType::Pointer(_) => {
                     unreachable!("pointer aliases with explicit stars return above")
                 }
@@ -2521,8 +2592,53 @@ impl Parser {
                 DeclType::Scalar(_) => self.expect_ident_after("variable name after type")?,
                 DeclType::Struct(_) => self.expect_ident_after("struct variable name")?,
                 DeclType::Pointer(_) => self.expect_ident_after("pointer name after type")?,
+                DeclType::Array(_, _) => self.expect_ident_after("array name after type")?,
             }
         };
+        if let DeclType::Array(pointee, len) = decl_type.clone() {
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "multidimensional array declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            match pointee {
+                PointeeType::Scalar(ty) => {
+                    let init = if self.matches(&Token::Assign) {
+                        self.parse_array_initializer_or_string(&name, len, ty)?
+                    } else {
+                        Vec::new()
+                    };
+                    if require_semi {
+                        self.expect_semicolon_after("array declaration")?;
+                    }
+                    return Ok(Stmt::ArrayDecl {
+                        name,
+                        elem_type: ty,
+                        len,
+                        init,
+                        is_const: leading_const,
+                    });
+                }
+                PointeeType::Struct(type_name) => {
+                    let init = if self.matches(&Token::Assign) {
+                        self.parse_struct_array_initializer(&name, &type_name, len)?
+                    } else {
+                        Vec::new()
+                    };
+                    if require_semi {
+                        self.expect_semicolon_after("struct array declaration")?;
+                    }
+                    return Ok(Stmt::StructArrayDecl {
+                        type_name,
+                        name,
+                        len,
+                        init,
+                        is_const: leading_const,
+                    });
+                }
+            }
+        }
         if is_pointer {
             let (is_const, points_to_const) = if has_explicit_star {
                 (post_star_const, leading_const)
@@ -2554,6 +2670,9 @@ impl Parser {
                     DeclType::Struct(_) | DeclType::Pointer(PointeeType::Struct(_)) => {
                         "struct pointer declaration"
                     }
+                    DeclType::Array(_, _) => {
+                        unreachable!("array aliases return before pointer declarations")
+                    }
                 };
                 self.expect_assign_after(context)?;
                 unreachable!("expect_assign_after only returns Ok after consuming '='")
@@ -2565,6 +2684,9 @@ impl Parser {
                     }
                     DeclType::Struct(_) | DeclType::Pointer(PointeeType::Struct(_)) => {
                         "struct pointer declaration"
+                    }
+                    DeclType::Array(_, _) => {
+                        unreachable!("array aliases return before pointer declarations")
                     }
                 };
                 self.expect_semicolon_after(context)?;
@@ -3301,6 +3423,10 @@ impl Parser {
                     ));
                 }
                 DeclType::Pointer(pointee) => StructFieldType::Pointer(pointee),
+                DeclType::Array(PointeeType::Scalar(ty), len) => StructFieldType::Array(ty, len),
+                DeclType::Array(PointeeType::Struct(type_name), len) => {
+                    StructFieldType::StructArray(type_name, len)
+                }
                 DeclType::Scalar(ty) => StructFieldType::Scalar(ty),
                 DeclType::Struct(type_name) => StructFieldType::Struct(type_name),
             };
@@ -4389,7 +4515,7 @@ impl Parser {
                     type_name,
                 });
             }
-            DeclType::Pointer(_) => {
+            DeclType::Pointer(_) | DeclType::Array(_, _) => {
                 return Err(Self::error_at(
                     "pointer casts are not supported".to_string(),
                     &type_token,
@@ -4583,6 +4709,22 @@ impl Parser {
                                 ));
                             }
                             SizeOfType::Pointer
+                        }
+                        DeclType::Array(element_type, len) => {
+                            if self.matches(&Token::Star) {
+                                return Err(Self::error_at(
+                                    "pointer-to-array sizeof types are not supported".to_string(),
+                                    self.previous(),
+                                ));
+                            }
+                            if self.check(&Token::LBracket) {
+                                return Err(Self::error_at(
+                                    "multidimensional sizeof array types are not supported"
+                                        .to_string(),
+                                    self.peek_located(),
+                                ));
+                            }
+                            SizeOfType::Array(element_type, len)
                         }
                     }
                 };

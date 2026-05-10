@@ -133,6 +133,25 @@ fn supports_auto_and_register_local_storage_class_specifiers() {
 }
 
 #[test]
+fn supports_array_typedef_aliases() {
+    let program = include_str!("fixtures/valid/array_typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 52);
+}
+
+#[test]
+fn rejects_pointer_array_typedef_aliases() {
+    let program = include_str!("fixtures/invalid/pointer_array_typedef_alias.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("pointer array typedef aliases are not supported"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn supports_standard_simple_escape_sequences() {
     let program = include_str!("fixtures/valid/standard_escape_sequences.c");
 
