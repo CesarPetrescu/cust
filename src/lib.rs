@@ -619,6 +619,7 @@ enum SizeOfType {
     Scalar(CType),
     Struct(String),
     Pointer,
+    Array(PointeeType, usize),
 }
 
 impl SizeOfType {
@@ -631,6 +632,11 @@ impl SizeOfType {
                 .transpose()?
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
             SizeOfType::Pointer => Ok(POINTER_SIZE),
+            SizeOfType::Array(element_type, len) => {
+                let len =
+                    i64::try_from(*len).map_err(|_| CustError::new("array length is too large"))?;
+                Ok(element_type.size(struct_types)? * len)
+            }
         }
     }
 }
@@ -4352,6 +4358,8 @@ impl Parser {
                         DeclType::Scalar(ty) => {
                             if self.matches(&Token::Star) {
                                 SizeOfType::Pointer
+                            } else if let Some(len) = self.parse_sizeof_array_type_len()? {
+                                SizeOfType::Array(PointeeType::Scalar(ty), len)
                             } else {
                                 SizeOfType::Scalar(ty)
                             }
@@ -4359,6 +4367,8 @@ impl Parser {
                         DeclType::Struct(type_name) => {
                             if self.matches(&Token::Star) {
                                 SizeOfType::Pointer
+                            } else if let Some(len) = self.parse_sizeof_array_type_len()? {
+                                SizeOfType::Array(PointeeType::Struct(type_name), len)
                             } else {
                                 SizeOfType::Struct(type_name)
                             }
@@ -4367,6 +4377,12 @@ impl Parser {
                             if self.matches(&Token::Star) {
                                 return Err(Self::error_at(
                                     "pointer-to-pointer sizeof types are not supported".to_string(),
+                                    self.previous(),
+                                ));
+                            }
+                            if self.matches(&Token::LBracket) {
+                                return Err(Self::error_at(
+                                    "pointer array sizeof types are not supported".to_string(),
                                     self.previous(),
                                 ));
                             }
@@ -4384,6 +4400,21 @@ impl Parser {
         } else {
             Ok(Expr::SizeOfValue(Box::new(self.parse_unary()?)))
         }
+    }
+
+    fn parse_sizeof_array_type_len(&mut self) -> CustResult<Option<usize>> {
+        if !self.matches(&Token::LBracket) {
+            return Ok(None);
+        }
+        let len = self.expect_array_len()?;
+        self.expect_closing_bracket_after("sizeof array type")?;
+        if self.check(&Token::LBracket) {
+            return Err(Self::error_at(
+                "multidimensional sizeof array types are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
+        Ok(Some(len))
     }
 
     fn parse_postfix(&mut self) -> CustResult<Expr> {

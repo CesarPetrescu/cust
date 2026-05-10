@@ -374,6 +374,13 @@ fn supports_sizeof_aggregate_type_names() {
 }
 
 #[test]
+fn supports_sizeof_array_type_names() {
+    let program = include_str!("fixtures/valid/sizeof_array_types.c");
+
+    assert_eq!(interpret(program).unwrap(), 95);
+}
+
+#[test]
 fn supports_sizeof_pointer_expressions_without_evaluating_operands() {
     let program = include_str!("fixtures/valid/sizeof_pointer_expressions.c");
 
