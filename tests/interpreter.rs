@@ -161,6 +161,13 @@ fn supports_volatile_type_qualifiers() {
 }
 
 #[test]
+fn supports_atomic_type_qualifiers() {
+    let program = include_str!("fixtures/valid/atomic_type_qualifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 52);
+}
+
+#[test]
 fn supports_restrict_pointer_qualifiers() {
     let program = include_str!("fixtures/valid/restrict_pointer_qualifiers.c");
 

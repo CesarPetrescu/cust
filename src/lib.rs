@@ -43,6 +43,7 @@ enum Token {
     Const,
     Volatile,
     Restrict,
+    Atomic,
     Static,
     Extern,
     ThreadLocal,
@@ -1220,6 +1221,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "const" => Token::Const,
                     "volatile" => Token::Volatile,
                     "restrict" => Token::Restrict,
+                    "_Atomic" => Token::Atomic,
                     "static" => Token::Static,
                     "extern" => Token::Extern,
                     "_Thread_local" => Token::ThreadLocal,
@@ -1736,6 +1738,7 @@ impl Parser {
                     | Token::Const
                     | Token::Volatile
                     | Token::Restrict
+                    | Token::Atomic
             ) || self.current_alias().is_some()
             {
                 let global = self.parse_var_decl()?;
@@ -1843,8 +1846,9 @@ impl Parser {
         let mut index = self.pos + 2;
         while matches!(
             self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Star | Token::Const | Token::Volatile | Token::Restrict)
-        ) {
+            Some(Token::Star)
+        ) || self.type_qualifier_at(index)
+        {
             index += 1;
         }
         matches!(
@@ -1932,6 +1936,14 @@ impl Parser {
             Token::Bool => {
                 saw_const |= self.consume_type_qualifiers();
                 Ok((saw_const, DeclType::Scalar(CType::Bool)))
+            }
+            Token::Atomic => {
+                self.expect_opening_paren_after("_Atomic")?;
+                let (nested_const, decl_type) =
+                    self.parse_decl_type_with_embedded_qualifiers("_Atomic type name")?;
+                self.expect_closing_paren_after("_Atomic type")?;
+                saw_const |= nested_const || self.consume_type_qualifiers();
+                Ok((saw_const, decl_type))
             }
             Token::Signed | Token::Unsigned => {
                 saw_const |= self.consume_type_qualifiers();
@@ -2047,19 +2059,34 @@ impl Parser {
         while matches!(
             self.peek(),
             Token::Const | Token::Volatile | Token::Restrict
-        ) {
+        ) || self.bare_atomic_qualifier_at(self.pos)
+        {
             if self.matches(&Token::Const) {
                 saw_const = true;
             } else if self.matches(&Token::Restrict) {
                 // `restrict` is accepted as parser-level C syntax over Cust's
                 // existing interpreter-owned pointer model. It does not change
                 // runtime aliasing behavior.
+            } else if self.matches(&Token::Atomic) {
+                // Bare `_Atomic` is accepted as parser-level C syntax over Cust's
+                // deterministic storage model. The `_Atomic(type-name)` form is
+                // parsed as a type specifier by parse_decl_type.
             } else {
                 self.expect(Token::Volatile)
                     .expect("peek confirmed volatile token");
             }
         }
         saw_const
+    }
+
+    fn bare_atomic_qualifier_at(&self, index: usize) -> bool {
+        matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Atomic)
+        ) && !matches!(
+            self.tokens.get(index + 1).map(|token| &token.kind),
+            Some(Token::LParen)
+        )
     }
 
     fn parse_const_qualified_decl_type(&mut self, context: &str) -> CustResult<(bool, DeclType)> {
@@ -2359,6 +2386,12 @@ impl Parser {
                 index += 2;
                 index = self.skip_type_qualifiers_at(index);
             }
+            Some(Token::Atomic) => {
+                let Some(next_index) = self.skip_atomic_type_specifier_at(index) else {
+                    return false;
+                };
+                index = self.skip_type_qualifiers_at(next_index);
+            }
             Some(Token::Ident(_)) if self.alias_at_index(index).is_some() => {
                 index += 1;
                 index = self.skip_type_qualifiers_at(index);
@@ -2367,8 +2400,9 @@ impl Parser {
         }
         while matches!(
             self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Star | Token::Const | Token::Volatile | Token::Restrict)
-        ) {
+            Some(Token::Star)
+        ) || self.type_qualifier_at(index)
+        {
             index += 1;
         }
 
@@ -2382,13 +2416,47 @@ impl Parser {
     }
 
     fn skip_type_qualifiers_at(&self, mut index: usize) -> usize {
-        while matches!(
-            self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Const | Token::Volatile | Token::Restrict)
-        ) {
+        while self.type_qualifier_at(index) {
             index += 1;
         }
         index
+    }
+
+    fn type_qualifier_at(&self, index: usize) -> bool {
+        matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Const | Token::Volatile | Token::Restrict)
+        ) || self.bare_atomic_qualifier_at(index)
+    }
+
+    fn skip_atomic_type_specifier_at(&self, index: usize) -> Option<usize> {
+        if !matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Atomic)
+        ) || !matches!(
+            self.tokens.get(index + 1).map(|token| &token.kind),
+            Some(Token::LParen)
+        ) {
+            return None;
+        }
+
+        let mut depth = 1;
+        let mut cursor = index + 2;
+        while let Some(token) = self.tokens.get(cursor) {
+            match &token.kind {
+                Token::LParen => depth += 1,
+                Token::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(cursor + 1);
+                    }
+                }
+                Token::Eof => return None,
+                _ => {}
+            }
+            cursor += 1;
+        }
+        None
     }
 
     fn starts_malformed_function_definition(&self) -> bool {
@@ -2718,7 +2786,8 @@ impl Parser {
             | Token::Short
             | Token::Const
             | Token::Volatile
-            | Token::Restrict => self.parse_var_decl(),
+            | Token::Restrict
+            | Token::Atomic => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Typedef => match self.parse_typedef_decl()? {
                 Some(stmt) => Ok(stmt),
@@ -2848,7 +2917,8 @@ impl Parser {
             | Token::Short
             | Token::Const
             | Token::Volatile
-            | Token::Restrict => self.parse_var_decl()?,
+            | Token::Restrict
+            | Token::Atomic => self.parse_var_decl()?,
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
             Token::Struct | Token::Union => self.parse_aggregate_var_decl()?,
             token => {
@@ -2880,7 +2950,8 @@ impl Parser {
             | Token::Short
             | Token::Const
             | Token::Volatile
-            | Token::Restrict => self.parse_var_decl(),
+            | Token::Restrict
+            | Token::Atomic => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -2908,7 +2979,8 @@ impl Parser {
             | Token::Short
             | Token::Const
             | Token::Volatile
-            | Token::Restrict => self.parse_var_decl(),
+            | Token::Restrict
+            | Token::Atomic => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -2934,7 +3006,8 @@ impl Parser {
             | Token::Short
             | Token::Const
             | Token::Volatile
-            | Token::Restrict => self.parse_var_decl(),
+            | Token::Restrict
+            | Token::Atomic => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -4331,6 +4404,7 @@ impl Parser {
                 | Token::Const
                 | Token::Volatile
                 | Token::Restrict
+                | Token::Atomic
                 | Token::Alignas
         ) || self.current_alias().is_some()
         {
@@ -4895,7 +4969,8 @@ impl Parser {
                 | Token::Union
                 | Token::Const
                 | Token::Volatile
-                | Token::Restrict,
+                | Token::Restrict
+                | Token::Atomic,
             ) => true,
             Some(Token::Ident(name)) => self.lookup_type_alias(name).is_some(),
             _ => false,
@@ -5104,6 +5179,7 @@ impl Parser {
                 | Token::Const
                 | Token::Volatile
                 | Token::Restrict
+                | Token::Atomic
                 | Token::Void
         ) || self.current_alias().is_some()
     }
