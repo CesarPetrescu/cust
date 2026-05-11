@@ -1550,6 +1550,7 @@ struct Parser {
     type_alias_scopes: Vec<HashMap<String, TypeAlias>>,
     next_static_local_id: usize,
     next_aggregate_type_id: usize,
+    last_decl_had_initializer: bool,
 }
 
 impl Parser {
@@ -1563,6 +1564,7 @@ impl Parser {
             type_alias_scopes: vec![HashMap::new()],
             next_static_local_id: 0,
             next_aggregate_type_id: 0,
+            last_decl_had_initializer: false,
         }
     }
 
@@ -1577,7 +1579,8 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let _storage_class = self.matches(&Token::Static) || self.matches(&Token::Extern);
+            let is_extern = self.matches(&Token::Extern);
+            let _is_static = !is_extern && self.matches(&Token::Static);
             if self.starts_function_definition()
                 || self.starts_struct_function_declaration()
                 || self.starts_alias_function_declaration()
@@ -1636,7 +1639,10 @@ impl Parser {
                     | Token::Const
             ) || self.current_alias().is_some()
             {
-                globals.push(self.parse_var_decl()?);
+                let global = self.parse_var_decl()?;
+                if !is_extern || self.last_decl_had_initializer {
+                    globals.push(global);
+                }
             } else if self.check(&Token::Typedef) {
                 if let Some(stmt) = self.parse_typedef_decl()? {
                     globals.push(stmt);
@@ -1645,13 +1651,19 @@ impl Parser {
                 if self.starts_typedef_enum_definition() {
                     globals.push(self.parse_enum_decl()?);
                 } else {
-                    globals.push(self.parse_var_decl()?);
+                    let global = self.parse_var_decl()?;
+                    if !is_extern || self.last_decl_had_initializer {
+                        globals.push(global);
+                    }
                 }
             } else if matches!(self.peek(), Token::Struct | Token::Union) {
                 if self.is_aggregate_definition() {
                     self.parse_aggregate_definition()?;
                 } else {
-                    globals.push(self.parse_aggregate_var_decl()?);
+                    let global = self.parse_aggregate_var_decl()?;
+                    if !is_extern || self.last_decl_had_initializer {
+                        globals.push(global);
+                    }
                 }
             } else {
                 let found = self.peek_located().clone();
@@ -2549,6 +2561,7 @@ impl Parser {
     }
 
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
+        self.last_decl_had_initializer = false;
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("struct type name")?;
         let has_explicit_star = self.matches(&Token::Star);
@@ -2607,6 +2620,7 @@ impl Parser {
             match pointee {
                 PointeeType::Scalar(ty) => {
                     let init = if self.matches(&Token::Assign) {
+                        self.last_decl_had_initializer = true;
                         self.parse_array_initializer_or_string(&name, len, ty)?
                     } else {
                         Vec::new()
@@ -2624,6 +2638,7 @@ impl Parser {
                 }
                 PointeeType::Struct(type_name) => {
                     let init = if self.matches(&Token::Assign) {
+                        self.last_decl_had_initializer = true;
                         self.parse_struct_array_initializer(&name, &type_name, len)?
                     } else {
                         Vec::new()
@@ -2654,6 +2669,7 @@ impl Parser {
                 ));
             }
             let expr = if self.matches(&Token::Assign) {
+                self.last_decl_had_initializer = true;
                 self.parse_expr()?
             } else if self.check(&Token::Semi) {
                 self.advance();
@@ -2715,6 +2731,7 @@ impl Parser {
                     unreachable!("struct declarations return above")
                 };
                 let init = if self.matches(&Token::Assign) {
+                    self.last_decl_had_initializer = true;
                     self.parse_struct_array_initializer(&name, type_name, len)?
                 } else {
                     Vec::new()
@@ -2733,6 +2750,7 @@ impl Parser {
                 }
             }
             let init = if self.matches(&Token::Assign) {
+                self.last_decl_had_initializer = true;
                 let DeclType::Struct(type_name) = &decl_type else {
                     unreachable!("struct declarations return above")
                 };
@@ -2771,6 +2789,7 @@ impl Parser {
                 ));
             }
             let init = if self.matches(&Token::Assign) {
+                self.last_decl_had_initializer = true;
                 self.parse_array_initializer_or_string(&name, len, ty)?
             } else {
                 Vec::new()
@@ -2787,6 +2806,7 @@ impl Parser {
             });
         }
         let expr = if self.matches(&Token::Assign) {
+            self.last_decl_had_initializer = true;
             self.parse_scalar_initializer_expr(&format!("variable '{name}'"))?
         } else if self.check(&Token::Semi) {
             self.advance();
@@ -3504,6 +3524,7 @@ impl Parser {
     }
 
     fn parse_aggregate_var_decl(&mut self) -> CustResult<Stmt> {
+        self.last_decl_had_initializer = false;
         let kind = match self.advance().kind {
             Token::Struct => AggregateKind::Struct,
             Token::Union => AggregateKind::Union,
@@ -3521,6 +3542,7 @@ impl Parser {
             let is_const = self.matches(&Token::Const);
             let name = self.expect_ident_after("struct pointer name after '*'")?;
             let expr = if self.matches(&Token::Assign) {
+                self.last_decl_had_initializer = true;
                 self.parse_expr()?
             } else if self.check(&Token::Semi) {
                 Expr::Number(0)
@@ -3542,6 +3564,7 @@ impl Parser {
             let len = self.expect_array_len()?;
             self.expect_closing_bracket_after("struct array length")?;
             let init = if self.matches(&Token::Assign) {
+                self.last_decl_had_initializer = true;
                 self.parse_struct_array_initializer(&name, &type_name, len)?
             } else {
                 Vec::new()
@@ -3556,6 +3579,7 @@ impl Parser {
             });
         }
         let init = if self.matches(&Token::Assign) {
+            self.last_decl_had_initializer = true;
             if self.check(&Token::LBrace) {
                 Some(StructVarInitializer::Fields(
                     self.parse_struct_initializer(&type_name)?,
@@ -3620,6 +3644,7 @@ impl Parser {
             }
 
             let value = if self.matches(&Token::Assign) {
+                self.last_decl_had_initializer = true;
                 self.parse_enum_constant_value()?
             } else {
                 next_value

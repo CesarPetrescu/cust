@@ -147,6 +147,13 @@ fn supports_extern_function_storage_class_specifiers() {
 }
 
 #[test]
+fn supports_extern_global_declarations() {
+    let program = include_str!("fixtures/valid/extern_global_declarations.c");
+
+    assert_eq!(interpret(program).unwrap(), 24);
+}
+
+#[test]
 fn rejects_pointer_array_typedef_aliases() {
     let program = include_str!("fixtures/invalid/pointer_array_typedef_alias.c");
 

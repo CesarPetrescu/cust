@@ -4,7 +4,21 @@ Last updated: 2026-05-11
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-11 autonomous top-level `extern` function storage-class run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge fixtures, aggregate-kind diagnostic polish, top-level `extern` syntax parity, standard-library-like builtins, and post-array-typedef pointer/aggregate parity gaps. The selected work package closes a small C function-declaration conformance gap: Cust now lexes and parses `extern` before top-level function prototypes and definitions, treating it as single-file linkage metadata like existing top-level `static` while preserving all existing prototype/definition compatibility checks. Coverage includes `tests/fixtures/valid/extern_function_storage_class.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/extern_function_storage_class.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-extern-function-storage-class.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-11 autonomous top-level `extern` global declaration run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge fixtures, aggregate-kind diagnostic polish, top-level `extern` object declaration parity, standard-library-like builtins, and post-array-typedef pointer/aggregate parity gaps. The selected work package closes the matching object-declaration side of the recent `extern` function syntax work: Cust now accepts uninitialized top-level `extern` global declarations for supported scalar, char, array, struct, struct-array, union, enum, and one-level pointer variables, treating those declarations as parser-only single-file linkage metadata so a later ordinary definition provides the runtime storage without duplicate-global diagnostics. Coverage includes `tests/fixtures/valid/extern_global_declarations.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/extern_global_declarations.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-extern-global-declarations.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_extern_global_declarations -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-11 autonomous top-level `extern` function storage-class run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge fixtures, aggregate-kind diagnostic polish, top-level `extern` syntax parity, standard-library-like builtins, and post-array-typedef pointer/aggregate parity gaps. The selected work package closes a small C function-declaration conformance gap: Cust now lexes and parses `extern` before top-level function prototypes and definitions, treating it as single-file linkage metadata like existing top-level `static` while preserving all existing prototype/definition compatibility checks. Coverage includes `tests/fixtures/valid/extern_function_storage_class.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/extern_function_storage_class.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-extern-function-storage-class.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
