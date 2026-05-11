@@ -129,7 +129,7 @@ Prioritized backlog for autonomous implementation.
 - [x] string literals as read-only byte arrays
 - [x] pointer model design document before implementation
 - [x] first scalar pointer milestone: pointer declarations, scalar address-of/dereference, dereference assignment, reassignment, null diagnostics, and out-of-scope scalar diagnostics
-- [x] pointer parameters, fixed-size and unsized scalar array parameter spellings as C-style pointer parameters, array/string decay to pointer arguments, and pointer indexing for array-base pointers
+- [x] pointer parameters, fixed-size and unsized scalar/aggregate array parameter spellings as C-style pointer parameters, C99 array-parameter bracket qualifiers (`static`, `const`, `restrict`, `volatile`, and `_Atomic`) as parser metadata, pointer-slot const enforcement for `int values[const N]`, array/string decay to pointer arguments, and pointer indexing for array-base pointers
 - [x] `&array[index]` array-element pointers and dereference assignment/read support
 - [x] Scoped array-backed pointer arithmetic: `p + n`, `n + p`, `p - n`, same-storage pointer difference, `p += n`, `p -= n`, and pointer-variable `++`/`--` with scalar/null/out-of-bounds diagnostics plus interpreter and C compiler-oracle fixtures
 - [x] Same-array pointer ordering comparisons for supported array-backed pointers; acceptance: `p < q`, `p <= q`, `p > q`, and `p >= q` work for pointers into the same scalar array, string-literal storage, aggregate array, or embedded aggregate-array field storage (including nested field paths), comparisons between different arrays/fields report `cannot compare pointers to different arrays`, scalar/null pointer ordering remains unsupported, and interpreter plus C compiler-oracle fixtures cover the subset

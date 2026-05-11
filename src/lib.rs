@@ -2722,6 +2722,7 @@ impl Parser {
                     }
                 }
             };
+            let mut array_parameter_const = false;
             let kind = if is_pointer {
                 if self.check(&Token::LBracket) {
                     return Err(Self::error_at(
@@ -2732,9 +2733,7 @@ impl Parser {
                 ParamKind::Pointer
             } else if matches!(decl_type, DeclType::Struct(_)) {
                 if self.matches(&Token::LBracket) {
-                    if !self.check(&Token::RBracket) {
-                        self.expect_array_len()?;
-                    }
+                    array_parameter_const = self.parse_array_parameter_length_and_qualifiers()?;
                     self.expect_closing_bracket_after("array parameter length")?;
                     if self.check(&Token::LBracket) {
                         return Err(Self::error_at(
@@ -2747,12 +2746,8 @@ impl Parser {
                     ParamKind::Struct
                 }
             } else if self.matches(&Token::LBracket) {
-                if self.check(&Token::RBracket) {
-                    self.expect_closing_bracket_after("array parameter length")?;
-                } else {
-                    self.expect_array_len()?;
-                    self.expect_closing_bracket_after("array parameter length")?;
-                }
+                array_parameter_const = self.parse_array_parameter_length_and_qualifiers()?;
+                self.expect_closing_bracket_after("array parameter length")?;
                 if self.check(&Token::LBracket) {
                     return Err(Self::error_at(
                         "multidimensional array parameters are not supported".to_string(),
@@ -2769,7 +2764,7 @@ impl Parser {
                 } else if is_pointer {
                     (leading_const, Self::decl_type_points_to_const(&decl_type))
                 } else {
-                    (false, leading_const)
+                    (array_parameter_const, leading_const)
                 }
             } else {
                 (leading_const, false)
@@ -2811,6 +2806,40 @@ impl Parser {
             }
         }
         Ok(params)
+    }
+
+    fn parse_array_parameter_length_and_qualifiers(&mut self) -> CustResult<bool> {
+        let mut pointer_slot_const = false;
+        loop {
+            if self.matches(&Token::Const) {
+                pointer_slot_const = true;
+            } else if matches!(
+                self.peek(),
+                Token::Volatile | Token::Restrict | Token::Atomic | Token::Static
+            ) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if !self.check(&Token::RBracket) {
+            self.expect_array_len()?;
+            loop {
+                if self.matches(&Token::Const) {
+                    pointer_slot_const = true;
+                } else if matches!(
+                    self.peek(),
+                    Token::Volatile | Token::Restrict | Token::Atomic
+                ) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        Ok(pointer_slot_const)
     }
 
     fn parse_block_after(&mut self, context: &str) -> CustResult<Vec<Stmt>> {

@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-12: C99 array-parameter bracket qualifiers implemented from existing project conventions rather than external docs. Implementation decision: treat `static`, `restrict`, `volatile`, and `_Atomic` inside parameter array brackets as parser metadata/no-ops over Cust's pointer-parameter decay model, while mapping bracket `const` to the existing const pointer-slot metadata so `int values[const N]` rejects reassignment of the parameter name. See `references/cust-array-parameter-qualifiers.md`.
+
 - 2026-05-12: No external documentation was needed for C `(void)expr` casts. Implementation decision: treat `(void)` as a parser-only cast form that evaluates the operand in discard context and has no scalar value; this keeps native C warning-suppression parity for unused scalar/pointer/void-call results while preserving Cust's existing `void ... used as scalar expression` boundary for value contexts.
 
 - 2026-05-12: Local `cc -std=c11 -Wall -Wextra -Werror` rejected comma expressions in enum initializer and `switch case` integer-constant-expression contexts (`enumerator value ... is not an integer constant` / `case label does not reduce to an integer constant`). Cust now intentionally rejects those malformed forms with a targeted parser diagnostic rather than adding comma folding to enum/switch integer constant expressions.

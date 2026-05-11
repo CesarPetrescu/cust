@@ -1110,6 +1110,23 @@ fn supports_fixed_array_parameters_as_pointer_parameters() {
 }
 
 #[test]
+fn supports_array_parameter_qualifiers_as_pointer_metadata() {
+    let program = include_str!("fixtures/valid/array_parameter_qualifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 41);
+}
+
+#[test]
+fn rejects_array_parameter_const_slot_reassignment() {
+    let program = include_str!("fixtures/invalid/array_parameter_const_slot_reassignment.c");
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const variable 'values'"
+    );
+}
+
+#[test]
 fn supports_pointer_return_functions_and_prototypes() {
     let program = include_str!("fixtures/valid/pointer_return_functions.c");
 
