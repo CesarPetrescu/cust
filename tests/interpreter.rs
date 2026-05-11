@@ -3173,6 +3173,13 @@ fn supports_switch_statements_with_cases_default_fallthrough_break_and_continue(
 }
 
 #[test]
+fn supports_enum_constants_as_switch_case_labels() {
+    let program = include_str!("fixtures/valid/switch_enum_case_labels.c");
+
+    assert_eq!(interpret(program).unwrap(), 72);
+}
+
+#[test]
 fn supports_single_statement_control_bodies_else_if_and_dangling_else() {
     let program = include_str!("fixtures/valid/single_statement_control_bodies.c");
 
@@ -3200,6 +3207,18 @@ fn rejects_duplicate_switch_case_labels() {
     assert_eq!(
         err.to_string(),
         "duplicate switch case label 1 at line 6, column 10"
+    );
+}
+
+#[test]
+fn rejects_duplicate_switch_enum_case_labels() {
+    let program = include_str!("fixtures/invalid/switch_duplicate_enum_case.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "duplicate switch case label 3 at line 10, column 10"
     );
 }
 

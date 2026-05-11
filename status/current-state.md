@@ -4,7 +4,22 @@ Last updated: 2026-05-11
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-11 autonomous multiplicative compound-assignment run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, enum/switch constant-expression parity, and closing the remaining arithmetic compound-assignment syntax gap. The selected work package completes C compound-assignment operator parity for Cust's existing scalar lvalue families: `*=`, `/=`, and `%=` now lex, parse at assignment precedence, and evaluate for scalar variables, indexed scalar array/pointer lvalues, and dereferenced pointer lvalues. Division and remainder compound assignments reuse the existing `division by zero` diagnostic, while pointer-valued compound-assignment contexts reject the new operators through the established pointer-arithmetic diagnostic path. Coverage extends `tests/fixtures/valid/compound_assignments.c` plus the C compiler-oracle fixture `tests/fixtures/compat/valid/compound_assignments.c`, with reference notes in `references/cust-multiplicative-compound-assignments.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-11 autonomous switch/enum constant-expression parity run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, enum/switch constant-expression parity, and remaining declaration/initializer conformance gaps. The selected work package closes a concrete enum/switch gap: Cust now maintains parser-side enum constant scopes and accepts enum constants as `switch case` labels, including block-scoped enum constants and simple additive integer constant expressions such as `DONE = BUSY + 3` and `case DONE:`. Duplicate switch-case detection now resolves identifier-valued case labels before comparing values. Runtime enum constant behavior remains unchanged for ordinary expressions. Coverage includes `tests/fixtures/valid/switch_enum_case_labels.c`, invalid duplicate-case fixture `tests/fixtures/invalid/switch_duplicate_enum_case.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/switch_enum_case_labels.c`, and reference notes in `references/cust-switch-enum-case-labels.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter enum_constants_as_switch_case_labels -- --nocapture
+cargo test --test interpreter switch_enum -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-11 autonomous multiplicative compound-assignment run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, enum/switch constant-expression parity, and closing the remaining arithmetic compound-assignment syntax gap. The selected work package completes C compound-assignment operator parity for Cust's existing scalar lvalue families: `*=`, `/=`, and `%=` now lex, parse at assignment precedence, and evaluate for scalar variables, indexed scalar array/pointer lvalues, and dereferenced pointer lvalues. Division and remainder compound assignments reuse the existing `division by zero` diagnostic, while pointer-valued compound-assignment contexts reject the new operators through the established pointer-arithmetic diagnostic path. Coverage extends `tests/fixtures/valid/compound_assignments.c` plus the C compiler-oracle fixture `tests/fixtures/compat/valid/compound_assignments.c`, with reference notes in `references/cust-multiplicative-compound-assignments.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

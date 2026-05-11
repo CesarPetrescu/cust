@@ -1649,6 +1649,7 @@ struct Parser {
     struct_types: HashMap<String, StructTypeDef>,
     aggregate_type_scopes: Vec<HashMap<String, String>>,
     enum_type_scopes: Vec<HashSet<String>>,
+    enum_constant_scopes: Vec<HashMap<String, i64>>,
     type_alias_scopes: Vec<HashMap<String, TypeAlias>>,
     const_type_alias_scopes: Vec<HashSet<String>>,
     next_static_local_id: usize,
@@ -1664,6 +1665,7 @@ impl Parser {
             struct_types: HashMap::new(),
             aggregate_type_scopes: vec![HashMap::new()],
             enum_type_scopes: vec![HashSet::new()],
+            enum_constant_scopes: vec![HashMap::new()],
             type_alias_scopes: vec![HashMap::new()],
             const_type_alias_scopes: vec![HashSet::new()],
             next_static_local_id: 0,
@@ -1925,6 +1927,13 @@ impl Parser {
             .iter()
             .rev()
             .any(|scope| scope.contains(name))
+    }
+
+    fn lookup_enum_constant(&self, name: &str) -> Option<i64> {
+        self.enum_constant_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
     }
 
     fn resolve_aggregate_type(&self, name: &str) -> Option<String> {
@@ -2760,6 +2769,7 @@ impl Parser {
         self.type_alias_scopes.push(HashMap::new());
         self.const_type_alias_scopes.push(HashSet::new());
         self.enum_type_scopes.push(HashSet::new());
+        self.enum_constant_scopes.push(HashMap::new());
         self.aggregate_type_scopes.push(HashMap::new());
         let mut statements = Vec::new();
         let result = (|| {
@@ -2777,6 +2787,7 @@ impl Parser {
             Ok(statements)
         })();
         self.aggregate_type_scopes.pop();
+        self.enum_constant_scopes.pop();
         self.enum_type_scopes.pop();
         self.const_type_alias_scopes.pop();
         self.type_alias_scopes.pop();
@@ -4105,6 +4116,7 @@ impl Parser {
         self.expect_opening_brace_after("enum")?;
 
         let mut constants = Vec::new();
+        let mut local_constants = HashMap::new();
         let mut names = HashSet::new();
         let mut next_value = 0;
         while !self.check(&Token::RBrace) {
@@ -4135,11 +4147,12 @@ impl Parser {
 
             let value = if self.matches(&Token::Assign) {
                 self.last_decl_had_initializer = true;
-                self.parse_enum_constant_value()?
+                self.parse_enum_constant_value(&local_constants)?
             } else {
                 next_value
             };
             next_value = value + 1;
+            local_constants.insert(name.clone(), value);
             constants.push(EnumConstant { name, value });
 
             if self.matches(&Token::Comma) {
@@ -4176,16 +4189,60 @@ impl Parser {
             }
             _ => {}
         }
+        self.enum_constant_scopes
+            .last_mut()
+            .expect("parser always has an enum constant scope")
+            .extend(local_constants);
         Ok(constants)
     }
 
-    fn parse_enum_constant_value(&mut self) -> CustResult<i64> {
-        let sign = if self.matches(&Token::Minus) { -1 } else { 1 };
+    fn parse_enum_constant_value(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<i64> {
+        let (mut value, _) = self.parse_integer_constant_primary(
+            local_constants,
+            "expected integer constant after enum constant '='",
+        )?;
+        while self.matches(&Token::Plus) || self.matches(&Token::Minus) {
+            let op = self.previous().kind.clone();
+            let (rhs, _) = self.parse_integer_constant_primary(
+                local_constants,
+                "expected integer constant in enum constant expression",
+            )?;
+            match op {
+                Token::Plus => value += rhs,
+                Token::Minus => value -= rhs,
+                _ => unreachable!("only plus/minus are matched above"),
+            }
+        }
+        Ok(value)
+    }
+
+    fn parse_integer_constant_primary(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let sign = if self.matches(&Token::Minus) {
+            -1
+        } else {
+            self.matches(&Token::Plus);
+            1
+        };
         let found = self.advance();
         match &found.kind {
-            Token::Number(value) => Ok(sign * *value),
+            Token::Number(value) => Ok((sign * *value, found)),
+            Token::Ident(name) => local_constants
+                .get(name)
+                .copied()
+                .or_else(|| self.lookup_enum_constant(name))
+                .map(|value| (sign * value, found.clone()))
+                .ok_or_else(|| {
+                    Self::error_at(format!("{context}, found {:?}", found.kind), &found)
+                }),
             token => Err(Self::error_at(
-                format!("expected integer constant after enum constant '=', found {token:?}"),
+                format!("{context}, found {token:?}"),
                 &found,
             )),
         }
@@ -4549,15 +4606,24 @@ impl Parser {
     }
 
     fn parse_switch_case_value(&mut self) -> CustResult<(i64, LocatedToken)> {
-        let sign = if self.matches(&Token::Minus) { -1 } else { 1 };
-        let found = self.advance();
-        match &found.kind {
-            Token::Number(value) => Ok((sign * *value, found)),
-            token => Err(Self::error_at(
-                format!("expected integer constant after switch case, found {token:?}"),
-                &found,
-            )),
+        let empty_constants = HashMap::new();
+        let (mut value, value_token) = self.parse_integer_constant_primary(
+            &empty_constants,
+            "expected integer constant after switch case",
+        )?;
+        while self.matches(&Token::Plus) || self.matches(&Token::Minus) {
+            let op = self.previous().kind.clone();
+            let (rhs, _) = self.parse_integer_constant_primary(
+                &empty_constants,
+                "expected integer constant in switch case expression",
+            )?;
+            match op {
+                Token::Plus => value += rhs,
+                Token::Minus => value -= rhs,
+                _ => unreachable!("only plus/minus are matched above"),
+            }
         }
+        Ok((value, value_token))
     }
 
     fn parse_expr(&mut self) -> CustResult<Expr> {
