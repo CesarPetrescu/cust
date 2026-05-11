@@ -2711,6 +2711,18 @@ fn rejects_function_pointer_declarations_with_context() {
 }
 
 #[test]
+fn rejects_local_function_pointer_declarations_with_context() {
+    let program = include_str!("fixtures/invalid/function_pointer_local_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function pointer declarations are not supported at line 2, column 9"
+    );
+}
+
+#[test]
 fn rejects_function_pointer_typedef_aliases_with_context() {
     let program = include_str!("fixtures/invalid/function_pointer_typedef_alias.c");
 
@@ -2719,6 +2731,18 @@ fn rejects_function_pointer_typedef_aliases_with_context() {
     assert_eq!(
         err.to_string(),
         "function pointer typedef aliases are not supported at line 1, column 13"
+    );
+}
+
+#[test]
+fn rejects_function_pointer_parameters_with_context() {
+    let program = include_str!("fixtures/invalid/function_pointer_parameter.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function pointer parameters are not supported at line 1, column 15"
     );
 }
 

@@ -2495,6 +2495,36 @@ impl Parser {
         None
     }
 
+    fn parenthesized_pointer_declarator_is_function_at(&self, index: usize) -> bool {
+        if !matches!(
+            (
+                self.tokens.get(index).map(|token| &token.kind),
+                self.tokens.get(index + 1).map(|token| &token.kind)
+            ),
+            (Some(Token::LParen), Some(Token::Star))
+        ) {
+            return false;
+        }
+
+        let mut cursor = self.skip_type_qualifiers_at(index + 2);
+        if !matches!(
+            self.tokens.get(cursor).map(|token| &token.kind),
+            Some(Token::Ident(_))
+        ) {
+            return false;
+        }
+        cursor += 1;
+        cursor = self.skip_type_qualifiers_at(cursor);
+
+        matches!(
+            (
+                self.tokens.get(cursor).map(|token| &token.kind),
+                self.tokens.get(cursor + 1).map(|token| &token.kind)
+            ),
+            (Some(Token::RParen), Some(Token::LParen))
+        )
+    }
+
     fn starts_malformed_function_definition(&self) -> bool {
         if !matches!(
             self.peek(),
@@ -2647,6 +2677,12 @@ impl Parser {
                 && self.check(&Token::LParen)
                 && matches!(self.peek_next(), Token::Star)
             {
+                if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
+                    return Err(Self::error_at(
+                        "function pointer parameters are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 return Err(Self::error_at(
                     "parenthesized pointer parameters are not supported".to_string(),
                     self.peek_located(),
@@ -3084,6 +3120,12 @@ impl Parser {
             && self.check(&Token::LParen)
             && matches!(self.peek_next(), Token::Star)
         {
+            if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
+                return Err(Self::error_at(
+                    "function pointer declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             return Err(Self::error_at(
                 "parenthesized pointer declarations are not supported".to_string(),
                 self.peek_located(),
