@@ -613,6 +613,21 @@ fn supports_scalar_cast_expressions() {
 }
 
 #[test]
+fn supports_void_cast_expressions() {
+    let program = include_str!("fixtures/valid/void_cast_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 15);
+}
+
+#[test]
+fn rejects_void_cast_expressions_used_as_scalar() {
+    let program = include_str!("fixtures/invalid/void_cast_used_as_scalar.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "void expression used as scalar");
+}
+
+#[test]
 fn supports_scalar_compound_literals_in_expression_contexts() {
     let program = include_str!("fixtures/valid/scalar_compound_literals.c");
 

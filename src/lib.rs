@@ -341,6 +341,7 @@ enum Expr {
         ty: CType,
         expr: Box<Expr>,
     },
+    VoidCast(Box<Expr>),
     ScalarLiteral {
         ty: CType,
         init: Box<Expr>,
@@ -5600,6 +5601,7 @@ impl Parser {
                 | Token::Short
                 | Token::Struct
                 | Token::Union
+                | Token::Void
                 | Token::Const
                 | Token::Volatile
                 | Token::Restrict
@@ -5614,6 +5616,10 @@ impl Parser {
         self.expect(Token::LParen)?;
         self.consume_type_qualifiers();
         let type_token = self.peek_located().clone();
+        if self.matches(&Token::Void) {
+            self.expect_closing_paren_after("cast type")?;
+            return Ok(Expr::VoidCast(Box::new(self.parse_unary()?)));
+        }
         let decl_type = self.parse_decl_type("cast type")?;
         if self.matches(&Token::Star) {
             return Err(Self::error_at(
@@ -12060,6 +12066,7 @@ impl Interpreter {
             | Expr::BitwiseNot(_)
             | Expr::LogicalNot(_)
             | Expr::Cast { .. }
+            | Expr::VoidCast(_)
             | Expr::ScalarLiteral { .. }
             | Expr::AggregateLiteral { .. }
             | Expr::AggregateFieldGet { .. }
@@ -12080,6 +12087,10 @@ impl Interpreter {
     fn eval_discard(&mut self, expr: &Expr) -> CustResult<()> {
         if let Expr::Call { name, args } = expr {
             self.call_function(name, args)?;
+            return Ok(());
+        }
+        if let Expr::VoidCast(inner) = expr {
+            self.eval_discard(inner)?;
             return Ok(());
         }
         match expr {
@@ -12497,6 +12508,7 @@ impl Interpreter {
                 pointer, fields, ..
             } => self.sizeof_struct_pointer_field(pointer, fields),
             Expr::Increment { target, .. } => self.sizeof_expr(target),
+            Expr::VoidCast(_) => Err(CustError::new("void expression used as scalar")),
             Expr::Cast { ty, .. }
             | Expr::ScalarLiteral { ty, .. }
             | Expr::ScalarLiteralSet { ty, .. }
@@ -14077,6 +14089,10 @@ impl Interpreter {
                 ))),
             },
             Expr::Cast { expr, .. } => self.eval(expr),
+            Expr::VoidCast(expr) => {
+                self.eval_discard(expr)?;
+                Err(CustError::new("void expression used as scalar"))
+            }
             Expr::ScalarLiteral { init, .. } => self.eval(init),
             Expr::AggregateLiteral { type_name, .. } => {
                 let aggregate_kind = self.aggregate_kind_label(type_name);

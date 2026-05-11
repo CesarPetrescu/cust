@@ -1,10 +1,26 @@
 # Cust Current State
 
-Last updated: 2026-05-11
+Last updated: 2026-05-12
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-12 autonomous integer-constant comma diagnostic run. Ideation considered failing tests/builds (none), active blockers (none), P0 parser recovery/error-message gaps for newly discovered malformed programs, remaining C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, pointer/aggregate parity gaps, and standard-library-like builtins. The selected work package tightens parser diagnostics for comma expressions in enum initializer and `switch case` integer-constant-expression contexts, matching C's integer-constant-expression boundary instead of falling through to generic missing-`)`/missing-`:` messages. Cust now reports `comma operator is not allowed in integer constant expression` for parenthesized enum constants, parenthesized case labels, and unparenthesized case-label commas. Coverage adds three invalid fixtures and exact-output interpreter tests. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-12 autonomous void-cast expression run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), P0 parser recovery gaps, remaining C-compatible compound-literal edges, pointer/aggregate parity gaps, standard-library-like builtins, and small C expression conformance items. The selected work package closes the C `(void)expr` cast gap because it is a compact, high-confidence expression feature with clear TDD coverage and native compiler-oracle parity. Cust now parses `(void)` as a cast type start, evaluates the operand in discard context so scalar/pointer/void-call side effects are preserved without scalar conversion, and rejects value use with `void expression used as scalar`. Coverage adds valid, invalid, and C compiler-oracle fixtures plus implementation notes in `references/cust-void-cast-expressions.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter void_cast -- --nocapture  # RED failed with expected parser errors before implementation; GREEN passed after implementation
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-12 autonomous integer-constant comma diagnostic run. Ideation considered failing tests/builds (none), active blockers (none), P0 parser recovery/error-message gaps for newly discovered malformed programs, remaining C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, pointer/aggregate parity gaps, and standard-library-like builtins. The selected work package tightens parser diagnostics for comma expressions in enum initializer and `switch case` integer-constant-expression contexts, matching C's integer-constant-expression boundary instead of falling through to generic missing-`)`/missing-`:` messages. Cust now reports `comma operator is not allowed in integer constant expression` for parenthesized enum constants, parenthesized case labels, and unparenthesized case-label commas. Coverage adds three invalid fixtures and exact-output interpreter tests. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
