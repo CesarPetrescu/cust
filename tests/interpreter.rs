@@ -203,6 +203,24 @@ fn supports_static_assertions() {
 }
 
 #[test]
+fn supports_alignof_type_names() {
+    let program = include_str!("fixtures/valid/alignof_type_names.c");
+
+    assert_eq!(interpret(program).unwrap(), 51);
+}
+
+#[test]
+fn rejects_alignof_void() {
+    let program = include_str!("fixtures/invalid/alignof_void.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string().contains("_Alignof(void) is not supported"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_failing_static_assertions() {
     let program = include_str!("fixtures/invalid/static_assertion_failure.c");
 

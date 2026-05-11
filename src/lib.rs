@@ -55,6 +55,7 @@ enum Token {
     Union,
     Typedef,
     Sizeof,
+    Alignof,
     StaticAssert,
     Return,
     If,
@@ -134,6 +135,7 @@ enum Expr {
     StringLiteral(Vec<i64>),
     SizeOfType(SizeOfType),
     SizeOfValue(Box<Expr>),
+    AlignOfType(SizeOfType),
     Var(String),
     StructGet {
         name: String,
@@ -526,6 +528,21 @@ impl StructFieldType {
             StructFieldType::Pointer(_) => Ok(POINTER_SIZE),
         }
     }
+
+    fn alignment(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
+        match self {
+            StructFieldType::Scalar(ty) => Ok(ty.alignment()),
+            StructFieldType::Array(ty, _) => Ok(ty.alignment()),
+            StructFieldType::Struct(type_name) | StructFieldType::StructArray(type_name, _) => {
+                struct_types
+                    .get(type_name)
+                    .map(|struct_type| struct_type.alignment(struct_types))
+                    .transpose()?
+                    .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))
+            }
+            StructFieldType::Pointer(_) => Ok(POINTER_SIZE),
+        }
+    }
 }
 
 impl StructTypeDef {
@@ -542,6 +559,15 @@ impl StructTypeDef {
                 .map(|field| field.ty.size(struct_types))
                 .try_fold(0, |max, size| size.map(|size| max.max(size))),
         }
+    }
+
+    fn alignment(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
+        self.fields
+            .iter()
+            .map(|field| field.ty.alignment(struct_types))
+            .try_fold(1, |max, alignment| {
+                alignment.map(|alignment| max.max(alignment))
+            })
     }
 }
 
@@ -623,6 +649,10 @@ impl CType {
             CType::Bool => CHAR_SIZE,
         }
     }
+
+    fn alignment(self) -> i64 {
+        self.size()
+    }
 }
 
 impl PointeeType {
@@ -632,6 +662,17 @@ impl PointeeType {
             PointeeType::Struct(type_name) => struct_types
                 .get(type_name)
                 .map(|struct_type| struct_type.size(struct_types))
+                .transpose()?
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+        }
+    }
+
+    fn alignment(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
+        match self {
+            PointeeType::Scalar(ty) => Ok(ty.alignment()),
+            PointeeType::Struct(type_name) => struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.alignment(struct_types))
                 .transpose()?
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
         }
@@ -661,6 +702,19 @@ impl SizeOfType {
                     i64::try_from(*len).map_err(|_| CustError::new("array length is too large"))?;
                 Ok(element_type.size(struct_types)? * len)
             }
+        }
+    }
+
+    fn alignment(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
+        match self {
+            SizeOfType::Scalar(ty) => Ok(ty.alignment()),
+            SizeOfType::Struct(type_name) => struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.alignment(struct_types))
+                .transpose()?
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            SizeOfType::Pointer => Ok(POINTER_SIZE),
+            SizeOfType::Array(element_type, _) => element_type.alignment(struct_types),
         }
     }
 }
@@ -1176,6 +1230,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "union" => Token::Union,
                     "typedef" => Token::Typedef,
                     "sizeof" => Token::Sizeof,
+                    "_Alignof" => Token::Alignof,
                     "_Static_assert" => Token::StaticAssert,
                     "return" => Token::Return,
                     "if" => Token::If,
@@ -2683,6 +2738,7 @@ impl Parser {
             | Token::MinusMinus
             | Token::Bang
             | Token::Sizeof
+            | Token::Alignof
             | Token::Star
             | Token::Amp
             | Token::LParen => self.parse_expr_stmt_with_semi(true),
@@ -4721,6 +4777,8 @@ impl Parser {
             Ok(Expr::LogicalNot(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Sizeof) {
             self.parse_sizeof()
+        } else if self.matches(&Token::Alignof) {
+            self.parse_alignof()
         } else if self.matches(&Token::Star) {
             Ok(Expr::Deref(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Amp) {
@@ -4914,106 +4972,8 @@ impl Parser {
 
     fn parse_sizeof(&mut self) -> CustResult<Expr> {
         if self.matches(&Token::LParen) {
-            if matches!(
-                self.peek(),
-                Token::Int
-                    | Token::Char
-                    | Token::Bool
-                    | Token::Signed
-                    | Token::Unsigned
-                    | Token::Long
-                    | Token::Short
-                    | Token::Struct
-                    | Token::Union
-                    | Token::Enum
-                    | Token::Const
-                    | Token::Volatile
-                    | Token::Restrict
-                    | Token::Void
-            ) || self.current_alias().is_some()
-            {
-                let is_const_qualified = self.consume_type_qualifiers();
-                let sizeof_type = if self.check(&Token::Void) {
-                    let type_token = self.advance();
-                    return Err(Self::error_at(
-                        "sizeof(void) is not supported".to_string(),
-                        &type_token,
-                    ));
-                } else {
-                    if is_const_qualified
-                        && !matches!(
-                            self.peek(),
-                            Token::Int
-                                | Token::Char
-                                | Token::Bool
-                                | Token::Signed
-                                | Token::Unsigned
-                                | Token::Long
-                                | Token::Short
-                                | Token::Struct
-                                | Token::Union
-                                | Token::Enum
-                        )
-                        && self.current_alias().is_none()
-                    {
-                        let found = self.peek_located().clone();
-                        return Err(Self::error_at(
-                            format!("expected sizeof type after const, found {:?}", found.kind),
-                            &found,
-                        ));
-                    }
-                    match self.parse_decl_type("sizeof struct type name")? {
-                        DeclType::Scalar(ty) => {
-                            if self.matches(&Token::Star) {
-                                SizeOfType::Pointer
-                            } else if let Some(len) = self.parse_sizeof_array_type_len()? {
-                                SizeOfType::Array(PointeeType::Scalar(ty), len)
-                            } else {
-                                SizeOfType::Scalar(ty)
-                            }
-                        }
-                        DeclType::Struct(type_name) => {
-                            if self.matches(&Token::Star) {
-                                SizeOfType::Pointer
-                            } else if let Some(len) = self.parse_sizeof_array_type_len()? {
-                                SizeOfType::Array(PointeeType::Struct(type_name), len)
-                            } else {
-                                SizeOfType::Struct(type_name)
-                            }
-                        }
-                        DeclType::Pointer { .. } => {
-                            if self.matches(&Token::Star) {
-                                return Err(Self::error_at(
-                                    "pointer-to-pointer sizeof types are not supported".to_string(),
-                                    self.previous(),
-                                ));
-                            }
-                            if self.matches(&Token::LBracket) {
-                                return Err(Self::error_at(
-                                    "pointer array sizeof types are not supported".to_string(),
-                                    self.previous(),
-                                ));
-                            }
-                            SizeOfType::Pointer
-                        }
-                        DeclType::Array(element_type, len) => {
-                            if self.matches(&Token::Star) {
-                                return Err(Self::error_at(
-                                    "pointer-to-array sizeof types are not supported".to_string(),
-                                    self.previous(),
-                                ));
-                            }
-                            if self.check(&Token::LBracket) {
-                                return Err(Self::error_at(
-                                    "multidimensional sizeof array types are not supported"
-                                        .to_string(),
-                                    self.peek_located(),
-                                ));
-                            }
-                            SizeOfType::Array(element_type, len)
-                        }
-                    }
-                };
+            if self.is_type_name_start() {
+                let sizeof_type = self.parse_sizeof_like_type_name("sizeof")?;
                 self.expect_closing_paren_after("sizeof type")?;
                 Ok(Expr::SizeOfType(sizeof_type))
             } else {
@@ -5026,15 +4986,135 @@ impl Parser {
         }
     }
 
-    fn parse_sizeof_array_type_len(&mut self) -> CustResult<Option<usize>> {
+    fn parse_alignof(&mut self) -> CustResult<Expr> {
+        self.expect_opening_paren_after("_Alignof")?;
+        if !self.is_type_name_start() {
+            let found = self.peek_located().clone();
+            return Err(Self::error_at(
+                format!("expected _Alignof type, found {:?}", found.kind),
+                &found,
+            ));
+        }
+        let alignof_type = self.parse_sizeof_like_type_name("_Alignof")?;
+        self.expect_closing_paren_after("_Alignof type")?;
+        Ok(Expr::AlignOfType(alignof_type))
+    }
+
+    fn is_type_name_start(&self) -> bool {
+        matches!(
+            self.peek(),
+            Token::Int
+                | Token::Char
+                | Token::Bool
+                | Token::Signed
+                | Token::Unsigned
+                | Token::Long
+                | Token::Short
+                | Token::Struct
+                | Token::Union
+                | Token::Enum
+                | Token::Const
+                | Token::Volatile
+                | Token::Restrict
+                | Token::Void
+        ) || self.current_alias().is_some()
+    }
+
+    fn parse_sizeof_like_type_name(&mut self, operator: &str) -> CustResult<SizeOfType> {
+        let is_const_qualified = self.consume_type_qualifiers();
+        if self.check(&Token::Void) {
+            let type_token = self.advance();
+            return Err(Self::error_at(
+                format!("{operator}(void) is not supported"),
+                &type_token,
+            ));
+        }
+        if is_const_qualified
+            && !matches!(
+                self.peek(),
+                Token::Int
+                    | Token::Char
+                    | Token::Bool
+                    | Token::Signed
+                    | Token::Unsigned
+                    | Token::Long
+                    | Token::Short
+                    | Token::Struct
+                    | Token::Union
+                    | Token::Enum
+            )
+            && self.current_alias().is_none()
+        {
+            let found = self.peek_located().clone();
+            return Err(Self::error_at(
+                format!(
+                    "expected {operator} type after const, found {:?}",
+                    found.kind
+                ),
+                &found,
+            ));
+        }
+        match self.parse_decl_type(&format!("{operator} struct type name"))? {
+            DeclType::Scalar(ty) => {
+                if self.matches(&Token::Star) {
+                    Ok(SizeOfType::Pointer)
+                } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
+                    Ok(SizeOfType::Array(PointeeType::Scalar(ty), len))
+                } else {
+                    Ok(SizeOfType::Scalar(ty))
+                }
+            }
+            DeclType::Struct(type_name) => {
+                if self.matches(&Token::Star) {
+                    Ok(SizeOfType::Pointer)
+                } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
+                    Ok(SizeOfType::Array(PointeeType::Struct(type_name), len))
+                } else {
+                    Ok(SizeOfType::Struct(type_name))
+                }
+            }
+            DeclType::Pointer { .. } => {
+                if self.matches(&Token::Star) {
+                    return Err(Self::error_at(
+                        format!("pointer-to-pointer {operator} types are not supported"),
+                        self.previous(),
+                    ));
+                }
+                if self.matches(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        format!("pointer array {operator} types are not supported"),
+                        self.previous(),
+                    ));
+                }
+                Ok(SizeOfType::Pointer)
+            }
+            DeclType::Array(element_type, len) => {
+                if self.matches(&Token::Star) {
+                    return Err(Self::error_at(
+                        format!("pointer-to-array {operator} types are not supported"),
+                        self.previous(),
+                    ));
+                }
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        format!("multidimensional {operator} array types are not supported"),
+                        self.peek_located(),
+                    ));
+                }
+                Ok(SizeOfType::Array(element_type, len))
+            }
+        }
+    }
+
+    fn parse_sizeof_array_type_len(&mut self, operator: &str) -> CustResult<Option<usize>> {
         if !self.matches(&Token::LBracket) {
             return Ok(None);
         }
         let len = self.expect_array_len()?;
-        self.expect_closing_bracket_after("sizeof array type")?;
+        self.expect_closing_bracket_after(&format!("{operator} array type"))?;
         if self.check(&Token::LBracket) {
             return Err(Self::error_at(
-                "multidimensional sizeof array types are not supported".to_string(),
+                format!("multidimensional {operator} array types are not supported"),
                 self.peek_located(),
             ));
         }
@@ -11172,6 +11252,7 @@ impl Interpreter {
             | Expr::AggregateFieldCompoundSet { .. }
             | Expr::SizeOfType(_)
             | Expr::SizeOfValue(_)
+            | Expr::AlignOfType(_)
             | Expr::CompoundAssign { .. }
             | Expr::ScalarLiteralSet { .. }
             | Expr::ScalarLiteralCompoundSet { .. }
@@ -11483,7 +11564,7 @@ impl Interpreter {
                     })?;
                 Ok(len as i64 * element_size)
             }
-            Expr::SizeOfType(_) | Expr::SizeOfValue(_) => Ok(INT_SIZE),
+            Expr::SizeOfType(_) | Expr::SizeOfValue(_) | Expr::AlignOfType(_) => Ok(INT_SIZE),
             Expr::Var(name) => self.sizeof_variable(name),
             Expr::StructGet { name, fields } => self.sizeof_struct_field(name, fields),
             Expr::StructArrayGet { name, fields, .. } => {
@@ -12927,6 +13008,7 @@ impl Interpreter {
             }
             Expr::SizeOfType(sizeof_type) => Ok(sizeof_type.size(&self.struct_types)?),
             Expr::SizeOfValue(expr) => self.sizeof_expr(expr),
+            Expr::AlignOfType(alignof_type) => Ok(alignof_type.alignment(&self.struct_types)?),
             Expr::Var(name) => self.find_scalar(name),
             Expr::AddressOf(_)
             | Expr::AddressOfArray { .. }

@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-11: No external documentation was needed for C11 `_Alignof(type-name)` syntax parity. Cust implements `_Alignof` as a non-evaluating type-name query over existing parser metadata with deterministic interpreter alignments (`char`/`_Bool` = 1, `int`/integer aliases and pointers = 8, arrays use element alignment, structs/unions use max field alignment) rather than native ABI padding. Native compiler-oracle coverage intentionally checks ABI-independent alignment relationships instead of exact Cust-specific integer/pointer/aggregate values.
+
 - 2026-05-11: No external documentation was needed for C11 `_Static_assert` syntax parity. Cust implements `_Static_assert(condition, "message");` at top level and in block scope as a parser/runtime assertion over existing scalar truthiness semantics; the condition parser intentionally uses assignment-precedence parsing so the comma remains the assertion argument separator. Top-level assertions execute through the existing globals-before-`main()` path, and false assertions report `static assertion failed: <message>`.
 
 - 2026-05-11: No external documentation was needed for postfix/interleaved const qualifier syntax parity. Cust now consumes shared type qualifiers after supported base type spellings as well as before them, so `int const`, `unsigned const int`, `long const int`, `struct Point const`, and alias spellings such as `typedef int const Alias` reuse the same const metadata paths as leading `const`. Native compiler-oracle fixtures avoid top-level const-qualified function return spellings because the repository's `cc -std=c11 -Wall -Wextra -Werror` flags reject ignored return qualifiers.
