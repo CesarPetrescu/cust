@@ -45,6 +45,8 @@ enum Token {
     Restrict,
     Static,
     Extern,
+    Inline,
+    Noreturn,
     Auto,
     Register,
     Void,
@@ -1153,6 +1155,8 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "restrict" => Token::Restrict,
                     "static" => Token::Static,
                     "extern" => Token::Extern,
+                    "inline" => Token::Inline,
+                    "_Noreturn" => Token::Noreturn,
                     "auto" => Token::Auto,
                     "register" => Token::Register,
                     "void" => Token::Void,
@@ -1583,8 +1587,11 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            let leading_function_specifier = self.consume_function_specifiers();
             let is_extern = self.matches(&Token::Extern);
             let _is_static = !is_extern && self.matches(&Token::Static);
+            let has_function_specifier =
+                leading_function_specifier || self.consume_function_specifiers();
             if self.starts_function_definition()
                 || self.starts_struct_function_declaration()
                 || self.starts_alias_function_declaration()
@@ -1631,6 +1638,11 @@ impl Parser {
                         }
                     }
                 }
+            } else if has_function_specifier {
+                return Err(Self::error_at(
+                    "function specifiers are only supported on function declarations".to_string(),
+                    self.peek_located(),
+                ));
             } else if matches!(
                 self.peek(),
                 Token::Int
@@ -1688,6 +1700,15 @@ impl Parser {
             functions,
             struct_types: self.struct_types.clone(),
         })
+    }
+
+    fn consume_function_specifiers(&mut self) -> bool {
+        let mut consumed = false;
+        while matches!(self.peek(), Token::Inline | Token::Noreturn) {
+            self.advance();
+            consumed = true;
+        }
+        consumed
     }
 
     fn is_aggregate_definition(&self) -> bool {

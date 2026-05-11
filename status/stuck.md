@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-05-11 autonomous C99 `restrict` pointer qualifier run after focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, and required Docker verification passed; full verification is recorded in `status/current-state.md`. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-05-11 autonomous C function specifier run after focused RED/GREEN interpreter coverage and full C compiler-oracle verification passed locally; final full local and Docker verification are recorded in `status/current-state.md`. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 

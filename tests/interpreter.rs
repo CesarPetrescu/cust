@@ -168,6 +168,13 @@ fn supports_restrict_pointer_qualifiers() {
 }
 
 #[test]
+fn supports_function_specifiers() {
+    let program = include_str!("fixtures/valid/function_specifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 11);
+}
+
+#[test]
 fn rejects_pointer_array_typedef_aliases() {
     let program = include_str!("fixtures/invalid/pointer_array_typedef_alias.c");
 

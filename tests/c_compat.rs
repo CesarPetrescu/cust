@@ -15,6 +15,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/array_typedef_aliases.c",
     "tests/fixtures/compat/valid/array_compound_literals.c",
     "tests/fixtures/compat/valid/extern_function_storage_class.c",
+    "tests/fixtures/compat/valid/function_specifiers.c",
     "tests/fixtures/compat/valid/extern_global_declarations.c",
     "tests/fixtures/compat/valid/volatile_type_qualifiers.c",
     "tests/fixtures/compat/valid/restrict_pointer_qualifiers.c",
