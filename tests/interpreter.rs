@@ -3271,6 +3271,42 @@ fn rejects_duplicate_switch_enum_case_labels() {
 }
 
 #[test]
+fn rejects_comma_operator_in_enum_constant_expression() {
+    let program = include_str!("fixtures/invalid/enum_comma_constant_expression.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "comma operator is not allowed in integer constant expression at line 2, column 15"
+    );
+}
+
+#[test]
+fn rejects_comma_operator_in_switch_case_label() {
+    let program = include_str!("fixtures/invalid/switch_comma_case_label.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "comma operator is not allowed in integer constant expression at line 3, column 12"
+    );
+}
+
+#[test]
+fn rejects_unparenthesized_comma_operator_in_switch_case_label() {
+    let program = include_str!("fixtures/invalid/switch_unparenthesized_comma_case_label.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "comma operator is not allowed in integer constant expression at line 3, column 11"
+    );
+}
+
+#[test]
 fn rejects_duplicate_switch_default_labels() {
     let program = include_str!("fixtures/invalid/switch_duplicate_default.c");
 

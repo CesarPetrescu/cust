@@ -4,7 +4,21 @@ Last updated: 2026-05-11
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-11 autonomous function-pointer parameter/local declarator diagnostics run. Ideation considered failing tests/builds (none), active blockers (none), remaining newly discovered malformed-program diagnostics, comma-expression constant-expression expansion (deferred because warning-free C-oracle parity is unclear), additional C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, remaining pointer/aggregate parity gaps, and deliberately scoped standard-library-like builtins. The selected work package tightens unsupported C function-pointer declarator diagnostics in contexts that previously fell through to broader parenthesized-pointer messages: local `int (*callback)(int);` declarations now report `function pointer declarations are not supported`, and parameter declarators such as `int apply(int (*callback)(int), int value)` now report `function pointer parameters are not supported` at the opening parenthesis. Pointer-to-array parenthesized declarators retain their existing targeted diagnostics. Coverage adds two invalid fixtures, exact-output interpreter tests, and updated implementation notes in `references/cust-function-pointer-declarator-diagnostics.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-12 autonomous integer-constant comma diagnostic run. Ideation considered failing tests/builds (none), active blockers (none), P0 parser recovery/error-message gaps for newly discovered malformed programs, remaining C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, pointer/aggregate parity gaps, and standard-library-like builtins. The selected work package tightens parser diagnostics for comma expressions in enum initializer and `switch case` integer-constant-expression contexts, matching C's integer-constant-expression boundary instead of falling through to generic missing-`)`/missing-`:` messages. Cust now reports `comma operator is not allowed in integer constant expression` for parenthesized enum constants, parenthesized case labels, and unparenthesized case-label commas. Coverage adds three invalid fixtures and exact-output interpreter tests. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter comma_operator_in -- --nocapture  # RED failed with missing ')' / missing ':' diagnostics before implementation
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-11 autonomous function-pointer parameter/local declarator diagnostics run. Ideation considered failing tests/builds (none), active blockers (none), remaining newly discovered malformed-program diagnostics, comma-expression constant-expression expansion (deferred because warning-free C-oracle parity is unclear), additional C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, remaining pointer/aggregate parity gaps, and deliberately scoped standard-library-like builtins. The selected work package tightens unsupported C function-pointer declarator diagnostics in contexts that previously fell through to broader parenthesized-pointer messages: local `int (*callback)(int);` declarations now report `function pointer declarations are not supported`, and parameter declarators such as `int apply(int (*callback)(int), int value)` now report `function pointer parameters are not supported` at the opening parenthesis. Pointer-to-array parenthesized declarators retain their existing targeted diagnostics. Coverage adds two invalid fixtures, exact-output interpreter tests, and updated implementation notes in `references/cust-function-pointer-declarator-diagnostics.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-12: Local `cc -std=c11 -Wall -Wextra -Werror` rejected comma expressions in enum initializer and `switch case` integer-constant-expression contexts (`enumerator value ... is not an integer constant` / `case label does not reduce to an integer constant`). Cust now intentionally rejects those malformed forms with a targeted parser diagnostic rather than adding comma folding to enum/switch integer constant expressions.
+
 - 2026-05-11: No external documentation was needed for function-pointer parameter/local declarator diagnostics. Cust still intentionally excludes runtime function pointers, but the parser now distinguishes unsupported `(*name)(...)` declarators in local declarations and function parameters from pointer-to-array parenthesized pointer declarators, preserving targeted diagnostics for both unsupported families.
 
 - 2026-05-11: No external documentation was needed for function-pointer declarator diagnostics. Cust still intentionally excludes function pointers, but parser checks now recognize `(` followed by `*` after a function return type or typedef base type and emit targeted unsupported-form diagnostics before generic missing-name helpers run.

@@ -4771,6 +4771,13 @@ impl Parser {
                 local_constants,
                 "expected integer constant in parenthesized integer constant expression",
             )?;
+            if self.check(&Token::Comma) {
+                let comma = self.peek_located().clone();
+                return Err(Self::error_at(
+                    "comma operator is not allowed in integer constant expression".to_string(),
+                    &comma,
+                ));
+            }
             self.expect_closing_paren_after("integer constant expression")?;
             return Ok((value, opening));
         }
@@ -5111,6 +5118,13 @@ impl Parser {
                     return Err(Self::error_at(
                         format!("duplicate switch case label {value}"),
                         &value_token,
+                    ));
+                }
+                if self.check(&Token::Comma) {
+                    let comma = self.peek_located().clone();
+                    return Err(Self::error_at(
+                        "comma operator is not allowed in integer constant expression".to_string(),
+                        &comma,
                     ));
                 }
                 self.expect_colon_after("switch case label")?;
