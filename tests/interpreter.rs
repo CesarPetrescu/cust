@@ -217,6 +217,13 @@ fn supports_alignas_specifiers() {
 }
 
 #[test]
+fn supports_thread_local_storage_class_specifiers() {
+    let program = include_str!("fixtures/valid/thread_local_storage_class.c");
+
+    assert_eq!(interpret(program).unwrap(), 17);
+}
+
+#[test]
 fn rejects_alignof_void() {
     let program = include_str!("fixtures/invalid/alignof_void.c");
 

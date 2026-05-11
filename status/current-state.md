@@ -4,7 +4,21 @@ Last updated: 2026-05-11
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-11 autonomous C11 `_Alignas` declaration specifier run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostic polish, standard-library-like builtins, and remaining small declaration-specifier syntax parity gaps. The selected work package closes one concrete syntax gap: Cust now lexes `_Alignas` and accepts `_Alignas(type-name)` / `_Alignas(expression)` as parser-level no-op metadata on supported object declarations, static locals, `for` initializer declarations, and aggregate fields. Runtime remains Cust's deterministic interpreter storage model; requested alignment intentionally does not change layout, `sizeof`, `_Alignof`, pointer identity, or aggregate field offsets. Coverage includes `tests/fixtures/valid/alignas_specifiers.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/alignas_specifiers.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-alignas-specifiers.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-11 autonomous C11 `_Thread_local` storage-class syntax run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, and remaining declaration specifier syntax parity gaps. The selected work package closes one concrete storage-class gap: Cust now lexes `_Thread_local` and accepts it as parser-level no-op metadata on supported top-level object declarations, `static _Thread_local` globals, and `static _Thread_local` local declarations. Runtime remains Cust's deterministic single-thread interpreter model; `_Thread_local` intentionally does not change storage partitioning, pointer identity, initialization order, `sizeof`, or `_Alignof`. Coverage includes `tests/fixtures/valid/thread_local_storage_class.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/thread_local_storage_class.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-thread-local-storage-class.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_thread_local_storage_class_specifiers -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-11 autonomous C11 `_Alignas` declaration specifier run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostic polish, standard-library-like builtins, and remaining small declaration-specifier syntax parity gaps. The selected work package closes one concrete syntax gap: Cust now lexes `_Alignas` and accepts `_Alignas(type-name)` / `_Alignas(expression)` as parser-level no-op metadata on supported object declarations, static locals, `for` initializer declarations, and aggregate fields. Runtime remains Cust's deterministic interpreter storage model; requested alignment intentionally does not change layout, `sizeof`, `_Alignof`, pointer identity, or aggregate field offsets. Coverage includes `tests/fixtures/valid/alignas_specifiers.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/alignas_specifiers.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-alignas-specifiers.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

@@ -45,6 +45,7 @@ enum Token {
     Restrict,
     Static,
     Extern,
+    ThreadLocal,
     Inline,
     Noreturn,
     Auto,
@@ -1221,6 +1222,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "restrict" => Token::Restrict,
                     "static" => Token::Static,
                     "extern" => Token::Extern,
+                    "_Thread_local" => Token::ThreadLocal,
                     "inline" => Token::Inline,
                     "_Noreturn" => Token::Noreturn,
                     "auto" => Token::Auto,
@@ -1664,8 +1666,10 @@ impl Parser {
             }
             let _has_alignment_specifier = self.consume_alignment_specifiers()?;
             let leading_function_specifier = self.consume_function_specifiers();
+            self.consume_thread_local_specifiers();
             let is_extern = self.matches(&Token::Extern);
             let _is_static = !is_extern && self.matches(&Token::Static);
+            self.consume_thread_local_specifiers();
             self.consume_alignment_specifiers()?;
             let has_function_specifier =
                 leading_function_specifier || self.consume_function_specifiers();
@@ -1783,6 +1787,14 @@ impl Parser {
         let mut consumed = false;
         while matches!(self.peek(), Token::Inline | Token::Noreturn) {
             self.advance();
+            consumed = true;
+        }
+        consumed
+    }
+
+    fn consume_thread_local_specifiers(&mut self) -> bool {
+        let mut consumed = false;
+        while self.matches(&Token::ThreadLocal) {
             consumed = true;
         }
         consumed
@@ -2694,6 +2706,7 @@ impl Parser {
         match self.peek() {
             Token::Semi => self.parse_empty(),
             Token::Static => self.parse_static_local_decl(),
+            Token::ThreadLocal => self.parse_thread_local_local_decl(),
             Token::Auto | Token::Register => self.parse_auto_register_local_decl(),
             Token::Alignas => self.parse_aligned_decl(),
             Token::Int
@@ -2823,6 +2836,7 @@ impl Parser {
         self.expect(Token::Static)?;
         let id = self.next_static_local_id;
         self.next_static_local_id += 1;
+        self.consume_thread_local_specifiers();
         self.consume_alignment_specifiers()?;
         let decl = match self.peek() {
             Token::Int
@@ -2848,6 +2862,32 @@ impl Parser {
             id,
             decl: Box::new(decl),
         })
+    }
+
+    fn parse_thread_local_local_decl(&mut self) -> CustResult<Stmt> {
+        self.consume_thread_local_specifiers();
+        if self.check(&Token::Static) {
+            return self.parse_static_local_decl();
+        }
+        self.consume_alignment_specifiers()?;
+        match self.peek() {
+            Token::Int
+            | Token::Char
+            | Token::Bool
+            | Token::Signed
+            | Token::Unsigned
+            | Token::Long
+            | Token::Short
+            | Token::Const
+            | Token::Volatile
+            | Token::Restrict => self.parse_var_decl(),
+            Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
+            Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
+            token => Err(Self::error_at(
+                format!("expected declaration after _Thread_local, found {token:?}"),
+                self.peek_located(),
+            )),
+        }
     }
 
     fn parse_auto_register_local_decl(&mut self) -> CustResult<Stmt> {
