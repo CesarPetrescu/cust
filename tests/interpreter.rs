@@ -182,6 +182,13 @@ fn supports_const_typedef_aliases() {
 }
 
 #[test]
+fn supports_const_pointer_typedef_aliases() {
+    let program = include_str!("fixtures/valid/const_pointer_typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 56);
+}
+
+#[test]
 fn rejects_assignment_to_const_typedef_alias_variables() {
     let program = include_str!("fixtures/invalid/const_typedef_alias_assignment.c");
 
@@ -189,6 +196,30 @@ fn rejects_assignment_to_const_typedef_alias_variables() {
     assert!(
         err.to_string()
             .contains("cannot assign to const variable 'value'"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_const_pointer_typedef_alias_const_discard() {
+    let program = include_str!("fixtures/invalid/const_pointer_typedef_alias_const_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("cannot discard const qualifier from pointer target"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_const_pointer_typedef_alias_slot_assignment() {
+    let program = include_str!("fixtures/invalid/const_pointer_typedef_alias_slot_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("cannot assign to const variable 'slot'"),
         "unexpected error: {err}"
     );
 }

@@ -412,7 +412,10 @@ struct Program {
 enum TypeAlias {
     Scalar(CType),
     Struct(String),
-    Pointer(PointeeType),
+    Pointer {
+        pointee: PointeeType,
+        points_to_const: bool,
+    },
     Array(PointeeType, usize),
 }
 
@@ -420,7 +423,10 @@ enum TypeAlias {
 enum DeclType {
     Scalar(CType),
     Struct(String),
-    Pointer(PointeeType),
+    Pointer {
+        pointee: PointeeType,
+        points_to_const: bool,
+    },
     Array(PointeeType, usize),
 }
 
@@ -1872,7 +1878,13 @@ impl Parser {
             Token::Ident(name) => match self.lookup_type_alias(&name).cloned() {
                 Some(TypeAlias::Scalar(ty)) => Ok(DeclType::Scalar(ty)),
                 Some(TypeAlias::Struct(type_name)) => Ok(DeclType::Struct(type_name)),
-                Some(TypeAlias::Pointer(pointee)) => Ok(DeclType::Pointer(pointee)),
+                Some(TypeAlias::Pointer {
+                    pointee,
+                    points_to_const,
+                }) => Ok(DeclType::Pointer {
+                    pointee,
+                    points_to_const,
+                }),
                 Some(TypeAlias::Array(pointee, len)) => Ok(DeclType::Array(pointee, len)),
                 None => Err(Self::error_at(
                     format!("expected {context}, found Ident(\"{name}\")"),
@@ -1920,9 +1932,12 @@ impl Parser {
         match decl_type {
             DeclType::Scalar(ty) => ReturnType::Scalar(ty),
             DeclType::Struct(type_name) => ReturnType::Struct(type_name),
-            DeclType::Pointer(ty) => ReturnType::Pointer {
-                ty,
-                points_to_const: false,
+            DeclType::Pointer {
+                pointee,
+                points_to_const,
+            } => ReturnType::Pointer {
+                ty: pointee,
+                points_to_const,
             },
             DeclType::Array(_, _) => unreachable!("array aliases are not valid return types"),
         }
@@ -1932,7 +1947,7 @@ impl Parser {
         match decl_type {
             DeclType::Scalar(ty) => ParamType::Scalar(*ty),
             DeclType::Struct(type_name) => ParamType::Struct(type_name.clone()),
-            DeclType::Pointer(pointee) => match pointee {
+            DeclType::Pointer { pointee, .. } => match pointee {
                 PointeeType::Scalar(ty) => ParamType::Scalar(*ty),
                 PointeeType::Struct(type_name) => ParamType::Struct(type_name.clone()),
             },
@@ -1947,8 +1962,17 @@ impl Parser {
         match decl_type {
             DeclType::Scalar(ty) => PointeeType::Scalar(*ty),
             DeclType::Struct(type_name) => PointeeType::Struct(type_name.clone()),
-            DeclType::Pointer(pointee) => pointee.clone(),
+            DeclType::Pointer { pointee, .. } => pointee.clone(),
             DeclType::Array(pointee, _) => pointee.clone(),
+        }
+    }
+
+    fn decl_type_points_to_const(decl_type: &DeclType) -> bool {
+        match decl_type {
+            DeclType::Pointer {
+                points_to_const, ..
+            } => *points_to_const,
+            _ => false,
         }
     }
 
@@ -1977,19 +2001,24 @@ impl Parser {
         } else {
             let (leading_const, base_type) =
                 self.parse_const_qualified_decl_type("typedef struct type name")?;
-            let alias = if self.matches(&Token::Star) {
+            let (alias, alias_is_const) = if self.matches(&Token::Star) {
                 if self.check(&Token::Star) {
                     return Err(Self::error_at(
                         "pointer-to-pointer typedef aliases are not supported".to_string(),
                         self.peek_located(),
                     ));
                 }
-                match base_type {
-                    DeclType::Scalar(ty) => TypeAlias::Pointer(PointeeType::Scalar(ty)),
-                    DeclType::Struct(type_name) => {
-                        TypeAlias::Pointer(PointeeType::Struct(type_name))
-                    }
-                    DeclType::Pointer(_) => {
+                let post_star_const = self.consume_type_qualifiers();
+                let alias = match base_type {
+                    DeclType::Scalar(ty) => TypeAlias::Pointer {
+                        pointee: PointeeType::Scalar(ty),
+                        points_to_const: leading_const,
+                    },
+                    DeclType::Struct(type_name) => TypeAlias::Pointer {
+                        pointee: PointeeType::Struct(type_name),
+                        points_to_const: leading_const,
+                    },
+                    DeclType::Pointer { .. } => {
                         return Err(Self::error_at(
                             "pointer-to-pointer typedef aliases are not supported".to_string(),
                             self.previous(),
@@ -2001,16 +2030,29 @@ impl Parser {
                             self.previous(),
                         ));
                     }
-                }
+                };
+                (alias, post_star_const)
             } else {
-                match base_type {
+                let alias = match base_type {
                     DeclType::Scalar(ty) => TypeAlias::Scalar(ty),
                     DeclType::Struct(type_name) => TypeAlias::Struct(type_name),
-                    DeclType::Pointer(pointee) => TypeAlias::Pointer(pointee),
+                    DeclType::Pointer {
+                        pointee,
+                        points_to_const,
+                    } => TypeAlias::Pointer {
+                        pointee,
+                        points_to_const,
+                    },
                     DeclType::Array(pointee, len) => TypeAlias::Array(pointee, len),
-                }
+                };
+                (alias, leading_const)
             };
-            (alias, "typedef alias name after type", false, leading_const)
+            (
+                alias,
+                "typedef alias name after type",
+                false,
+                alias_is_const,
+            )
         };
         let alias_name = self.expect_ident_after(alias_context)?;
         let alias = if self.matches(&Token::LBracket) {
@@ -2027,7 +2069,7 @@ impl Parser {
                 TypeAlias::Struct(type_name) => {
                     TypeAlias::Array(PointeeType::Struct(type_name), len)
                 }
-                TypeAlias::Pointer(_) => {
+                TypeAlias::Pointer { .. } => {
                     return Err(Self::error_at(
                         "pointer array typedef aliases are not supported".to_string(),
                         self.previous(),
@@ -2253,7 +2295,7 @@ impl Parser {
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("struct return type name")?;
         if self.matches(&Token::Star) {
-            if matches!(decl_type, DeclType::Pointer(_)) || self.check(&Token::Star) {
+            if matches!(decl_type, DeclType::Pointer { .. }) || self.check(&Token::Star) {
                 return Err(Self::error_at(
                     "pointer-to-pointer return types are not supported".to_string(),
                     self.peek_located(),
@@ -2265,10 +2307,14 @@ impl Parser {
                 points_to_const: leading_const,
             });
         }
-        if let DeclType::Pointer(pointee) = decl_type {
+        if let DeclType::Pointer {
+            pointee,
+            points_to_const,
+        } = decl_type
+        {
             return Ok(ReturnType::Pointer {
                 ty: pointee,
-                points_to_const: leading_const,
+                points_to_const: leading_const || points_to_const,
             });
         }
         if matches!(decl_type, DeclType::Array(_, _)) {
@@ -2301,7 +2347,7 @@ impl Parser {
                 self.parse_const_qualified_decl_type("parameter type")?;
             let has_explicit_star = self.matches(&Token::Star);
             let post_star_const = has_explicit_star && self.consume_type_qualifiers();
-            if matches!(decl_type, DeclType::Pointer(_)) && has_explicit_star {
+            if matches!(decl_type, DeclType::Pointer { .. }) && has_explicit_star {
                 return Err(Self::error_at(
                     "pointer-to-pointer parameters are not supported".to_string(),
                     self.previous(),
@@ -2329,7 +2375,7 @@ impl Parser {
                 ));
             }
             let is_pointer = has_explicit_star
-                || matches!(decl_type, DeclType::Pointer(_) | DeclType::Array(_, _));
+                || matches!(decl_type, DeclType::Pointer { .. } | DeclType::Array(_, _));
             let name = if allow_unnamed
                 && matches!(self.peek(), Token::Comma | Token::RParen | Token::LBracket)
             {
@@ -2340,7 +2386,7 @@ impl Parser {
                     DeclType::Struct(_) => {
                         self.expect_ident_after("struct pointer parameter name after '*'")?
                     }
-                    DeclType::Pointer(_) => {
+                    DeclType::Pointer { .. } => {
                         unreachable!("pointer aliases with explicit stars return above")
                     }
                     DeclType::Array(_, _) => {
@@ -2353,7 +2399,7 @@ impl Parser {
                     DeclType::Struct(_) => {
                         self.expect_ident_after("struct parameter name after type")?
                     }
-                    DeclType::Pointer(_) => {
+                    DeclType::Pointer { .. } => {
                         self.expect_ident_after("pointer parameter name after type")?
                     }
                     DeclType::Array(_, _) => {
@@ -2406,7 +2452,7 @@ impl Parser {
                 if has_explicit_star {
                     (post_star_const, leading_const)
                 } else if is_pointer {
-                    (leading_const, false)
+                    (leading_const, Self::decl_type_points_to_const(&decl_type))
                 } else {
                     (false, leading_const)
                 }
@@ -2644,7 +2690,7 @@ impl Parser {
             self.parse_const_qualified_decl_type("struct type name")?;
         let has_explicit_star = self.matches(&Token::Star);
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
-        if matches!(decl_type, DeclType::Pointer(_)) && has_explicit_star {
+        if matches!(decl_type, DeclType::Pointer { .. }) && has_explicit_star {
             return Err(Self::error_at(
                 "pointer-to-pointer declarations are not supported".to_string(),
                 self.previous(),
@@ -2665,7 +2711,7 @@ impl Parser {
                 self.peek_located(),
             ));
         }
-        let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer(_));
+        let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer { .. });
         let name = if has_explicit_star {
             match &decl_type {
                 DeclType::Scalar(_) => self.expect_ident_after("pointer name after '*'")?,
@@ -2676,7 +2722,7 @@ impl Parser {
                         self.previous(),
                     ));
                 }
-                DeclType::Pointer(_) => {
+                DeclType::Pointer { .. } => {
                     unreachable!("pointer aliases with explicit stars return above")
                 }
             }
@@ -2684,7 +2730,7 @@ impl Parser {
             match &decl_type {
                 DeclType::Scalar(_) => self.expect_ident_after("variable name after type")?,
                 DeclType::Struct(_) => self.expect_ident_after("struct variable name")?,
-                DeclType::Pointer(_) => self.expect_ident_after("pointer name after type")?,
+                DeclType::Pointer { .. } => self.expect_ident_after("pointer name after type")?,
                 DeclType::Array(_, _) => self.expect_ident_after("array name after type")?,
             }
         };
@@ -2738,7 +2784,7 @@ impl Parser {
             let (is_const, points_to_const) = if has_explicit_star {
                 (post_star_const, leading_const)
             } else {
-                (leading_const, false)
+                (leading_const, Self::decl_type_points_to_const(&decl_type))
             };
             if self.check(&Token::LBracket) {
                 return Err(Self::error_at(
@@ -2760,12 +2806,16 @@ impl Parser {
                 });
             } else {
                 let context = match &decl_type {
-                    DeclType::Scalar(_) | DeclType::Pointer(PointeeType::Scalar(_)) => {
-                        "pointer declaration"
-                    }
-                    DeclType::Struct(_) | DeclType::Pointer(PointeeType::Struct(_)) => {
-                        "struct pointer declaration"
-                    }
+                    DeclType::Scalar(_)
+                    | DeclType::Pointer {
+                        pointee: PointeeType::Scalar(_),
+                        ..
+                    } => "pointer declaration",
+                    DeclType::Struct(_)
+                    | DeclType::Pointer {
+                        pointee: PointeeType::Struct(_),
+                        ..
+                    } => "struct pointer declaration",
                     DeclType::Array(_, _) => {
                         unreachable!("array aliases return before pointer declarations")
                     }
@@ -2775,12 +2825,16 @@ impl Parser {
             };
             if require_semi {
                 let context = match &decl_type {
-                    DeclType::Scalar(_) | DeclType::Pointer(PointeeType::Scalar(_)) => {
-                        "pointer declaration"
-                    }
-                    DeclType::Struct(_) | DeclType::Pointer(PointeeType::Struct(_)) => {
-                        "struct pointer declaration"
-                    }
+                    DeclType::Scalar(_)
+                    | DeclType::Pointer {
+                        pointee: PointeeType::Scalar(_),
+                        ..
+                    } => "pointer declaration",
+                    DeclType::Struct(_)
+                    | DeclType::Pointer {
+                        pointee: PointeeType::Struct(_),
+                        ..
+                    } => "struct pointer declaration",
                     DeclType::Array(_, _) => {
                         unreachable!("array aliases return before pointer declarations")
                     }
@@ -3499,12 +3553,12 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer(_));
+            let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer { .. });
             let (is_const, points_to_const) = if is_pointer {
                 if has_explicit_star {
                     (post_star_const, leading_const)
                 } else {
-                    (leading_const, false)
+                    (leading_const, Self::decl_type_points_to_const(&decl_type))
                 }
             } else {
                 (leading_const, false)
@@ -3516,13 +3570,13 @@ impl Parser {
                 DeclType::Struct(type_name) if has_explicit_star => {
                     StructFieldType::Pointer(PointeeType::Struct(type_name))
                 }
-                DeclType::Pointer(_) if has_explicit_star => {
+                DeclType::Pointer { .. } if has_explicit_star => {
                     return Err(Self::error_at(
                         format!("pointer-to-pointer {keyword} fields are not supported"),
                         self.previous(),
                     ));
                 }
-                DeclType::Pointer(pointee) => StructFieldType::Pointer(pointee),
+                DeclType::Pointer { pointee, .. } => StructFieldType::Pointer(pointee),
                 DeclType::Array(PointeeType::Scalar(ty), len) => StructFieldType::Array(ty, len),
                 DeclType::Array(PointeeType::Struct(type_name), len) => {
                     StructFieldType::StructArray(type_name, len)
@@ -4624,7 +4678,7 @@ impl Parser {
                     type_name,
                 });
             }
-            DeclType::Pointer(_) | DeclType::Array(_, _) => {
+            DeclType::Pointer { .. } | DeclType::Array(_, _) => {
                 return Err(Self::error_at(
                     "pointer casts are not supported".to_string(),
                     &type_token,
@@ -4806,7 +4860,7 @@ impl Parser {
                                 SizeOfType::Struct(type_name)
                             }
                         }
-                        DeclType::Pointer(_) => {
+                        DeclType::Pointer { .. } => {
                             if self.matches(&Token::Star) {
                                 return Err(Self::error_at(
                                     "pointer-to-pointer sizeof types are not supported".to_string(),
