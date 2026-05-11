@@ -10,7 +10,8 @@ enum Mode {
     MODE_LOGIC = (MODE_CMP == 3) && (MODE_DONE >= 5) ? 11 : 12,
     MODE_COND = MODE_LOGIC == 11 ? MODE_EXTRA + 2 : 0,
     MODE_SIZE = sizeof(char[5]) + _Alignof(char),
-    MODE_CAST = (Count)(MODE_SIZE + (Small)6)
+    MODE_CAST = (Count)(MODE_SIZE + (Small)6),
+    MODE_SIZEOF_EXPR = sizeof(1 / 0) == sizeof(int) ? 14 : 15
 };
 
 int classify(enum Mode mode) {
@@ -31,6 +32,8 @@ int classify(enum Mode mode) {
         return 6;
     case MODE_CAST:
         return 12;
+    case MODE_SIZEOF_EXPR:
+        return 5;
     default:
         return 40;
     }
@@ -73,5 +76,6 @@ int main(void) {
         + classify(MODE_EXTRA) + block_scoped_case(27) + block_scoped_case(1)
         + block_scoped_case(10) + classify(MODE_COND) + block_scoped_case(8)
         + classify(MODE_SIZE) + block_scoped_case(4) + classify(MODE_CAST)
+        + classify(MODE_SIZEOF_EXPR)
         + block_scoped_case(11);
 }

@@ -4492,7 +4492,7 @@ impl Parser {
             return Ok((value, op_token));
         }
         if self.matches(&Token::Sizeof) {
-            return self.parse_integer_constant_sizeof();
+            return self.parse_integer_constant_sizeof(local_constants);
         }
         if self.matches(&Token::Alignof) {
             return self.parse_integer_constant_alignof();
@@ -4534,25 +4534,158 @@ impl Parser {
         Ok((value, opening))
     }
 
-    fn parse_integer_constant_sizeof(&mut self) -> CustResult<(i64, LocatedToken)> {
-        let operator = self.previous().clone();
-        self.expect_opening_paren_after("sizeof")?;
-        if !self.is_type_name_start() {
-            let found = self.peek_located().clone();
-            return Err(Self::error_at(
-                format!(
-                    "expected sizeof type in integer constant expression, found {:?}",
-                    found.kind
-                ),
-                &found,
-            ));
+    fn infer_array_initializer_len(init: &[ArrayInitializer]) -> usize {
+        let mut len = 0usize;
+        let mut next_positional_index = 0usize;
+        for initializer in init {
+            match initializer {
+                ArrayInitializer::Expr(_) => {
+                    len = len.max(next_positional_index + 1);
+                    next_positional_index += 1;
+                }
+                ArrayInitializer::Designated { index, .. } => {
+                    len = len.max(index + 1);
+                    next_positional_index = index + 1;
+                }
+                ArrayInitializer::StringLiteral(values) => {
+                    len = len.max(values.len());
+                    next_positional_index = values.len();
+                }
+            }
         }
-        let sizeof_type = self.parse_sizeof_like_type_name("sizeof")?;
-        self.expect_closing_paren_after("sizeof type")?;
-        let value = sizeof_type
-            .size(&self.struct_types)
-            .map_err(|err| Self::error_at(err.to_string(), &operator))?;
-        Ok((value, operator))
+        len
+    }
+
+    fn infer_struct_array_initializer_len(init: &[StructArrayInitializer]) -> usize {
+        let mut len = 0usize;
+        let mut next_positional_index = 0usize;
+        for initializer in init {
+            match initializer {
+                StructArrayInitializer::Element(_) => {
+                    len = len.max(next_positional_index + 1);
+                    next_positional_index += 1;
+                }
+                StructArrayInitializer::Designated { index, .. } => {
+                    len = len.max(index + 1);
+                    next_positional_index = index + 1;
+                }
+            }
+        }
+        len
+    }
+
+    fn parse_integer_constant_sizeof(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let operator = self.previous().clone();
+        if self.matches(&Token::LParen) {
+            if self.is_type_name_start() {
+                let sizeof_type = self.parse_sizeof_like_type_name("sizeof")?;
+                self.expect_closing_paren_after("sizeof type")?;
+                let value = sizeof_type
+                    .size(&self.struct_types)
+                    .map_err(|err| Self::error_at(err.to_string(), &operator))?;
+                return Ok((value, operator));
+            }
+            let expr = self.parse_expr()?;
+            self.expect_closing_paren_after("sizeof expression")?;
+            let value = self
+                .sizeof_integer_constant_expr(&expr, local_constants)
+                .map_err(|err| Self::error_at(err.to_string(), &operator))?;
+            return Ok((value, operator));
+        }
+
+        let (_value, _) = self.parse_integer_constant_unary(
+            local_constants,
+            "expected integer constant in sizeof expression",
+        )?;
+        Ok((INT_SIZE, operator))
+    }
+
+    fn sizeof_integer_constant_expr(
+        &self,
+        expr: &Expr,
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<i64> {
+        match expr {
+            Expr::Number(_) => Ok(INT_SIZE),
+            Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
+            Expr::SizeOfType(sizeof_type) => sizeof_type.size(&self.struct_types),
+            Expr::SizeOfValue(inner) => self.sizeof_integer_constant_expr(inner, local_constants),
+            Expr::AlignOfType(_) => Ok(INT_SIZE),
+            Expr::Var(name) => {
+                if local_constants.contains_key(name) || self.lookup_enum_constant(name).is_some() {
+                    Ok(INT_SIZE)
+                } else {
+                    Err(CustError::new(format!(
+                        "unsupported sizeof expression in integer constant expression: variable '{name}'"
+                    )))
+                }
+            }
+            Expr::UnaryPlus(inner)
+            | Expr::UnaryMinus(inner)
+            | Expr::BitwiseNot(inner)
+            | Expr::LogicalNot(inner)
+            | Expr::Cast { expr: inner, .. } => {
+                self.sizeof_integer_constant_expr(inner, local_constants)?;
+                Ok(INT_SIZE)
+            }
+            Expr::Binary(left, _, right) | Expr::Comma(left, right) => {
+                self.sizeof_integer_constant_expr(left, local_constants)?;
+                self.sizeof_integer_constant_expr(right, local_constants)?;
+                Ok(INT_SIZE)
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                self.sizeof_integer_constant_expr(cond, local_constants)?;
+                self.sizeof_integer_constant_expr(then_expr, local_constants)?;
+                self.sizeof_integer_constant_expr(else_expr, local_constants)?;
+                Ok(INT_SIZE)
+            }
+            Expr::ScalarLiteral { ty, init }
+            | Expr::ScalarLiteralSet { ty, init, .. }
+            | Expr::ScalarLiteralCompoundSet { ty, init, .. } => {
+                self.sizeof_integer_constant_expr(init, local_constants)?;
+                Ok(ty.size())
+            }
+            Expr::ArrayLiteral {
+                elem_type,
+                len,
+                init,
+            } => {
+                let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
+                Ok(len as i64 * elem_type.size())
+            }
+            Expr::AggregateLiteral { type_name, .. } => self
+                .struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.size(&self.struct_types))
+                .transpose()?
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            Expr::AggregateArrayLiteral {
+                type_name,
+                len,
+                init,
+            } => {
+                let len = len.unwrap_or_else(|| Self::infer_struct_array_initializer_len(init));
+                let element_size = self
+                    .struct_types
+                    .get(type_name)
+                    .map(|struct_type| struct_type.size(&self.struct_types))
+                    .transpose()?
+                    .ok_or_else(|| {
+                        CustError::new(format!("undefined struct type '{type_name}'"))
+                    })?;
+                Ok(len as i64 * element_size)
+            }
+            _ => Err(CustError::new(
+                "unsupported sizeof expression in integer constant expression",
+            )),
+        }
     }
 
     fn parse_integer_constant_alignof(&mut self) -> CustResult<(i64, LocatedToken)> {
