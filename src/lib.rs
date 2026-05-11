@@ -80,6 +80,9 @@ enum Token {
     MinusMinus,
     PlusAssign,
     MinusAssign,
+    StarAssign,
+    SlashAssign,
+    PercentAssign,
     AmpAssign,
     PipeAssign,
     CaretAssign,
@@ -795,6 +798,9 @@ enum BinaryOp {
 enum CompoundOp {
     Add,
     Sub,
+    Mul,
+    Div,
+    Rem,
     BitAnd,
     BitOr,
     BitXor,
@@ -1286,13 +1292,28 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 push_token(&mut tokens, Token::Minus, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
+            '*' if chars.get(i + 1) == Some(&'=') => {
+                push_token(&mut tokens, Token::StarAssign, line, column);
+                advance_position('*', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
+            }
             '*' => {
                 push_token(&mut tokens, Token::Star, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
+            '/' if chars.get(i + 1) == Some(&'=') => {
+                push_token(&mut tokens, Token::SlashAssign, line, column);
+                advance_position('/', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
+            }
             '/' => {
                 push_token(&mut tokens, Token::Slash, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
+            }
+            '%' if chars.get(i + 1) == Some(&'=') => {
+                push_token(&mut tokens, Token::PercentAssign, line, column);
+                advance_position('%', &mut line, &mut column, &mut i);
+                advance_position('=', &mut line, &mut column, &mut i);
             }
             '%' => {
                 push_token(&mut tokens, Token::Percent, line, column);
@@ -5741,6 +5762,9 @@ impl Parser {
         match self.peek() {
             Token::PlusAssign => Some(CompoundOp::Add),
             Token::MinusAssign => Some(CompoundOp::Sub),
+            Token::StarAssign => Some(CompoundOp::Mul),
+            Token::SlashAssign => Some(CompoundOp::Div),
+            Token::PercentAssign => Some(CompoundOp::Rem),
             Token::AmpAssign => Some(CompoundOp::BitAnd),
             Token::PipeAssign => Some(CompoundOp::BitOr),
             Token::CaretAssign => Some(CompoundOp::BitXor),
@@ -5756,6 +5780,9 @@ impl Parser {
             Token::Assign
                 | Token::PlusAssign
                 | Token::MinusAssign
+                | Token::StarAssign
+                | Token::SlashAssign
+                | Token::PercentAssign
                 | Token::AmpAssign
                 | Token::PipeAssign
                 | Token::CaretAssign
@@ -8342,7 +8369,10 @@ impl Interpreter {
         let offset = match op {
             CompoundOp::Add => offset,
             CompoundOp::Sub => -offset,
-            CompoundOp::BitAnd
+            CompoundOp::Mul
+            | CompoundOp::Div
+            | CompoundOp::Rem
+            | CompoundOp::BitAnd
             | CompoundOp::BitOr
             | CompoundOp::BitXor
             | CompoundOp::ShiftLeft
@@ -10306,7 +10336,10 @@ impl Interpreter {
                 let offset = match op {
                     CompoundOp::Add => offset,
                     CompoundOp::Sub => -offset,
-                    CompoundOp::BitAnd
+                    CompoundOp::Mul
+                    | CompoundOp::Div
+                    | CompoundOp::Rem
+                    | CompoundOp::BitAnd
                     | CompoundOp::BitOr
                     | CompoundOp::BitXor
                     | CompoundOp::ShiftLeft
@@ -10457,7 +10490,10 @@ impl Interpreter {
                 let offset = match op {
                     CompoundOp::Add => offset,
                     CompoundOp::Sub => -offset,
-                    CompoundOp::BitAnd
+                    CompoundOp::Mul
+                    | CompoundOp::Div
+                    | CompoundOp::Rem
+                    | CompoundOp::BitAnd
                     | CompoundOp::BitOr
                     | CompoundOp::BitXor
                     | CompoundOp::ShiftLeft
@@ -10491,7 +10527,10 @@ impl Interpreter {
                 let pointer = match op {
                     CompoundOp::Add => self.offset_array_pointer(&pointer, offset)?,
                     CompoundOp::Sub => self.offset_array_pointer(&pointer, -offset)?,
-                    CompoundOp::BitAnd
+                    CompoundOp::Mul
+                    | CompoundOp::Div
+                    | CompoundOp::Rem
+                    | CompoundOp::BitAnd
                     | CompoundOp::BitOr
                     | CompoundOp::BitXor
                     | CompoundOp::ShiftLeft
@@ -11546,6 +11585,11 @@ impl Interpreter {
         match op {
             CompoundOp::Add => Ok(lhs + rhs),
             CompoundOp::Sub => Ok(lhs - rhs),
+            CompoundOp::Mul => Ok(lhs * rhs),
+            CompoundOp::Div if rhs == 0 => Err(CustError::new("division by zero")),
+            CompoundOp::Div => Ok(lhs / rhs),
+            CompoundOp::Rem if rhs == 0 => Err(CustError::new("division by zero")),
+            CompoundOp::Rem => Ok(lhs % rhs),
             CompoundOp::BitAnd => Ok(lhs & rhs),
             CompoundOp::BitOr => Ok(lhs | rhs),
             CompoundOp::BitXor => Ok(lhs ^ rhs),
@@ -11556,9 +11600,11 @@ impl Interpreter {
 
     fn pointer_compound_error(op: CompoundOp) -> CustError {
         match op {
-            CompoundOp::Add | CompoundOp::Sub => {
-                CustError::new("pointer arithmetic is not supported")
-            }
+            CompoundOp::Add
+            | CompoundOp::Sub
+            | CompoundOp::Mul
+            | CompoundOp::Div
+            | CompoundOp::Rem => CustError::new("pointer arithmetic is not supported"),
             CompoundOp::BitAnd
             | CompoundOp::BitOr
             | CompoundOp::BitXor

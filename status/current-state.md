@@ -4,6 +4,20 @@ Last updated: 2026-05-11
 
 ## Latest autonomous verification
 
+All passed after the 2026-05-11 autonomous multiplicative compound-assignment run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, enum/switch constant-expression parity, and closing the remaining arithmetic compound-assignment syntax gap. The selected work package completes C compound-assignment operator parity for Cust's existing scalar lvalue families: `*=`, `/=`, and `%=` now lex, parse at assignment precedence, and evaluate for scalar variables, indexed scalar array/pointer lvalues, and dereferenced pointer lvalues. Division and remainder compound assignments reuse the existing `division by zero` diagnostic, while pointer-valued compound-assignment contexts reject the new operators through the established pointer-arithmetic diagnostic path. Coverage extends `tests/fixtures/valid/compound_assignments.c` plus the C compiler-oracle fixture `tests/fixtures/compat/valid/compound_assignments.c`, with reference notes in `references/cust-multiplicative-compound-assignments.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_compound_assignment_expressions_for_scalar_array_and_deref_lvalues -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
 All passed after the 2026-05-11 autonomous C11 `_Atomic` type qualifier/specifier syntax run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, remaining declaration specifier syntax parity gaps, and C11 `_Atomic` syntax as a safe no-op metadata feature. The selected work package closes one concrete qualifier/specifier gap: Cust now lexes `_Atomic`, accepts bare `_Atomic` qualifier spellings such as `_Atomic int value;`, and accepts `_Atomic(type-name)` spellings such as `_Atomic(int) value;` across supported global/local declarations, typedef aliases, parameters, function return type parsing, `for` initializer declarations, pointer/array forms, and type-query contexts. Runtime remains Cust's deterministic single-thread interpreter model; `_Atomic` intentionally does not add native atomic operations, memory-order semantics, lock-free guarantees, layout changes, or new write restrictions. Coverage includes `tests/fixtures/valid/atomic_type_qualifiers.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/atomic_type_qualifiers.c`, focused RED/GREEN interpreter coverage, full C compiler-oracle verification, full local verification, required Docker verification, and reference notes in `references/cust-atomic-type-qualifiers.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:

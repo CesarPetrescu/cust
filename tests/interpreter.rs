@@ -3134,7 +3134,7 @@ fn supports_do_while_loops_with_break_continue_and_post_test_execution() {
 fn supports_compound_assignment_expressions_for_scalar_array_and_deref_lvalues() {
     let program = include_str!("fixtures/valid/compound_assignments.c");
 
-    assert_eq!(interpret(program).unwrap(), 39);
+    assert_eq!(interpret(program).unwrap(), 26);
 }
 
 #[test]

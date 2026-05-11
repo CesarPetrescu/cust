@@ -29,6 +29,31 @@ int main() {
         return 6;
     }
 
+    if ((x *= 2) != 26) {
+        return 7;
+    }
+    if ((x /= y) != 5) {
+        return 8;
+    }
+    if ((x %= 3) != 2) {
+        return 9;
+    }
+
+    if ((values[0] *= 2) != 28) {
+        return 10;
+    }
+    if ((values[1] /= 3) != 1) {
+        return 11;
+    }
+    if ((values[2] %= 5) != 2) {
+        return 12;
+    }
+
+    p = &values[0];
+    if ((*p %= 10) != 8) {
+        return 13;
+    }
+
     for (x = 0; x < 4; x += 1) {
         y += x;
     }
