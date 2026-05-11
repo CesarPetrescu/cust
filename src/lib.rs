@@ -41,6 +41,7 @@ enum Token {
     Long,
     Short,
     Const,
+    Volatile,
     Static,
     Extern,
     Auto,
@@ -1147,6 +1148,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "long" => Token::Long,
                     "short" => Token::Short,
                     "const" => Token::Const,
+                    "volatile" => Token::Volatile,
                     "static" => Token::Static,
                     "extern" => Token::Extern,
                     "auto" => Token::Auto,
@@ -1637,6 +1639,7 @@ impl Parser {
                     | Token::Long
                     | Token::Short
                     | Token::Const
+                    | Token::Volatile
             ) || self.current_alias().is_some()
             {
                 let global = self.parse_var_decl()?;
@@ -1712,7 +1715,7 @@ impl Parser {
         let mut index = self.pos + 2;
         while matches!(
             self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Star | Token::Const)
+            Some(Token::Star | Token::Const | Token::Volatile)
         ) {
             index += 1;
         }
@@ -1850,8 +1853,21 @@ impl Parser {
         }
     }
 
+    fn consume_type_qualifiers(&mut self) -> bool {
+        let mut saw_const = false;
+        while matches!(self.peek(), Token::Const | Token::Volatile) {
+            if self.matches(&Token::Const) {
+                saw_const = true;
+            } else {
+                self.expect(Token::Volatile)
+                    .expect("peek confirmed volatile token");
+            }
+        }
+        saw_const
+    }
+
     fn parse_const_qualified_decl_type(&mut self, context: &str) -> CustResult<(bool, DeclType)> {
-        let is_const = self.matches(&Token::Const);
+        let is_const = self.consume_type_qualifiers();
         let decl_type = self.parse_decl_type(context)?;
         Ok((is_const, decl_type))
     }
@@ -1913,7 +1929,8 @@ impl Parser {
                 false,
             )
         } else {
-            let base_type = self.parse_decl_type("typedef struct type name")?;
+            let (_leading_const, base_type) =
+                self.parse_const_qualified_decl_type("typedef struct type name")?;
             let alias = if self.matches(&Token::Star) {
                 if self.check(&Token::Star) {
                     return Err(Self::error_at(
@@ -2005,9 +2022,9 @@ impl Parser {
 
     fn starts_function_definition(&self) -> bool {
         let mut index = self.pos;
-        if matches!(
+        while matches!(
             self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Const)
+            Some(Token::Const | Token::Volatile)
         ) {
             index += 1;
         }
@@ -2097,7 +2114,7 @@ impl Parser {
         }
         while matches!(
             self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Star | Token::Const)
+            Some(Token::Star | Token::Const | Token::Volatile)
         ) {
             index += 1;
         }
@@ -2189,7 +2206,7 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            self.matches(&Token::Const);
+            self.consume_type_qualifiers();
             return Ok(ReturnType::Pointer {
                 ty: Self::decl_type_to_pointee_type(&decl_type),
                 points_to_const: leading_const,
@@ -2230,7 +2247,7 @@ impl Parser {
             let (leading_const, decl_type) =
                 self.parse_const_qualified_decl_type("parameter type")?;
             let has_explicit_star = self.matches(&Token::Star);
-            let post_star_const = has_explicit_star && self.matches(&Token::Const);
+            let post_star_const = has_explicit_star && self.consume_type_qualifiers();
             if matches!(decl_type, DeclType::Pointer(_)) && has_explicit_star {
                 return Err(Self::error_at(
                     "pointer-to-pointer parameters are not supported".to_string(),
@@ -2428,7 +2445,8 @@ impl Parser {
             | Token::Unsigned
             | Token::Long
             | Token::Short
-            | Token::Const => self.parse_var_decl(),
+            | Token::Const
+            | Token::Volatile => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Typedef => match self.parse_typedef_decl()? {
                 Some(stmt) => Ok(stmt),
@@ -2515,7 +2533,8 @@ impl Parser {
             | Token::Unsigned
             | Token::Long
             | Token::Short
-            | Token::Const => self.parse_var_decl()?,
+            | Token::Const
+            | Token::Volatile => self.parse_var_decl()?,
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
             Token::Struct | Token::Union => self.parse_aggregate_var_decl()?,
             token => {
@@ -2546,7 +2565,8 @@ impl Parser {
             | Token::Unsigned
             | Token::Long
             | Token::Short
-            | Token::Const => self.parse_var_decl(),
+            | Token::Const
+            | Token::Volatile => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -2565,7 +2585,7 @@ impl Parser {
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("struct type name")?;
         let has_explicit_star = self.matches(&Token::Star);
-        let post_star_const = has_explicit_star && self.matches(&Token::Const);
+        let post_star_const = has_explicit_star && self.consume_type_qualifiers();
         if matches!(decl_type, DeclType::Pointer(_)) && has_explicit_star {
             return Err(Self::error_at(
                 "pointer-to-pointer declarations are not supported".to_string(),
@@ -3393,7 +3413,7 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let leading_const = self.matches(&Token::Const);
+            let leading_const = self.consume_type_qualifiers();
             let decl_type = if matches!(self.peek(), Token::Struct | Token::Union) {
                 let field_kind = match self.advance().kind {
                     Token::Struct => AggregateKind::Struct,
@@ -3414,7 +3434,7 @@ impl Parser {
                 self.parse_decl_type(&format!("{keyword} field type"))?
             };
             let has_explicit_star = self.matches(&Token::Star);
-            let post_star_const = has_explicit_star && self.matches(&Token::Const);
+            let post_star_const = has_explicit_star && self.consume_type_qualifiers();
             if has_explicit_star && self.check(&Token::Star) {
                 return Err(Self::error_at(
                     format!("pointer-to-pointer {keyword} fields are not supported"),
@@ -3539,7 +3559,7 @@ impl Parser {
         };
         let type_name = internal_type_name;
         if self.matches(&Token::Star) {
-            let is_const = self.matches(&Token::Const);
+            let is_const = self.consume_type_qualifiers();
             let name = self.expect_ident_after("struct pointer name after '*'")?;
             let expr = if self.matches(&Token::Assign) {
                 self.last_decl_had_initializer = true;
@@ -3933,6 +3953,7 @@ impl Parser {
                 | Token::Long
                 | Token::Short
                 | Token::Const
+                | Token::Volatile
         ) || self.current_alias().is_some()
         {
             Some(Box::new(self.parse_var_decl()?))
@@ -4492,7 +4513,8 @@ impl Parser {
                 | Token::Short
                 | Token::Struct
                 | Token::Union
-                | Token::Const,
+                | Token::Const
+                | Token::Volatile,
             ) => true,
             Some(Token::Ident(name)) => self.lookup_type_alias(name).is_some(),
             _ => false,
@@ -4501,7 +4523,7 @@ impl Parser {
 
     fn parse_cast(&mut self) -> CustResult<Expr> {
         self.expect(Token::LParen)?;
-        self.matches(&Token::Const);
+        self.consume_type_qualifiers();
         let type_token = self.peek_located().clone();
         let decl_type = self.parse_decl_type("cast type")?;
         if self.matches(&Token::Star) {
@@ -4670,10 +4692,11 @@ impl Parser {
                     | Token::Union
                     | Token::Enum
                     | Token::Const
+                    | Token::Volatile
                     | Token::Void
             ) || self.current_alias().is_some()
             {
-                let is_const_qualified = self.matches(&Token::Const);
+                let is_const_qualified = self.consume_type_qualifiers();
                 let sizeof_type = if self.check(&Token::Void) {
                     let type_token = self.advance();
                     return Err(Self::error_at(

@@ -154,6 +154,13 @@ fn supports_extern_global_declarations() {
 }
 
 #[test]
+fn supports_volatile_type_qualifiers() {
+    let program = include_str!("fixtures/valid/volatile_type_qualifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 74);
+}
+
+#[test]
 fn rejects_pointer_array_typedef_aliases() {
     let program = include_str!("fixtures/invalid/pointer_array_typedef_alias.c");
 

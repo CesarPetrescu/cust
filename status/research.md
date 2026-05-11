@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-11: No external documentation was needed for C `volatile` type qualifier syntax parity. Cust treats `volatile` as parser-level no-op syntax over the existing deterministic interpreter model while preserving `const` as the qualifier with write-enforcement semantics. Native C compiler-oracle coverage avoids `volatile` on function return types (`-Werror=ignored-qualifiers`) and avoids assigning volatile arrays to non-volatile pointee types (`-Werror=discarded-qualifiers`).
+
 - 2026-05-04: Autonomous research may use local manual pages (`man`) when needed for command syntax, C/POSIX/libc behavior, or when external docs are unavailable. Record concise `man <page>` findings here just like URL-based findings.
 
 - 2026-05-04: No external documentation was needed for lexer line/column tracking; implementation used simple 1-based position accounting over Rust `char`s in `src/lib.rs`.
