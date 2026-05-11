@@ -196,6 +196,25 @@ fn supports_postfix_const_qualifiers() {
 }
 
 #[test]
+fn supports_static_assertions() {
+    let program = include_str!("fixtures/valid/static_assertions.c");
+
+    assert_eq!(interpret(program).unwrap(), 17);
+}
+
+#[test]
+fn rejects_failing_static_assertions() {
+    let program = include_str!("fixtures/invalid/static_assertion_failure.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("static assertion failed: zero is false"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_assignment_to_const_typedef_alias_variables() {
     let program = include_str!("fixtures/invalid/const_typedef_alias_assignment.c");
 

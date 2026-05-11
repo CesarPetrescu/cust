@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-11: No external documentation was needed for C11 `_Static_assert` syntax parity. Cust implements `_Static_assert(condition, "message");` at top level and in block scope as a parser/runtime assertion over existing scalar truthiness semantics; the condition parser intentionally uses assignment-precedence parsing so the comma remains the assertion argument separator. Top-level assertions execute through the existing globals-before-`main()` path, and false assertions report `static assertion failed: <message>`.
+
 - 2026-05-11: No external documentation was needed for postfix/interleaved const qualifier syntax parity. Cust now consumes shared type qualifiers after supported base type spellings as well as before them, so `int const`, `unsigned const int`, `long const int`, `struct Point const`, and alias spellings such as `typedef int const Alias` reuse the same const metadata paths as leading `const`. Native compiler-oracle fixtures avoid top-level const-qualified function return spellings because the repository's `cc -std=c11 -Wall -Wextra -Werror` flags reject ignored return qualifiers.
 
 - 2026-05-11: No external documentation was needed for const-qualified pointer typedef aliases. Cust now keeps pointer typedef alias pointee constness (`typedef const int *Alias`) in `TypeAlias::Pointer` / `DeclType::Pointer` metadata separately from top-level alias constness (`typedef int * const Alias`) in `const_type_alias_scopes`, so declarations/parameters/returns/fields can apply existing pointee-const and pointer-slot const diagnostics independently.

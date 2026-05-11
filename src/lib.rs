@@ -55,6 +55,7 @@ enum Token {
     Union,
     Typedef,
     Sizeof,
+    StaticAssert,
     Return,
     If,
     Else,
@@ -793,6 +794,10 @@ enum Stmt {
     EnumDecl {
         constants: Vec<EnumConstant>,
     },
+    StaticAssert {
+        condition: Expr,
+        message: String,
+    },
     Assign(String, Expr),
     DerefAssign {
         pointer: Expr,
@@ -1171,6 +1176,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "union" => Token::Union,
                     "typedef" => Token::Typedef,
                     "sizeof" => Token::Sizeof,
+                    "_Static_assert" => Token::StaticAssert,
                     "return" => Token::Return,
                     "if" => Token::If,
                     "else" => Token::Else,
@@ -1594,6 +1600,10 @@ impl Parser {
                     "unmatched '}' at top level".to_string(),
                     self.peek_located(),
                 ));
+            }
+            if self.check(&Token::StaticAssert) {
+                globals.push(self.parse_static_assert()?);
+                continue;
             }
             let leading_function_specifier = self.consume_function_specifiers();
             let is_extern = self.matches(&Token::Extern);
@@ -2643,6 +2653,7 @@ impl Parser {
             Token::Switch => self.parse_switch(),
             Token::Break => self.parse_break(),
             Token::Continue => self.parse_continue(),
+            Token::StaticAssert => self.parse_static_assert(),
             Token::Case => Err(Self::error_at(
                 "case label outside switch".to_string(),
                 self.peek_located(),
@@ -2693,6 +2704,43 @@ impl Parser {
     fn parse_empty(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Semi)?;
         Ok(Stmt::Empty)
+    }
+
+    fn parse_static_assert(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::StaticAssert)?;
+        self.expect_opening_paren_after("_Static_assert")?;
+        let condition = self.parse_assignment_expr()?;
+        if !self.matches(&Token::Comma) {
+            return Err(Self::error_at(
+                format!(
+                    "expected ',' after _Static_assert condition, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        let message = match self.advance().kind.clone() {
+            Token::StringLiteral(values) => Self::static_assert_message(values),
+            token => {
+                return Err(Self::error_at(
+                    format!(
+                        "expected string literal after _Static_assert condition, found {token:?}"
+                    ),
+                    self.previous(),
+                ));
+            }
+        };
+        self.expect_closing_paren_after("_Static_assert message")?;
+        self.expect_semicolon_after("_Static_assert")?;
+        Ok(Stmt::StaticAssert { condition, message })
+    }
+
+    fn static_assert_message(values: Vec<i64>) -> String {
+        values
+            .into_iter()
+            .take_while(|value| *value != 0)
+            .map(|value| char::from_u32(value as u32).unwrap_or('\u{FFFD}'))
+            .collect()
     }
 
     fn parse_static_local_decl(&mut self) -> CustResult<Stmt> {
@@ -12504,6 +12552,15 @@ impl Interpreter {
                     self.insert_enum_constant(constant.name.clone(), constant.value)?;
                 }
                 Ok(ExecFlow::None)
+            }
+            Stmt::StaticAssert { condition, message } => {
+                if self.eval_truthy(condition)? {
+                    Ok(ExecFlow::None)
+                } else {
+                    Err(CustError::new(format!(
+                        "static assertion failed: {message}"
+                    )))
+                }
             }
             Stmt::Assign(name, expr) => {
                 let existing = self.find_variable(name).cloned();
