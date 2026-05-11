@@ -210,6 +210,13 @@ fn supports_alignof_type_names() {
 }
 
 #[test]
+fn supports_alignas_specifiers() {
+    let program = include_str!("fixtures/valid/alignas_specifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 16);
+}
+
+#[test]
 fn rejects_alignof_void() {
     let program = include_str!("fixtures/invalid/alignof_void.c");
 

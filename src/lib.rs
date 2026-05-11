@@ -56,6 +56,7 @@ enum Token {
     Typedef,
     Sizeof,
     Alignof,
+    Alignas,
     StaticAssert,
     Return,
     If,
@@ -1231,6 +1232,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "typedef" => Token::Typedef,
                     "sizeof" => Token::Sizeof,
                     "_Alignof" => Token::Alignof,
+                    "_Alignas" => Token::Alignas,
                     "_Static_assert" => Token::StaticAssert,
                     "return" => Token::Return,
                     "if" => Token::If,
@@ -1660,9 +1662,11 @@ impl Parser {
                 globals.push(self.parse_static_assert()?);
                 continue;
             }
+            let _has_alignment_specifier = self.consume_alignment_specifiers()?;
             let leading_function_specifier = self.consume_function_specifiers();
             let is_extern = self.matches(&Token::Extern);
             let _is_static = !is_extern && self.matches(&Token::Static);
+            self.consume_alignment_specifiers()?;
             let has_function_specifier =
                 leading_function_specifier || self.consume_function_specifiers();
             if self.starts_function_definition()
@@ -1782,6 +1786,21 @@ impl Parser {
             consumed = true;
         }
         consumed
+    }
+
+    fn consume_alignment_specifiers(&mut self) -> CustResult<bool> {
+        let mut consumed = false;
+        while self.matches(&Token::Alignas) {
+            consumed = true;
+            self.expect_opening_paren_after("_Alignas")?;
+            if self.is_type_name_start() {
+                self.parse_sizeof_like_type_name("_Alignas")?;
+            } else {
+                self.parse_assignment_expr()?;
+            }
+            self.expect_closing_paren_after("_Alignas specifier")?;
+        }
+        Ok(consumed)
     }
 
     fn is_aggregate_definition(&self) -> bool {
@@ -2676,6 +2695,7 @@ impl Parser {
             Token::Semi => self.parse_empty(),
             Token::Static => self.parse_static_local_decl(),
             Token::Auto | Token::Register => self.parse_auto_register_local_decl(),
+            Token::Alignas => self.parse_aligned_decl(),
             Token::Int
             | Token::Char
             | Token::Bool
@@ -2803,6 +2823,7 @@ impl Parser {
         self.expect(Token::Static)?;
         let id = self.next_static_local_id;
         self.next_static_local_id += 1;
+        self.consume_alignment_specifiers()?;
         let decl = match self.peek() {
             Token::Int
             | Token::Char
@@ -2836,6 +2857,7 @@ impl Parser {
             _ => unreachable!("caller checked storage-class token"),
         };
         self.advance();
+        self.consume_alignment_specifiers()?;
         match self.peek() {
             Token::Int
             | Token::Char
@@ -2860,8 +2882,31 @@ impl Parser {
         self.parse_var_decl_with_semi(true)
     }
 
+    fn parse_aligned_decl(&mut self) -> CustResult<Stmt> {
+        self.consume_alignment_specifiers()?;
+        match self.peek() {
+            Token::Int
+            | Token::Char
+            | Token::Bool
+            | Token::Signed
+            | Token::Unsigned
+            | Token::Long
+            | Token::Short
+            | Token::Const
+            | Token::Volatile
+            | Token::Restrict => self.parse_var_decl(),
+            Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
+            Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
+            token => Err(Self::error_at(
+                format!("expected declaration after _Alignas specifier, found {token:?}"),
+                self.peek_located(),
+            )),
+        }
+    }
+
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         self.last_decl_had_initializer = false;
+        self.consume_alignment_specifiers()?;
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("struct type name")?;
         let has_explicit_star = self.matches(&Token::Star);
@@ -3701,6 +3746,7 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            self.consume_alignment_specifiers()?;
             let leading_const = self.consume_type_qualifiers();
             let decl_type = if matches!(self.peek(), Token::Struct | Token::Union) {
                 let field_kind = match self.advance().kind {
@@ -3833,6 +3879,7 @@ impl Parser {
 
     fn parse_aggregate_var_decl(&mut self) -> CustResult<Stmt> {
         self.last_decl_had_initializer = false;
+        self.consume_alignment_specifiers()?;
         let kind = match self.advance().kind {
             Token::Struct => AggregateKind::Struct,
             Token::Union => AggregateKind::Union,
@@ -4244,6 +4291,7 @@ impl Parser {
                 | Token::Const
                 | Token::Volatile
                 | Token::Restrict
+                | Token::Alignas
         ) || self.current_alias().is_some()
         {
             Some(Box::new(self.parse_var_decl()?))
