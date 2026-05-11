@@ -4212,7 +4212,70 @@ impl Parser {
         local_constants: &HashMap<String, i64>,
         context: &str,
     ) -> CustResult<(i64, LocatedToken)> {
-        self.parse_integer_constant_bitwise_or(local_constants, context)
+        self.parse_integer_constant_conditional(local_constants, context)
+    }
+
+    fn parse_integer_constant_conditional(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (condition, first_token) =
+            self.parse_integer_constant_logical_or(local_constants, context)?;
+        if self.matches(&Token::Question) {
+            let (then_value, _) = self.parse_integer_constant_expr(
+                local_constants,
+                "expected integer constant in conditional expression",
+            )?;
+            self.expect_colon_after("conditional expression")?;
+            let (else_value, _) = self.parse_integer_constant_conditional(
+                local_constants,
+                "expected integer constant in conditional expression",
+            )?;
+            return Ok((
+                if condition != 0 {
+                    then_value
+                } else {
+                    else_value
+                },
+                first_token,
+            ));
+        }
+        Ok((condition, first_token))
+    }
+
+    fn parse_integer_constant_logical_or(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (mut value, first_token) =
+            self.parse_integer_constant_logical_and(local_constants, context)?;
+        while self.matches(&Token::OrOr) {
+            let (rhs, _) = self.parse_integer_constant_logical_and(
+                local_constants,
+                "expected integer constant in integer constant expression",
+            )?;
+            value = i64::from(value != 0 || rhs != 0);
+        }
+        Ok((value, first_token))
+    }
+
+    fn parse_integer_constant_logical_and(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (mut value, first_token) =
+            self.parse_integer_constant_bitwise_or(local_constants, context)?;
+        while self.matches(&Token::AndAnd) {
+            let (rhs, _) = self.parse_integer_constant_bitwise_or(
+                local_constants,
+                "expected integer constant in integer constant expression",
+            )?;
+            value = i64::from(value != 0 && rhs != 0);
+        }
+        Ok((value, first_token))
     }
 
     fn parse_integer_constant_bitwise_or(
@@ -4255,13 +4318,63 @@ impl Parser {
         context: &str,
     ) -> CustResult<(i64, LocatedToken)> {
         let (mut value, first_token) =
-            self.parse_integer_constant_shift(local_constants, context)?;
+            self.parse_integer_constant_equality(local_constants, context)?;
         while self.matches(&Token::Amp) {
-            let (rhs, _) = self.parse_integer_constant_shift(
+            let (rhs, _) = self.parse_integer_constant_equality(
                 local_constants,
                 "expected integer constant in integer constant expression",
             )?;
             value &= rhs;
+        }
+        Ok((value, first_token))
+    }
+
+    fn parse_integer_constant_equality(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (mut value, first_token) =
+            self.parse_integer_constant_relational(local_constants, context)?;
+        while self.matches(&Token::Eq) || self.matches(&Token::Ne) {
+            let op = self.previous().kind.clone();
+            let (rhs, _) = self.parse_integer_constant_relational(
+                local_constants,
+                "expected integer constant in integer constant expression",
+            )?;
+            value = match op {
+                Token::Eq => i64::from(value == rhs),
+                Token::Ne => i64::from(value != rhs),
+                _ => unreachable!("only equality operators are matched above"),
+            };
+        }
+        Ok((value, first_token))
+    }
+
+    fn parse_integer_constant_relational(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (mut value, first_token) =
+            self.parse_integer_constant_shift(local_constants, context)?;
+        while self.matches(&Token::Lt)
+            || self.matches(&Token::Le)
+            || self.matches(&Token::Gt)
+            || self.matches(&Token::Ge)
+        {
+            let op = self.previous().kind.clone();
+            let (rhs, _) = self.parse_integer_constant_shift(
+                local_constants,
+                "expected integer constant in integer constant expression",
+            )?;
+            value = match op {
+                Token::Lt => i64::from(value < rhs),
+                Token::Le => i64::from(value <= rhs),
+                Token::Gt => i64::from(value > rhs),
+                Token::Ge => i64::from(value >= rhs),
+                _ => unreachable!("only relational operators are matched above"),
+            };
         }
         Ok((value, first_token))
     }
