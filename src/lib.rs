@@ -2255,6 +2255,12 @@ impl Parser {
                 alias_is_const,
             )
         };
+        if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
+            return Err(Self::error_at(
+                "function pointer typedef aliases are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
         let alias_name = self.expect_ident_after(alias_context)?;
         let alias = if self.matches(&Token::LBracket) {
             let len = self.expect_array_len()?;
@@ -2514,6 +2520,12 @@ impl Parser {
 
     fn parse_function_declaration(&mut self) -> CustResult<(String, TopLevelFunction)> {
         let return_type = self.parse_function_return_type()?;
+        if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
+            return Err(Self::error_at(
+                "function pointer declarations are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
         let name = self.expect_ident_after("function name after return type")?;
         self.expect_opening_paren_after("function name")?;
         let allow_unnamed_params = self.parameter_list_is_prototype();

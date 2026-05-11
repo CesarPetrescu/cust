@@ -2699,6 +2699,30 @@ fn rejects_parenthesized_pointer_declarations_with_context() {
 }
 
 #[test]
+fn rejects_function_pointer_declarations_with_context() {
+    let program = include_str!("fixtures/invalid/function_pointer_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function pointer declarations are not supported at line 1, column 5"
+    );
+}
+
+#[test]
+fn rejects_function_pointer_typedef_aliases_with_context() {
+    let program = include_str!("fixtures/invalid/function_pointer_typedef_alias.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function pointer typedef aliases are not supported at line 1, column 13"
+    );
+}
+
+#[test]
 fn reports_missing_pointer_parameter_names_after_stars() {
     let program = "int identity(int *) { return 0; }\nint main() { return identity(0); }\n";
 

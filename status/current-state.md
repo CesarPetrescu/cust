@@ -4,7 +4,23 @@ Last updated: 2026-05-11
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-11 autonomous expression-form `sizeof` integer constant-expression run. Ideation considered newly discovered malformed-program parser diagnostics, additional C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, remaining declaration specifier syntax, pointer/aggregate parity gaps, comma expressions in enum/switch integer constant expressions, and expression-form `sizeof` in enum/switch integer constant expressions. The selected work package extends the parser-side integer-constant-expression evaluator used for enum initializer values and `switch case` labels: Cust now accepts parenthesized expression-form `sizeof(...)` operands, infers supported expression sizes without runtime evaluation, and preserves type-name `sizeof(type-name)` handling. Coverage demonstrates non-evaluation with `sizeof(1 / 0) == sizeof(int)` in `tests/fixtures/valid/switch_enum_case_labels.c` plus the compiler-oracle twin `tests/fixtures/compat/valid/switch_enum_case_labels.c`; implementation notes live in `references/cust-sizeof-expression-integer-constant-expressions.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-11 autonomous function-pointer declarator diagnostics run. Ideation considered failing tests/builds (none), active blockers (none), parser recovery/error-message expansion for newly discovered malformed programs, additional compound-literal edge cases, aggregate-kind diagnostic polish, remaining declaration specifier syntax, pointer/aggregate parity gaps, and deliberately scoped standard-library-like builtins. The selected work package tightens unsupported C declarator diagnostics for function-pointer declarations and typedef aliases: `int (*callback)(int);` now reports `function pointer declarations are not supported` and `typedef int (*Callback)(int);` now reports `function pointer typedef aliases are not supported` at the opening parenthesis instead of falling through to misleading missing-name errors. Coverage adds two invalid fixtures and exact-output interpreter tests; implementation notes live in `references/cust-function-pointer-declarator-diagnostics.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter rejects_function_pointer_declarations_with_context -- --nocapture
+cargo test --test interpreter rejects_function_pointer_typedef_aliases_with_context -- --nocapture
+cargo test --test interpreter rejects_function_pointer -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-11 autonomous expression-form `sizeof` integer constant-expression run. Ideation considered newly discovered malformed-program parser diagnostics, additional C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, remaining declaration specifier syntax, pointer/aggregate parity gaps, comma expressions in enum/switch integer constant expressions, and expression-form `sizeof` in enum/switch integer constant expressions. The selected work package extends the parser-side integer-constant-expression evaluator used for enum initializer values and `switch case` labels: Cust now accepts parenthesized expression-form `sizeof(...)` operands, infers supported expression sizes without runtime evaluation, and preserves type-name `sizeof(type-name)` handling. Coverage demonstrates non-evaluation with `sizeof(1 / 0) == sizeof(int)` in `tests/fixtures/valid/switch_enum_case_labels.c` plus the compiler-oracle twin `tests/fixtures/compat/valid/switch_enum_case_labels.c`; implementation notes live in `references/cust-sizeof-expression-integer-constant-expressions.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
