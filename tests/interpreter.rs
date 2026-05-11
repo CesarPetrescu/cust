@@ -175,6 +175,25 @@ fn supports_function_specifiers() {
 }
 
 #[test]
+fn supports_const_typedef_aliases() {
+    let program = include_str!("fixtures/valid/const_typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 35);
+}
+
+#[test]
+fn rejects_assignment_to_const_typedef_alias_variables() {
+    let program = include_str!("fixtures/invalid/const_typedef_alias_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("cannot assign to const variable 'value'"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_pointer_array_typedef_aliases() {
     let program = include_str!("fixtures/invalid/pointer_array_typedef_alias.c");
 

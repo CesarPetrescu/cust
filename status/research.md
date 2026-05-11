@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-11: No external documentation was needed for const-qualified non-pointer typedef aliases. Cust stores parser-only const typedef metadata in a lexical scope stack parallel to ordinary typedef aliases, then merges alias constness with explicit leading qualifiers in `parse_const_qualified_decl_type` so alias-spelled scalar, aggregate, parameter, and array declarations reuse existing const enforcement. Pointer typedef aliases intentionally remain on the existing pointer-alias metadata path; const-pointee pointer typedefs such as `typedef const int *ConstIntPtr` remain future work if needed.
+
 - 2026-05-11: No external documentation was needed for C function specifier syntax parity. Cust treats top-level `inline` and `_Noreturn` as parser-level no-op metadata over existing function prototypes/definitions, preserving the current single-file function table and return-shape behavior. Native compiler-oracle coverage uses warning-free `static inline` helper definitions and an unused `_Noreturn` prototype; defining a `_Noreturn` function that returns normally is intentionally avoided because `cc -std=c11 -Wall -Wextra -Werror` rejects that fixture shape.
 
 - 2026-05-11: No external documentation was needed for C99 `restrict` pointer qualifier syntax parity. Cust treats `restrict` as parser-level no-op syntax over the existing interpreter-owned pointer model, preserving `const` as the only qualifier with write-enforcement metadata. Native compiler-oracle coverage keeps `restrict` attached to pointer-derived declarations (`int * restrict p`, parameters, and pointer fields) and avoids non-pointer `restrict int value` forms.

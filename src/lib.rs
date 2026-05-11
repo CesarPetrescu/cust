@@ -1556,6 +1556,7 @@ struct Parser {
     aggregate_type_scopes: Vec<HashMap<String, String>>,
     enum_type_scopes: Vec<HashSet<String>>,
     type_alias_scopes: Vec<HashMap<String, TypeAlias>>,
+    const_type_alias_scopes: Vec<HashSet<String>>,
     next_static_local_id: usize,
     next_aggregate_type_id: usize,
     last_decl_had_initializer: bool,
@@ -1570,6 +1571,7 @@ impl Parser {
             aggregate_type_scopes: vec![HashMap::new()],
             enum_type_scopes: vec![HashSet::new()],
             type_alias_scopes: vec![HashMap::new()],
+            const_type_alias_scopes: vec![HashSet::new()],
             next_static_local_id: 0,
             next_aggregate_type_id: 0,
             last_decl_had_initializer: false,
@@ -1784,6 +1786,13 @@ impl Parser {
             .find_map(|scope| scope.get(name))
     }
 
+    fn type_alias_is_const(&self, name: &str) -> bool {
+        self.const_type_alias_scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+    }
+
     fn enum_type_is_declared(&self, name: &str) -> bool {
         self.enum_type_scopes
             .iter()
@@ -1898,9 +1907,13 @@ impl Parser {
     }
 
     fn parse_const_qualified_decl_type(&mut self, context: &str) -> CustResult<(bool, DeclType)> {
-        let is_const = self.consume_type_qualifiers();
+        let leading_const = self.consume_type_qualifiers();
+        let alias_const = match self.peek() {
+            Token::Ident(name) => self.type_alias_is_const(name),
+            _ => false,
+        };
         let decl_type = self.parse_decl_type(context)?;
-        Ok((is_const, decl_type))
+        Ok((leading_const || alias_const, decl_type))
     }
 
     fn decl_type_to_return_type(decl_type: DeclType) -> ReturnType {
@@ -1942,7 +1955,7 @@ impl Parser {
     fn parse_typedef_decl(&mut self) -> CustResult<Option<Stmt>> {
         self.expect(Token::Typedef)?;
         let mut enum_constants = None;
-        let (alias, alias_context, anonymous_aggregate) = if self
+        let (alias, alias_context, anonymous_aggregate, alias_is_const) = if self
             .starts_typedef_aggregate_definition()
         {
             let (type_name, _, is_anonymous) = self.parse_aggregate_definition_body(false, true)?;
@@ -1950,6 +1963,7 @@ impl Parser {
                 TypeAlias::Struct(type_name),
                 "typedef alias name after aggregate definition",
                 is_anonymous,
+                false,
             )
         } else if self.starts_typedef_enum_definition() {
             let constants = self.parse_enum_decl_body(false)?;
@@ -1958,9 +1972,10 @@ impl Parser {
                 TypeAlias::Scalar(CType::Int),
                 "typedef alias name after enum definition",
                 false,
+                false,
             )
         } else {
-            let (_leading_const, base_type) =
+            let (leading_const, base_type) =
                 self.parse_const_qualified_decl_type("typedef struct type name")?;
             let alias = if self.matches(&Token::Star) {
                 if self.check(&Token::Star) {
@@ -1995,7 +2010,7 @@ impl Parser {
                     DeclType::Array(pointee, len) => TypeAlias::Array(pointee, len),
                 }
             };
-            (alias, "typedef alias name after type", false)
+            (alias, "typedef alias name after type", false, leading_const)
         };
         let alias_name = self.expect_ident_after(alias_context)?;
         let alias = if self.matches(&Token::LBracket) {
@@ -2047,6 +2062,13 @@ impl Parser {
             return Err(CustError::new(format!(
                 "typedef alias '{alias_name}' already declared"
             )));
+        }
+        if alias_is_const {
+            let const_scope = self
+                .const_type_alias_scopes
+                .last_mut()
+                .expect("parser always has a const typedef scope");
+            const_scope.insert(alias_name);
         }
         Ok(enum_constants.map(|constants| Stmt::EnumDecl { constants }))
     }
@@ -2433,6 +2455,7 @@ impl Parser {
     fn parse_block_after(&mut self, context: &str) -> CustResult<Vec<Stmt>> {
         self.expect_opening_brace_after(context)?;
         self.type_alias_scopes.push(HashMap::new());
+        self.const_type_alias_scopes.push(HashSet::new());
         self.enum_type_scopes.push(HashSet::new());
         self.aggregate_type_scopes.push(HashMap::new());
         let mut statements = Vec::new();
@@ -2452,6 +2475,7 @@ impl Parser {
         })();
         self.aggregate_type_scopes.pop();
         self.enum_type_scopes.pop();
+        self.const_type_alias_scopes.pop();
         self.type_alias_scopes.pop();
         result
     }
