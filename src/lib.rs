@@ -42,6 +42,7 @@ enum Token {
     Short,
     Const,
     Volatile,
+    Restrict,
     Static,
     Extern,
     Auto,
@@ -1149,6 +1150,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "short" => Token::Short,
                     "const" => Token::Const,
                     "volatile" => Token::Volatile,
+                    "restrict" => Token::Restrict,
                     "static" => Token::Static,
                     "extern" => Token::Extern,
                     "auto" => Token::Auto,
@@ -1640,6 +1642,7 @@ impl Parser {
                     | Token::Short
                     | Token::Const
                     | Token::Volatile
+                    | Token::Restrict
             ) || self.current_alias().is_some()
             {
                 let global = self.parse_var_decl()?;
@@ -1715,7 +1718,7 @@ impl Parser {
         let mut index = self.pos + 2;
         while matches!(
             self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Star | Token::Const | Token::Volatile)
+            Some(Token::Star | Token::Const | Token::Volatile | Token::Restrict)
         ) {
             index += 1;
         }
@@ -1855,9 +1858,16 @@ impl Parser {
 
     fn consume_type_qualifiers(&mut self) -> bool {
         let mut saw_const = false;
-        while matches!(self.peek(), Token::Const | Token::Volatile) {
+        while matches!(
+            self.peek(),
+            Token::Const | Token::Volatile | Token::Restrict
+        ) {
             if self.matches(&Token::Const) {
                 saw_const = true;
+            } else if self.matches(&Token::Restrict) {
+                // `restrict` is accepted as parser-level C syntax over Cust's
+                // existing interpreter-owned pointer model. It does not change
+                // runtime aliasing behavior.
             } else {
                 self.expect(Token::Volatile)
                     .expect("peek confirmed volatile token");
@@ -2024,7 +2034,7 @@ impl Parser {
         let mut index = self.pos;
         while matches!(
             self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Const | Token::Volatile)
+            Some(Token::Const | Token::Volatile | Token::Restrict)
         ) {
             index += 1;
         }
@@ -2114,7 +2124,7 @@ impl Parser {
         }
         while matches!(
             self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Star | Token::Const | Token::Volatile)
+            Some(Token::Star | Token::Const | Token::Volatile | Token::Restrict)
         ) {
             index += 1;
         }
@@ -2446,7 +2456,8 @@ impl Parser {
             | Token::Long
             | Token::Short
             | Token::Const
-            | Token::Volatile => self.parse_var_decl(),
+            | Token::Volatile
+            | Token::Restrict => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Typedef => match self.parse_typedef_decl()? {
                 Some(stmt) => Ok(stmt),
@@ -2534,7 +2545,8 @@ impl Parser {
             | Token::Long
             | Token::Short
             | Token::Const
-            | Token::Volatile => self.parse_var_decl()?,
+            | Token::Volatile
+            | Token::Restrict => self.parse_var_decl()?,
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
             Token::Struct | Token::Union => self.parse_aggregate_var_decl()?,
             token => {
@@ -2566,7 +2578,8 @@ impl Parser {
             | Token::Long
             | Token::Short
             | Token::Const
-            | Token::Volatile => self.parse_var_decl(),
+            | Token::Volatile
+            | Token::Restrict => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -3954,6 +3967,7 @@ impl Parser {
                 | Token::Short
                 | Token::Const
                 | Token::Volatile
+                | Token::Restrict
         ) || self.current_alias().is_some()
         {
             Some(Box::new(self.parse_var_decl()?))
@@ -4514,7 +4528,8 @@ impl Parser {
                 | Token::Struct
                 | Token::Union
                 | Token::Const
-                | Token::Volatile,
+                | Token::Volatile
+                | Token::Restrict,
             ) => true,
             Some(Token::Ident(name)) => self.lookup_type_alias(name).is_some(),
             _ => false,
@@ -4693,6 +4708,7 @@ impl Parser {
                     | Token::Enum
                     | Token::Const
                     | Token::Volatile
+                    | Token::Restrict
                     | Token::Void
             ) || self.current_alias().is_some()
             {

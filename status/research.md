@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-11: No external documentation was needed for C99 `restrict` pointer qualifier syntax parity. Cust treats `restrict` as parser-level no-op syntax over the existing interpreter-owned pointer model, preserving `const` as the only qualifier with write-enforcement metadata. Native compiler-oracle coverage keeps `restrict` attached to pointer-derived declarations (`int * restrict p`, parameters, and pointer fields) and avoids non-pointer `restrict int value` forms.
+
 - 2026-05-11: No external documentation was needed for C `volatile` type qualifier syntax parity. Cust treats `volatile` as parser-level no-op syntax over the existing deterministic interpreter model while preserving `const` as the qualifier with write-enforcement semantics. Native C compiler-oracle coverage avoids `volatile` on function return types (`-Werror=ignored-qualifiers`) and avoids assigning volatile arrays to non-volatile pointee types (`-Werror=discarded-qualifiers`).
 
 - 2026-05-04: Autonomous research may use local manual pages (`man`) when needed for command syntax, C/POSIX/libc behavior, or when external docs are unavailable. Record concise `man <page>` findings here just like URL-based findings.

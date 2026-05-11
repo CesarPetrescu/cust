@@ -161,6 +161,13 @@ fn supports_volatile_type_qualifiers() {
 }
 
 #[test]
+fn supports_restrict_pointer_qualifiers() {
+    let program = include_str!("fixtures/valid/restrict_pointer_qualifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 28);
+}
+
+#[test]
 fn rejects_pointer_array_typedef_aliases() {
     let program = include_str!("fixtures/invalid/pointer_array_typedef_alias.c");
 
