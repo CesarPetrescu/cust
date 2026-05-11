@@ -4491,7 +4491,52 @@ impl Parser {
             };
             return Ok((value, op_token));
         }
+        if self.matches(&Token::Sizeof) {
+            return self.parse_integer_constant_sizeof();
+        }
+        if self.matches(&Token::Alignof) {
+            return self.parse_integer_constant_alignof();
+        }
         self.parse_integer_constant_primary(local_constants, context)
+    }
+
+    fn parse_integer_constant_sizeof(&mut self) -> CustResult<(i64, LocatedToken)> {
+        let operator = self.previous().clone();
+        self.expect_opening_paren_after("sizeof")?;
+        if !self.is_type_name_start() {
+            let found = self.peek_located().clone();
+            return Err(Self::error_at(
+                format!(
+                    "expected sizeof type in integer constant expression, found {:?}",
+                    found.kind
+                ),
+                &found,
+            ));
+        }
+        let sizeof_type = self.parse_sizeof_like_type_name("sizeof")?;
+        self.expect_closing_paren_after("sizeof type")?;
+        let value = sizeof_type
+            .size(&self.struct_types)
+            .map_err(|err| Self::error_at(err.to_string(), &operator))?;
+        Ok((value, operator))
+    }
+
+    fn parse_integer_constant_alignof(&mut self) -> CustResult<(i64, LocatedToken)> {
+        let operator = self.previous().clone();
+        self.expect_opening_paren_after("_Alignof")?;
+        if !self.is_type_name_start() {
+            let found = self.peek_located().clone();
+            return Err(Self::error_at(
+                format!("expected _Alignof type, found {:?}", found.kind),
+                &found,
+            ));
+        }
+        let alignof_type = self.parse_sizeof_like_type_name("_Alignof")?;
+        self.expect_closing_paren_after("_Alignof type")?;
+        let value = alignof_type
+            .alignment(&self.struct_types)
+            .map_err(|err| Self::error_at(err.to_string(), &operator))?;
+        Ok((value, operator))
     }
 
     fn parse_integer_constant_primary(
