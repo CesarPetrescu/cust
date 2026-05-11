@@ -4200,15 +4200,113 @@ impl Parser {
         &mut self,
         local_constants: &HashMap<String, i64>,
     ) -> CustResult<i64> {
-        let (mut value, _) = self.parse_integer_constant_primary(
+        let (value, _) = self.parse_integer_constant_expr(
             local_constants,
             "expected integer constant after enum constant '='",
         )?;
+        Ok(value)
+    }
+
+    fn parse_integer_constant_expr(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        self.parse_integer_constant_bitwise_or(local_constants, context)
+    }
+
+    fn parse_integer_constant_bitwise_or(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (mut value, first_token) =
+            self.parse_integer_constant_bitwise_xor(local_constants, context)?;
+        while self.matches(&Token::Pipe) {
+            let (rhs, _) = self.parse_integer_constant_bitwise_xor(
+                local_constants,
+                "expected integer constant in integer constant expression",
+            )?;
+            value |= rhs;
+        }
+        Ok((value, first_token))
+    }
+
+    fn parse_integer_constant_bitwise_xor(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (mut value, first_token) =
+            self.parse_integer_constant_bitwise_and(local_constants, context)?;
+        while self.matches(&Token::Caret) {
+            let (rhs, _) = self.parse_integer_constant_bitwise_and(
+                local_constants,
+                "expected integer constant in integer constant expression",
+            )?;
+            value ^= rhs;
+        }
+        Ok((value, first_token))
+    }
+
+    fn parse_integer_constant_bitwise_and(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (mut value, first_token) =
+            self.parse_integer_constant_shift(local_constants, context)?;
+        while self.matches(&Token::Amp) {
+            let (rhs, _) = self.parse_integer_constant_shift(
+                local_constants,
+                "expected integer constant in integer constant expression",
+            )?;
+            value &= rhs;
+        }
+        Ok((value, first_token))
+    }
+
+    fn parse_integer_constant_shift(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (mut value, first_token) =
+            self.parse_integer_constant_additive(local_constants, context)?;
+        while self.matches(&Token::ShiftLeft) || self.matches(&Token::ShiftRight) {
+            let op = self.previous().kind.clone();
+            let op_token = self.previous().clone();
+            let (rhs, _) = self.parse_integer_constant_additive(
+                local_constants,
+                "expected integer constant in integer constant expression",
+            )?;
+            if rhs < 0 {
+                return Err(Self::error_at(
+                    "shift count must be non-negative".to_string(),
+                    &op_token,
+                ));
+            }
+            match op {
+                Token::ShiftLeft => value <<= rhs,
+                Token::ShiftRight => value >>= rhs,
+                _ => unreachable!("only shift operators are matched above"),
+            }
+        }
+        Ok((value, first_token))
+    }
+
+    fn parse_integer_constant_additive(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (mut value, first_token) =
+            self.parse_integer_constant_multiplicative(local_constants, context)?;
         while self.matches(&Token::Plus) || self.matches(&Token::Minus) {
             let op = self.previous().kind.clone();
-            let (rhs, _) = self.parse_integer_constant_primary(
+            let (rhs, _) = self.parse_integer_constant_multiplicative(
                 local_constants,
-                "expected integer constant in enum constant expression",
+                "expected integer constant in integer constant expression",
             )?;
             match op {
                 Token::Plus => value += rhs,
@@ -4216,7 +4314,71 @@ impl Parser {
                 _ => unreachable!("only plus/minus are matched above"),
             }
         }
-        Ok(value)
+        Ok((value, first_token))
+    }
+
+    fn parse_integer_constant_multiplicative(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let (mut value, first_token) =
+            self.parse_integer_constant_unary(local_constants, context)?;
+        while self.matches(&Token::Star)
+            || self.matches(&Token::Slash)
+            || self.matches(&Token::Percent)
+        {
+            let op = self.previous().kind.clone();
+            let op_token = self.previous().clone();
+            let (rhs, _) = self.parse_integer_constant_unary(
+                local_constants,
+                "expected integer constant in integer constant expression",
+            )?;
+            match op {
+                Token::Star => value *= rhs,
+                Token::Slash => {
+                    if rhs == 0 {
+                        return Err(Self::error_at("division by zero".to_string(), &op_token));
+                    }
+                    value /= rhs;
+                }
+                Token::Percent => {
+                    if rhs == 0 {
+                        return Err(Self::error_at("division by zero".to_string(), &op_token));
+                    }
+                    value %= rhs;
+                }
+                _ => unreachable!("only multiplicative operators are matched above"),
+            }
+        }
+        Ok((value, first_token))
+    }
+
+    fn parse_integer_constant_unary(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+        context: &str,
+    ) -> CustResult<(i64, LocatedToken)> {
+        if self.matches(&Token::Plus)
+            || self.matches(&Token::Minus)
+            || self.matches(&Token::Tilde)
+            || self.matches(&Token::Bang)
+        {
+            let op_token = self.previous().clone();
+            let (value, _) = self.parse_integer_constant_unary(
+                local_constants,
+                "expected integer constant in integer constant expression",
+            )?;
+            let value = match op_token.kind {
+                Token::Plus => value,
+                Token::Minus => -value,
+                Token::Tilde => !value,
+                Token::Bang => i64::from(value == 0),
+                _ => unreachable!("only unary constant operators are matched above"),
+            };
+            return Ok((value, op_token));
+        }
+        self.parse_integer_constant_primary(local_constants, context)
     }
 
     fn parse_integer_constant_primary(
@@ -4224,20 +4386,24 @@ impl Parser {
         local_constants: &HashMap<String, i64>,
         context: &str,
     ) -> CustResult<(i64, LocatedToken)> {
-        let sign = if self.matches(&Token::Minus) {
-            -1
-        } else {
-            self.matches(&Token::Plus);
-            1
-        };
+        if self.matches(&Token::LParen) {
+            let opening = self.previous().clone();
+            let (value, _) = self.parse_integer_constant_expr(
+                local_constants,
+                "expected integer constant in parenthesized integer constant expression",
+            )?;
+            self.expect_closing_paren_after("integer constant expression")?;
+            return Ok((value, opening));
+        }
+
         let found = self.advance();
         match &found.kind {
-            Token::Number(value) => Ok((sign * *value, found)),
+            Token::Number(value) => Ok((*value, found)),
             Token::Ident(name) => local_constants
                 .get(name)
                 .copied()
                 .or_else(|| self.lookup_enum_constant(name))
-                .map(|value| (sign * value, found.clone()))
+                .map(|value| (value, found.clone()))
                 .ok_or_else(|| {
                     Self::error_at(format!("{context}, found {:?}", found.kind), &found)
                 }),
@@ -4607,23 +4773,10 @@ impl Parser {
 
     fn parse_switch_case_value(&mut self) -> CustResult<(i64, LocatedToken)> {
         let empty_constants = HashMap::new();
-        let (mut value, value_token) = self.parse_integer_constant_primary(
+        self.parse_integer_constant_expr(
             &empty_constants,
             "expected integer constant after switch case",
-        )?;
-        while self.matches(&Token::Plus) || self.matches(&Token::Minus) {
-            let op = self.previous().kind.clone();
-            let (rhs, _) = self.parse_integer_constant_primary(
-                &empty_constants,
-                "expected integer constant in switch case expression",
-            )?;
-            match op {
-                Token::Plus => value += rhs,
-                Token::Minus => value -= rhs,
-                _ => unreachable!("only plus/minus are matched above"),
-            }
-        }
-        Ok((value, value_token))
+        )
     }
 
     fn parse_expr(&mut self) -> CustResult<Expr> {

@@ -4,7 +4,22 @@ Last updated: 2026-05-11
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-11 autonomous switch/enum constant-expression parity run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, enum/switch constant-expression parity, and remaining declaration/initializer conformance gaps. The selected work package closes a concrete enum/switch gap: Cust now maintains parser-side enum constant scopes and accepts enum constants as `switch case` labels, including block-scoped enum constants and simple additive integer constant expressions such as `DONE = BUSY + 3` and `case DONE:`. Duplicate switch-case detection now resolves identifier-valued case labels before comparing values. Runtime enum constant behavior remains unchanged for ordinary expressions. Coverage includes `tests/fixtures/valid/switch_enum_case_labels.c`, invalid duplicate-case fixture `tests/fixtures/invalid/switch_duplicate_enum_case.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/switch_enum_case_labels.c`, and reference notes in `references/cust-switch-enum-case-labels.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-11 autonomous broader integer constant-expression run. Ideation considered newly discovered malformed-program parser diagnostics, additional C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, remaining declaration specifier syntax, pointer/aggregate parity gaps, and broadening enum/switch constant-expression operators. The selected work package extends the parser-side integer-constant-expression evaluator used for enum initializer values and `switch case` labels: Cust now accepts parenthesized constants, unary `+`/`-`/`~`/`!`, multiplicative `*`/`/`/`%`, shifts `<<`/`>>`, and bitwise `&`/`^`/`|` in addition to additive expressions and visible enum constants. The helper remains parser-only and non-evaluating, preserving runtime enum constant behavior and duplicate switch-case detection after folding. Coverage expands `tests/fixtures/valid/switch_enum_case_labels.c` plus the compiler-oracle twin `tests/fixtures/compat/valid/switch_enum_case_labels.c`, with implementation notes in `references/cust-broader-integer-constant-expressions.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_enum_constants_as_switch_case_labels -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-11 autonomous switch/enum constant-expression parity run. Ideation considered newly discovered malformed-program parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, enum/switch constant-expression parity, and remaining declaration/initializer conformance gaps. The selected work package closes a concrete enum/switch gap: Cust now maintains parser-side enum constant scopes and accepts enum constants as `switch case` labels, including block-scoped enum constants and simple additive integer constant expressions such as `DONE = BUSY + 3` and `case DONE:`. Duplicate switch-case detection now resolves identifier-valued case labels before comparing values. Runtime enum constant behavior remains unchanged for ordinary expressions. Coverage includes `tests/fixtures/valid/switch_enum_case_labels.c`, invalid duplicate-case fixture `tests/fixtures/invalid/switch_duplicate_enum_case.c`, C compiler-oracle fixture `tests/fixtures/compat/valid/switch_enum_case_labels.c`, and reference notes in `references/cust-switch-enum-case-labels.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 

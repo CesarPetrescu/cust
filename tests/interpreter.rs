@@ -3176,7 +3176,7 @@ fn supports_switch_statements_with_cases_default_fallthrough_break_and_continue(
 fn supports_enum_constants_as_switch_case_labels() {
     let program = include_str!("fixtures/valid/switch_enum_case_labels.c");
 
-    assert_eq!(interpret(program).unwrap(), 72);
+    assert_eq!(interpret(program).unwrap(), 138);
 }
 
 #[test]
