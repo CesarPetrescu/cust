@@ -4497,7 +4497,41 @@ impl Parser {
         if self.matches(&Token::Alignof) {
             return self.parse_integer_constant_alignof();
         }
+        if self.check(&Token::LParen) && self.starts_cast_type_after_lparen() {
+            return self.parse_integer_constant_cast(local_constants);
+        }
         self.parse_integer_constant_primary(local_constants, context)
+    }
+
+    fn parse_integer_constant_cast(
+        &mut self,
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<(i64, LocatedToken)> {
+        let opening = self.advance();
+        self.consume_type_qualifiers();
+        let type_token = self.peek_located().clone();
+        let decl_type = self.parse_decl_type("integer constant expression cast type")?;
+        match decl_type {
+            DeclType::Scalar(_) => {}
+            DeclType::Struct(_) => {
+                return Err(Self::error_at(
+                    "aggregate casts are not supported".to_string(),
+                    &type_token,
+                ));
+            }
+            DeclType::Pointer { .. } | DeclType::Array(_, _) => {
+                return Err(Self::error_at(
+                    "pointer casts are not supported".to_string(),
+                    &type_token,
+                ));
+            }
+        }
+        self.expect_closing_paren_after("integer constant expression cast type")?;
+        let (value, _) = self.parse_integer_constant_unary(
+            local_constants,
+            "expected integer constant in integer constant expression",
+        )?;
+        Ok((value, opening))
     }
 
     fn parse_integer_constant_sizeof(&mut self) -> CustResult<(i64, LocatedToken)> {
