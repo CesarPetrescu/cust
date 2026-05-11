@@ -1814,33 +1814,64 @@ impl Parser {
     }
 
     fn parse_decl_type(&mut self, context: &str) -> CustResult<DeclType> {
+        let (_, decl_type) = self.parse_decl_type_with_embedded_qualifiers(context)?;
+        Ok(decl_type)
+    }
+
+    fn parse_decl_type_with_embedded_qualifiers(
+        &mut self,
+        context: &str,
+    ) -> CustResult<(bool, DeclType)> {
         let found = self.advance();
+        let mut saw_const = false;
         match found.kind.clone() {
-            Token::Int => Ok(DeclType::Scalar(CType::Int)),
-            Token::Char => Ok(DeclType::Scalar(CType::Char)),
-            Token::Bool => Ok(DeclType::Scalar(CType::Bool)),
+            Token::Int => {
+                saw_const |= self.consume_type_qualifiers();
+                Ok((saw_const, DeclType::Scalar(CType::Int)))
+            }
+            Token::Char => {
+                saw_const |= self.consume_type_qualifiers();
+                Ok((saw_const, DeclType::Scalar(CType::Char)))
+            }
+            Token::Bool => {
+                saw_const |= self.consume_type_qualifiers();
+                Ok((saw_const, DeclType::Scalar(CType::Bool)))
+            }
             Token::Signed | Token::Unsigned => {
+                saw_const |= self.consume_type_qualifiers();
                 if self.matches(&Token::Char) {
-                    Ok(DeclType::Scalar(CType::Char))
+                    saw_const |= self.consume_type_qualifiers();
+                    Ok((saw_const, DeclType::Scalar(CType::Char)))
                 } else {
                     self.matches(&Token::Int);
+                    saw_const |= self.consume_type_qualifiers();
                     if self.matches(&Token::Long) {
+                        saw_const |= self.consume_type_qualifiers();
                         self.matches(&Token::Long);
+                        saw_const |= self.consume_type_qualifiers();
                         self.matches(&Token::Int);
+                        saw_const |= self.consume_type_qualifiers();
                     } else if self.matches(&Token::Short) {
+                        saw_const |= self.consume_type_qualifiers();
                         self.matches(&Token::Int);
+                        saw_const |= self.consume_type_qualifiers();
                     }
-                    Ok(DeclType::Scalar(CType::Int))
+                    Ok((saw_const, DeclType::Scalar(CType::Int)))
                 }
             }
             Token::Long => {
+                saw_const |= self.consume_type_qualifiers();
                 self.matches(&Token::Long);
+                saw_const |= self.consume_type_qualifiers();
                 self.matches(&Token::Int);
-                Ok(DeclType::Scalar(CType::Int))
+                saw_const |= self.consume_type_qualifiers();
+                Ok((saw_const, DeclType::Scalar(CType::Int)))
             }
             Token::Short => {
+                saw_const |= self.consume_type_qualifiers();
                 self.matches(&Token::Int);
-                Ok(DeclType::Scalar(CType::Int))
+                saw_const |= self.consume_type_qualifiers();
+                Ok((saw_const, DeclType::Scalar(CType::Int)))
             }
             Token::Struct | Token::Union => {
                 let keyword = if matches!(found.kind, Token::Union) {
@@ -1849,12 +1880,13 @@ impl Parser {
                     "struct"
                 };
                 let type_name = self.expect_ident_after(context)?;
+                saw_const |= self.consume_type_qualifiers();
                 let Some(internal_type_name) = self.resolve_aggregate_type(&type_name) else {
                     return Err(CustError::new(format!(
                         "undefined {keyword} type '{type_name}'"
                     )));
                 };
-                Ok(DeclType::Struct(internal_type_name))
+                Ok((saw_const, DeclType::Struct(internal_type_name)))
             }
             Token::Enum => {
                 let type_name_token = self.advance();
@@ -1867,25 +1899,41 @@ impl Parser {
                         ));
                     }
                 };
+                saw_const |= self.consume_type_qualifiers();
                 if !self.enum_type_is_declared(&type_name) {
                     return Err(Self::error_at(
                         format!("undefined enum type '{type_name}'"),
                         &type_name_token,
                     ));
                 }
-                Ok(DeclType::Scalar(CType::Int))
+                Ok((saw_const, DeclType::Scalar(CType::Int)))
             }
             Token::Ident(name) => match self.lookup_type_alias(&name).cloned() {
-                Some(TypeAlias::Scalar(ty)) => Ok(DeclType::Scalar(ty)),
-                Some(TypeAlias::Struct(type_name)) => Ok(DeclType::Struct(type_name)),
+                Some(TypeAlias::Scalar(ty)) => {
+                    saw_const |= self.consume_type_qualifiers();
+                    Ok((saw_const, DeclType::Scalar(ty)))
+                }
+                Some(TypeAlias::Struct(type_name)) => {
+                    saw_const |= self.consume_type_qualifiers();
+                    Ok((saw_const, DeclType::Struct(type_name)))
+                }
                 Some(TypeAlias::Pointer {
                     pointee,
                     points_to_const,
-                }) => Ok(DeclType::Pointer {
-                    pointee,
-                    points_to_const,
-                }),
-                Some(TypeAlias::Array(pointee, len)) => Ok(DeclType::Array(pointee, len)),
+                }) => {
+                    saw_const |= self.consume_type_qualifiers();
+                    Ok((
+                        saw_const,
+                        DeclType::Pointer {
+                            pointee,
+                            points_to_const,
+                        },
+                    ))
+                }
+                Some(TypeAlias::Array(pointee, len)) => {
+                    saw_const |= self.consume_type_qualifiers();
+                    Ok((saw_const, DeclType::Array(pointee, len)))
+                }
                 None => Err(Self::error_at(
                     format!("expected {context}, found Ident(\"{name}\")"),
                     &found,
@@ -1924,8 +1972,8 @@ impl Parser {
             Token::Ident(name) => self.type_alias_is_const(name),
             _ => false,
         };
-        let decl_type = self.parse_decl_type(context)?;
-        Ok((leading_const || alias_const, decl_type))
+        let (embedded_const, decl_type) = self.parse_decl_type_with_embedded_qualifiers(context)?;
+        Ok((leading_const || embedded_const || alias_const, decl_type))
     }
 
     fn decl_type_to_return_type(decl_type: DeclType) -> ReturnType {
@@ -2116,73 +2164,82 @@ impl Parser {
     }
 
     fn starts_function_definition(&self) -> bool {
-        let mut index = self.pos;
-        while matches!(
-            self.tokens.get(index).map(|token| &token.kind),
-            Some(Token::Const | Token::Volatile | Token::Restrict)
-        ) {
-            index += 1;
-        }
+        let mut index = self.skip_type_qualifiers_at(self.pos);
         match self.tokens.get(index).map(|token| &token.kind) {
-            Some(Token::Int | Token::Char | Token::Bool | Token::Void) => index += 1,
+            Some(Token::Int | Token::Char | Token::Bool | Token::Void) => {
+                index += 1;
+                index = self.skip_type_qualifiers_at(index);
+            }
             Some(Token::Long) => {
                 index += 1;
+                index = self.skip_type_qualifiers_at(index);
                 if matches!(
                     self.tokens.get(index).map(|token| &token.kind),
                     Some(Token::Long)
                 ) {
                     index += 1;
+                    index = self.skip_type_qualifiers_at(index);
                 }
                 if matches!(
                     self.tokens.get(index).map(|token| &token.kind),
                     Some(Token::Int)
                 ) {
                     index += 1;
+                    index = self.skip_type_qualifiers_at(index);
                 }
             }
             Some(Token::Short) => {
                 index += 1;
+                index = self.skip_type_qualifiers_at(index);
                 if matches!(
                     self.tokens.get(index).map(|token| &token.kind),
                     Some(Token::Int)
                 ) {
                     index += 1;
+                    index = self.skip_type_qualifiers_at(index);
                 }
             }
             Some(Token::Signed | Token::Unsigned) => {
                 index += 1;
+                index = self.skip_type_qualifiers_at(index);
                 if matches!(
                     self.tokens.get(index).map(|token| &token.kind),
                     Some(Token::Int | Token::Char)
                 ) {
                     index += 1;
+                    index = self.skip_type_qualifiers_at(index);
                 } else if matches!(
                     self.tokens.get(index).map(|token| &token.kind),
                     Some(Token::Long)
                 ) {
                     index += 1;
+                    index = self.skip_type_qualifiers_at(index);
                     if matches!(
                         self.tokens.get(index).map(|token| &token.kind),
                         Some(Token::Long)
                     ) {
                         index += 1;
+                        index = self.skip_type_qualifiers_at(index);
                     }
                     if matches!(
                         self.tokens.get(index).map(|token| &token.kind),
                         Some(Token::Int)
                     ) {
                         index += 1;
+                        index = self.skip_type_qualifiers_at(index);
                     }
                 } else if matches!(
                     self.tokens.get(index).map(|token| &token.kind),
                     Some(Token::Short)
                 ) {
                     index += 1;
+                    index = self.skip_type_qualifiers_at(index);
                     if matches!(
                         self.tokens.get(index).map(|token| &token.kind),
                         Some(Token::Int)
                     ) {
                         index += 1;
+                        index = self.skip_type_qualifiers_at(index);
                     }
                 }
             }
@@ -2194,6 +2251,7 @@ impl Parser {
                     return false;
                 }
                 index += 2;
+                index = self.skip_type_qualifiers_at(index);
             }
             Some(Token::Struct | Token::Union) => {
                 if !matches!(
@@ -2203,8 +2261,12 @@ impl Parser {
                     return false;
                 }
                 index += 2;
+                index = self.skip_type_qualifiers_at(index);
             }
-            Some(Token::Ident(_)) if self.alias_at_index(index).is_some() => index += 1,
+            Some(Token::Ident(_)) if self.alias_at_index(index).is_some() => {
+                index += 1;
+                index = self.skip_type_qualifiers_at(index);
+            }
             _ => return false,
         }
         while matches!(
@@ -2221,6 +2283,16 @@ impl Parser {
             ),
             (Some(Token::Ident(_)), Some(Token::LParen))
         )
+    }
+
+    fn skip_type_qualifiers_at(&self, mut index: usize) -> usize {
+        while matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Const | Token::Volatile | Token::Restrict)
+        ) {
+            index += 1;
+        }
+        index
     }
 
     fn starts_malformed_function_definition(&self) -> bool {
@@ -3670,6 +3742,7 @@ impl Parser {
             )));
         };
         let type_name = internal_type_name;
+        let points_to_const = self.consume_type_qualifiers();
         if self.matches(&Token::Star) {
             let is_const = self.consume_type_qualifiers();
             let name = self.expect_ident_after("struct pointer name after '*'")?;
@@ -3688,7 +3761,7 @@ impl Parser {
                 ty: PointeeType::Struct(type_name),
                 expr,
                 is_const,
-                points_to_const: false,
+                points_to_const,
             });
         }
         let name = self.expect_ident_after("struct variable name")?;
@@ -3707,7 +3780,7 @@ impl Parser {
                 name,
                 len,
                 init,
-                is_const: false,
+                is_const: points_to_const,
             });
         }
         let init = if self.matches(&Token::Assign) {
@@ -3727,7 +3800,7 @@ impl Parser {
             type_name,
             name,
             init,
-            is_const: false,
+            is_const: points_to_const,
         })
     }
 

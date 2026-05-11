@@ -189,6 +189,13 @@ fn supports_const_pointer_typedef_aliases() {
 }
 
 #[test]
+fn supports_postfix_const_qualifiers() {
+    let program = include_str!("fixtures/valid/postfix_const_qualifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 75);
+}
+
+#[test]
 fn rejects_assignment_to_const_typedef_alias_variables() {
     let program = include_str!("fixtures/invalid/const_typedef_alias_assignment.c");
 
