@@ -2350,6 +2350,12 @@ impl Parser {
         } else {
             alias
         };
+        if self.check(&Token::LParen) {
+            return Err(Self::error_at(
+                "function typedef aliases are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
         self.expect_semicolon_after("typedef declaration")?;
         let anonymous_type_name = match (anonymous_aggregate, &alias) {
             (true, TypeAlias::Struct(type_name)) => Some(type_name.clone()),

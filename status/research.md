@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-12: No external documentation was needed for unsupported function typedef diagnostic polish. Implementation decision: Cust still does not implement C function type aliases such as `typedef int Callback(int);`; the parser now rejects the function declarator suffix after the alias name with `function typedef aliases are not supported`, avoiding the misleading generic missing-semicolon diagnostic while leaving existing function-pointer typedef diagnostics intact.
+
 - 2026-05-12: No external documentation was needed for unsupported C11 `_Generic` diagnostic polish. Implementation decision: Cust still does not implement generic selections/type dispatch; the lexer recognizes `_Generic` as a keyword and the parser rejects it at primary-expression position with `generic selections are not supported`, avoiding misleading association-list parser errors. See `references/cust-generic-selection-diagnostics.md`.
 
 - 2026-05-12: No external documentation was needed for unsupported preprocessor-directive diagnostic polish. Implementation decision: Cust remains preprocessor-free; the lexer now detects `#` before the generic unexpected-character fallback and reports `preprocessor directives are not supported` with source-line/caret context, rather than adding a directive token or invoking a native preprocessor. See `references/cust-preprocessor-directive-diagnostics.md`.
