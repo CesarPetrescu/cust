@@ -2885,6 +2885,7 @@ impl Parser {
             Token::Semi => self.parse_empty(),
             Token::Static => self.parse_static_local_decl(),
             Token::ThreadLocal => self.parse_thread_local_local_decl(),
+            Token::Extern => self.parse_extern_local_decl(),
             Token::Auto | Token::Register => self.parse_auto_register_local_decl(),
             Token::Alignas => self.parse_aligned_decl(),
             Token::Int
@@ -3069,6 +3070,40 @@ impl Parser {
                 self.peek_located(),
             )),
         }
+    }
+
+    fn parse_extern_local_decl(&mut self) -> CustResult<Stmt> {
+        self.expect(Token::Extern)?;
+        self.consume_alignment_specifiers()?;
+        let parsed_decl = match self.peek() {
+            Token::Int
+            | Token::Char
+            | Token::Bool
+            | Token::Signed
+            | Token::Unsigned
+            | Token::Long
+            | Token::Short
+            | Token::Const
+            | Token::Volatile
+            | Token::Restrict
+            | Token::Atomic => self.parse_var_decl()?,
+            Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
+            Token::Enum => self.parse_var_decl()?,
+            Token::Struct | Token::Union => self.parse_aggregate_var_decl()?,
+            token => {
+                return Err(Self::error_at(
+                    format!("expected declaration after extern, found {token:?}"),
+                    self.peek_located(),
+                ));
+            }
+        };
+        if self.last_decl_had_initializer {
+            return Err(CustError::new(
+                "extern local declarations cannot have initializers",
+            ));
+        }
+        drop(parsed_decl);
+        Ok(Stmt::Empty)
     }
 
     fn parse_auto_register_local_decl(&mut self) -> CustResult<Stmt> {

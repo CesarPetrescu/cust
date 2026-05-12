@@ -154,6 +154,25 @@ fn supports_extern_global_declarations() {
 }
 
 #[test]
+fn supports_extern_local_declarations() {
+    let program = include_str!("fixtures/valid/extern_local_declarations.c");
+
+    assert_eq!(interpret(program).unwrap(), 28);
+}
+
+#[test]
+fn rejects_initialized_extern_local_declarations() {
+    let program = include_str!("fixtures/invalid/extern_local_initializer.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("extern local declarations cannot have initializers")
+    );
+}
+
+#[test]
 fn supports_volatile_type_qualifiers() {
     let program = include_str!("fixtures/valid/volatile_type_qualifiers.c");
 

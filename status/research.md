@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-12: No external documentation was needed for block-scope `extern` object declarations. Implementation decision: parse supported local `extern` object declarations with existing declaration parsers and lower them to `Stmt::Empty` so they do not create local storage or shadow existing globals in Cust's single-file global model; initialized block-scope extern declarations are rejected to avoid silently discarding initializer side effects. See `references/cust-extern-local-declarations.md`.
+
 - 2026-05-12: C99 array-parameter bracket qualifiers implemented from existing project conventions rather than external docs. Implementation decision: treat `static`, `restrict`, `volatile`, and `_Atomic` inside parameter array brackets as parser metadata/no-ops over Cust's pointer-parameter decay model, while mapping bracket `const` to the existing const pointer-slot metadata so `int values[const N]` rejects reassignment of the parameter name. See `references/cust-array-parameter-qualifiers.md`.
 
 - 2026-05-12: No external documentation was needed for C `(void)expr` casts. Implementation decision: treat `(void)` as a parser-only cast form that evaluates the operand in discard context and has no scalar value; this keeps native C warning-suppression parity for unused scalar/pointer/void-call results while preserving Cust's existing `void ... used as scalar expression` boundary for value contexts.

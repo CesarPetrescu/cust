@@ -4,7 +4,23 @@ Last updated: 2026-05-12
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-12 autonomous C99 array-parameter qualifier run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), P0 parser recovery gaps, remaining compound-literal edge cases, aggregate-kind diagnostics, standard-library-like builtins, and declaration/parameter syntax parity gaps. The selected work package closes a concrete C99 parameter-declarator gap: Cust now accepts `static`, `const`, `restrict`, `volatile`, and `_Atomic` metadata inside one-dimensional array parameter brackets such as `int values[static 3]`, `int values[restrict 3]`, and `struct Point points[static 2]`, while preserving existing decay to pointer parameters. Bracket `const` is mapped to pointer-slot const metadata, so `int values[const 3]` rejects reassignment of the parameter name with the existing const-variable diagnostic; leading `const` still qualifies the pointee. Coverage adds valid, invalid, and C compiler-oracle fixtures plus implementation notes in `references/cust-array-parameter-qualifiers.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+All passed after the 2026-05-12 autonomous block-scope `extern` object declaration run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), P0 parser recovery gaps, remaining compound-literal edges, aggregate-kind diagnostic polish, standard-library-like builtins, and declaration specifier syntax parity. The selected work package closes a concrete C declaration-syntax gap: Cust now accepts block-scope `extern` object declarations such as `extern int total;`, `extern int values[3];`, `extern struct Point origin;`, `extern union Number number;`, and `extern int *cursor;` as parser-only declarations that do not shadow existing global storage. Initialized block-scope extern declarations are rejected with `extern local declarations cannot have initializers` rather than silently discarding initializer side effects. Coverage adds valid, invalid, and C compiler-oracle fixtures plus implementation notes in `references/cust-extern-local-declarations.md`.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter extern_local -- --nocapture  # RED failed with unexpected Extern before implementation; GREEN passed after implementation
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-12 autonomous C99 array-parameter qualifier run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), P0 parser recovery gaps, remaining compound-literal edge cases, aggregate-kind diagnostics, standard-library-like builtins, and declaration/parameter syntax parity gaps. The selected work package closes a concrete C99 parameter-declarator gap: Cust now accepts `static`, `const`, `restrict`, `volatile`, and `_Atomic` metadata inside one-dimensional array parameter brackets such as `int values[static 3]`, `int values[restrict 3]`, and `struct Point points[static 2]`, while preserving existing decay to pointer parameters. Bracket `const` is mapped to pointer-slot const metadata, so `int values[const 3]` rejects reassignment of the parameter name with the existing const-variable diagnostic; leading `const` still qualifies the pointee. Coverage adds valid, invalid, and C compiler-oracle fixtures plus implementation notes in `references/cust-array-parameter-qualifiers.md`. Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
 
 Commands verified:
 
