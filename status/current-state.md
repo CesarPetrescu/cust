@@ -4,7 +4,26 @@ Last updated: 2026-05-12
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-12 autonomous local function prototype run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), the remaining P0 parser/lexer trust bucket for newly discovered malformed programs, additional C-compatible compound-literal edges, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, and C declaration syntax parity gaps. The selected work package closes C block-scope function prototype syntax parity: Cust now accepts no-op local prototypes such as `int add(int, int);`, `extern char pick(char, char);`, `extern struct Point make_point(int, int);`, `union Number make_number(int);`, and array-parameter prototype spellings inside function blocks. Runtime function lookup remains the existing top-level function table; local prototypes are parser-only declarations and local nested function definitions are still rejected.
+All passed after the 2026-05-12 autonomous inferred scalar array declaration run. Ideation considered failing tests/builds (none; pre-change `cargo test` passed), active blockers (none), remaining parser-trust diagnostics for newly discovered malformed programs, additional compound-literal/aggregate edge cases, scoped standard-library-like builtins, CLI/product polish, and C declaration/initializer parity gaps. The selected work package closes C-style inferred-length scalar array declarations because it is a compact, high-impact conformance feature that reuses existing array initializer, designator, string literal, `sizeof`, const-array, and pointer-decay runtime paths. Cust now accepts `int values[] = {1, 2, [4] = 5, 6};`, `char word[] = "cat";`, and `const int table[] = {[1] = 3, [3] = 4};`, inferring the object length from positional/designated/string initializers while requiring an initializer for empty-bracket declarations.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_inferred_array_declarations -- --nocapture  # RED failed with expected empty-bracket array parser error before implementation; GREEN passed after implementation
+cargo test --test interpreter inferred_array -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-05-12 autonomous local function prototype run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), the remaining P0 parser/lexer trust bucket for newly discovered malformed programs, additional C-compatible compound-literal edges, aggregate-kind diagnostic polish, deliberately scoped standard-library-like builtins, and C declaration syntax parity gaps. The selected work package closes C block-scope function prototype syntax parity: Cust now accepts no-op local prototypes such as `int add(int, int);`, `extern char pick(char, char);`, `extern struct Point make_point(int, int);`, `union Number make_number(int);`, and array-parameter prototype spellings inside function blocks. Runtime function lookup remains the existing top-level function table; local prototypes are parser-only declarations and local nested function definitions are still rejected.
 
 Commands verified:
 

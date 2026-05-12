@@ -3460,19 +3460,31 @@ impl Parser {
             unreachable!("struct declarations return above")
         };
         if self.matches(&Token::LBracket) {
-            let len = self.expect_array_len()?;
-            self.expect_closing_bracket_after("array length")?;
-            if self.check(&Token::LBracket) {
-                return Err(Self::error_at(
-                    "multidimensional array declarations are not supported".to_string(),
-                    self.peek_located(),
-                ));
-            }
-            let init = if self.matches(&Token::Assign) {
+            let (len, init) = if self.matches(&Token::RBracket) {
+                if !self.matches(&Token::Assign) {
+                    self.expect_assign_after("inferred array declaration")?;
+                    unreachable!("expect_assign_after only returns Ok after consuming '='")
+                }
                 self.last_decl_had_initializer = true;
-                self.parse_array_initializer_or_string(&name, len, ty)?
+                let init = self.parse_inferred_array_initializer_or_string(&name, ty)?;
+                let len = Self::infer_array_initializer_len(&init);
+                (len, init)
             } else {
-                Vec::new()
+                let len = self.expect_array_len()?;
+                self.expect_closing_bracket_after("array length")?;
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "multidimensional array declarations are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                let init = if self.matches(&Token::Assign) {
+                    self.last_decl_had_initializer = true;
+                    self.parse_array_initializer_or_string(&name, len, ty)?
+                } else {
+                    Vec::new()
+                };
+                (len, init)
             };
             if require_semi {
                 self.expect_semicolon_after("array declaration")?;
@@ -3522,6 +3534,25 @@ impl Parser {
         }
 
         self.parse_array_initializer(name, len)
+    }
+
+    fn parse_inferred_array_initializer_or_string(
+        &mut self,
+        name: &str,
+        elem_type: CType,
+    ) -> CustResult<Vec<ArrayInitializer>> {
+        if let Token::StringLiteral(values) = self.peek().clone() {
+            self.advance();
+            let values = self.concatenate_adjacent_string_literals(values);
+            if elem_type != CType::Char {
+                return Err(CustError::new(format!(
+                    "string literal initializer requires char array '{name}'"
+                )));
+            }
+            return Ok(vec![ArrayInitializer::StringLiteral(values)]);
+        }
+
+        self.parse_array_compound_initializer(None, elem_type)
     }
 
     fn parse_string_literal_array_initializer(

@@ -199,6 +199,13 @@ fn supports_local_function_prototypes() {
 }
 
 #[test]
+fn supports_inferred_array_declarations() {
+    let program = include_str!("fixtures/valid/inferred_array_declarations.c");
+
+    assert_eq!(interpret(program).unwrap(), 139);
+}
+
+#[test]
 fn rejects_initialized_extern_local_declarations() {
     let program = include_str!("fixtures/invalid/extern_local_initializer.c");
 
@@ -2351,14 +2358,14 @@ fn reports_missing_closing_brackets_after_array_lengths() {
 }
 
 #[test]
-fn reports_missing_array_lengths() {
+fn reports_inferred_array_declarations_without_initializers() {
     let program = "int main() {\nint values[];\nreturn 0;\n}\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "expected array length before ']' at line 2, column 12"
+        "expected '=' after inferred array declaration, found Semi at line 2, column 13"
     );
 }
 
