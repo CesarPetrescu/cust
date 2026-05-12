@@ -4,7 +4,22 @@ Last updated: 2026-05-12
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-12 autonomous permuted scalar type-specifier run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser recovery only for newly discovered malformed programs, additional compound-literal edge cases, aggregate-kind diagnostic polish, standard-library-like builtins, and declaration specifier syntax parity gaps. The selected work package closes a concrete C declaration-specifier parity gap: Cust now accepts supported scalar specifier permutations such as `int unsigned`, `char signed`, `int const unsigned`, `int long signed`, `int short unsigned`, and `int long long unsigned` across globals, locals, typedef aliases, casts, sizeof type operands, function returns/prototypes/parameters, pointers, and `for` declarations. The parser shares scalar-specifier consumption with function lookahead so permuted return types route to function parsing, while simple invalid-combination validation avoids silently accepting forms such as `int char`. Coverage adds interpreter and C compiler-oracle fixtures plus implementation notes in `references/cust-permuted-scalar-type-specifiers.md`.
+All passed after the 2026-05-12 autonomous variadic-parameter diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser recovery only for newly discovered malformed programs, additional compound-literal edge cases, aggregate-kind diagnostic polish, declaration specifier ordering gaps, deliberately scoped builtins, and unsupported C declarator forms. The selected work package closes a concrete parser-trust gap for unsupported C variadic function parameters: `int f(int count, ...)` now reports `variadic function parameters are not supported` at the ellipsis start instead of falling through to a generic `expected type, found Dot` parser error. The fix is parser-local and does not add C varargs runtime support.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter variadic_function_parameters -- --nocapture  # RED failed with generic Dot type error before implementation; GREEN passed after implementation
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-12 autonomous permuted scalar type-specifier run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser recovery only for newly discovered malformed programs, additional compound-literal edge cases, aggregate-kind diagnostic polish, standard-library-like builtins, and declaration specifier syntax parity gaps. The selected work package closes a concrete C declaration-specifier parity gap: Cust now accepts supported scalar specifier permutations such as `int unsigned`, `char signed`, `int const unsigned`, `int long signed`, `int short unsigned`, and `int long long unsigned` across globals, locals, typedef aliases, casts, sizeof type operands, function returns/prototypes/parameters, pointers, and `for` declarations. The parser shares scalar-specifier consumption with function lookahead so permuted return types route to function parsing, while simple invalid-combination validation avoids silently accepting forms such as `int char`. Coverage adds interpreter and C compiler-oracle fixtures plus implementation notes in `references/cust-permuted-scalar-type-specifiers.md`.
 
 Commands verified:
 

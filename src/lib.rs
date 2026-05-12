@@ -2649,6 +2649,12 @@ impl Parser {
         }
 
         loop {
+            if self.starts_ellipsis() {
+                return Err(Self::error_at(
+                    "variadic function parameters are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let (leading_const, decl_type) =
                 self.parse_const_qualified_decl_type("parameter type")?;
             let has_explicit_star = self.matches(&Token::Star);
@@ -2803,6 +2809,17 @@ impl Parser {
             }
         }
         Ok(params)
+    }
+
+    fn starts_ellipsis(&self) -> bool {
+        matches!(
+            (
+                self.peek(),
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                self.tokens.get(self.pos + 2).map(|token| &token.kind)
+            ),
+            (Token::Dot, Some(Token::Dot), Some(Token::Dot))
+        )
     }
 
     fn parse_array_parameter_length_and_qualifiers(&mut self) -> CustResult<bool> {

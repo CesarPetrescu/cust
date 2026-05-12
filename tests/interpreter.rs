@@ -2805,6 +2805,18 @@ fn rejects_function_pointer_parameters_with_context() {
 }
 
 #[test]
+fn rejects_variadic_function_parameters_with_context() {
+    let program = include_str!("fixtures/invalid/variadic_function_parameter.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "variadic function parameters are not supported at line 1, column 20"
+    );
+}
+
+#[test]
 fn reports_missing_pointer_parameter_names_after_stars() {
     let program = "int identity(int *) { return 0; }\nint main() { return identity(0); }\n";
 

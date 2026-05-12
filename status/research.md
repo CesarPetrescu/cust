@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-12: No external documentation was needed for variadic function-parameter diagnostic polish. Implementation decision: C varargs remain outside Cust's runtime subset; the parser now detects `...` in function parameter lists before generic type parsing and reports a targeted unsupported diagnostic at the first dot.
+
 - 2026-05-12: No external documentation was needed for permuted scalar type specifiers. Implementation decision: supported C scalar declaration specifier permutations are parsed by consuming interleaved scalar specifier tokens plus qualifiers and lowering them to Cust's deterministic scalar model; native `cc -std=c11 -Wall -Wextra -Werror` was used only as a compiler-oracle fixture check for warning-free forms. See `references/cust-permuted-scalar-type-specifiers.md`.
 
 - 2026-05-12: No external documentation was needed for block-scope `extern` object declarations. Implementation decision: parse supported local `extern` object declarations with existing declaration parsers and lower them to `Stmt::Empty` so they do not create local storage or shadow existing globals in Cust's single-file global model; initialized block-scope extern declarations are rejected to avoid silently discarding initializer side effects. See `references/cust-extern-local-declarations.md`.
