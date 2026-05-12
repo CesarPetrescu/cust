@@ -1956,18 +1956,13 @@ impl Parser {
         let found = self.advance();
         let mut saw_const = false;
         match found.kind.clone() {
-            Token::Int => {
-                saw_const |= self.consume_type_qualifiers();
-                Ok((saw_const, DeclType::Scalar(CType::Int)))
-            }
-            Token::Char => {
-                saw_const |= self.consume_type_qualifiers();
-                Ok((saw_const, DeclType::Scalar(CType::Char)))
-            }
-            Token::Bool => {
-                saw_const |= self.consume_type_qualifiers();
-                Ok((saw_const, DeclType::Scalar(CType::Bool)))
-            }
+            Token::Int
+            | Token::Char
+            | Token::Bool
+            | Token::Signed
+            | Token::Unsigned
+            | Token::Long
+            | Token::Short => self.parse_scalar_decl_type_specifiers(found.kind),
             Token::Atomic => {
                 self.expect_opening_paren_after("_Atomic")?;
                 let (nested_const, decl_type) =
@@ -1975,42 +1970,6 @@ impl Parser {
                 self.expect_closing_paren_after("_Atomic type")?;
                 saw_const |= nested_const || self.consume_type_qualifiers();
                 Ok((saw_const, decl_type))
-            }
-            Token::Signed | Token::Unsigned => {
-                saw_const |= self.consume_type_qualifiers();
-                if self.matches(&Token::Char) {
-                    saw_const |= self.consume_type_qualifiers();
-                    Ok((saw_const, DeclType::Scalar(CType::Char)))
-                } else {
-                    self.matches(&Token::Int);
-                    saw_const |= self.consume_type_qualifiers();
-                    if self.matches(&Token::Long) {
-                        saw_const |= self.consume_type_qualifiers();
-                        self.matches(&Token::Long);
-                        saw_const |= self.consume_type_qualifiers();
-                        self.matches(&Token::Int);
-                        saw_const |= self.consume_type_qualifiers();
-                    } else if self.matches(&Token::Short) {
-                        saw_const |= self.consume_type_qualifiers();
-                        self.matches(&Token::Int);
-                        saw_const |= self.consume_type_qualifiers();
-                    }
-                    Ok((saw_const, DeclType::Scalar(CType::Int)))
-                }
-            }
-            Token::Long => {
-                saw_const |= self.consume_type_qualifiers();
-                self.matches(&Token::Long);
-                saw_const |= self.consume_type_qualifiers();
-                self.matches(&Token::Int);
-                saw_const |= self.consume_type_qualifiers();
-                Ok((saw_const, DeclType::Scalar(CType::Int)))
-            }
-            Token::Short => {
-                saw_const |= self.consume_type_qualifiers();
-                self.matches(&Token::Int);
-                saw_const |= self.consume_type_qualifiers();
-                Ok((saw_const, DeclType::Scalar(CType::Int)))
             }
             Token::Struct | Token::Union => {
                 let keyword = if matches!(found.kind, Token::Union) {
@@ -2082,6 +2041,92 @@ impl Parser {
                 format!("expected type, found {token:?}"),
                 &found,
             )),
+        }
+    }
+
+    fn parse_scalar_decl_type_specifiers(&mut self, first: Token) -> CustResult<(bool, DeclType)> {
+        let mut saw_const = false;
+        let mut saw_char = false;
+        let mut saw_bool = false;
+        let mut saw_int = false;
+        let mut saw_short = false;
+        let mut long_count = 0;
+        let mut sign_count = 0;
+
+        Self::record_scalar_type_specifier(
+            first,
+            &mut saw_char,
+            &mut saw_bool,
+            &mut saw_int,
+            &mut saw_short,
+            &mut long_count,
+            &mut sign_count,
+        );
+        saw_const |= self.consume_type_qualifiers();
+
+        while Self::scalar_type_specifier_token(self.peek()) {
+            let specifier = self.advance().kind.clone();
+            Self::record_scalar_type_specifier(
+                specifier,
+                &mut saw_char,
+                &mut saw_bool,
+                &mut saw_int,
+                &mut saw_short,
+                &mut long_count,
+                &mut sign_count,
+            );
+            saw_const |= self.consume_type_qualifiers();
+        }
+
+        if sign_count > 1
+            || long_count > 2
+            || (saw_short && long_count > 0)
+            || (saw_char && (saw_int || saw_short || long_count > 0 || saw_bool))
+            || (saw_bool && (saw_int || saw_short || long_count > 0 || sign_count > 0))
+        {
+            return Err(CustError::new("invalid scalar type specifier combination"));
+        }
+
+        let ty = if saw_char {
+            CType::Char
+        } else if saw_bool {
+            CType::Bool
+        } else {
+            CType::Int
+        };
+        Ok((saw_const, DeclType::Scalar(ty)))
+    }
+
+    fn scalar_type_specifier_token(token: &Token) -> bool {
+        matches!(
+            token,
+            Token::Int
+                | Token::Char
+                | Token::Bool
+                | Token::Signed
+                | Token::Unsigned
+                | Token::Long
+                | Token::Short
+        )
+    }
+
+    fn record_scalar_type_specifier(
+        specifier: Token,
+        saw_char: &mut bool,
+        saw_bool: &mut bool,
+        saw_int: &mut bool,
+        saw_short: &mut bool,
+        long_count: &mut usize,
+        sign_count: &mut usize,
+    ) {
+        match specifier {
+            Token::Char => *saw_char = true,
+            Token::Bool => *saw_bool = true,
+            Token::Int => *saw_int = true,
+            Token::Short => *saw_short = true,
+            Token::Long => *long_count += 1,
+            Token::Signed | Token::Unsigned => *sign_count += 1,
+            _ => unreachable!("caller only passes scalar type specifier tokens"),
         }
     }
 
@@ -2326,82 +2371,15 @@ impl Parser {
     fn starts_function_definition(&self) -> bool {
         let mut index = self.skip_type_qualifiers_at(self.pos);
         match self.tokens.get(index).map(|token| &token.kind) {
-            Some(Token::Int | Token::Char | Token::Bool | Token::Void) => {
+            Some(Token::Void) => {
                 index += 1;
                 index = self.skip_type_qualifiers_at(index);
             }
-            Some(Token::Long) => {
-                index += 1;
-                index = self.skip_type_qualifiers_at(index);
-                if matches!(
-                    self.tokens.get(index).map(|token| &token.kind),
-                    Some(Token::Long)
-                ) {
-                    index += 1;
-                    index = self.skip_type_qualifiers_at(index);
-                }
-                if matches!(
-                    self.tokens.get(index).map(|token| &token.kind),
-                    Some(Token::Int)
-                ) {
-                    index += 1;
-                    index = self.skip_type_qualifiers_at(index);
-                }
-            }
-            Some(Token::Short) => {
-                index += 1;
-                index = self.skip_type_qualifiers_at(index);
-                if matches!(
-                    self.tokens.get(index).map(|token| &token.kind),
-                    Some(Token::Int)
-                ) {
-                    index += 1;
-                    index = self.skip_type_qualifiers_at(index);
-                }
-            }
-            Some(Token::Signed | Token::Unsigned) => {
-                index += 1;
-                index = self.skip_type_qualifiers_at(index);
-                if matches!(
-                    self.tokens.get(index).map(|token| &token.kind),
-                    Some(Token::Int | Token::Char)
-                ) {
-                    index += 1;
-                    index = self.skip_type_qualifiers_at(index);
-                } else if matches!(
-                    self.tokens.get(index).map(|token| &token.kind),
-                    Some(Token::Long)
-                ) {
-                    index += 1;
-                    index = self.skip_type_qualifiers_at(index);
-                    if matches!(
-                        self.tokens.get(index).map(|token| &token.kind),
-                        Some(Token::Long)
-                    ) {
-                        index += 1;
-                        index = self.skip_type_qualifiers_at(index);
-                    }
-                    if matches!(
-                        self.tokens.get(index).map(|token| &token.kind),
-                        Some(Token::Int)
-                    ) {
-                        index += 1;
-                        index = self.skip_type_qualifiers_at(index);
-                    }
-                } else if matches!(
-                    self.tokens.get(index).map(|token| &token.kind),
-                    Some(Token::Short)
-                ) {
-                    index += 1;
-                    index = self.skip_type_qualifiers_at(index);
-                    if matches!(
-                        self.tokens.get(index).map(|token| &token.kind),
-                        Some(Token::Int)
-                    ) {
-                        index += 1;
-                        index = self.skip_type_qualifiers_at(index);
-                    }
-                }
+            Some(token) if Self::scalar_type_specifier_token(token) => {
+                let Some(next_index) = self.skip_scalar_type_specifiers_at(index) else {
+                    return false;
+                };
+                index = next_index;
             }
             Some(Token::Enum) => {
                 if !matches!(
@@ -2457,6 +2435,25 @@ impl Parser {
             index += 1;
         }
         index
+    }
+
+    fn skip_scalar_type_specifiers_at(&self, mut index: usize) -> Option<usize> {
+        if !self
+            .tokens
+            .get(index)
+            .is_some_and(|token| Self::scalar_type_specifier_token(&token.kind))
+        {
+            return None;
+        }
+        while self
+            .tokens
+            .get(index)
+            .is_some_and(|token| Self::scalar_type_specifier_token(&token.kind))
+        {
+            index += 1;
+            index = self.skip_type_qualifiers_at(index);
+        }
+        Some(index)
     }
 
     fn type_qualifier_at(&self, index: usize) -> bool {

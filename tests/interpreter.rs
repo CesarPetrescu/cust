@@ -126,6 +126,13 @@ fn supports_bool_type_spellings() {
 }
 
 #[test]
+fn supports_permuted_scalar_type_specifiers() {
+    let program = include_str!("fixtures/valid/permuted_scalar_type_specifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 33);
+}
+
+#[test]
 fn supports_auto_and_register_local_storage_class_specifiers() {
     let program = include_str!("fixtures/valid/auto_register_storage_class.c");
 
