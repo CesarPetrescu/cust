@@ -4,7 +4,23 @@ Last updated: 2026-05-12
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-12 autonomous variadic-parameter diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser recovery only for newly discovered malformed programs, additional compound-literal edge cases, aggregate-kind diagnostic polish, declaration specifier ordering gaps, deliberately scoped builtins, and unsupported C declarator forms. The selected work package closes a concrete parser-trust gap for unsupported C variadic function parameters: `int f(int count, ...)` now reports `variadic function parameters are not supported` at the ellipsis start instead of falling through to a generic `expected type, found Dot` parser error. The fix is parser-local and does not add C varargs runtime support.
+All passed after the 2026-05-12 autonomous unsupported `goto`/label diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser recovery for newly discovered malformed programs, additional compound-literal edge cases, aggregate-kind diagnostic polish, remaining declaration specifier syntax if any, deliberately scoped builtins, and unsupported C statement forms. The selected work package closes a concrete parser-trust gap for unsupported C jump labels: `goto done;` now reports `goto statements are not supported` at the `goto` keyword, and `done:` now reports `labels are not supported` at the label identifier instead of falling through to generic missing-assignment/missing-semicolon diagnostics. The fix is parser-local and intentionally does not add arbitrary jump execution.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_goto -- --nocapture  # RED failed with generic missing-assignment diagnostic before implementation; GREEN passed after implementation
+cargo test --test interpreter rejects_label -- --nocapture  # RED failed with generic missing-semicolon diagnostic before implementation; GREEN passed after implementation
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-12 autonomous variadic-parameter diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser recovery only for newly discovered malformed programs, additional compound-literal edge cases, aggregate-kind diagnostic polish, declaration specifier ordering gaps, deliberately scoped builtins, and unsupported C declarator forms. The selected work package closes a concrete parser-trust gap for unsupported C variadic function parameters: `int f(int count, ...)` now reports `variadic function parameters are not supported` at the ellipsis start instead of falling through to a generic `expected type, found Dot` parser error. The fix is parser-local and does not add C varargs runtime support.
 
 Commands verified:
 

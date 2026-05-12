@@ -71,6 +71,7 @@ enum Token {
     Default,
     Break,
     Continue,
+    Goto,
     Ident(String),
     Number(i64),
     StringLiteral(Vec<i64>),
@@ -1256,6 +1257,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "default" => Token::Default,
                     "break" => Token::Break,
                     "continue" => Token::Continue,
+                    "goto" => Token::Goto,
                     _ => Token::Ident(text),
                 };
                 tokens.push(LocatedToken::new(kind, start_line, start_column));
@@ -2935,6 +2937,10 @@ impl Parser {
             Token::Switch => self.parse_switch(),
             Token::Break => self.parse_break(),
             Token::Continue => self.parse_continue(),
+            Token::Goto => Err(Self::error_at(
+                "goto statements are not supported".to_string(),
+                self.peek_located(),
+            )),
             Token::StaticAssert => self.parse_static_assert(),
             Token::Case => Err(Self::error_at(
                 "case label outside switch".to_string(),
@@ -2950,6 +2956,10 @@ impl Parser {
             {
                 self.parse_deref_assign()
             }
+            Token::Ident(_) if matches!(self.peek_next(), Token::Colon) => Err(Self::error_at(
+                "labels are not supported".to_string(),
+                self.peek_located(),
+            )),
             Token::Ident(_)
                 if self.starts_assignment_stmt()
                     || self.starts_missing_assignment_operator_stmt() =>

@@ -2817,6 +2817,30 @@ fn rejects_variadic_function_parameters_with_context() {
 }
 
 #[test]
+fn rejects_goto_statements_with_context() {
+    let program = include_str!("fixtures/invalid/goto_statement.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "goto statements are not supported at line 2, column 5"
+    );
+}
+
+#[test]
+fn rejects_label_statements_with_context() {
+    let program = include_str!("fixtures/invalid/label_statement.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "labels are not supported at line 2, column 1"
+    );
+}
+
+#[test]
 fn reports_missing_pointer_parameter_names_after_stars() {
     let program = "int identity(int *) { return 0; }\nint main() { return identity(0); }\n";
 
