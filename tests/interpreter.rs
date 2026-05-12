@@ -192,6 +192,13 @@ fn supports_extern_local_declarations() {
 }
 
 #[test]
+fn supports_local_function_prototypes() {
+    let program = include_str!("fixtures/valid/local_function_prototypes.c");
+
+    assert_eq!(interpret(program).unwrap(), 68);
+}
+
+#[test]
 fn rejects_initialized_extern_local_declarations() {
     let program = include_str!("fixtures/invalid/extern_local_initializer.c");
 

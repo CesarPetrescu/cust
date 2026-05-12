@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-12: No external documentation was needed for block-scope function prototype syntax parity. Implementation decision: local function declarations/prototypes are parsed as no-op statements that reuse Cust's existing function signature parser (including unnamed and array parameters) while runtime calls still resolve against top-level function definitions; nested block-scope function definitions remain unsupported.
+
 - 2026-05-12: No external documentation was needed for unsupported function typedef diagnostic polish. Implementation decision: Cust still does not implement C function type aliases such as `typedef int Callback(int);`; the parser now rejects the function declarator suffix after the alias name with `function typedef aliases are not supported`, avoiding the misleading generic missing-semicolon diagnostic while leaving existing function-pointer typedef diagnostics intact.
 
 - 2026-05-12: No external documentation was needed for unsupported C11 `_Generic` diagnostic polish. Implementation decision: Cust still does not implement generic selections/type dispatch; the lexer recognizes `_Generic` as a keyword and the parser rejects it at primary-expression position with `generic selections are not supported`, avoiding misleading association-list parser errors. See `references/cust-generic-selection-diagnostics.md`.

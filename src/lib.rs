@@ -2913,6 +2913,9 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> CustResult<Stmt> {
+        if self.starts_local_function_declaration() {
+            return self.parse_local_function_prototype_decl();
+        }
         match self.peek() {
             Token::Semi => self.parse_empty(),
             Token::Static => self.parse_static_local_decl(),
@@ -3015,6 +3018,23 @@ impl Parser {
         Ok(Stmt::Empty)
     }
 
+    fn starts_local_function_declaration(&self) -> bool {
+        self.starts_function_definition()
+            || self.starts_struct_function_declaration()
+            || self.starts_alias_function_declaration()
+            || self.check(&Token::Void)
+    }
+
+    fn parse_local_function_prototype_decl(&mut self) -> CustResult<Stmt> {
+        let (_, declaration) = self.parse_function_declaration()?;
+        match declaration {
+            TopLevelFunction::Prototype(_) => Ok(Stmt::Empty),
+            TopLevelFunction::Definition(_) => Err(CustError::new(
+                "function definitions are not supported inside blocks",
+            )),
+        }
+    }
+
     fn parse_static_assert(&mut self) -> CustResult<Stmt> {
         self.expect(Token::StaticAssert)?;
         self.expect_opening_paren_after("_Static_assert")?;
@@ -3115,6 +3135,9 @@ impl Parser {
     fn parse_extern_local_decl(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Extern)?;
         self.consume_alignment_specifiers()?;
+        if self.starts_local_function_declaration() {
+            return self.parse_local_function_prototype_decl();
+        }
         let parsed_decl = match self.peek() {
             Token::Int
             | Token::Char
