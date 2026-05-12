@@ -60,6 +60,7 @@ enum Token {
     Alignof,
     Alignas,
     StaticAssert,
+    Generic,
     Return,
     If,
     Else,
@@ -1246,6 +1247,7 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "_Alignof" => Token::Alignof,
                     "_Alignas" => Token::Alignas,
                     "_Static_assert" => Token::StaticAssert,
+                    "_Generic" => Token::Generic,
                     "return" => Token::Return,
                     "if" => Token::If,
                     "else" => Token::Else,
@@ -6256,6 +6258,10 @@ impl Parser {
                 self.expect_closing_paren_after("grouped expression")?;
                 Ok(expr)
             }
+            Token::Generic => Err(Self::error_at(
+                "generic selections are not supported".to_string(),
+                &found,
+            )),
             token => Err(Self::error_at(
                 format!("expected expression, found {token:?}"),
                 &found,

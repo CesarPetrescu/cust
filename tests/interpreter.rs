@@ -89,6 +89,18 @@ fn rejects_preprocessor_directives_with_context() {
 }
 
 #[test]
+fn rejects_generic_selections_with_context() {
+    let program = include_str!("fixtures/invalid/generic_selection.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "generic selections are not supported at line 2, column 12"
+    );
+}
+
+#[test]
 fn supports_hexadecimal_and_octal_integer_literals() {
     let program = include_str!("fixtures/valid/integer_literal_bases.c");
 

@@ -4,7 +4,26 @@ Last updated: 2026-05-12
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-12 autonomous unsupported preprocessor-directive diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser/lexer trust gaps for newly discovered malformed programs, additional C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, remaining declaration specifier syntax if any, deliberately scoped builtins, and unsupported C preprocessing forms. The selected work package closes a concrete preprocessor-free subset diagnostic gap: source beginning with `#include <stdio.h>` now reports `preprocessor directives are not supported` with the existing source-line/caret context instead of falling through to generic `unexpected character '#'`. The fix is lexer-local and intentionally does not add macro/include preprocessing.
+All passed after the 2026-05-12 autonomous unsupported C11 `_Generic` diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), the remaining P0 parser/lexer trust bucket for newly discovered malformed programs, additional C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, remaining parser-metadata declaration syntax, deliberately scoped builtins, and unsupported C11 expression forms. The selected work package closes a concrete parser-trust gap for unsupported C11 generic selections: `_Generic(1, int: 2, default: 3)` now reports `generic selections are not supported` at the `_Generic` keyword instead of falling through to a misleading association-list parser error. The fix is lexer/parser-local and intentionally does not add type-dispatch semantics.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_generic_selections_with_context -- --nocapture  # RED failed with downstream association-list parser error before implementation; GREEN passed after implementation
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test --test interpreter rejects_generic_selections_with_context -- --nocapture
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-05-12 autonomous unsupported preprocessor-directive diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser/lexer trust gaps for newly discovered malformed programs, additional C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, remaining declaration specifier syntax if any, deliberately scoped builtins, and unsupported C preprocessing forms. The selected work package closes a concrete preprocessor-free subset diagnostic gap: source beginning with `#include <stdio.h>` now reports `preprocessor directives are not supported` with the existing source-line/caret context instead of falling through to generic `unexpected character '#'`. The fix is lexer-local and intentionally does not add macro/include preprocessing.
 
 Commands verified:
 

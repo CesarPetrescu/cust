@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-12: No external documentation was needed for unsupported C11 `_Generic` diagnostic polish. Implementation decision: Cust still does not implement generic selections/type dispatch; the lexer recognizes `_Generic` as a keyword and the parser rejects it at primary-expression position with `generic selections are not supported`, avoiding misleading association-list parser errors. See `references/cust-generic-selection-diagnostics.md`.
+
 - 2026-05-12: No external documentation was needed for unsupported preprocessor-directive diagnostic polish. Implementation decision: Cust remains preprocessor-free; the lexer now detects `#` before the generic unexpected-character fallback and reports `preprocessor directives are not supported` with source-line/caret context, rather than adding a directive token or invoking a native preprocessor. See `references/cust-preprocessor-directive-diagnostics.md`.
 
 - 2026-05-12: No external documentation was needed for unsupported `goto`/label diagnostic polish. Implementation decision: arbitrary jumps/labels remain outside Cust's structured-control-flow subset; the parser now recognizes `goto` as a keyword and detects statement-leading `identifier:` labels before expression-statement parsing so both unsupported forms get targeted diagnostics.
