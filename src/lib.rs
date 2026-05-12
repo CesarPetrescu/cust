@@ -1465,6 +1465,14 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 push_token(&mut tokens, Token::Gt, line, column);
                 advance_position(c, &mut line, &mut column, &mut i);
             }
+            '#' => {
+                return Err(lexer_error_with_context(
+                    "preprocessor directives are not supported".to_string(),
+                    source,
+                    line,
+                    column,
+                ));
+            }
             other => {
                 return Err(lexer_error_with_context(
                     format!("unexpected character '{other}'"),

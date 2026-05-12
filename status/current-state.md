@@ -4,7 +4,22 @@ Last updated: 2026-05-12
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-12 autonomous unsupported `goto`/label diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser recovery for newly discovered malformed programs, additional compound-literal edge cases, aggregate-kind diagnostic polish, remaining declaration specifier syntax if any, deliberately scoped builtins, and unsupported C statement forms. The selected work package closes a concrete parser-trust gap for unsupported C jump labels: `goto done;` now reports `goto statements are not supported` at the `goto` keyword, and `done:` now reports `labels are not supported` at the label identifier instead of falling through to generic missing-assignment/missing-semicolon diagnostics. The fix is parser-local and intentionally does not add arbitrary jump execution.
+All passed after the 2026-05-12 autonomous unsupported preprocessor-directive diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser/lexer trust gaps for newly discovered malformed programs, additional C-compatible compound-literal edge cases, aggregate-kind diagnostic polish, remaining declaration specifier syntax if any, deliberately scoped builtins, and unsupported C preprocessing forms. The selected work package closes a concrete preprocessor-free subset diagnostic gap: source beginning with `#include <stdio.h>` now reports `preprocessor directives are not supported` with the existing source-line/caret context instead of falling through to generic `unexpected character '#'`. The fix is lexer-local and intentionally does not add macro/include preprocessing.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_preprocessor_directives_with_context -- --nocapture  # RED failed with generic unexpected '#' diagnostic before implementation; GREEN passed after implementation
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --test interpreter reports_function_name_when_recursive_calls_exceed_depth_limit -- --nocapture
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-05-12 autonomous unsupported `goto`/label diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed before changes), active blockers (none), remaining P0 parser recovery for newly discovered malformed programs, additional compound-literal edge cases, aggregate-kind diagnostic polish, remaining declaration specifier syntax if any, deliberately scoped builtins, and unsupported C statement forms. The selected work package closes a concrete parser-trust gap for unsupported C jump labels: `goto done;` now reports `goto statements are not supported` at the `goto` keyword, and `done:` now reports `labels are not supported` at the label identifier instead of falling through to generic missing-assignment/missing-semicolon diagnostics. The fix is parser-local and intentionally does not add arbitrary jump execution.
 
 Commands verified:
 

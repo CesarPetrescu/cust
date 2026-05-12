@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-05-12: No external documentation was needed for unsupported preprocessor-directive diagnostic polish. Implementation decision: Cust remains preprocessor-free; the lexer now detects `#` before the generic unexpected-character fallback and reports `preprocessor directives are not supported` with source-line/caret context, rather than adding a directive token or invoking a native preprocessor. See `references/cust-preprocessor-directive-diagnostics.md`.
+
 - 2026-05-12: No external documentation was needed for unsupported `goto`/label diagnostic polish. Implementation decision: arbitrary jumps/labels remain outside Cust's structured-control-flow subset; the parser now recognizes `goto` as a keyword and detects statement-leading `identifier:` labels before expression-statement parsing so both unsupported forms get targeted diagnostics.
 
 - 2026-05-12: No external documentation was needed for variadic function-parameter diagnostic polish. Implementation decision: C varargs remain outside Cust's runtime subset; the parser now detects `...` in function parameter lists before generic type parsing and reports a targeted unsupported diagnostic at the first dot.

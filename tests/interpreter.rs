@@ -77,6 +77,18 @@ fn reports_source_context_for_out_of_range_integer_literal() {
 }
 
 #[test]
+fn rejects_preprocessor_directives_with_context() {
+    let program = include_str!("fixtures/invalid/preprocessor_directive.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "preprocessor directives are not supported at line 1, column 1\n#include <stdio.h>\n^"
+    );
+}
+
+#[test]
 fn supports_hexadecimal_and_octal_integer_literals() {
     let program = include_str!("fixtures/valid/integer_literal_bases.c");
 
