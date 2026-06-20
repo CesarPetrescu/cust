@@ -4,7 +4,25 @@ Last updated: 2026-06-20
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-20 autonomous inferred aggregate array declaration run. Ideation considered failing tests/builds (none from status; focused baseline was clean before implementation), active blockers (none), newly discovered parser diagnostics, compound-literal edge cases, aggregate-kind diagnostics, standard-library-like builtins, and the next concrete C declaration/initializer parity gap. The selected work package closes inferred-length aggregate array declarations because it is high-impact, scoped, and reuses already-verified aggregate-array initializer/runtime paths. Cust now accepts direct and typedef-spelled aggregate arrays with empty brackets when an initializer is present, including `struct Point points[] = {{1, 2}, {.y = 4}, [3] = {5, 6}};`, `const struct Point fixed[] = {{7, 8}, {.x = 9}};`, and `union Number numbers[] = {{3}, [2] = {.value = 5}};`. The inferred length feeds existing zero-fill, `sizeof`, pointer decay/arithmetic, const enforcement, and mutation aliasing; initializer-less aggregate arrays now get the targeted `expected '=' after inferred aggregate array declaration` diagnostic.
+All passed after the 2026-06-20 autonomous pointer cast expression run. Ideation considered failing tests/builds (none; pre-change `cargo test` passed), active blockers (none), newly discovered parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostics, standard-library-like builtins, and pointer/aggregate parity gaps. The selected work package closes one-level C pointer cast expressions because it is a compact high-impact pointer-conformance gap adjacent to existing scalar casts and pointer typedefs. Cust now accepts casts such as `(int *)0`, `(const int *)0`, `(IntPtr)(values + 1)`, `(ConstIntPtr)cursor`, and `sizeof(*(char *)0)` over the existing safe one-level scalar/aggregate pointer subset. Runtime values remain interpreter-owned pointers; assignment/argument boundaries still validate concrete pointee type compatibility, and explicit casts preserve source const-pointee safety instead of allowing unsafe const discard.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter pointer_cast -- --nocapture  # RED failed with expected "pointer casts are not supported" before implementation; GREEN passed after implementation
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-20 autonomous inferred aggregate array declaration run. Ideation considered failing tests/builds (none from status; focused baseline was clean before implementation), active blockers (none), newly discovered parser diagnostics, compound-literal edge cases, aggregate-kind diagnostics, standard-library-like builtins, and the next concrete C declaration/initializer parity gap. The selected work package closes inferred-length aggregate array declarations because it is high-impact, scoped, and reuses already-verified aggregate-array initializer/runtime paths. Cust now accepts direct and typedef-spelled aggregate arrays with empty brackets when an initializer is present, including `struct Point points[] = {{1, 2}, {.y = 4}, [3] = {5, 6}};`, `const struct Point fixed[] = {{7, 8}, {.x = 9}};`, and `union Number numbers[] = {{3}, [2] = {.value = 5}};`. The inferred length feeds existing zero-fill, `sizeof`, pointer decay/arithmetic, const enforcement, and mutation aliasing; initializer-less aggregate arrays now get the targeted `expected '=' after inferred aggregate array declaration` diagnostic.
 
 Commands verified:
 

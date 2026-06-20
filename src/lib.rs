@@ -343,6 +343,11 @@ enum Expr {
         ty: CType,
         expr: Box<Expr>,
     },
+    PointerCast {
+        pointee: PointeeType,
+        points_to_const: bool,
+        expr: Box<Expr>,
+    },
     VoidCast(Box<Expr>),
     ScalarLiteral {
         ty: CType,
@@ -5796,7 +5801,7 @@ impl Parser {
 
     fn parse_cast(&mut self) -> CustResult<Expr> {
         self.expect(Token::LParen)?;
-        self.consume_type_qualifiers();
+        let leading_const = self.consume_type_qualifiers();
         let type_token = self.peek_located().clone();
         if self.matches(&Token::Void) {
             self.expect_closing_paren_after("cast type")?;
@@ -5804,10 +5809,29 @@ impl Parser {
         }
         let decl_type = self.parse_decl_type("cast type")?;
         if self.matches(&Token::Star) {
-            return Err(Self::error_at(
-                "pointer casts are not supported".to_string(),
-                self.previous(),
-            ));
+            let pointee = match decl_type {
+                DeclType::Scalar(ty) => PointeeType::Scalar(ty),
+                DeclType::Struct(type_name) => PointeeType::Struct(type_name),
+                DeclType::Pointer { .. } => {
+                    return Err(Self::error_at(
+                        "pointer-to-pointer casts are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
+                DeclType::Array(_, _) => {
+                    return Err(Self::error_at(
+                        "pointer-to-array casts are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
+            };
+            self.consume_type_qualifiers();
+            self.expect_closing_paren_after("cast type")?;
+            return Ok(Expr::PointerCast {
+                pointee,
+                points_to_const: leading_const,
+                expr: Box::new(self.parse_unary()?),
+            });
         }
         let ty = match decl_type {
             DeclType::Scalar(ty) => ty,
@@ -5841,7 +5865,18 @@ impl Parser {
                     type_name,
                 });
             }
-            DeclType::Pointer { .. } | DeclType::Array(_, _) => {
+            DeclType::Pointer {
+                pointee,
+                points_to_const,
+            } => {
+                self.expect_closing_paren_after("cast type")?;
+                return Ok(Expr::PointerCast {
+                    pointee,
+                    points_to_const: leading_const || points_to_const,
+                    expr: Box::new(self.parse_unary()?),
+                });
+            }
+            DeclType::Array(_, _) => {
                 return Err(Self::error_at(
                     "pointer casts are not supported".to_string(),
                     &type_token,
@@ -7717,6 +7752,7 @@ impl Interpreter {
                 Ok(None)
             }
             Expr::StringLiteral(_) => Ok(Some(PointeeType::Scalar(CType::Char))),
+            Expr::PointerCast { pointee, .. } => Ok(Some(pointee.clone())),
             Expr::Call { name, .. } => match self
                 .functions
                 .get(name)
@@ -7818,6 +7854,11 @@ impl Interpreter {
                 _ => false,
             },
             Expr::Comma(_, right) => self.pointer_expr_points_to_const(right),
+            Expr::PointerCast {
+                points_to_const,
+                expr,
+                ..
+            } => *points_to_const || self.pointer_expr_points_to_const(expr),
             Expr::Conditional {
                 then_expr,
                 else_expr,
@@ -11005,6 +11046,7 @@ impl Interpreter {
     fn eval_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
         match expr {
             Expr::Number(0) => Ok(PointerValue::Null),
+            Expr::PointerCast { expr, .. } => self.eval_pointer(expr),
             Expr::Conditional {
                 cond,
                 then_expr,
@@ -11829,7 +11871,8 @@ impl Interpreter {
             | Expr::AddressOfStructPtrField { .. }
             | Expr::StringLiteral(_)
             | Expr::ArrayLiteral { .. }
-            | Expr::AggregateArrayLiteral { .. } => true,
+            | Expr::AggregateArrayLiteral { .. }
+            | Expr::PointerCast { .. } => true,
             Expr::Var(name) | Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
                 matches!(
                     self.find_variable(name),
@@ -12172,9 +12215,8 @@ impl Interpreter {
             | Expr::AddressOfAggregateField { .. }
             | Expr::StringLiteral(_)
             | Expr::ArrayLiteral { .. }
-            | Expr::AggregateArrayLiteral { .. } => {
-                Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
-            }
+            | Expr::AggregateArrayLiteral { .. }
+            | Expr::PointerCast { .. } => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
             Expr::Assign { name, .. } => match self.find_variable(name).cloned() {
                 Some(Value::Pointer { .. }) => Ok(Self::pointer_truthy(&self.eval_pointer(expr)?)),
                 Some(Value::Scalar { .. }) => Ok(self.eval(expr)? != 0),
@@ -12661,7 +12703,8 @@ impl Interpreter {
             | Expr::AddressOfStructPtrArrayField { .. }
             | Expr::AddressOfScalarLiteral { .. }
             | Expr::AddressOfAggregateLiteral { .. }
-            | Expr::AddressOfAggregateField { .. } => Ok(POINTER_SIZE),
+            | Expr::AddressOfAggregateField { .. }
+            | Expr::PointerCast { .. } => Ok(POINTER_SIZE),
             Expr::Deref(pointer) => self.sizeof_deref(pointer),
             Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
                 self.sizeof_assignment_result(name)
@@ -13941,9 +13984,9 @@ impl Interpreter {
         match expr {
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
-            Expr::ArrayLiteral { .. } | Expr::AggregateArrayLiteral { .. } => {
-                Err(CustError::new("pointer value used as scalar"))
-            }
+            Expr::ArrayLiteral { .. }
+            | Expr::AggregateArrayLiteral { .. }
+            | Expr::PointerCast { .. } => Err(CustError::new("pointer value used as scalar")),
             Expr::StructGet { name, fields } => self.read_struct_field(name, fields),
             Expr::StructArrayGet {
                 name,

@@ -102,6 +102,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/pointers_scalars.c",
     "tests/fixtures/compat/valid/single_statement_control_bodies.c",
     "tests/fixtures/compat/valid/scalar_cast_expressions.c",
+    "tests/fixtures/compat/valid/pointer_cast_expressions.c",
     "tests/fixtures/compat/valid/scalar_compound_literals.c",
     "tests/fixtures/compat/valid/scalar_compound_literal_lvalues.c",
     "tests/fixtures/compat/valid/signed_unsigned_int_types.c",

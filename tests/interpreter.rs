@@ -684,6 +684,24 @@ fn supports_scalar_cast_expressions() {
 }
 
 #[test]
+fn supports_pointer_cast_expressions() {
+    let program = include_str!("fixtures/valid/pointer_cast_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 29);
+}
+
+#[test]
+fn rejects_pointer_casts_that_discard_const_pointees() {
+    let program = include_str!("fixtures/invalid/pointer_cast_const_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
 fn supports_void_cast_expressions() {
     let program = include_str!("fixtures/valid/void_cast_expressions.c");
 
