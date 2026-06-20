@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-06-21: No external documentation was needed for comma-separated pointer/array/aggregate declaration-list parity. Implementation decision: declaration-list initializers use assignment-expression precedence rather than the full comma-expression parser so source commas remain declarator separators; explicit parenthesized comma expressions still work inside initializers. The parser now reuses `Stmt::Many` for same-scope pointer, array, struct, union, and array-alias declarators, preserving const and pointee metadata per declarator.
+
 - 2026-06-20: No external documentation was needed for comma-separated scalar declaration lists. Implementation decision: Cust now lowers scalar declarator lists into a same-scope `Stmt::Many` wrapper rather than a block so `int a = 1, b;` and `for (int i = 0, j = 3; ...)` preserve C declaration scope and omitted-initializer zeroing. Static-local lists are expanded into separate `StaticLocal` declarations with distinct persistent storage IDs. Pointer, array, and aggregate declarator lists remain follow-up work.
 
 - 2026-06-20: No external documentation was needed for one-level pointer cast expression support. Implementation decision: Cust now accepts `(T *)expr` and pointer-typedef cast spellings for the existing one-level scalar/aggregate pointer subset, with casts usable in pointer expression contexts and non-evaluating `sizeof(*(T *)0)` type inference. Runtime pointer values remain interpreter-owned and type-checked at assignment/argument boundaries; explicit casts do not discard const-pointee safety because cast metadata preserves source constness as well as target `const`.

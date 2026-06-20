@@ -220,6 +220,13 @@ fn supports_comma_separated_scalar_declarations() {
 }
 
 #[test]
+fn supports_comma_separated_pointer_array_and_aggregate_declarations() {
+    let program = include_str!("fixtures/valid/comma_separated_mixed_declarations.c");
+
+    assert_eq!(interpret(program).unwrap(), 125);
+}
+
+#[test]
 fn rejects_initialized_extern_local_declarations() {
     let program = include_str!("fixtures/invalid/extern_local_initializer.c");
 

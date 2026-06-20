@@ -3318,16 +3318,24 @@ impl Parser {
                     } else {
                         Vec::new()
                     };
-                    if require_semi {
-                        self.expect_semicolon_after("array declaration")?;
-                    }
-                    return Ok(Stmt::ArrayDecl {
+                    let stmt = Stmt::ArrayDecl {
                         name,
                         elem_type: ty,
                         len,
                         init,
                         is_const: leading_const,
-                    });
+                    };
+                    if require_semi && self.matches(&Token::Comma) {
+                        return self.parse_declarator_list_tail(
+                            stmt,
+                            DeclType::Array(PointeeType::Scalar(ty), len),
+                            leading_const,
+                        );
+                    }
+                    if require_semi {
+                        self.expect_semicolon_after("array declaration")?;
+                    }
+                    return Ok(stmt);
                 }
                 PointeeType::Struct(type_name) => {
                     let init = if self.matches(&Token::Assign) {
@@ -3336,16 +3344,24 @@ impl Parser {
                     } else {
                         Vec::new()
                     };
-                    if require_semi {
-                        self.expect_semicolon_after("struct array declaration")?;
-                    }
-                    return Ok(Stmt::StructArrayDecl {
-                        type_name,
+                    let stmt = Stmt::StructArrayDecl {
+                        type_name: type_name.clone(),
                         name,
                         len,
                         init,
                         is_const: leading_const,
-                    });
+                    };
+                    if require_semi && self.matches(&Token::Comma) {
+                        return self.parse_declarator_list_tail(
+                            stmt,
+                            DeclType::Array(PointeeType::Struct(type_name), len),
+                            leading_const,
+                        );
+                    }
+                    if require_semi {
+                        self.expect_semicolon_after("struct array declaration")?;
+                    }
+                    return Ok(stmt);
                 }
             }
         }
@@ -3363,16 +3379,9 @@ impl Parser {
             }
             let expr = if self.matches(&Token::Assign) {
                 self.last_decl_had_initializer = true;
-                self.parse_expr()?
-            } else if self.check(&Token::Semi) {
-                self.advance();
-                return Ok(Stmt::PointerDecl {
-                    name,
-                    ty: Self::decl_type_to_pointee_type(&decl_type),
-                    expr: Expr::Number(0),
-                    is_const,
-                    points_to_const,
-                });
+                self.parse_assignment_expr()?
+            } else if matches!(self.peek(), Token::Semi | Token::Comma) {
+                Expr::Number(0)
             } else {
                 let context = match &decl_type {
                     DeclType::Scalar(_)
@@ -3392,6 +3401,16 @@ impl Parser {
                 self.expect_assign_after(context)?;
                 unreachable!("expect_assign_after only returns Ok after consuming '='")
             };
+            let stmt = Stmt::PointerDecl {
+                name,
+                ty: Self::decl_type_to_pointee_type(&decl_type),
+                expr,
+                is_const,
+                points_to_const,
+            };
+            if require_semi && self.matches(&Token::Comma) {
+                return self.parse_declarator_list_tail(stmt, decl_type, leading_const);
+            }
             if require_semi {
                 let context = match &decl_type {
                     DeclType::Scalar(_)
@@ -3410,13 +3429,7 @@ impl Parser {
                 };
                 self.expect_semicolon_after(context)?;
             }
-            return Ok(Stmt::PointerDecl {
-                name,
-                ty: Self::decl_type_to_pointee_type(&decl_type),
-                expr,
-                is_const,
-                points_to_const,
-            });
+            return Ok(stmt);
         }
         if matches!(decl_type, DeclType::Struct(_)) {
             if self.matches(&Token::LBracket) {
@@ -3449,17 +3462,25 @@ impl Parser {
                     };
                     (len, init)
                 };
-                if require_semi {
-                    self.expect_semicolon_after("struct array declaration")?;
-                }
                 if let DeclType::Struct(type_name) = decl_type {
-                    return Ok(Stmt::StructArrayDecl {
-                        type_name,
+                    let stmt = Stmt::StructArrayDecl {
+                        type_name: type_name.clone(),
                         name,
                         len,
                         init,
                         is_const: leading_const,
-                    });
+                    };
+                    if require_semi && self.matches(&Token::Comma) {
+                        return self.parse_declarator_list_tail(
+                            stmt,
+                            DeclType::Struct(type_name),
+                            leading_const,
+                        );
+                    }
+                    if require_semi {
+                        self.expect_semicolon_after("struct array declaration")?;
+                    }
+                    return Ok(stmt);
                 }
             }
             let init = if self.matches(&Token::Assign) {
@@ -3472,21 +3493,29 @@ impl Parser {
                         self.parse_struct_initializer(type_name)?,
                     ))
                 } else {
-                    Some(StructVarInitializer::Expr(self.parse_expr()?))
+                    Some(StructVarInitializer::Expr(self.parse_assignment_expr()?))
                 }
             } else {
                 None
             };
-            if require_semi {
-                self.expect_semicolon_after("struct variable declaration")?;
-            }
             if let DeclType::Struct(type_name) = decl_type {
-                return Ok(Stmt::StructVarDecl {
-                    type_name,
+                let stmt = Stmt::StructVarDecl {
+                    type_name: type_name.clone(),
                     name,
                     init,
                     is_const: leading_const,
-                });
+                };
+                if require_semi && self.matches(&Token::Comma) {
+                    return self.parse_declarator_list_tail(
+                        stmt,
+                        DeclType::Struct(type_name),
+                        leading_const,
+                    );
+                }
+                if require_semi {
+                    self.expect_semicolon_after("struct variable declaration")?;
+                }
+                return Ok(stmt);
             }
         }
         let DeclType::Scalar(ty) = decl_type else {
@@ -3519,48 +3548,290 @@ impl Parser {
                 };
                 (len, init)
             };
-            if require_semi {
-                self.expect_semicolon_after("array declaration")?;
-            }
-            return Ok(Stmt::ArrayDecl {
+            let stmt = Stmt::ArrayDecl {
                 name,
                 elem_type: ty,
                 len,
                 init,
                 is_const: leading_const,
-            });
+            };
+            if require_semi && self.matches(&Token::Comma) {
+                return self.parse_declarator_list_tail(stmt, DeclType::Scalar(ty), leading_const);
+            }
+            if require_semi {
+                self.expect_semicolon_after("array declaration")?;
+            }
+            return Ok(stmt);
         }
         let first_decl = self.parse_scalar_declarator_tail(name, ty, leading_const)?;
         if require_semi && self.matches(&Token::Comma) {
-            let mut declarations = vec![first_decl];
-            loop {
-                if self.check(&Token::Star) {
-                    return Err(Self::error_at(
-                        "pointer declarators in comma-separated scalar declarations are not supported"
-                            .to_string(),
-                        self.peek_located(),
-                    ));
-                }
-                let name = self.expect_ident_after("variable name after ','")?;
-                if self.check(&Token::LBracket) {
-                    return Err(Self::error_at(
-                        "array declarators in comma-separated scalar declarations are not supported"
-                            .to_string(),
-                        self.peek_located(),
-                    ));
-                }
-                declarations.push(self.parse_scalar_declarator_tail(name, ty, leading_const)?);
-                if !self.matches(&Token::Comma) {
-                    break;
-                }
-            }
-            self.expect_semicolon_after("variable declaration")?;
-            return Ok(Stmt::Many(declarations));
+            return self.parse_declarator_list_tail(
+                first_decl,
+                DeclType::Scalar(ty),
+                leading_const,
+            );
         }
         if require_semi {
             self.expect_semicolon_after("variable declaration")?;
         }
         Ok(first_decl)
+    }
+
+    fn parse_declarator_list_tail(
+        &mut self,
+        first_decl: Stmt,
+        base_type: DeclType,
+        leading_const: bool,
+    ) -> CustResult<Stmt> {
+        let mut declarations = vec![first_decl];
+        loop {
+            declarations.push(self.parse_additional_declarator(base_type.clone(), leading_const)?);
+            if !self.matches(&Token::Comma) {
+                break;
+            }
+        }
+        self.expect_semicolon_after("declaration list")?;
+        Ok(Stmt::Many(declarations))
+    }
+
+    fn parse_additional_declarator(
+        &mut self,
+        base_type: DeclType,
+        leading_const: bool,
+    ) -> CustResult<Stmt> {
+        if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
+            if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
+                return Err(Self::error_at(
+                    "function pointer declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            return Err(Self::error_at(
+                "parenthesized pointer declarations are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
+        let has_explicit_star = self.matches(&Token::Star);
+        let post_star_const = has_explicit_star && self.consume_type_qualifiers();
+        if matches!(base_type, DeclType::Pointer { .. }) && has_explicit_star {
+            return Err(Self::error_at(
+                "pointer-to-pointer declarations are not supported".to_string(),
+                self.previous(),
+            ));
+        }
+        if has_explicit_star && self.check(&Token::Star) {
+            return Err(Self::error_at(
+                "pointer-to-pointer declarations are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
+        let is_pointer = has_explicit_star || matches!(base_type, DeclType::Pointer { .. });
+        let name = if has_explicit_star {
+            match &base_type {
+                DeclType::Scalar(_) => self.expect_ident_after("pointer name after '*'")?,
+                DeclType::Struct(_) => self.expect_ident_after("struct pointer name after '*'")?,
+                DeclType::Array(_, _) => {
+                    return Err(Self::error_at(
+                        "pointer-to-array declarations are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
+                DeclType::Pointer { .. } => unreachable!("pointer aliases with stars return above"),
+            }
+        } else {
+            match &base_type {
+                DeclType::Scalar(_) => self.expect_ident_after("variable name after ','")?,
+                DeclType::Struct(_) => self.expect_ident_after("struct variable name after ','")?,
+                DeclType::Pointer { .. } => self.expect_ident_after("pointer name after ','")?,
+                DeclType::Array(_, _) => self.expect_ident_after("array name after ','")?,
+            }
+        };
+
+        if let DeclType::Array(pointee, len) = base_type.clone() {
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "multidimensional array declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            return match pointee {
+                PointeeType::Scalar(ty) => {
+                    let init = if self.matches(&Token::Assign) {
+                        self.last_decl_had_initializer = true;
+                        self.parse_array_initializer_or_string(&name, len, ty)?
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(Stmt::ArrayDecl {
+                        name,
+                        elem_type: ty,
+                        len,
+                        init,
+                        is_const: leading_const,
+                    })
+                }
+                PointeeType::Struct(type_name) => {
+                    let init = if self.matches(&Token::Assign) {
+                        self.last_decl_had_initializer = true;
+                        self.parse_struct_array_initializer(&name, &type_name, len)?
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(Stmt::StructArrayDecl {
+                        type_name,
+                        name,
+                        len,
+                        init,
+                        is_const: leading_const,
+                    })
+                }
+            };
+        }
+
+        if is_pointer {
+            let (is_const, points_to_const) = if has_explicit_star {
+                (post_star_const, leading_const)
+            } else {
+                (leading_const, Self::decl_type_points_to_const(&base_type))
+            };
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "pointer array declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            let expr = if self.matches(&Token::Assign) {
+                self.last_decl_had_initializer = true;
+                self.parse_assignment_expr()?
+            } else if matches!(self.peek(), Token::Semi | Token::Comma) {
+                Expr::Number(0)
+            } else {
+                let context = match &base_type {
+                    DeclType::Scalar(_)
+                    | DeclType::Pointer {
+                        pointee: PointeeType::Scalar(_),
+                        ..
+                    } => "pointer declaration",
+                    DeclType::Struct(_)
+                    | DeclType::Pointer {
+                        pointee: PointeeType::Struct(_),
+                        ..
+                    } => "struct pointer declaration",
+                    DeclType::Array(_, _) => {
+                        unreachable!("array aliases return before pointer declarations")
+                    }
+                };
+                self.expect_assign_after(context)?;
+                unreachable!("expect_assign_after only returns Ok after consuming '='")
+            };
+            return Ok(Stmt::PointerDecl {
+                name,
+                ty: Self::decl_type_to_pointee_type(&base_type),
+                expr,
+                is_const,
+                points_to_const,
+            });
+        }
+
+        match base_type {
+            DeclType::Scalar(ty) => {
+                if self.matches(&Token::LBracket) {
+                    let (len, init) = if self.matches(&Token::RBracket) {
+                        if !self.matches(&Token::Assign) {
+                            self.expect_assign_after("inferred array declaration")?;
+                            unreachable!("expect_assign_after only returns Ok after consuming '='")
+                        }
+                        self.last_decl_had_initializer = true;
+                        let init = self.parse_inferred_array_initializer_or_string(&name, ty)?;
+                        let len = Self::infer_array_initializer_len(&init);
+                        (len, init)
+                    } else {
+                        let len = self.expect_array_len()?;
+                        self.expect_closing_bracket_after("array length")?;
+                        if self.check(&Token::LBracket) {
+                            return Err(Self::error_at(
+                                "multidimensional array declarations are not supported".to_string(),
+                                self.peek_located(),
+                            ));
+                        }
+                        let init = if self.matches(&Token::Assign) {
+                            self.last_decl_had_initializer = true;
+                            self.parse_array_initializer_or_string(&name, len, ty)?
+                        } else {
+                            Vec::new()
+                        };
+                        (len, init)
+                    };
+                    Ok(Stmt::ArrayDecl {
+                        name,
+                        elem_type: ty,
+                        len,
+                        init,
+                        is_const: leading_const,
+                    })
+                } else {
+                    self.parse_scalar_declarator_tail(name, ty, leading_const)
+                }
+            }
+            DeclType::Struct(type_name) => {
+                if self.matches(&Token::LBracket) {
+                    let (len, init) = if self.matches(&Token::RBracket) {
+                        if !self.matches(&Token::Assign) {
+                            self.expect_assign_after("inferred aggregate array declaration")?;
+                            unreachable!("expect_assign_after only returns Ok after consuming '='")
+                        }
+                        self.last_decl_had_initializer = true;
+                        let init =
+                            self.parse_aggregate_array_compound_initializer(&type_name, None)?;
+                        let len = Self::infer_struct_array_initializer_len(&init);
+                        (len, init)
+                    } else {
+                        let len = self.expect_array_len()?;
+                        self.expect_closing_bracket_after("struct array length")?;
+                        if self.check(&Token::LBracket) {
+                            return Err(Self::error_at(
+                                "multidimensional array declarations are not supported".to_string(),
+                                self.peek_located(),
+                            ));
+                        }
+                        let init = if self.matches(&Token::Assign) {
+                            self.last_decl_had_initializer = true;
+                            self.parse_struct_array_initializer(&name, &type_name, len)?
+                        } else {
+                            Vec::new()
+                        };
+                        (len, init)
+                    };
+                    Ok(Stmt::StructArrayDecl {
+                        type_name,
+                        name,
+                        len,
+                        init,
+                        is_const: leading_const,
+                    })
+                } else {
+                    let init = if self.matches(&Token::Assign) {
+                        self.last_decl_had_initializer = true;
+                        if self.check(&Token::LBrace) {
+                            Some(StructVarInitializer::Fields(
+                                self.parse_struct_initializer(&type_name)?,
+                            ))
+                        } else {
+                            Some(StructVarInitializer::Expr(self.parse_assignment_expr()?))
+                        }
+                    } else {
+                        None
+                    };
+                    Ok(Stmt::StructVarDecl {
+                        type_name,
+                        name,
+                        init,
+                        is_const: leading_const,
+                    })
+                }
+            }
+            DeclType::Pointer { .. } | DeclType::Array(_, _) => unreachable!("handled above"),
+        }
     }
 
     fn parse_scalar_declarator_tail(
@@ -4320,21 +4591,29 @@ impl Parser {
             let name = self.expect_ident_after("struct pointer name after '*'")?;
             let expr = if self.matches(&Token::Assign) {
                 self.last_decl_had_initializer = true;
-                self.parse_expr()?
-            } else if self.check(&Token::Semi) {
+                self.parse_assignment_expr()?
+            } else if matches!(self.peek(), Token::Semi | Token::Comma) {
                 Expr::Number(0)
             } else {
                 self.expect_assign_after("struct pointer declaration")?;
                 unreachable!("expect_assign_after only returns Ok after consuming '='")
             };
-            self.expect_semicolon_after("struct pointer declaration")?;
-            return Ok(Stmt::PointerDecl {
+            let stmt = Stmt::PointerDecl {
                 name,
-                ty: PointeeType::Struct(type_name),
+                ty: PointeeType::Struct(type_name.clone()),
                 expr,
                 is_const,
                 points_to_const,
-            });
+            };
+            if self.matches(&Token::Comma) {
+                return self.parse_declarator_list_tail(
+                    stmt,
+                    DeclType::Struct(type_name),
+                    points_to_const,
+                );
+            }
+            self.expect_semicolon_after("struct pointer declaration")?;
+            return Ok(stmt);
         }
         let name = self.expect_ident_after("struct variable name")?;
         if self.matches(&Token::LBracket) {
@@ -4358,14 +4637,22 @@ impl Parser {
                 };
                 (len, init)
             };
-            self.expect_semicolon_after("struct array declaration")?;
-            return Ok(Stmt::StructArrayDecl {
-                type_name,
+            let stmt = Stmt::StructArrayDecl {
+                type_name: type_name.clone(),
                 name,
                 len,
                 init,
                 is_const: points_to_const,
-            });
+            };
+            if self.matches(&Token::Comma) {
+                return self.parse_declarator_list_tail(
+                    stmt,
+                    DeclType::Struct(type_name),
+                    points_to_const,
+                );
+            }
+            self.expect_semicolon_after("struct array declaration")?;
+            return Ok(stmt);
         }
         let init = if self.matches(&Token::Assign) {
             self.last_decl_had_initializer = true;
@@ -4374,18 +4661,26 @@ impl Parser {
                     self.parse_struct_initializer(&type_name)?,
                 ))
             } else {
-                Some(StructVarInitializer::Expr(self.parse_expr()?))
+                Some(StructVarInitializer::Expr(self.parse_assignment_expr()?))
             }
         } else {
             None
         };
-        self.expect_semicolon_after("struct variable declaration")?;
-        Ok(Stmt::StructVarDecl {
-            type_name,
+        let stmt = Stmt::StructVarDecl {
+            type_name: type_name.clone(),
             name,
             init,
             is_const: points_to_const,
-        })
+        };
+        if self.matches(&Token::Comma) {
+            return self.parse_declarator_list_tail(
+                stmt,
+                DeclType::Struct(type_name),
+                points_to_const,
+            );
+        }
+        self.expect_semicolon_after("struct variable declaration")?;
+        Ok(stmt)
     }
 
     fn parse_enum_decl(&mut self) -> CustResult<Stmt> {
