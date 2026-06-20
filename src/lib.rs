@@ -3399,22 +3399,34 @@ impl Parser {
         }
         if matches!(decl_type, DeclType::Struct(_)) {
             if self.matches(&Token::LBracket) {
-                let len = self.expect_array_len()?;
-                self.expect_closing_bracket_after("struct array length")?;
-                if self.check(&Token::LBracket) {
-                    return Err(Self::error_at(
-                        "multidimensional array declarations are not supported".to_string(),
-                        self.peek_located(),
-                    ));
-                }
                 let DeclType::Struct(type_name) = &decl_type else {
                     unreachable!("struct declarations return above")
                 };
-                let init = if self.matches(&Token::Assign) {
+                let (len, init) = if self.matches(&Token::RBracket) {
+                    if !self.matches(&Token::Assign) {
+                        self.expect_assign_after("inferred aggregate array declaration")?;
+                        unreachable!("expect_assign_after only returns Ok after consuming '='")
+                    }
                     self.last_decl_had_initializer = true;
-                    self.parse_struct_array_initializer(&name, type_name, len)?
+                    let init = self.parse_aggregate_array_compound_initializer(type_name, None)?;
+                    let len = Self::infer_struct_array_initializer_len(&init);
+                    (len, init)
                 } else {
-                    Vec::new()
+                    let len = self.expect_array_len()?;
+                    self.expect_closing_bracket_after("struct array length")?;
+                    if self.check(&Token::LBracket) {
+                        return Err(Self::error_at(
+                            "multidimensional array declarations are not supported".to_string(),
+                            self.peek_located(),
+                        ));
+                    }
+                    let init = if self.matches(&Token::Assign) {
+                        self.last_decl_had_initializer = true;
+                        self.parse_struct_array_initializer(&name, type_name, len)?
+                    } else {
+                        Vec::new()
+                    };
+                    (len, init)
                 };
                 if require_semi {
                     self.expect_semicolon_after("struct array declaration")?;
@@ -4275,13 +4287,25 @@ impl Parser {
         }
         let name = self.expect_ident_after("struct variable name")?;
         if self.matches(&Token::LBracket) {
-            let len = self.expect_array_len()?;
-            self.expect_closing_bracket_after("struct array length")?;
-            let init = if self.matches(&Token::Assign) {
+            let (len, init) = if self.matches(&Token::RBracket) {
+                if !self.matches(&Token::Assign) {
+                    self.expect_assign_after("inferred aggregate array declaration")?;
+                    unreachable!("expect_assign_after only returns Ok after consuming '='")
+                }
                 self.last_decl_had_initializer = true;
-                self.parse_struct_array_initializer(&name, &type_name, len)?
+                let init = self.parse_aggregate_array_compound_initializer(&type_name, None)?;
+                let len = Self::infer_struct_array_initializer_len(&init);
+                (len, init)
             } else {
-                Vec::new()
+                let len = self.expect_array_len()?;
+                self.expect_closing_bracket_after("struct array length")?;
+                let init = if self.matches(&Token::Assign) {
+                    self.last_decl_had_initializer = true;
+                    self.parse_struct_array_initializer(&name, &type_name, len)?
+                } else {
+                    Vec::new()
+                };
+                (len, init)
             };
             self.expect_semicolon_after("struct array declaration")?;
             return Ok(Stmt::StructArrayDecl {

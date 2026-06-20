@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-06-20: No external documentation was needed for inferred aggregate array declaration support. Implementation decision: empty-bracket aggregate array declarations are accepted only with immediate brace initializers, then lowered to the existing fixed-length `Stmt::StructArrayDecl` runtime path after inferring length from positional and designated aggregate entries; initializer-less `struct Point points[];` remains rejected because the object type is incomplete.
+
 - 2026-05-12: No external documentation was needed for inferred scalar array declaration support. Implementation decision: empty-bracket scalar array declarations are accepted only when immediately followed by an initializer, then lowered to the existing fixed-length `Stmt::ArrayDecl` runtime path after inferring length from positional/designated/string initializers; initializer-less `int values[];` remains rejected because the object type is incomplete.
 
 - 2026-05-12: No external documentation was needed for block-scope function prototype syntax parity. Implementation decision: local function declarations/prototypes are parsed as no-op statements that reuse Cust's existing function signature parser (including unnamed and array parameters) while runtime calls still resolve against top-level function definitions; nested block-scope function definitions remain unsupported.

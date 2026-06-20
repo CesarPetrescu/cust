@@ -1,10 +1,26 @@
 # Cust Current State
 
-Last updated: 2026-05-12
+Last updated: 2026-06-20
 
 ## Latest autonomous verification
 
-All passed after the 2026-05-12 autonomous inferred scalar array declaration run. Ideation considered failing tests/builds (none; pre-change `cargo test` passed), active blockers (none), remaining parser-trust diagnostics for newly discovered malformed programs, additional compound-literal/aggregate edge cases, scoped standard-library-like builtins, CLI/product polish, and C declaration/initializer parity gaps. The selected work package closes C-style inferred-length scalar array declarations because it is a compact, high-impact conformance feature that reuses existing array initializer, designator, string literal, `sizeof`, const-array, and pointer-decay runtime paths. Cust now accepts `int values[] = {1, 2, [4] = 5, 6};`, `char word[] = "cat";`, and `const int table[] = {[1] = 3, [3] = 4};`, inferring the object length from positional/designated/string initializers while requiring an initializer for empty-bracket declarations.
+All passed after the 2026-06-20 autonomous inferred aggregate array declaration run. Ideation considered failing tests/builds (none from status; focused baseline was clean before implementation), active blockers (none), newly discovered parser diagnostics, compound-literal edge cases, aggregate-kind diagnostics, standard-library-like builtins, and the next concrete C declaration/initializer parity gap. The selected work package closes inferred-length aggregate array declarations because it is high-impact, scoped, and reuses already-verified aggregate-array initializer/runtime paths. Cust now accepts direct and typedef-spelled aggregate arrays with empty brackets when an initializer is present, including `struct Point points[] = {{1, 2}, {.y = 4}, [3] = {5, 6}};`, `const struct Point fixed[] = {{7, 8}, {.x = 9}};`, and `union Number numbers[] = {{3}, [2] = {.value = 5}};`. The inferred length feeds existing zero-fill, `sizeof`, pointer decay/arithmetic, const enforcement, and mutation aliasing; initializer-less aggregate arrays now get the targeted `expected '=' after inferred aggregate array declaration` diagnostic.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter inferred_aggregate_array -- --nocapture  # RED failed with expected empty-bracket aggregate-array parser errors before implementation; GREEN passed after implementation
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-05-12 autonomous inferred scalar array declaration run. Ideation considered failing tests/builds (none; pre-change `cargo test` passed), active blockers (none), remaining parser-trust diagnostics for newly discovered malformed programs, additional compound-literal/aggregate edge cases, scoped standard-library-like builtins, CLI/product polish, and C declaration/initializer parity gaps. The selected work package closes C-style inferred-length scalar array declarations because it is a compact, high-impact conformance feature that reuses existing array initializer, designator, string literal, `sizeof`, const-array, and pointer-decay runtime paths. Cust now accepts `int values[] = {1, 2, [4] = 5, 6};`, `char word[] = "cat";`, and `const int table[] = {[1] = 3, [3] = 4};`, inferring the object length from positional/designated/string initializers while requiring an initializer for empty-bracket declarations.
 
 Commands verified:
 
