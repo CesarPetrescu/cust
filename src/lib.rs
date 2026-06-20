@@ -825,6 +825,7 @@ enum IncrementOp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Stmt {
     Empty,
+    Many(Vec<Stmt>),
     StaticLocal {
         id: usize,
         decl: Box<Stmt>,
@@ -3104,10 +3105,25 @@ impl Parser {
                 ));
             }
         };
-        Ok(Stmt::StaticLocal {
-            id,
-            decl: Box::new(decl),
-        })
+        match decl {
+            Stmt::Many(declarations) => {
+                self.next_static_local_id += declarations.len().saturating_sub(1);
+                Ok(Stmt::Many(
+                    declarations
+                        .into_iter()
+                        .enumerate()
+                        .map(|(offset, declaration)| Stmt::StaticLocal {
+                            id: id + offset,
+                            decl: Box::new(declaration),
+                        })
+                        .collect(),
+                ))
+            }
+            declaration => Ok(Stmt::StaticLocal {
+                id,
+                decl: Box::new(declaration),
+            }),
+        }
     }
 
     fn parse_thread_local_local_decl(&mut self) -> CustResult<Stmt> {
@@ -3514,29 +3530,59 @@ impl Parser {
                 is_const: leading_const,
             });
         }
+        let first_decl = self.parse_scalar_declarator_tail(name, ty, leading_const)?;
+        if require_semi && self.matches(&Token::Comma) {
+            let mut declarations = vec![first_decl];
+            loop {
+                if self.check(&Token::Star) {
+                    return Err(Self::error_at(
+                        "pointer declarators in comma-separated scalar declarations are not supported"
+                            .to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                let name = self.expect_ident_after("variable name after ','")?;
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "array declarators in comma-separated scalar declarations are not supported"
+                            .to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                declarations.push(self.parse_scalar_declarator_tail(name, ty, leading_const)?);
+                if !self.matches(&Token::Comma) {
+                    break;
+                }
+            }
+            self.expect_semicolon_after("variable declaration")?;
+            return Ok(Stmt::Many(declarations));
+        }
+        if require_semi {
+            self.expect_semicolon_after("variable declaration")?;
+        }
+        Ok(first_decl)
+    }
+
+    fn parse_scalar_declarator_tail(
+        &mut self,
+        name: String,
+        ty: CType,
+        is_const: bool,
+    ) -> CustResult<Stmt> {
         let expr = if self.matches(&Token::Assign) {
             self.last_decl_had_initializer = true;
             self.parse_scalar_initializer_expr(&format!("variable '{name}'"))?
-        } else if self.check(&Token::Semi) {
-            self.advance();
-            return Ok(Stmt::VarDecl {
-                name,
-                ty,
-                expr: Expr::Number(0),
-                is_const: leading_const,
-            });
+        } else if matches!(self.peek(), Token::Semi | Token::Comma) {
+            Expr::Number(0)
         } else {
             self.expect_assign_after("variable declaration")?;
             unreachable!("expect_assign_after only returns Ok after consuming '='")
         };
-        if require_semi {
-            self.expect_semicolon_after("variable declaration")?;
-        }
         Ok(Stmt::VarDecl {
             name,
             ty,
             expr,
-            is_const: leading_const,
+            is_const,
         })
     }
 
@@ -13586,6 +13632,15 @@ impl Interpreter {
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
         match stmt {
             Stmt::Empty => Ok(ExecFlow::None),
+            Stmt::Many(statements) => {
+                for statement in statements {
+                    match self.exec_stmt(statement)? {
+                        ExecFlow::None => {}
+                        flow => return Ok(flow),
+                    }
+                }
+                Ok(ExecFlow::None)
+            }
             Stmt::StaticLocal { id, decl } => self.exec_static_local(*id, decl),
             Stmt::VarDecl {
                 name,

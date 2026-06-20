@@ -4,7 +4,24 @@ Last updated: 2026-06-20
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-20 autonomous pointer cast expression run. Ideation considered failing tests/builds (none; pre-change `cargo test` passed), active blockers (none), newly discovered parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostics, standard-library-like builtins, and pointer/aggregate parity gaps. The selected work package closes one-level C pointer cast expressions because it is a compact high-impact pointer-conformance gap adjacent to existing scalar casts and pointer typedefs. Cust now accepts casts such as `(int *)0`, `(const int *)0`, `(IntPtr)(values + 1)`, `(ConstIntPtr)cursor`, and `sizeof(*(char *)0)` over the existing safe one-level scalar/aggregate pointer subset. Runtime values remain interpreter-owned pointers; assignment/argument boundaries still validate concrete pointee type compatibility, and explicit casts preserve source const-pointee safety instead of allowing unsafe const discard.
+All passed after the 2026-06-20 autonomous comma-separated scalar declaration run. Ideation considered failing tests/builds (none; pre-change `cargo test` passed), active blockers (none), newly discovered parser diagnostics, additional compound-literal edges, aggregate-kind diagnostics, remaining declaration-specifier syntax, pointer/aggregate parity gaps, and a foundational C declaration syntax gap. The selected work package closes comma-separated scalar declarators because it is high-impact, compact, and improves ordinary C source compatibility without changing pointer/aggregate storage semantics. Cust now accepts scalar declaration lists such as `int a = 1, b, c = a + 2;`, `const int x = 7, y = 11;`, `char first = 'A', next = 'B';`, `_Bool ok = expr, nope;`, and `for (int i = 0, j = 3; ... )` in global, local, static-local, and `for` initializer contexts. The parser lowers each declarator to same-scope `Stmt::Many` entries, preserving zero-initialization for omitted initializers and const metadata for every declared scalar. Pointer and array declarators in comma-separated lists remain intentionally outside this slice and are tracked as the next follow-up.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_comma_separated_scalar_declarations -- --nocapture  # RED failed with expected comma-after-declaration parser error before implementation; GREEN passed after implementation
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-20 autonomous pointer cast expression run. Ideation considered failing tests/builds (none; pre-change `cargo test` passed), active blockers (none), newly discovered parser diagnostics, additional compound-literal edge cases, aggregate-kind diagnostics, standard-library-like builtins, and pointer/aggregate parity gaps. The selected work package closes one-level C pointer cast expressions because it is a compact high-impact pointer-conformance gap adjacent to existing scalar casts and pointer typedefs. Cust now accepts casts such as `(int *)0`, `(const int *)0`, `(IntPtr)(values + 1)`, `(ConstIntPtr)cursor`, and `sizeof(*(char *)0)` over the existing safe one-level scalar/aggregate pointer subset. Runtime values remain interpreter-owned pointers; assignment/argument boundaries still validate concrete pointee type compatibility, and explicit casts preserve source const-pointee safety instead of allowing unsafe const discard.
 
 Commands verified:
 
