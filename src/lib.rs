@@ -4617,6 +4617,18 @@ impl Parser {
     fn parse_aggregate_var_decl(&mut self) -> CustResult<Stmt> {
         self.last_decl_had_initializer = false;
         self.consume_alignment_specifiers()?;
+        if matches!(
+            (
+                self.peek(),
+                self.tokens.get(self.pos + 1).map(|token| &token.kind)
+            ),
+            (Token::Struct | Token::Union, Some(Token::LBrace))
+        ) {
+            let (type_name, kind, _) = self.parse_aggregate_definition_body(false, true)?;
+            let points_to_const = self.consume_type_qualifiers();
+            return self.parse_aggregate_var_decl_after_type(kind, type_name, points_to_const);
+        }
+
         let kind = match self.advance().kind {
             Token::Struct => AggregateKind::Struct,
             Token::Union => AggregateKind::Union,
@@ -4626,21 +4638,30 @@ impl Parser {
         let type_name = self.expect_ident_after(&format!("{keyword} type name"))?;
         let Some(internal_type_name) = self.resolve_aggregate_type(&type_name) else {
             return Err(CustError::new(format!(
-                "undefined struct type '{type_name}'"
+                "undefined {keyword} type '{type_name}'"
             )));
         };
-        let type_name = internal_type_name;
         let points_to_const = self.consume_type_qualifiers();
+        self.parse_aggregate_var_decl_after_type(kind, internal_type_name, points_to_const)
+    }
+
+    fn parse_aggregate_var_decl_after_type(
+        &mut self,
+        kind: AggregateKind,
+        type_name: String,
+        points_to_const: bool,
+    ) -> CustResult<Stmt> {
+        let keyword = kind.keyword();
         if self.matches(&Token::Star) {
             let is_const = self.consume_type_qualifiers();
-            let name = self.expect_ident_after("struct pointer name after '*'")?;
+            let name = self.expect_ident_after(&format!("{keyword} pointer name after '*'"))?;
             let expr = if self.matches(&Token::Assign) {
                 self.last_decl_had_initializer = true;
                 self.parse_assignment_expr()?
             } else if matches!(self.peek(), Token::Semi | Token::Comma) {
                 Expr::Number(0)
             } else {
-                self.expect_assign_after("struct pointer declaration")?;
+                self.expect_assign_after(&format!("{keyword} pointer declaration"))?;
                 unreachable!("expect_assign_after only returns Ok after consuming '='")
             };
             let stmt = Stmt::PointerDecl {
@@ -4657,10 +4678,10 @@ impl Parser {
                     points_to_const,
                 );
             }
-            self.expect_semicolon_after("struct pointer declaration")?;
+            self.expect_semicolon_after(&format!("{keyword} pointer declaration"))?;
             return Ok(stmt);
         }
-        let name = self.expect_ident_after("struct variable name")?;
+        let name = self.expect_ident_after(&format!("{keyword} variable name"))?;
         if self.matches(&Token::LBracket) {
             let (len, init) = if self.matches(&Token::RBracket) {
                 if !self.matches(&Token::Assign) {
@@ -4696,7 +4717,7 @@ impl Parser {
                     points_to_const,
                 );
             }
-            self.expect_semicolon_after("struct array declaration")?;
+            self.expect_semicolon_after(&format!("{keyword} array declaration"))?;
             return Ok(stmt);
         }
         let init = if self.matches(&Token::Assign) {
@@ -4724,7 +4745,7 @@ impl Parser {
                 points_to_const,
             );
         }
-        self.expect_semicolon_after("struct variable declaration")?;
+        self.expect_semicolon_after(&format!("{keyword} variable declaration"))?;
         Ok(stmt)
     }
 

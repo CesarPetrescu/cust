@@ -957,6 +957,13 @@ fn supports_designated_array_and_struct_initializers() {
 }
 
 #[test]
+fn supports_anonymous_aggregate_object_declarations() {
+    let program = include_str!("fixtures/valid/anonymous_aggregate_objects.c");
+
+    assert_eq!(interpret(program).unwrap(), 42);
+}
+
+#[test]
 fn supports_path_designated_struct_initializers() {
     let program = include_str!("fixtures/valid/path_designated_initializers.c");
 

@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-06-21: No external documentation was needed for anonymous aggregate object declarations. Implementation decision: reuse the same unique internal aggregate type identity path that backs anonymous aggregate typedef definitions, but do not install a user-visible tag or typedef alias for `struct { ... } object` / `union { ... } object` declarations. The parser now handles the inline aggregate body before the ordinary aggregate declarator tail, so supported global/local variables and arrays reuse existing aggregate initializer/runtime paths and C compiler-oracle coverage.
+
 - 2026-06-21: No external documentation was needed for unsupported aggregate bit-field diagnostics. Implementation decision: Cust still does not support C bit-field storage/layout semantics, but `:` after a parsed struct/union field declarator should be detected before the generic field semicolon helper so users get targeted `bit-field aggregate fields are not supported` diagnostics for both `struct` and `union` fields. See `references/cust-aggregate-bit-field-diagnostics.md`.
 
 - 2026-06-21: No external documentation was needed for unsupported aggregate forward-declaration diagnostics. Implementation decision: Cust still does not support incomplete aggregate types, but top-level `struct Name;` and `union Name;` should be detected before aggregate variable-declaration parsing so users get targeted `forward struct/union declarations are not supported` diagnostics rather than misleading `undefined struct type` errors. See `references/cust-aggregate-forward-declaration-diagnostics.md`.
