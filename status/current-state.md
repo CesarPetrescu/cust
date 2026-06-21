@@ -4,7 +4,24 @@ Last updated: 2026-06-21
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-21 autonomous anonymous aggregate object declaration run. Ideation considered failing tests/builds (none; `cargo test` passed after pull), active blockers (none), the first unchecked `status/todo.md` parser/runtime parity item, mixed supported-subset conformance fixtures, malformed-source exact diagnostics, and a typedef-const metadata audit. The selected work package adds ordinary C anonymous `struct`/`union` object declarations in supported aggregate object contexts: global/local anonymous aggregate variables, aggregate arrays, brace/designated initializers, scalar array fields, union fields, and field reads now reuse Cust's existing unique internal aggregate type identities without leaking source-level tags or aliases. Anonymous aggregate typedef definitions remain supported as before; no native ABI layout compatibility was added.
+All passed after the 2026-06-21 autonomous anonymous aggregate const/pointer declaration-list run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, extending anonymous aggregate object coverage to const/pointer/address-of forms, mixed supported-subset conformance fixtures, malformed-source diagnostic fuzzing, and a typedef-const metadata audit. The selected work package extends anonymous `struct { ... }` / `union { ... }` object declarations to qualified aggregate specifiers and same-declaration pointer declarator lists: `const struct { ... } value = {...};` now parses through aggregate declaration routing, and declaration lists such as `struct { int x; int y; } point = {4, 5}, copy = point, *slot = &point;` preserve one unique anonymous type across all declarators so pointer initialization, `->` mutation, by-value copy, and const aggregate write diagnostics work without installing user-visible tags or aliases.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_const_and_pointer_anonymous_aggregate_declaration_lists -- --nocapture  # RED failed with expected missing qualified-anonymous aggregate routing; GREEN passed after parser routing fix
+cargo test --test interpreter anonymous_aggregate -- --nocapture
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-21 autonomous anonymous aggregate object declaration run. Ideation considered failing tests/builds (none; `cargo test` passed after pull), active blockers (none), the first unchecked `status/todo.md` parser/runtime parity item, mixed supported-subset conformance fixtures, malformed-source exact diagnostics, and a typedef-const metadata audit. The selected work package adds ordinary C anonymous `struct`/`union` object declarations in supported aggregate object contexts: global/local anonymous aggregate variables, aggregate arrays, brace/designated initializers, scalar array fields, union fields, and field reads now reuse Cust's existing unique internal aggregate type identities without leaking source-level tags or aliases. Anonymous aggregate typedef definitions remain supported as before; no native ABI layout compatibility was added.
 
 Commands verified:
 

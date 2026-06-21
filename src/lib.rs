@@ -1768,6 +1768,11 @@ impl Parser {
                     "function specifiers are only supported on function declarations".to_string(),
                     self.peek_located(),
                 ));
+            } else if self.starts_qualified_aggregate_declaration() {
+                let global = self.parse_aggregate_var_decl()?;
+                if !is_extern || self.last_decl_had_initializer {
+                    globals.push(global);
+                }
             } else if matches!(
                 self.peek(),
                 Token::Int
@@ -2208,6 +2213,24 @@ impl Parser {
             self.tokens.get(index + 1).map(|token| &token.kind),
             Some(Token::LParen)
         )
+    }
+
+    fn starts_qualified_aggregate_declaration(&self) -> bool {
+        let mut offset = 0;
+        let mut saw_qualifier = false;
+        while matches!(
+            self.tokens.get(self.pos + offset).map(|token| &token.kind),
+            Some(Token::Const | Token::Volatile | Token::Restrict)
+        ) || self.bare_atomic_qualifier_at(self.pos + offset)
+        {
+            saw_qualifier = true;
+            offset += 1;
+        }
+        saw_qualifier
+            && matches!(
+                self.tokens.get(self.pos + offset).map(|token| &token.kind),
+                Some(Token::Struct | Token::Union)
+            )
     }
 
     fn parse_const_qualified_decl_type(&mut self, context: &str) -> CustResult<(bool, DeclType)> {
@@ -2948,6 +2971,9 @@ impl Parser {
     fn parse_stmt(&mut self) -> CustResult<Stmt> {
         if self.starts_local_function_declaration() {
             return self.parse_local_function_prototype_decl();
+        }
+        if self.starts_qualified_aggregate_declaration() {
+            return self.parse_aggregate_var_decl();
         }
         match self.peek() {
             Token::Semi => self.parse_empty(),
@@ -4617,6 +4643,7 @@ impl Parser {
     fn parse_aggregate_var_decl(&mut self) -> CustResult<Stmt> {
         self.last_decl_had_initializer = false;
         self.consume_alignment_specifiers()?;
+        let leading_const = self.consume_type_qualifiers();
         if matches!(
             (
                 self.peek(),
@@ -4625,7 +4652,7 @@ impl Parser {
             (Token::Struct | Token::Union, Some(Token::LBrace))
         ) {
             let (type_name, kind, _) = self.parse_aggregate_definition_body(false, true)?;
-            let points_to_const = self.consume_type_qualifiers();
+            let points_to_const = leading_const || self.consume_type_qualifiers();
             return self.parse_aggregate_var_decl_after_type(kind, type_name, points_to_const);
         }
 
@@ -4641,7 +4668,7 @@ impl Parser {
                 "undefined {keyword} type '{type_name}'"
             )));
         };
-        let points_to_const = self.consume_type_qualifiers();
+        let points_to_const = leading_const || self.consume_type_qualifiers();
         self.parse_aggregate_var_decl_after_type(kind, internal_type_name, points_to_const)
     }
 

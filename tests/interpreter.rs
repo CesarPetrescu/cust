@@ -964,6 +964,25 @@ fn supports_anonymous_aggregate_object_declarations() {
 }
 
 #[test]
+fn supports_const_and_pointer_anonymous_aggregate_declaration_lists() {
+    let program = include_str!("fixtures/valid/anonymous_aggregate_const_and_pointers.c");
+
+    assert_eq!(interpret(program).unwrap(), 26);
+}
+
+#[test]
+fn rejects_assignment_to_const_anonymous_aggregate_fields() {
+    let program = include_str!("fixtures/invalid/const_anonymous_aggregate_field_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("cannot assign to const variable 'point'"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn supports_path_designated_struct_initializers() {
     let program = include_str!("fixtures/valid/path_designated_initializers.c");
 
