@@ -11353,6 +11353,63 @@ impl Interpreter {
         }
     }
 
+    fn eval_struct_field_array_element_assignment_expr(
+        &mut self,
+        name: &str,
+        fields: &[String],
+        index: &Expr,
+        rhs: &Expr,
+    ) -> CustResult<ReturnValue> {
+        let (rhs_type, rhs_fields) = match self.eval_struct_expr(rhs)? {
+            ReturnValue::Struct { type_name, fields } => (type_name, fields),
+            ReturnValue::Scalar(_) | ReturnValue::Pointer { .. } => {
+                return Err(CustError::new("struct assignment requires struct value"));
+            }
+        };
+
+        self.ensure_variable_mutable(name)?;
+        let scope_id = self
+            .find_variable_scope_id(name)
+            .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
+        let index = self.checked_struct_aggregate_array_field_index(name, None, fields, index)?;
+        let field_label = Self::field_path_label(fields).to_string();
+        let struct_types = self.struct_types.clone();
+
+        match self.struct_field_by_scope(scope_id, name, None, fields)? {
+            StructFieldValue::StructArray { is_const, .. } if *is_const => {
+                return Err(CustError::new(format!(
+                    "cannot assign to const struct field '{field_label}'"
+                )));
+            }
+            StructFieldValue::StructArray { .. } => {}
+            _ => {
+                return Err(CustError::new(format!(
+                    "struct field '{field_label}' is not a struct array"
+                )));
+            }
+        }
+
+        let (target_type, target_fields) =
+            self.struct_field_array_element_fields_mut(scope_id, name, None, fields, index)?;
+        if target_type != rhs_type {
+            return Err(CustError::new(format!(
+                "cannot assign struct '{}' to struct '{}'",
+                Self::aggregate_label_from(&struct_types, &rhs_type),
+                Self::aggregate_label_from(&struct_types, &target_type)
+            )));
+        }
+        if target_fields.values().any(StructFieldValue::is_const) {
+            return Err(CustError::new(format!(
+                "cannot assign to struct '{target_type}' with const fields"
+            )));
+        }
+        *target_fields = StructFieldValue::deep_clone_fields(&rhs_fields);
+        Ok(ReturnValue::Struct {
+            type_name: rhs_type,
+            fields: rhs_fields,
+        })
+    }
+
     fn assign_struct_pointer_copy(&mut self, pointer: &Expr, rhs: &Expr) -> CustResult<()> {
         self.eval_struct_pointer_assignment_expr(pointer, rhs)
             .map(|_| ())
@@ -12767,17 +12824,24 @@ impl Interpreter {
                 self.eval_struct_index_assignment_expr(name, index, value)?;
                 return Ok(());
             }
+            Expr::StructArraySet {
+                name,
+                fields,
+                index,
+                value,
+            } if self
+                .direct_struct_aggregate_array_field_type(name, fields)?
+                .is_some() =>
+            {
+                self.eval_struct_field_array_element_assignment_expr(name, fields, index, value)?;
+                return Ok(());
+            }
             Expr::DerefSet { pointer, value } => {
-                if match pointer.as_ref() {
-                    Expr::Var(name) => matches!(
-                        self.find_variable(name),
-                        Some(Value::Pointer {
-                            ty: PointeeType::Struct(_),
-                            ..
-                        })
-                    ),
-                    _ => false,
-                } {
+                if self
+                    .eval_pointer(pointer)
+                    .and_then(|target| self.find_struct_pointer_fields(&target).map(|_| ()))
+                    .is_ok()
+                {
                     self.assign_struct_pointer_copy(pointer, value)?;
                     return Ok(());
                 }
@@ -13805,6 +13869,17 @@ impl Interpreter {
             Expr::Assign { name, value } => self.eval_struct_assignment_expr(name, value),
             Expr::ArraySet { name, index, value } => {
                 self.eval_struct_index_assignment_expr(name, index, value)
+            }
+            Expr::StructArraySet {
+                name,
+                fields,
+                index,
+                value,
+            } if self
+                .direct_struct_aggregate_array_field_type(name, fields)?
+                .is_some() =>
+            {
+                self.eval_struct_field_array_element_assignment_expr(name, fields, index, value)
             }
             Expr::DerefSet { pointer, value } => {
                 self.eval_struct_pointer_assignment_expr(pointer, value)

@@ -1173,6 +1173,26 @@ fn supports_aggregate_array_element_copy_assignment() {
 }
 
 #[test]
+fn supports_embedded_aggregate_array_element_copy_assignment() {
+    let program = include_str!("fixtures/valid/embedded_aggregate_array_element_assignment.c");
+
+    assert_eq!(interpret(program).unwrap(), 72);
+}
+
+#[test]
+fn rejects_embedded_aggregate_array_element_assignment_type_mismatch() {
+    let program = include_str!(
+        "fixtures/invalid/embedded_aggregate_array_element_assignment_type_mismatch.c"
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign struct 'Size' to struct 'Point'"
+    );
+}
+
+#[test]
 fn supports_aggregate_pointer_dereference_values_and_assignment() {
     let program = include_str!("fixtures/valid/aggregate_pointer_dereference.c");
 
