@@ -11268,6 +11268,91 @@ impl Interpreter {
         }
     }
 
+    fn eval_struct_index_assignment_expr(
+        &mut self,
+        name: &str,
+        index: &Expr,
+        rhs: &Expr,
+    ) -> CustResult<ReturnValue> {
+        let (rhs_type, rhs_fields) = match self.eval_struct_expr(rhs)? {
+            ReturnValue::Struct { type_name, fields } => (type_name, fields),
+            ReturnValue::Scalar(_) | ReturnValue::Pointer { .. } => {
+                return Err(CustError::new("struct assignment requires struct value"));
+            }
+        };
+
+        if matches!(
+            self.find_variable(name),
+            Some(Value::Pointer {
+                ty: PointeeType::Struct(_),
+                ..
+            })
+        ) {
+            self.ensure_pointer_variable_pointee_mutable(name)?;
+            let Some(pointer) = self.indexed_struct_pointer(name, index)? else {
+                return Err(CustError::new(format!(
+                    "pointer '{name}' is not a struct pointer"
+                )));
+            };
+            self.ensure_struct_pointer_target_mutable(&pointer)?;
+            let struct_types = self.struct_types.clone();
+            let (target_type, target_fields) = self.find_struct_pointer_fields_mut(&pointer)?;
+            if target_type != rhs_type {
+                return Err(CustError::new(format!(
+                    "cannot assign struct '{}' to struct '{}'",
+                    Self::aggregate_label_from(&struct_types, &rhs_type),
+                    Self::aggregate_label_from(&struct_types, &target_type)
+                )));
+            }
+            if target_fields.values().any(StructFieldValue::is_const) {
+                return Err(CustError::new(format!(
+                    "cannot assign to struct '{target_type}' with const fields"
+                )));
+            }
+            *target_fields = StructFieldValue::deep_clone_fields(&rhs_fields);
+            return Ok(ReturnValue::Struct {
+                type_name: rhs_type,
+                fields: rhs_fields,
+            });
+        }
+
+        self.ensure_variable_mutable(name)?;
+        let index = self.checked_struct_element_index(name, index)?;
+        let struct_types = self.struct_types.clone();
+        match self.find_variable_mut(name) {
+            Some(Value::StructArray {
+                type_name,
+                elements,
+                read_only,
+            }) if *type_name == rhs_type => {
+                if *read_only {
+                    return Err(CustError::new(format!(
+                        "cannot modify read-only struct array '{name}'"
+                    )));
+                }
+                if elements[index].values().any(StructFieldValue::is_const) {
+                    return Err(CustError::new(format!(
+                        "cannot assign to struct '{type_name}' with const fields"
+                    )));
+                }
+                elements[index] = StructFieldValue::deep_clone_fields(&rhs_fields);
+                Ok(ReturnValue::Struct {
+                    type_name: rhs_type,
+                    fields: rhs_fields,
+                })
+            }
+            Some(Value::StructArray { type_name, .. }) => Err(CustError::new(format!(
+                "cannot assign struct '{}' to struct '{}'",
+                Self::aggregate_label_from(&struct_types, &rhs_type),
+                Self::aggregate_label_from(&struct_types, type_name)
+            ))),
+            Some(_) => Err(CustError::new(format!(
+                "variable '{name}' is not a struct array"
+            ))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
     fn assign_struct_pointer_copy(&mut self, pointer: &Expr, rhs: &Expr) -> CustResult<()> {
         self.eval_struct_pointer_assignment_expr(pointer, rhs)
             .map(|_| ())
@@ -12669,6 +12754,19 @@ impl Interpreter {
                 self.assign_struct_copy(name, value)?;
                 return Ok(());
             }
+            Expr::ArraySet { name, index, value }
+                if matches!(
+                    self.find_variable(name),
+                    Some(Value::StructArray { .. })
+                        | Some(Value::Pointer {
+                            ty: PointeeType::Struct(_),
+                            ..
+                        })
+                ) =>
+            {
+                self.eval_struct_index_assignment_expr(name, index, value)?;
+                return Ok(());
+            }
             Expr::DerefSet { pointer, value } => {
                 if match pointer.as_ref() {
                     Expr::Var(name) => matches!(
@@ -13705,6 +13803,9 @@ impl Interpreter {
                 self.eval_struct_expr(right)
             }
             Expr::Assign { name, value } => self.eval_struct_assignment_expr(name, value),
+            Expr::ArraySet { name, index, value } => {
+                self.eval_struct_index_assignment_expr(name, index, value)
+            }
             Expr::DerefSet { pointer, value } => {
                 self.eval_struct_pointer_assignment_expr(pointer, value)
             }
@@ -14124,6 +14225,17 @@ impl Interpreter {
                 Ok(ExecFlow::None)
             }
             Stmt::ArrayAssign { name, index, value } => {
+                if matches!(
+                    self.find_variable(name),
+                    Some(Value::StructArray { .. })
+                        | Some(Value::Pointer {
+                            ty: PointeeType::Struct(_),
+                            ..
+                        })
+                ) {
+                    self.eval_struct_index_assignment_expr(name, index, value)?;
+                    return Ok(ExecFlow::None);
+                }
                 let value = self.eval(value)?;
                 match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => {
@@ -14486,6 +14598,16 @@ impl Interpreter {
                 self.eval_increment_expr(target, *op, *prefix)
             }
             Expr::ArraySet { name, index, value } => {
+                if matches!(
+                    self.find_variable(name),
+                    Some(Value::StructArray { .. })
+                        | Some(Value::Pointer {
+                            ty: PointeeType::Struct(_),
+                            ..
+                        })
+                ) {
+                    return Err(CustError::new("struct value used as scalar expression"));
+                }
                 let value = self.eval(value)?;
                 match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => {

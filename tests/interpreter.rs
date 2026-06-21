@@ -1166,6 +1166,13 @@ fn supports_aggregate_array_decay_to_pointer_parameters() {
 }
 
 #[test]
+fn supports_aggregate_array_element_copy_assignment() {
+    let program = include_str!("fixtures/valid/aggregate_array_element_assignment.c");
+
+    assert_eq!(interpret(program).unwrap(), 49);
+}
+
+#[test]
 fn supports_aggregate_pointer_dereference_values_and_assignment() {
     let program = include_str!("fixtures/valid/aggregate_pointer_dereference.c");
 
