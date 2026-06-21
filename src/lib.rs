@@ -2294,12 +2294,12 @@ impl Parser {
     fn parse_typedef_decl(&mut self) -> CustResult<Option<Stmt>> {
         self.expect(Token::Typedef)?;
         let mut enum_constants = None;
-        let (alias, alias_context, anonymous_aggregate, alias_is_const) = if self
+        let (base_type, alias_context, anonymous_aggregate, leading_const) = if self
             .starts_typedef_aggregate_definition()
         {
             let (type_name, _, is_anonymous) = self.parse_aggregate_definition_body(false, true)?;
             (
-                TypeAlias::Struct(type_name),
+                DeclType::Struct(type_name),
                 "typedef alias name after aggregate definition",
                 is_anonymous,
                 false,
@@ -2308,7 +2308,7 @@ impl Parser {
             let constants = self.parse_enum_decl_body(false)?;
             enum_constants = Some(constants);
             (
-                TypeAlias::Scalar(CType::Int),
+                DeclType::Scalar(CType::Int),
                 "typedef alias name after enum definition",
                 false,
                 false,
@@ -2316,67 +2316,92 @@ impl Parser {
         } else {
             let (leading_const, base_type) =
                 self.parse_const_qualified_decl_type("typedef struct type name")?;
-            let (alias, alias_is_const) = if self.matches(&Token::Star) {
-                if self.check(&Token::Star) {
-                    return Err(Self::error_at(
-                        "pointer-to-pointer typedef aliases are not supported".to_string(),
-                        self.peek_located(),
-                    ));
-                }
-                let post_star_const = self.consume_type_qualifiers();
-                let alias = match base_type {
-                    DeclType::Scalar(ty) => TypeAlias::Pointer {
-                        pointee: PointeeType::Scalar(ty),
-                        points_to_const: leading_const,
-                    },
-                    DeclType::Struct(type_name) => TypeAlias::Pointer {
-                        pointee: PointeeType::Struct(type_name),
-                        points_to_const: leading_const,
-                    },
-                    DeclType::Pointer { .. } => {
-                        return Err(Self::error_at(
-                            "pointer-to-pointer typedef aliases are not supported".to_string(),
-                            self.previous(),
-                        ));
-                    }
-                    DeclType::Array(_, _) => {
-                        return Err(Self::error_at(
-                            "pointer-to-array typedef aliases are not supported".to_string(),
-                            self.previous(),
-                        ));
-                    }
-                };
-                (alias, post_star_const)
-            } else {
-                let alias = match base_type {
-                    DeclType::Scalar(ty) => TypeAlias::Scalar(ty),
-                    DeclType::Struct(type_name) => TypeAlias::Struct(type_name),
-                    DeclType::Pointer {
-                        pointee,
-                        points_to_const,
-                    } => TypeAlias::Pointer {
-                        pointee,
-                        points_to_const,
-                    },
-                    DeclType::Array(pointee, len) => TypeAlias::Array(pointee, len),
-                };
-                (alias, leading_const)
-            };
             (
-                alias,
+                base_type,
                 "typedef alias name after type",
                 false,
-                alias_is_const,
+                leading_const,
             )
         };
+
+        loop {
+            let (alias_name, alias, alias_is_const) =
+                self.parse_typedef_declarator(base_type.clone(), leading_const, alias_context)?;
+            self.register_typedef_alias(alias_name, alias, alias_is_const, anonymous_aggregate)?;
+            if !self.matches(&Token::Comma) {
+                break;
+            }
+        }
+        self.expect_semicolon_after("typedef declaration")?;
+        Ok(enum_constants.map(|constants| Stmt::EnumDecl { constants }))
+    }
+
+    fn parse_typedef_declarator(
+        &mut self,
+        base_type: DeclType,
+        leading_const: bool,
+        alias_context: &str,
+    ) -> CustResult<(String, TypeAlias, bool)> {
         if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
             return Err(Self::error_at(
                 "function pointer typedef aliases are not supported".to_string(),
                 self.peek_located(),
             ));
         }
+        let has_explicit_star = self.matches(&Token::Star);
+        if matches!(base_type, DeclType::Pointer { .. }) && has_explicit_star {
+            return Err(Self::error_at(
+                "pointer-to-pointer typedef aliases are not supported".to_string(),
+                self.previous(),
+            ));
+        }
+        if has_explicit_star && self.check(&Token::Star) {
+            return Err(Self::error_at(
+                "pointer-to-pointer typedef aliases are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
+        let post_star_const = has_explicit_star && self.consume_type_qualifiers();
         let alias_name = self.expect_ident_after(alias_context)?;
-        let alias = if self.matches(&Token::LBracket) {
+        let mut alias = if has_explicit_star {
+            match base_type {
+                DeclType::Scalar(ty) => TypeAlias::Pointer {
+                    pointee: PointeeType::Scalar(ty),
+                    points_to_const: leading_const,
+                },
+                DeclType::Struct(type_name) => TypeAlias::Pointer {
+                    pointee: PointeeType::Struct(type_name),
+                    points_to_const: leading_const,
+                },
+                DeclType::Pointer { .. } => unreachable!("pointer aliases with stars return above"),
+                DeclType::Array(_, _) => {
+                    return Err(Self::error_at(
+                        "pointer-to-array typedef aliases are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
+            }
+        } else {
+            match base_type {
+                DeclType::Scalar(ty) => TypeAlias::Scalar(ty),
+                DeclType::Struct(type_name) => TypeAlias::Struct(type_name),
+                DeclType::Pointer {
+                    pointee,
+                    points_to_const,
+                } => TypeAlias::Pointer {
+                    pointee,
+                    points_to_const,
+                },
+                DeclType::Array(pointee, len) => TypeAlias::Array(pointee, len),
+            }
+        };
+        let alias_is_const = if has_explicit_star {
+            post_star_const
+        } else {
+            leading_const
+        };
+
+        if self.matches(&Token::LBracket) {
             let len = self.expect_array_len()?;
             self.expect_closing_bracket_after("typedef array length")?;
             if self.check(&Token::LBracket) {
@@ -2385,7 +2410,7 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            match alias {
+            alias = match alias {
                 TypeAlias::Scalar(ty) => TypeAlias::Array(PointeeType::Scalar(ty), len),
                 TypeAlias::Struct(type_name) => {
                     TypeAlias::Array(PointeeType::Struct(type_name), len)
@@ -2402,17 +2427,24 @@ impl Parser {
                         self.previous(),
                     ));
                 }
-            }
-        } else {
-            alias
-        };
+            };
+        }
         if self.check(&Token::LParen) {
             return Err(Self::error_at(
                 "function typedef aliases are not supported".to_string(),
                 self.peek_located(),
             ));
         }
-        self.expect_semicolon_after("typedef declaration")?;
+        Ok((alias_name, alias, alias_is_const))
+    }
+
+    fn register_typedef_alias(
+        &mut self,
+        alias_name: String,
+        alias: TypeAlias,
+        alias_is_const: bool,
+        anonymous_aggregate: bool,
+    ) -> CustResult<()> {
         let anonymous_type_name = match (anonymous_aggregate, &alias) {
             (true, TypeAlias::Struct(type_name)) => Some(type_name.clone()),
             _ => None,
@@ -2439,7 +2471,7 @@ impl Parser {
                 .expect("parser always has a const typedef scope");
             const_scope.insert(alias_name);
         }
-        Ok(enum_constants.map(|constants| Stmt::EnumDecl { constants }))
+        Ok(())
     }
 
     fn starts_function_definition(&self) -> bool {

@@ -1,10 +1,28 @@
 # Cust Current State
 
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-21 autonomous anonymous aggregate array-pointer declaration-list conformance run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed conformance fixtures that combine declaration lists/aggregate pointers/const views/compound literals, and a typedef alias const-metadata audit. The selected work package locks in same-declaration anonymous aggregate arrays with pointer declarators, e.g. `struct { int x; int y; } points[3] = {...}, *slot = points + 1;` and matching anonymous union arrays/pointers. Focused RED initially failed due to an incorrect expected arithmetic total in the new test (Cust returned 31); after correcting the test expectation, the focused interpreter test and compiler-oracle suite passed. No production parser/runtime code was required because the previous anonymous aggregate declaration-list support already handled this supported C declarator shape.
+All passed after the 2026-06-22 autonomous comma-separated typedef alias run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed supported-subset conformance fixtures, anonymous aggregate pointer/const-array coverage, and auditing typedef alias const metadata in declaration contexts. The selected work package closes ordinary C typedef declarator-list parity because it is a compact, high-impact declaration syntax gap adjacent to previous declaration-list work: Cust now accepts forms such as `typedef int Count, *CountPtr, Counts[3];`, `typedef const int ConstCount, *ConstCountView, ConstCounts[2];`, `typedef struct Point Point, *PointPtr, Points[2];`, and `typedef struct { int value; int extra; } Anon, *AnonPtr, Anons[2];`. Per-declarator pointer stars, post-star const pointer-slot metadata, and array suffixes are preserved; unsupported pointer-to-pointer, pointer-array, function typedef, and multidimensional typedef diagnostics still apply per declarator.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_comma_separated_typedef_aliases -- --nocapture  # RED failed with old missing-semicolon typedef diagnostic; GREEN passed after parser refactor
+cargo test --test interpreter comma_separated_typedef -- --nocapture
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-21 autonomous anonymous aggregate array-pointer declaration-list conformance run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed conformance fixtures that combine declaration lists/aggregate pointers/const views/compound literals, and a typedef alias const-metadata audit. The selected work package locks in same-declaration anonymous aggregate arrays with pointer declarators, e.g. `struct { int x; int y; } points[3] = {...}, *slot = points + 1;` and matching anonymous union arrays/pointers. Focused RED initially failed due to an incorrect expected arithmetic total in the new test (Cust returned 31); after correcting the test expectation, the focused interpreter test and compiler-oracle suite passed. No production parser/runtime code was required because the previous anonymous aggregate declaration-list support already handled this supported C declarator shape.
 
 Commands verified:
 

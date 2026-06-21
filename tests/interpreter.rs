@@ -323,6 +323,13 @@ fn supports_const_typedef_aliases() {
 }
 
 #[test]
+fn supports_comma_separated_typedef_aliases() {
+    let program = include_str!("fixtures/valid/comma_separated_typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 81);
+}
+
+#[test]
 fn supports_const_pointer_typedef_aliases() {
     let program = include_str!("fixtures/valid/const_pointer_typedef_aliases.c");
 
@@ -414,6 +421,18 @@ fn rejects_const_pointer_typedef_alias_const_discard() {
 #[test]
 fn rejects_const_pointer_typedef_alias_slot_assignment() {
     let program = include_str!("fixtures/invalid/const_pointer_typedef_alias_slot_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("cannot assign to const variable 'slot'"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_const_pointer_slots_from_comma_separated_typedef_aliases() {
+    let program = include_str!("fixtures/invalid/comma_typedef_const_pointer_slot_assignment.c");
 
     let err = interpret(program).unwrap_err();
     assert!(
