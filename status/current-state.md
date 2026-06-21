@@ -4,7 +4,23 @@ Last updated: 2026-06-21
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-21 autonomous anonymous aggregate const/pointer declaration-list run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, extending anonymous aggregate object coverage to const/pointer/address-of forms, mixed supported-subset conformance fixtures, malformed-source diagnostic fuzzing, and a typedef-const metadata audit. The selected work package extends anonymous `struct { ... }` / `union { ... }` object declarations to qualified aggregate specifiers and same-declaration pointer declarator lists: `const struct { ... } value = {...};` now parses through aggregate declaration routing, and declaration lists such as `struct { int x; int y; } point = {4, 5}, copy = point, *slot = &point;` preserve one unique anonymous type across all declarators so pointer initialization, `->` mutation, by-value copy, and const aggregate write diagnostics work without installing user-visible tags or aliases.
+All passed after the 2026-06-21 autonomous anonymous aggregate array-pointer declaration-list conformance run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed conformance fixtures that combine declaration lists/aggregate pointers/const views/compound literals, and a typedef alias const-metadata audit. The selected work package locks in same-declaration anonymous aggregate arrays with pointer declarators, e.g. `struct { int x; int y; } points[3] = {...}, *slot = points + 1;` and matching anonymous union arrays/pointers. Focused RED initially failed due to an incorrect expected arithmetic total in the new test (Cust returned 31); after correcting the test expectation, the focused interpreter test and compiler-oracle suite passed. No production parser/runtime code was required because the previous anonymous aggregate declaration-list support already handled this supported C declarator shape.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_anonymous_aggregate_array_pointer_declaration_lists -- --nocapture  # RED failed with incorrect new-test expectation; GREEN passed after correcting expected result to 31
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-21 autonomous anonymous aggregate const/pointer declaration-list run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, extending anonymous aggregate object coverage to const/pointer/address-of forms, mixed supported-subset conformance fixtures, malformed-source diagnostic fuzzing, and a typedef-const metadata audit. The selected work package extends anonymous `struct { ... }` / `union { ... }` object declarations to qualified aggregate specifiers and same-declaration pointer declarator lists: `const struct { ... } value = {...};` now parses through aggregate declaration routing, and declaration lists such as `struct { int x; int y; } point = {4, 5}, copy = point, *slot = &point;` preserve one unique anonymous type across all declarators so pointer initialization, `->` mutation, by-value copy, and const aggregate write diagnostics work without installing user-visible tags or aliases.
 
 Commands verified:
 

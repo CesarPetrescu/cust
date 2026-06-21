@@ -10,6 +10,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/anonymous_aggregate_typedefs.c",
     "tests/fixtures/compat/valid/anonymous_aggregate_objects.c",
     "tests/fixtures/compat/valid/anonymous_aggregate_const_and_pointers.c",
+    "tests/fixtures/compat/valid/anonymous_aggregate_array_pointer_lists.c",
     "tests/fixtures/compat/valid/anonymous_enum_typedefs.c",
     "tests/fixtures/compat/valid/address_of_dereference.c",
     "tests/fixtures/compat/valid/addressable_compound_literals.c",

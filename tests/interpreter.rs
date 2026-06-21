@@ -971,6 +971,13 @@ fn supports_const_and_pointer_anonymous_aggregate_declaration_lists() {
 }
 
 #[test]
+fn supports_anonymous_aggregate_array_pointer_declaration_lists() {
+    let program = include_str!("fixtures/valid/anonymous_aggregate_array_pointer_lists.c");
+
+    assert_eq!(interpret(program).unwrap(), 31);
+}
+
+#[test]
 fn rejects_assignment_to_const_anonymous_aggregate_fields() {
     let program = include_str!("fixtures/invalid/const_anonymous_aggregate_field_assignment.c");
 
