@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-06-21: No external documentation was needed for comma-separated aggregate field declaration lists; this is ordinary C declarator-list syntax applied inside `struct`/`union` definitions. Implementation decision: parse the shared declaration specifiers once and then parse each field declarator's own `*`/qualifier and `[N]` suffix before the terminating semicolon, so forms like `int *head, *tail;` and `int weights[2], offsets[2];` preserve per-field metadata while duplicate-field diagnostics still point at the duplicate declarator.
+
 - 2026-06-21: No external documentation was needed for aggregate pointer declaration-list conformance coverage. Implementation decision: this run added explicit Cust and C compiler-oracle fixtures for already-supported ordinary C declarator-list forms `struct Point *p = points, *q = points + 1;` and `union Number *n = numbers, *m = numbers + 2;`; the focused interpreter test passed immediately, so no production parser/runtime code was changed.
 
 - 2026-06-21: No external documentation was needed for embedded aggregate-array element copy assignment. Implementation decision: direct `line.points[i] = aggregate` syntax reaches `Expr::StructArraySet`, which previously only routed scalar array fields; direct embedded aggregate-array fields now dispatch to a new aggregate assignment helper using `StructFieldValue::StructArray` storage and existing deep-copy semantics. Struct-pointer forms such as `slot->points[i] = aggregate` reuse `AddressOfStructPtrArrayField` and the existing aggregate pointer assignment path once discard-context detection checks the evaluated pointer target instead of only variable-shaped pointers.

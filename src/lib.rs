@@ -4459,100 +4459,107 @@ impl Parser {
             } else {
                 self.parse_decl_type(&format!("{keyword} field type"))?
             };
-            let has_explicit_star = self.matches(&Token::Star);
-            let post_star_const = has_explicit_star && self.consume_type_qualifiers();
-            if has_explicit_star && self.check(&Token::Star) {
-                return Err(Self::error_at(
-                    format!("pointer-to-pointer {keyword} fields are not supported"),
-                    self.peek_located(),
-                ));
-            }
-            let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer { .. });
-            let (is_const, points_to_const) = if is_pointer {
-                if has_explicit_star {
-                    (post_star_const, leading_const)
-                } else {
-                    (leading_const, Self::decl_type_points_to_const(&decl_type))
-                }
-            } else {
-                (leading_const, false)
-            };
-            let ty = match decl_type {
-                DeclType::Scalar(ty) if has_explicit_star => {
-                    StructFieldType::Pointer(PointeeType::Scalar(ty))
-                }
-                DeclType::Struct(type_name) if has_explicit_star => {
-                    StructFieldType::Pointer(PointeeType::Struct(type_name))
-                }
-                DeclType::Pointer { .. } if has_explicit_star => {
+            loop {
+                let has_explicit_star = self.matches(&Token::Star);
+                let post_star_const = has_explicit_star && self.consume_type_qualifiers();
+                if has_explicit_star && self.check(&Token::Star) {
                     return Err(Self::error_at(
                         format!("pointer-to-pointer {keyword} fields are not supported"),
-                        self.previous(),
+                        self.peek_located(),
                     ));
                 }
-                DeclType::Pointer { pointee, .. } => StructFieldType::Pointer(pointee),
-                DeclType::Array(PointeeType::Scalar(ty), len) => StructFieldType::Array(ty, len),
-                DeclType::Array(PointeeType::Struct(type_name), len) => {
-                    StructFieldType::StructArray(type_name, len)
-                }
-                DeclType::Scalar(ty) => StructFieldType::Scalar(ty),
-                DeclType::Struct(type_name) => StructFieldType::Struct(type_name),
-            };
-            let name = self.expect_ident_after(&format!("{keyword} field name after type"))?;
-            if !names.insert(name.clone()) {
-                return Err(Self::error_at(
-                    format!("duplicate {keyword} field '{name}'"),
-                    self.previous(),
-                ));
-            }
-            let ty = if self.matches(&Token::LBracket) {
-                match ty {
-                    StructFieldType::Scalar(elem_type) => {
-                        let len = self.expect_array_len()?;
-                        self.expect_closing_bracket_after("struct array field length")?;
-                        if self.check(&Token::LBracket) {
-                            return Err(Self::error_at(
-                                format!(
-                                    "multidimensional array {keyword} fields are not supported"
-                                ),
-                                self.peek_located(),
-                            ));
-                        }
-                        StructFieldType::Array(elem_type, len)
+                let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer { .. });
+                let (is_const, points_to_const) = if is_pointer {
+                    if has_explicit_star {
+                        (post_star_const, leading_const)
+                    } else {
+                        (leading_const, Self::decl_type_points_to_const(&decl_type))
                     }
-                    StructFieldType::Struct(type_name) => {
-                        let len = self.expect_array_len()?;
-                        self.expect_closing_bracket_after("struct array field length")?;
-                        if self.check(&Token::LBracket) {
-                            return Err(Self::error_at(
-                                format!(
-                                    "multidimensional array {keyword} fields are not supported"
-                                ),
-                                self.peek_located(),
-                            ));
-                        }
-                        StructFieldType::StructArray(type_name, len)
+                } else {
+                    (leading_const, false)
+                };
+                let ty = match decl_type.clone() {
+                    DeclType::Scalar(ty) if has_explicit_star => {
+                        StructFieldType::Pointer(PointeeType::Scalar(ty))
                     }
-                    StructFieldType::Pointer(_) => {
+                    DeclType::Struct(type_name) if has_explicit_star => {
+                        StructFieldType::Pointer(PointeeType::Struct(type_name))
+                    }
+                    DeclType::Pointer { .. } if has_explicit_star => {
                         return Err(Self::error_at(
-                            format!("pointer array {keyword} fields are not supported"),
+                            format!("pointer-to-pointer {keyword} fields are not supported"),
                             self.previous(),
                         ));
                     }
-                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => {
-                        unreachable!("array field not built yet")
+                    DeclType::Pointer { pointee, .. } => StructFieldType::Pointer(pointee),
+                    DeclType::Array(PointeeType::Scalar(ty), len) => {
+                        StructFieldType::Array(ty, len)
                     }
+                    DeclType::Array(PointeeType::Struct(type_name), len) => {
+                        StructFieldType::StructArray(type_name, len)
+                    }
+                    DeclType::Scalar(ty) => StructFieldType::Scalar(ty),
+                    DeclType::Struct(type_name) => StructFieldType::Struct(type_name),
+                };
+                let name = self.expect_ident_after(&format!("{keyword} field name after type"))?;
+                if !names.insert(name.clone()) {
+                    return Err(Self::error_at(
+                        format!("duplicate {keyword} field '{name}'"),
+                        self.previous(),
+                    ));
                 }
-            } else {
-                ty
-            };
+                let ty = if self.matches(&Token::LBracket) {
+                    match ty {
+                        StructFieldType::Scalar(elem_type) => {
+                            let len = self.expect_array_len()?;
+                            self.expect_closing_bracket_after("struct array field length")?;
+                            if self.check(&Token::LBracket) {
+                                return Err(Self::error_at(
+                                    format!(
+                                        "multidimensional array {keyword} fields are not supported"
+                                    ),
+                                    self.peek_located(),
+                                ));
+                            }
+                            StructFieldType::Array(elem_type, len)
+                        }
+                        StructFieldType::Struct(type_name) => {
+                            let len = self.expect_array_len()?;
+                            self.expect_closing_bracket_after("struct array field length")?;
+                            if self.check(&Token::LBracket) {
+                                return Err(Self::error_at(
+                                    format!(
+                                        "multidimensional array {keyword} fields are not supported"
+                                    ),
+                                    self.peek_located(),
+                                ));
+                            }
+                            StructFieldType::StructArray(type_name, len)
+                        }
+                        StructFieldType::Pointer(_) => {
+                            return Err(Self::error_at(
+                                format!("pointer array {keyword} fields are not supported"),
+                                self.previous(),
+                            ));
+                        }
+                        StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => {
+                            unreachable!("array field not built yet")
+                        }
+                    }
+                } else {
+                    ty
+                };
+                fields.push(StructFieldDef {
+                    name,
+                    ty,
+                    is_const,
+                    points_to_const,
+                });
+                if !self.matches(&Token::Comma) {
+                    break;
+                }
+            }
             self.expect_semicolon_after("struct field declaration")?;
-            fields.push(StructFieldDef {
-                name,
-                ty,
-                is_const,
-                points_to_const,
-            });
         }
         self.expect(Token::RBrace)?;
         if require_semicolon {

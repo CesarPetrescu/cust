@@ -1477,6 +1477,24 @@ fn supports_scalar_struct_initializers() {
 }
 
 #[test]
+fn supports_aggregate_field_declaration_lists() {
+    let program = include_str!("fixtures/valid/aggregate_field_declaration_lists.c");
+
+    assert_eq!(interpret(program).unwrap(), 133);
+}
+
+#[test]
+fn rejects_duplicate_aggregate_fields_in_declaration_lists() {
+    let program = include_str!("fixtures/invalid/duplicate_aggregate_field_in_declaration_list.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "duplicate struct field 'x' at line 1, column 24"
+    );
+}
+
+#[test]
 fn supports_nested_struct_fields() {
     let program = include_str!("fixtures/valid/nested_struct_fields.c");
 
