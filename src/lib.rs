@@ -4534,6 +4534,12 @@ impl Parser {
                     DeclType::Struct(type_name) => StructFieldType::Struct(type_name),
                 };
                 let name = self.expect_ident_after(&format!("{keyword} field name after type"))?;
+                if self.check(&Token::Colon) {
+                    return Err(Self::error_at(
+                        "bit-field aggregate fields are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 if !names.insert(name.clone()) {
                     return Err(Self::error_at(
                         format!("duplicate {keyword} field '{name}'"),

@@ -4,7 +4,23 @@ Last updated: 2026-06-21
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-21 autonomous aggregate forward declaration diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed after pull), active blockers (none), the first unchecked `status/todo.md` parser/runtime parity item, mixed supported-subset conformance fixtures, malformed-source fuzzing, and an audit of declaration contexts around typedef const metadata. The selected work package closes a newly discovered parser-trust gap for unsupported C incomplete aggregate declarations: top-level `struct Point;` and `union Number;` now report targeted `forward struct declarations are not supported` / `forward union declarations are not supported` diagnostics at the semicolon instead of falling through to misleading `undefined struct type` variable-declaration errors. No incomplete-type runtime support was added.
+All passed after the 2026-06-21 autonomous aggregate bit-field diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed after pull), active blockers (none), the first unchecked `status/todo.md` parser/runtime parity item, mixed supported-subset conformance fixtures, malformed-source fuzzing, and an audit of declaration contexts around typedef const metadata. The selected work package closes a newly discovered parser-trust gap for unsupported C aggregate bit-fields: `struct Flags { unsigned ready : 1; };` and `union Bits { int value : 3; };` now report targeted `bit-field aggregate fields are not supported` diagnostics at the colon instead of falling through to the generic field-declaration semicolon helper. No bit-field storage/layout runtime support was added.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_aggregate_bit_fields_with_context -- --nocapture  # RED failed with the old generic semicolon diagnostic; GREEN passed after parser routing fix
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-21 autonomous aggregate forward declaration diagnostic run. Ideation considered failing tests/builds (none; `cargo test` passed after pull), active blockers (none), the first unchecked `status/todo.md` parser/runtime parity item, mixed supported-subset conformance fixtures, malformed-source fuzzing, and an audit of declaration contexts around typedef const metadata. The selected work package closes a newly discovered parser-trust gap for unsupported C incomplete aggregate declarations: top-level `struct Point;` and `union Number;` now report targeted `forward struct declarations are not supported` / `forward union declarations are not supported` diagnostics at the semicolon instead of falling through to misleading `undefined struct type` variable-declaration errors. No incomplete-type runtime support was added.
 
 Commands verified:
 

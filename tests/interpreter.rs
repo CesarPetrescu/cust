@@ -110,6 +110,27 @@ fn rejects_aggregate_forward_declarations_with_context() {
 }
 
 #[test]
+fn rejects_aggregate_bit_fields_with_context() {
+    let program = include_str!("fixtures/invalid/aggregate_bit_fields.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "bit-field aggregate fields are not supported at line 2, column 20"
+    );
+
+    let program = include_str!("fixtures/invalid/union_bit_fields.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "bit-field aggregate fields are not supported at line 2, column 15"
+    );
+}
+
+#[test]
 fn rejects_generic_selections_with_context() {
     let program = include_str!("fixtures/invalid/generic_selection.c");
 

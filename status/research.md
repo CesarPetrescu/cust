@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-06-21: No external documentation was needed for unsupported aggregate bit-field diagnostics. Implementation decision: Cust still does not support C bit-field storage/layout semantics, but `:` after a parsed struct/union field declarator should be detected before the generic field semicolon helper so users get targeted `bit-field aggregate fields are not supported` diagnostics for both `struct` and `union` fields. See `references/cust-aggregate-bit-field-diagnostics.md`.
+
 - 2026-06-21: No external documentation was needed for unsupported aggregate forward-declaration diagnostics. Implementation decision: Cust still does not support incomplete aggregate types, but top-level `struct Name;` and `union Name;` should be detected before aggregate variable-declaration parsing so users get targeted `forward struct/union declarations are not supported` diagnostics rather than misleading `undefined struct type` errors. See `references/cust-aggregate-forward-declaration-diagnostics.md`.
 
 - 2026-06-21: No external documentation was needed for typedef-backed aggregate field declaration lists. Implementation decision: when parsing aggregate field specifiers, preserve alias-carried const metadata by checking `type_alias_is_const(...)` before `parse_decl_type(...)` consumes a typedef name. This keeps `typedef int * const ConstIntSlot; struct Cursor { ConstIntSlot fixed, backup; };` as const pointer-slot fields and preserves existing `typedef const int *ConstIntView;` pointee-const metadata. See `references/cust-aggregate-field-typedef-const-metadata.md`.
