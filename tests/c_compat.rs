@@ -5,6 +5,7 @@ use std::process::Command;
 
 const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/aggregate_field_declaration_lists.c",
+    "tests/fixtures/compat/valid/aggregate_field_typedef_declaration_lists.c",
     "tests/fixtures/compat/valid/aggregate_tag_shadowing.c",
     "tests/fixtures/compat/valid/anonymous_aggregate_typedefs.c",
     "tests/fixtures/compat/valid/anonymous_enum_typedefs.c",

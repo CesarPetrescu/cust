@@ -4,7 +4,24 @@ Last updated: 2026-06-21
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-21 autonomous aggregate field declaration-list run. Ideation considered failing tests/builds (none after pull), active blockers (none), remaining P0 parser-trust diagnostics, mixed supported-subset conformance-only fixtures, and the first unchecked `status/todo.md` item for newly discovered parser/runtime parity gaps. The selected work package closes an ordinary C aggregate declaration gap: Cust now accepts comma-separated fields inside struct/union definitions such as `int x, y;`, `char tag, code;`, `struct Point start, end;`, `int weights[2], offsets[2];`, `int *head, *tail;`, `const int *view, *limit;`, and `union Number { int value, other; };`. Field duplicate diagnostics continue to point at the duplicate declarator in a declaration list, and native compiler-oracle coverage confirms the supported subset matches C exit behavior.
+All passed after the 2026-06-21 autonomous aggregate-field typedef const metadata run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` parser/runtime parity item, malformed-source diagnostic fuzzing, and mixed supported-subset conformance fixtures. The selected work package closes the highest-impact compact parity gap in aggregate field declaration lists: fields spelled with typedef aliases now preserve alias-carried const metadata, including const pointer-slot aliases such as `typedef int * const ConstIntSlot; struct Cursor { ConstIntSlot fixed, backup; };`. Cust continues to support comma-separated typedef-backed scalar/pointer/aggregate/array fields, preserves pointee-const metadata for `typedef const int *ConstIntView;`, rejects assignment to const pointer-slot fields with `cannot assign to const struct field 'fixed'`, and verifies the supported subset against the native C compiler oracle.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter aggregate_field -- --nocapture  # RED exposed the const pointer-slot typedef field assignment gap; GREEN passed after parser metadata fix
+cargo test --test interpreter rejects_assignment_to_const_pointer_slot_typedef_field_in_declaration_list -- --nocapture
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-21 autonomous aggregate field declaration-list run. Ideation considered failing tests/builds (none after pull), active blockers (none), remaining P0 parser-trust diagnostics, mixed supported-subset conformance-only fixtures, and the first unchecked `status/todo.md` item for newly discovered parser/runtime parity gaps. The selected work package closes an ordinary C aggregate declaration gap: Cust now accepts comma-separated fields inside struct/union definitions such as `int x, y;`, `char tag, code;`, `struct Point start, end;`, `int weights[2], offsets[2];`, `int *head, *tail;`, `const int *view, *limit;`, and `union Number { int value, other; };`. Field duplicate diagnostics continue to point at the duplicate declarator in a declaration list, and native compiler-oracle coverage confirms the supported subset matches C exit behavior.
 
 Commands verified:
 

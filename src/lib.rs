@@ -4440,6 +4440,11 @@ impl Parser {
             }
             self.consume_alignment_specifiers()?;
             let leading_const = self.consume_type_qualifiers();
+            let alias_const = match self.peek() {
+                Token::Ident(name) => self.type_alias_is_const(name),
+                _ => false,
+            };
+            let leading_const = leading_const || alias_const;
             let decl_type = if matches!(self.peek(), Token::Struct | Token::Union) {
                 let field_kind = match self.advance().kind {
                     Token::Struct => AggregateKind::Struct,

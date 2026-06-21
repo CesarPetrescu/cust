@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-06-21: No external documentation was needed for typedef-backed aggregate field declaration lists. Implementation decision: when parsing aggregate field specifiers, preserve alias-carried const metadata by checking `type_alias_is_const(...)` before `parse_decl_type(...)` consumes a typedef name. This keeps `typedef int * const ConstIntSlot; struct Cursor { ConstIntSlot fixed, backup; };` as const pointer-slot fields and preserves existing `typedef const int *ConstIntView;` pointee-const metadata. See `references/cust-aggregate-field-typedef-const-metadata.md`.
+
 - 2026-06-21: No external documentation was needed for comma-separated aggregate field declaration lists; this is ordinary C declarator-list syntax applied inside `struct`/`union` definitions. Implementation decision: parse the shared declaration specifiers once and then parse each field declarator's own `*`/qualifier and `[N]` suffix before the terminating semicolon, so forms like `int *head, *tail;` and `int weights[2], offsets[2];` preserve per-field metadata while duplicate-field diagnostics still point at the duplicate declarator.
 
 - 2026-06-21: No external documentation was needed for aggregate pointer declaration-list conformance coverage. Implementation decision: this run added explicit Cust and C compiler-oracle fixtures for already-supported ordinary C declarator-list forms `struct Point *p = points, *q = points + 1;` and `union Number *n = numbers, *m = numbers + 2;`; the focused interpreter test passed immediately, so no production parser/runtime code was changed.

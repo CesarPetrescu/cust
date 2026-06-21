@@ -1484,6 +1484,24 @@ fn supports_aggregate_field_declaration_lists() {
 }
 
 #[test]
+fn supports_typedef_aliases_in_aggregate_field_declaration_lists() {
+    let program = include_str!("fixtures/valid/aggregate_field_typedef_declaration_lists.c");
+
+    assert_eq!(interpret(program).unwrap(), 188);
+}
+
+#[test]
+fn rejects_assignment_to_const_pointer_slot_typedef_field_in_declaration_list() {
+    let program = include_str!("fixtures/invalid/aggregate_field_typedef_const_slot_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'fixed'"
+    );
+}
+
+#[test]
 fn rejects_duplicate_aggregate_fields_in_declaration_lists() {
     let program = include_str!("fixtures/invalid/duplicate_aggregate_field_in_declaration_list.c");
 
