@@ -89,6 +89,27 @@ fn rejects_preprocessor_directives_with_context() {
 }
 
 #[test]
+fn rejects_aggregate_forward_declarations_with_context() {
+    let program = include_str!("fixtures/invalid/struct_forward_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "forward struct declarations are not supported at line 1, column 13"
+    );
+
+    let program = include_str!("fixtures/invalid/union_forward_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "forward union declarations are not supported at line 1, column 13"
+    );
+}
+
+#[test]
 fn rejects_generic_selections_with_context() {
     let program = include_str!("fixtures/invalid/generic_selection.c");
 

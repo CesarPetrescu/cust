@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-06-21: No external documentation was needed for unsupported aggregate forward-declaration diagnostics. Implementation decision: Cust still does not support incomplete aggregate types, but top-level `struct Name;` and `union Name;` should be detected before aggregate variable-declaration parsing so users get targeted `forward struct/union declarations are not supported` diagnostics rather than misleading `undefined struct type` errors. See `references/cust-aggregate-forward-declaration-diagnostics.md`.
+
 - 2026-06-21: No external documentation was needed for typedef-backed aggregate field declaration lists. Implementation decision: when parsing aggregate field specifiers, preserve alias-carried const metadata by checking `type_alias_is_const(...)` before `parse_decl_type(...)` consumes a typedef name. This keeps `typedef int * const ConstIntSlot; struct Cursor { ConstIntSlot fixed, backup; };` as const pointer-slot fields and preserves existing `typedef const int *ConstIntView;` pointee-const metadata. See `references/cust-aggregate-field-typedef-const-metadata.md`.
 
 - 2026-06-21: No external documentation was needed for comma-separated aggregate field declaration lists; this is ordinary C declarator-list syntax applied inside `struct`/`union` definitions. Implementation decision: parse the shared declaration specifiers once and then parse each field declarator's own `*`/qualifier and `[N]` suffix before the terminating semicolon, so forms like `int *head, *tail;` and `int weights[2], offsets[2];` preserve per-field metadata while duplicate-field diagnostics still point at the duplicate declarator.

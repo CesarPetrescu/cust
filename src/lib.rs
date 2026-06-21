@@ -1803,6 +1803,18 @@ impl Parser {
             } else if matches!(self.peek(), Token::Struct | Token::Union) {
                 if self.is_aggregate_definition() {
                     self.parse_aggregate_definition()?;
+                } else if self.is_aggregate_forward_declaration() {
+                    let keyword = match self.peek() {
+                        Token::Struct => "struct",
+                        Token::Union => "union",
+                        _ => unreachable!("checked aggregate keyword above"),
+                    };
+                    return Err(Self::error_at(
+                        format!("forward {keyword} declarations are not supported"),
+                        self.tokens
+                            .get(self.pos + 2)
+                            .expect("forward aggregate declaration has a semicolon"),
+                    ));
                 } else {
                     let global = self.parse_aggregate_var_decl()?;
                     if !is_extern || self.last_decl_had_initializer {
@@ -1871,6 +1883,21 @@ impl Parser {
                 Token::Struct | Token::Union,
                 Some(Token::Ident(_)),
                 Some(Token::LBrace)
+            )
+        )
+    }
+
+    fn is_aggregate_forward_declaration(&self) -> bool {
+        matches!(
+            (
+                self.peek(),
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                self.tokens.get(self.pos + 2).map(|token| &token.kind)
+            ),
+            (
+                Token::Struct | Token::Union,
+                Some(Token::Ident(_)),
+                Some(Token::Semi)
             )
         )
     }
