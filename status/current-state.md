@@ -4,6 +4,39 @@ Last updated: 2026-06-21
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-21 autonomous aggregate pointer declaration-list conformance run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` item for struct/union pointer declarator-list fixtures, additional malformed-source exact diagnostics, and broader tooling-only work. The selected work package completes the concrete unchecked conformance coverage item because mixed declaration-list parser/runtime support was already implemented but aggregate pointer declarators needed explicit interpreter and native-oracle coverage. Cust is now covered for ordinary C declaration lists such as `struct Point *p = points, *q = points + 1;` and `union Number *n = numbers, *m = numbers + 2;`, with `->`, indexed aggregate pointer reads/writes, pointer arithmetic, and function-argument flow verified against both Cust and the C compiler oracle. The focused interpreter test passed immediately, confirming this was a coverage/conformance closure item over already-supported runtime behavior rather than a production-code behavior change.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_aggregate_pointer_declaration_lists -- --nocapture  # coverage test passed immediately; no production behavior change required
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-21 autonomous embedded aggregate-array element assignment run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` parity gap, struct/union pointer declaration-list fixture expansion, malformed-source diagnostic polish, and conformance/tooling-only work. The selected work package closes aggregate-array element copy assignment through embedded struct fields because it is the first concrete unchecked runtime parity item and directly extends the prior top-level aggregate-array assignment slice. Cust now accepts direct embedded aggregate-array writes such as `line.points[1] = replacement`, aggregate assignment expressions returning by-value copies such as `struct Point returned = (line.points[1] = replacement)`, and struct-pointer embedded aggregate-array writes such as `slot->points[0] = (struct Point){11, 12}`. The implementation reuses the interpreter-owned embedded aggregate-array pointer metadata for `->` paths and adds direct `StructArraySet` aggregate routing for field paths, preserving deep-copy isolation, same-type checks, const/read-only diagnostics, and scalar array-field assignment behavior.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_embedded_aggregate_array_element_copy_assignment -- --nocapture  # RED failed with expected missing embedded aggregate StructArraySet routing; GREEN passed after implementation
+cargo test --test interpreter rejects_embedded_aggregate_array_element_assignment_type_mismatch -- --nocapture
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
 All passed after the 2026-06-21 autonomous embedded aggregate-array element assignment run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` parity gap, struct/union pointer declaration-list fixture expansion, malformed-source diagnostic polish, and conformance/tooling-only work. The selected work package closes aggregate-array element copy assignment through embedded struct fields because it is the first concrete unchecked runtime parity item and directly extends the prior top-level aggregate-array assignment slice. Cust now accepts direct embedded aggregate-array writes such as `line.points[1] = replacement`, aggregate assignment expressions returning by-value copies such as `struct Point returned = (line.points[1] = replacement)`, and struct-pointer embedded aggregate-array writes such as `slot->points[0] = (struct Point){11, 12}`. The implementation reuses the interpreter-owned embedded aggregate-array pointer metadata for `->` paths and adds direct `StructArraySet` aggregate routing for field paths, preserving deep-copy isolation, same-type checks, const/read-only diagnostics, and scalar array-field assignment behavior.
 
 Commands verified:
