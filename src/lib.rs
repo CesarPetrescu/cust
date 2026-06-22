@@ -2828,6 +2828,46 @@ impl Parser {
         None
     }
 
+    fn old_style_parameter_token(&self) -> Option<&LocatedToken> {
+        let Token::Ident(name) = self.peek() else {
+            return None;
+        };
+        if self.lookup_type_alias(name).is_some() {
+            return None;
+        }
+        if !matches!(self.peek_next(), Token::Comma | Token::RParen) {
+            return None;
+        }
+        let closing_paren = (self.pos..self.tokens.len())
+            .find(|&index| matches!(self.tokens[index].kind, Token::RParen))?;
+        let after_params = self.tokens.get(closing_paren + 1).map(|token| &token.kind);
+        if matches!(
+            after_params,
+            Some(
+                Token::Int
+                    | Token::Char
+                    | Token::Bool
+                    | Token::Signed
+                    | Token::Unsigned
+                    | Token::Long
+                    | Token::Short
+                    | Token::Const
+                    | Token::Volatile
+                    | Token::Atomic
+                    | Token::Static
+                    | Token::Extern
+                    | Token::Auto
+                    | Token::Register
+                    | Token::Struct
+                    | Token::Union
+                    | Token::Enum
+            )
+        ) {
+            return Some(self.peek_located());
+        }
+        None
+    }
+
     fn parse_params(&mut self, allow_unnamed: bool) -> CustResult<Vec<Param>> {
         let mut params = Vec::new();
         if self.check(&Token::RParen) {
@@ -2854,6 +2894,12 @@ impl Parser {
             if let Some(token) = self.anonymous_aggregate_parameter_token() {
                 return Err(Self::error_at(
                     "anonymous aggregate parameters are not supported".to_string(),
+                    token,
+                ));
+            }
+            if let Some(token) = self.old_style_parameter_token() {
+                return Err(Self::error_at(
+                    "old-style function parameter lists are not supported".to_string(),
                     token,
                 ));
             }

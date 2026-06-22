@@ -4,7 +4,25 @@ Last updated: 2026-06-22
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-22 autonomous anonymous aggregate return-type diagnostic run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, another malformed-source parser-trust diagnostic, additional mixed supported-subset conformance fixtures, storage/alignment declaration-context audits, and const anonymous aggregate negative coverage. The selected work package closes a concrete parser-trust gap adjacent to existing anonymous aggregate object/typedef support: function return types spelled directly as anonymous aggregate types such as `struct { int x; } make(void)` now report targeted `anonymous aggregate return types are not supported` at the `struct` keyword instead of falling through to the generic aggregate-variable semicolon diagnostic. No anonymous aggregate return runtime/type support was added.
+All passed after the 2026-06-22 autonomous old-style function parameter diagnostic run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, const anonymous aggregate negative coverage, more mixed conformance fixtures, and another parser-trust diagnostic. The selected work package closes a concrete malformed-source diagnostic gap for unsupported K&R/old-style function identifier-list definitions such as `int add(x, y) int x; int y; { ... }`: Cust now reports `old-style function parameter lists are not supported` at the first identifier-list parameter instead of the generic `expected parameter type` fallback. The detection is conservative so modern malformed definitions such as `int identity(value) { ... }` keep the existing missing-parameter-type diagnostic.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_old_style_function_parameter_lists_with_context -- --nocapture  # RED failed with old generic parameter-type diagnostic; GREEN passed after parser lookahead routing
+cargo test --test interpreter reports_missing_parameter_types_before_parameter_names -- --nocapture
+cargo test --test interpreter parameter -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-22 autonomous anonymous aggregate return-type diagnostic run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, another malformed-source parser-trust diagnostic, additional mixed supported-subset conformance fixtures, storage/alignment declaration-context audits, and const anonymous aggregate negative coverage. The selected work package closes a concrete parser-trust gap adjacent to existing anonymous aggregate object/typedef support: function return types spelled directly as anonymous aggregate types such as `struct { int x; } make(void)` now report targeted `anonymous aggregate return types are not supported` at the `struct` keyword instead of falling through to the generic aggregate-variable semicolon diagnostic. No anonymous aggregate return runtime/type support was added.
 
 Commands verified:
 

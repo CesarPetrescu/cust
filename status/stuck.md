@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-06-22 autonomous anonymous aggregate return-type diagnostic run after focused RED/GREEN interpreter coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-06-22 autonomous old-style function parameter diagnostic run after focused RED/GREEN interpreter coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 

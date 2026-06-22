@@ -164,6 +164,18 @@ fn rejects_anonymous_aggregate_return_types_with_context() {
 }
 
 #[test]
+fn rejects_old_style_function_parameter_lists_with_context() {
+    let program = include_str!("fixtures/invalid/old_style_function_parameters.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "old-style function parameter lists are not supported at line 1, column 9"
+    );
+}
+
+#[test]
 fn rejects_generic_selections_with_context() {
     let program = include_str!("fixtures/invalid/generic_selection.c");
 
