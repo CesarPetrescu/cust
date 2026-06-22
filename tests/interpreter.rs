@@ -1096,6 +1096,29 @@ fn rejects_assignment_to_const_anonymous_aggregate_array_elements() {
 }
 
 #[test]
+fn rejects_anonymous_aggregate_pointer_to_pointer_declarations_with_targeted_diagnostic() {
+    let program =
+        include_str!("fixtures/invalid/anonymous_aggregate_pointer_to_pointer_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "pointer-to-pointer declarations are not supported at line 1, column 37"
+    );
+}
+
+#[test]
+fn rejects_anonymous_aggregate_pointer_array_declarations_with_targeted_diagnostic() {
+    let program = include_str!("fixtures/invalid/anonymous_aggregate_pointer_array_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "pointer array declarations are not supported at line 1, column 42"
+    );
+}
+
+#[test]
 fn supports_path_designated_struct_initializers() {
     let program = include_str!("fixtures/valid/path_designated_initializers.c");
 

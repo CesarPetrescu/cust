@@ -4936,7 +4936,19 @@ impl Parser {
         let keyword = kind.keyword();
         if self.matches(&Token::Star) {
             let is_const = self.consume_type_qualifiers();
+            if self.check(&Token::Star) {
+                return Err(Self::error_at(
+                    "pointer-to-pointer declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let name = self.expect_ident_after(&format!("{keyword} pointer name after '*'"))?;
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "pointer array declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let expr = if self.matches(&Token::Assign) {
                 self.last_decl_had_initializer = true;
                 self.parse_assignment_expr()?

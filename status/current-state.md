@@ -4,7 +4,22 @@ Last updated: 2026-06-22
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-22 autonomous const anonymous aggregate array negative-coverage run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, another malformed-source parser-trust diagnostic, additional mixed supported-subset conformance coverage, storage/alignment declaration-context audits, and targeted const anonymous aggregate array negative coverage. The selected work package locks in a previously unisolated const-safety edge for same-declaration anonymous aggregate arrays and pointer declarators: `const struct { int x; int y; } points[2] = ..., *slot = points + 1; slot->x = 9;` now has focused invalid fixture coverage proving the pointer view remains pointer-to-const and rejects writes with `cannot assign through pointer to const`. Focused RED initially failed because the first test fixture wrote directly through `points[1].x` and correctly produced the existing root-const diagnostic `cannot assign to const variable 'points'`; the fixture was narrowed to the intended pointer-view path and then passed. No production parser/runtime change was needed.
+All passed after the 2026-06-22 autonomous anonymous aggregate pointer-declarator diagnostic run. Ideation considered failing tests/builds (none in the inherited verified state), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source parser-trust diagnostics, additional mixed supported-subset conformance fixtures, storage/alignment declaration-context audits, and targeted anonymous aggregate pointer declaration-list type/const edge cases. The selected work package closes two concrete unsupported-form diagnostic gaps in anonymous aggregate object declarations: `struct { int x; } **slot;` now reports `pointer-to-pointer declarations are not supported` at the second `*`, and `struct { int x; } *slots[2];` now reports `pointer array declarations are not supported` at `[`, matching the named/typedef-backed pointer declaration boundary instead of falling through to generic missing-name/missing-`=` diagnostics. No pointer-to-pointer or pointer-array runtime support was added.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter anonymous_aggregate_pointer -- --nocapture  # RED failed with generic diagnostics; GREEN passed after parser checks
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted the known non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-22 autonomous const anonymous aggregate array negative-coverage run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, another malformed-source parser-trust diagnostic, additional mixed supported-subset conformance coverage, storage/alignment declaration-context audits, and targeted const anonymous aggregate array negative coverage. The selected work package locks in a previously unisolated const-safety edge for same-declaration anonymous aggregate arrays and pointer declarators: `const struct { int x; int y; } points[2] = ..., *slot = points + 1; slot->x = 9;` now has focused invalid fixture coverage proving the pointer view remains pointer-to-const and rejects writes with `cannot assign through pointer to const`. Focused RED initially failed because the first test fixture wrote directly through `points[1].x` and correctly produced the existing root-const diagnostic `cannot assign to const variable 'points'`; the fixture was narrowed to the intended pointer-view path and then passed. No production parser/runtime change was needed.
 
 Commands verified:
 
