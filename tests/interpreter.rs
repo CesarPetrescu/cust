@@ -107,6 +107,15 @@ fn rejects_aggregate_forward_declarations_with_context() {
         err.to_string(),
         "forward union declarations are not supported at line 1, column 13"
     );
+
+    let program = include_str!("fixtures/invalid/enum_forward_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "forward enum declarations are not supported at line 1, column 11"
+    );
 }
 
 #[test]

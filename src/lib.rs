@@ -2058,6 +2058,12 @@ impl Parser {
                     }
                 };
                 saw_const |= self.consume_type_qualifiers();
+                if self.check(&Token::Semi) {
+                    return Err(Self::error_at(
+                        "forward enum declarations are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 if !self.enum_type_is_declared(&type_name) {
                     return Err(Self::error_at(
                         format!("undefined enum type '{type_name}'"),

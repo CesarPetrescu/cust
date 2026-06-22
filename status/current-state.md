@@ -4,7 +4,23 @@ Last updated: 2026-06-22
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-22 autonomous mixed declaration-context conformance run. Ideation considered failing tests/builds (none after pull/status inspection), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh exact diagnostics, anonymous aggregate pointer-first/const-array negative coverage, and a mixed supported-subset conformance fixture. The selected work package adds a compact compiler-oracle fixture that combines several recently completed declaration/runtime surfaces in one warning-free C program: comma-separated typedef alias lists, inline enum object declarations in a `for` initializer and local declaration, pointer-first anonymous aggregate declaration lists, const anonymous aggregate arrays with pointer views, aggregate compound literal returns, and typedef-spelled aggregate return values. The focused interpreter coverage passed immediately, confirming this was a conformance-lock fixture over already-supported behavior rather than a production parser/runtime change; the native C compiler-oracle suite also passed.
+All passed after the 2026-06-22 autonomous enum forward-declaration diagnostic run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh exact diagnostics, additional const anonymous aggregate negative coverage, and more mixed supported-subset conformance fixtures. The selected work package closes a concrete parser-trust gap adjacent to the existing unsupported aggregate forward-declaration diagnostics: top-level `enum Color;` now reports targeted `forward enum declarations are not supported` at the semicolon instead of falling through to the misleading `undefined enum type 'Color'` message at the tag token. No incomplete enum runtime/type support was added.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_aggregate_forward_declarations_with_context -- --nocapture  # RED failed with old undefined-enum diagnostic; GREEN passed after parser diagnostic routing
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-22 autonomous mixed declaration-context conformance run. Ideation considered failing tests/builds (none after pull/status inspection), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh exact diagnostics, anonymous aggregate pointer-first/const-array negative coverage, and a mixed supported-subset conformance fixture. The selected work package adds a compact compiler-oracle fixture that combines several recently completed declaration/runtime surfaces in one warning-free C program: comma-separated typedef alias lists, inline enum object declarations in a `for` initializer and local declaration, pointer-first anonymous aggregate declaration lists, const anonymous aggregate arrays with pointer views, aggregate compound literal returns, and typedef-spelled aggregate return values. The focused interpreter coverage passed immediately, confirming this was a conformance-lock fixture over already-supported behavior rather than a production parser/runtime change; the native C compiler-oracle suite also passed.
 
 Commands verified:
 
