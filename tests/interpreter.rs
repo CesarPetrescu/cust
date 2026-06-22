@@ -1087,6 +1087,15 @@ fn rejects_assignment_to_const_anonymous_aggregate_fields() {
 }
 
 #[test]
+fn rejects_assignment_to_const_anonymous_aggregate_array_elements() {
+    let program =
+        include_str!("fixtures/invalid/const_anonymous_aggregate_array_element_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
+}
+
+#[test]
 fn supports_path_designated_struct_initializers() {
     let program = include_str!("fixtures/valid/path_designated_initializers.c");
 

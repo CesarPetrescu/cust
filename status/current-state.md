@@ -4,7 +4,23 @@ Last updated: 2026-06-22
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-22 autonomous old-style function parameter diagnostic run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, const anonymous aggregate negative coverage, more mixed conformance fixtures, and another parser-trust diagnostic. The selected work package closes a concrete malformed-source diagnostic gap for unsupported K&R/old-style function identifier-list definitions such as `int add(x, y) int x; int y; { ... }`: Cust now reports `old-style function parameter lists are not supported` at the first identifier-list parameter instead of the generic `expected parameter type` fallback. The detection is conservative so modern malformed definitions such as `int identity(value) { ... }` keep the existing missing-parameter-type diagnostic.
+All passed after the 2026-06-22 autonomous const anonymous aggregate array negative-coverage run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, another malformed-source parser-trust diagnostic, additional mixed supported-subset conformance coverage, storage/alignment declaration-context audits, and targeted const anonymous aggregate array negative coverage. The selected work package locks in a previously unisolated const-safety edge for same-declaration anonymous aggregate arrays and pointer declarators: `const struct { int x; int y; } points[2] = ..., *slot = points + 1; slot->x = 9;` now has focused invalid fixture coverage proving the pointer view remains pointer-to-const and rejects writes with `cannot assign through pointer to const`. Focused RED initially failed because the first test fixture wrote directly through `points[1].x` and correctly produced the existing root-const diagnostic `cannot assign to const variable 'points'`; the fixture was narrowed to the intended pointer-view path and then passed. No production parser/runtime change was needed.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_assignment_to_const_anonymous_aggregate_array_elements -- --nocapture  # RED exposed incorrect first fixture expectation; GREEN passed after targeting pointer-view write
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-22 autonomous old-style function parameter diagnostic run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, const anonymous aggregate negative coverage, more mixed conformance fixtures, and another parser-trust diagnostic. The selected work package closes a concrete malformed-source diagnostic gap for unsupported K&R/old-style function identifier-list definitions such as `int add(x, y) int x; int y; { ... }`: Cust now reports `old-style function parameter lists are not supported` at the first identifier-list parameter instead of the generic `expected parameter type` fallback. The detection is conservative so modern malformed definitions such as `int identity(value) { ... }` keep the existing missing-parameter-type diagnostic.
 
 Commands verified:
 
