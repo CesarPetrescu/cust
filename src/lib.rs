@@ -1674,6 +1674,7 @@ struct Parser {
     next_static_local_id: usize,
     next_aggregate_type_id: usize,
     last_decl_had_initializer: bool,
+    pending_inline_enum_constants: Option<Vec<EnumConstant>>,
 }
 
 impl Parser {
@@ -1690,6 +1691,7 @@ impl Parser {
             next_static_local_id: 0,
             next_aggregate_type_id: 0,
             last_decl_had_initializer: false,
+            pending_inline_enum_constants: None,
         }
     }
 
@@ -1797,7 +1799,9 @@ impl Parser {
                     globals.push(stmt);
                 }
             } else if self.check(&Token::Enum) {
-                if self.starts_typedef_enum_definition() {
+                if self.starts_typedef_enum_definition()
+                    && self.enum_definition_followed_by_semicolon()
+                {
                     globals.push(self.parse_enum_decl()?);
                 } else {
                     let global = self.parse_var_decl()?;
@@ -2037,6 +2041,12 @@ impl Parser {
                 Ok((saw_const, DeclType::Struct(internal_type_name)))
             }
             Token::Enum => {
+                if self.starts_enum_definition_after_keyword() {
+                    let constants = self.parse_enum_decl_body_after_keyword(false)?;
+                    self.pending_inline_enum_constants = Some(constants);
+                    saw_const |= self.consume_type_qualifiers();
+                    return Ok((saw_const, DeclType::Scalar(CType::Int)));
+                }
                 let type_name_token = self.advance();
                 let type_name = match type_name_token.kind.clone() {
                     Token::Ident(type_name) => type_name,
@@ -3031,7 +3041,9 @@ impl Parser {
                 None => Ok(Stmt::Empty),
             },
             Token::Enum => {
-                if self.starts_typedef_enum_definition() {
+                if self.starts_typedef_enum_definition()
+                    && self.enum_definition_followed_by_semicolon()
+                {
                     self.parse_enum_decl()
                 } else {
                     self.parse_var_decl()
@@ -3305,7 +3317,16 @@ impl Parser {
     }
 
     fn parse_var_decl(&mut self) -> CustResult<Stmt> {
-        self.parse_var_decl_with_semi(true)
+        self.pending_inline_enum_constants = None;
+        let stmt = self.parse_var_decl_with_semi(true)?;
+        Ok(self.with_pending_inline_enum_decl(stmt))
+    }
+
+    fn with_pending_inline_enum_decl(&mut self, stmt: Stmt) -> Stmt {
+        match self.pending_inline_enum_constants.take() {
+            Some(constants) => Stmt::Many(vec![Stmt::EnumDecl { constants }, stmt]),
+            None => stmt,
+        }
     }
 
     fn parse_aligned_decl(&mut self) -> CustResult<Stmt> {
@@ -4463,6 +4484,55 @@ impl Parser {
         )
     }
 
+    fn starts_enum_definition_after_keyword(&self) -> bool {
+        matches!(
+            (
+                self.peek(),
+                self.tokens.get(self.pos + 1).map(|token| &token.kind)
+            ),
+            (Token::LBrace, _) | (Token::Ident(_), Some(Token::LBrace))
+        )
+    }
+
+    fn enum_definition_followed_by_semicolon(&self) -> bool {
+        if !self.starts_typedef_enum_definition() {
+            return false;
+        }
+        let mut cursor = if matches!(
+            self.tokens.get(self.pos + 1).map(|token| &token.kind),
+            Some(Token::Ident(_))
+        ) {
+            self.pos + 2
+        } else {
+            self.pos + 1
+        };
+        if !matches!(
+            self.tokens.get(cursor).map(|token| &token.kind),
+            Some(Token::LBrace)
+        ) {
+            return false;
+        }
+        let mut depth = 0;
+        while let Some(token) = self.tokens.get(cursor) {
+            match &token.kind {
+                Token::LBrace => depth += 1,
+                Token::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            self.tokens.get(cursor + 1).map(|token| &token.kind),
+                            Some(Token::Semi)
+                        );
+                    }
+                }
+                Token::Eof => return false,
+                _ => {}
+            }
+            cursor += 1;
+        }
+        false
+    }
+
     fn parse_aggregate_definition_body(
         &mut self,
         require_semicolon: bool,
@@ -4815,6 +4885,13 @@ impl Parser {
 
     fn parse_enum_decl_body(&mut self, require_semicolon: bool) -> CustResult<Vec<EnumConstant>> {
         self.expect(Token::Enum)?;
+        self.parse_enum_decl_body_after_keyword(require_semicolon)
+    }
+
+    fn parse_enum_decl_body_after_keyword(
+        &mut self,
+        require_semicolon: bool,
+    ) -> CustResult<Vec<EnumConstant>> {
         let enum_tag = if let Token::Ident(name) = self.peek().clone() {
             self.advance();
             Some(name)

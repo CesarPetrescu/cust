@@ -997,6 +997,25 @@ fn supports_anonymous_aggregate_array_pointer_declaration_lists() {
 }
 
 #[test]
+fn supports_inline_enum_object_declarations() {
+    let program = include_str!("fixtures/valid/inline_enum_object_declarations.c");
+
+    assert_eq!(interpret(program).unwrap(), 48);
+}
+
+#[test]
+fn rejects_assignment_to_const_inline_enum_object() {
+    let program = include_str!("fixtures/invalid/const_inline_enum_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("cannot assign to const variable 'value'"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_assignment_to_const_anonymous_aggregate_fields() {
     let program = include_str!("fixtures/invalid/const_anonymous_aggregate_field_assignment.c");
 

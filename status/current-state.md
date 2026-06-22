@@ -4,7 +4,23 @@ Last updated: 2026-06-22
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-22 autonomous comma-separated typedef alias run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed supported-subset conformance fixtures, anonymous aggregate pointer/const-array coverage, and auditing typedef alias const metadata in declaration contexts. The selected work package closes ordinary C typedef declarator-list parity because it is a compact, high-impact declaration syntax gap adjacent to previous declaration-list work: Cust now accepts forms such as `typedef int Count, *CountPtr, Counts[3];`, `typedef const int ConstCount, *ConstCountView, ConstCounts[2];`, `typedef struct Point Point, *PointPtr, Points[2];`, and `typedef struct { int value; int extra; } Anon, *AnonPtr, Anons[2];`. Per-declarator pointer stars, post-star const pointer-slot metadata, and array suffixes are preserved; unsupported pointer-to-pointer, pointer-array, function typedef, and multidimensional typedef diagnostics still apply per declarator.
+All passed after the 2026-06-22 autonomous inline enum object declaration run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed supported-subset conformance fixtures, anonymous aggregate pointer/const-array coverage, and an audit of declaration contexts where parser-only enum/type metadata must survive into runtime initialization. The selected work package closes inline enum definition object declarations because it is a compact ordinary-C declaration gap adjacent to completed enum typedef/direct enum work: Cust now accepts `enum { A = 1 } value = A;`, `const enum { LOCKED = 7 } global = LOCKED;`, `enum Mode { IDLE = 11 } mode = IDLE;`, and same-declaration enum scalar lists such as `enum { ONE = 1 } first = ONE, second = first + 5;`. Inline enum constants are installed as runtime read-only enum constants before the associated variable declaration so same-statement initializers and later expressions can reference them, while const enum object declarations reuse existing scalar const assignment diagnostics.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter inline_enum -- --nocapture  # RED failed with old enum-declaration/enum-type-name routing; GREEN passed after parser/runtime statement wrapping
+cargo test --test c_compat -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-22 autonomous comma-separated typedef alias run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed supported-subset conformance fixtures, anonymous aggregate pointer/const-array coverage, and auditing typedef alias const metadata in declaration contexts. The selected work package closes ordinary C typedef declarator-list parity because it is a compact, high-impact declaration syntax gap adjacent to previous declaration-list work: Cust now accepts forms such as `typedef int Count, *CountPtr, Counts[3];`, `typedef const int ConstCount, *ConstCountView, ConstCounts[2];`, `typedef struct Point Point, *PointPtr, Points[2];`, and `typedef struct { int value; int extra; } Anon, *AnonPtr, Anons[2];`. Per-declarator pointer stars, post-star const pointer-slot metadata, and array suffixes are preserved; unsupported pointer-to-pointer, pointer-array, function typedef, and multidimensional typedef diagnostics still apply per declarator.
 
 Commands verified:
 
