@@ -152,6 +152,18 @@ fn rejects_anonymous_aggregate_parameters_with_context() {
 }
 
 #[test]
+fn rejects_anonymous_aggregate_return_types_with_context() {
+    let program = include_str!("fixtures/invalid/anonymous_aggregate_return_type.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "anonymous aggregate return types are not supported at line 1, column 1"
+    );
+}
+
+#[test]
 fn rejects_generic_selections_with_context() {
     let program = include_str!("fixtures/invalid/generic_selection.c");
 

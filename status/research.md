@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-06-22: No external documentation was needed for unsupported anonymous aggregate return-type diagnostics. Implementation decision: Cust continues to require aggregate function return types to use named tags or typedef-backed aggregate aliases; direct anonymous `struct { ... } make(...)` / `union { ... } pick(...)` return spellings now fail early with `anonymous aggregate return types are not supported` at the aggregate keyword rather than falling through to aggregate variable-declaration parsing. See `references/cust-anonymous-aggregate-return-diagnostics.md`.
+
 - 2026-06-22: No external documentation was needed for unsupported anonymous aggregate parameter diagnostics. Implementation decision: Cust continues to require aggregate parameters to use named tags or typedef-backed aggregate aliases; direct anonymous `struct { ... }` / `union { ... }` parameter types now fail early in `parse_params` with `anonymous aggregate parameters are not supported` at the aggregate keyword rather than falling through to a generic `LBrace` type error. See `references/cust-anonymous-aggregate-parameter-diagnostics.md`.
 
 - 2026-06-22: No external documentation was needed for unsupported enum forward-declaration diagnostics. Implementation decision: Cust still does not support incomplete enum declarations such as `enum Color;`, but `parse_decl_type` now detects a semicolon immediately after the enum tag and reports `forward enum declarations are not supported` at the semicolon before the generic undefined-enum-type path runs.

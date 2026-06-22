@@ -1719,6 +1719,12 @@ impl Parser {
             self.consume_alignment_specifiers()?;
             let has_function_specifier =
                 leading_function_specifier || self.consume_function_specifiers();
+            if let Some(token) = self.anonymous_aggregate_return_type_token() {
+                return Err(Self::error_at(
+                    "anonymous aggregate return types are not supported".to_string(),
+                    token,
+                ));
+            }
             if self.starts_function_definition()
                 || self.starts_struct_function_declaration()
                 || self.starts_alias_function_declaration()
@@ -1947,6 +1953,60 @@ impl Parser {
                 ),
                 (Some(Token::Ident(_)), Some(Token::LParen))
             )
+    }
+
+    fn anonymous_aggregate_return_type_token(&self) -> Option<&LocatedToken> {
+        let index = self.skip_type_qualifiers_at(self.pos);
+        if !matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Struct | Token::Union)
+        ) || !matches!(
+            self.tokens.get(index + 1).map(|token| &token.kind),
+            Some(Token::LBrace)
+        ) {
+            return None;
+        }
+
+        let mut cursor = index + 2;
+        let mut depth = 1usize;
+        while let Some(token) = self.tokens.get(cursor) {
+            match token.kind {
+                Token::LBrace => depth += 1,
+                Token::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                Token::Eof => return None,
+                _ => {}
+            }
+            cursor += 1;
+        }
+        if depth != 0 {
+            return None;
+        }
+
+        let mut after = self.skip_type_qualifiers_at(cursor + 1);
+        while matches!(
+            self.tokens.get(after).map(|token| &token.kind),
+            Some(Token::Star)
+        ) || self.type_qualifier_at(after)
+        {
+            after += 1;
+        }
+
+        if matches!(
+            (
+                self.tokens.get(after).map(|token| &token.kind),
+                self.tokens.get(after + 1).map(|token| &token.kind)
+            ),
+            (Some(Token::Ident(_)), Some(Token::LParen))
+        ) {
+            self.tokens.get(index)
+        } else {
+            None
+        }
     }
 
     fn current_alias(&self) -> Option<&TypeAlias> {
@@ -3037,6 +3097,12 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> CustResult<Stmt> {
+        if let Some(token) = self.anonymous_aggregate_return_type_token() {
+            return Err(Self::error_at(
+                "anonymous aggregate return types are not supported".to_string(),
+                token,
+            ));
+        }
         if self.starts_local_function_declaration() {
             return self.parse_local_function_prototype_decl();
         }
