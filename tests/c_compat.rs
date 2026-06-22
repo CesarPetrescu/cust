@@ -13,6 +13,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/anonymous_aggregate_array_pointer_lists.c",
     "tests/fixtures/compat/valid/inline_enum_declaration_contexts.c",
     "tests/fixtures/compat/valid/inline_enum_object_declarations.c",
+    "tests/fixtures/compat/valid/mixed_declaration_contexts.c",
     "tests/fixtures/compat/valid/anonymous_enum_typedefs.c",
     "tests/fixtures/compat/valid/address_of_dereference.c",
     "tests/fixtures/compat/valid/addressable_compound_literals.c",

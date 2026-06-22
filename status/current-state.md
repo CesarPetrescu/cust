@@ -4,7 +4,23 @@ Last updated: 2026-06-22
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-22 autonomous inline enum declaration-context run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed supported-subset conformance fixtures, anonymous aggregate pointer-first/const-array coverage, and the follow-up audit from the prior inline-enum run. The selected work package closes inline enum object declarations in ordinary declaration contexts beyond simple local/global statements: Cust now accepts inline enum object declarations in `for` initializers (`for (enum { START = 2 } i = START; ...)`), block-scope `static enum { SAVED = 4 } saved = SAVED;`, and local `auto enum` / `register enum` declarations. Parser routing now allows `enum` after these storage/context specifiers, and static-local wrapping preserves the generated runtime `EnumDecl` before wrapping only the actual variable declarations as `StaticLocal`, so same-statement enum constants are visible during first-time static initialization without assigning static storage ids to enum-constant declarations.
+All passed after the 2026-06-22 autonomous mixed declaration-context conformance run. Ideation considered failing tests/builds (none after pull/status inspection), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh exact diagnostics, anonymous aggregate pointer-first/const-array negative coverage, and a mixed supported-subset conformance fixture. The selected work package adds a compact compiler-oracle fixture that combines several recently completed declaration/runtime surfaces in one warning-free C program: comma-separated typedef alias lists, inline enum object declarations in a `for` initializer and local declaration, pointer-first anonymous aggregate declaration lists, const anonymous aggregate arrays with pointer views, aggregate compound literal returns, and typedef-spelled aggregate return values. The focused interpreter coverage passed immediately, confirming this was a conformance-lock fixture over already-supported behavior rather than a production parser/runtime change; the native C compiler-oracle suite also passed.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter supports_mixed_declaration_context_conformance_fixture -- --nocapture  # coverage test passed immediately; no production behavior change required
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-22 autonomous inline enum declaration-context run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed supported-subset conformance fixtures, anonymous aggregate pointer-first/const-array coverage, and the follow-up audit from the prior inline-enum run. The selected work package closes inline enum object declarations in ordinary declaration contexts beyond simple local/global statements: Cust now accepts inline enum object declarations in `for` initializers (`for (enum { START = 2 } i = START; ...)`), block-scope `static enum { SAVED = 4 } saved = SAVED;`, and local `auto enum` / `register enum` declarations. Parser routing now allows `enum` after these storage/context specifiers, and static-local wrapping preserves the generated runtime `EnumDecl` before wrapping only the actual variable declarations as `StaticLocal`, so same-statement enum constants are visible during first-time static initialization without assigning static storage ids to enum-constant declarations.
 
 Commands verified:
 
