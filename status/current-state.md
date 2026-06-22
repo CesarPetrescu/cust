@@ -4,7 +4,24 @@ Last updated: 2026-06-22
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-22 autonomous anonymous aggregate pointer-declarator diagnostic run. Ideation considered failing tests/builds (none in the inherited verified state), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source parser-trust diagnostics, additional mixed supported-subset conformance fixtures, storage/alignment declaration-context audits, and targeted anonymous aggregate pointer declaration-list type/const edge cases. The selected work package closes two concrete unsupported-form diagnostic gaps in anonymous aggregate object declarations: `struct { int x; } **slot;` now reports `pointer-to-pointer declarations are not supported` at the second `*`, and `struct { int x; } *slots[2];` now reports `pointer array declarations are not supported` at `[`, matching the named/typedef-backed pointer declaration boundary instead of falling through to generic missing-name/missing-`=` diagnostics. No pointer-to-pointer or pointer-array runtime support was added.
+All passed after the 2026-06-23 autonomous anonymous aggregate `for` initializer run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source parser-trust diagnostics, additional mixed supported-subset conformance fixtures, storage/alignment declaration-context audits, and targeted anonymous aggregate pointer declaration-list type/const edge cases. The selected work package closes a concrete declaration-context parity gap: Cust now accepts anonymous aggregate object declarations directly in `for` initializers, including `for (struct { int x; } point = {1}; ...)` and `for (union { int value; char tag; } number = {5}; ...)`. `parse_for` now routes `Token::Struct | Token::Union` through `parse_aggregate_var_decl()` in initializer position, reusing existing unique anonymous aggregate type identities, initializer semantics, field lvalues, and loop scoping. No new runtime storage model was added.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_anonymous_aggregate_for_initializers -- --nocapture  # RED failed with `unexpected token in for initializer: Struct`; GREEN passed after parser routing fix
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted the known non-fatal `Docker Compose requires buildx plugin to be installed` warning and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-22 autonomous anonymous aggregate pointer-declarator diagnostic run. Ideation considered failing tests/builds (none in the inherited verified state), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source parser-trust diagnostics, additional mixed supported-subset conformance fixtures, storage/alignment declaration-context audits, and targeted anonymous aggregate pointer declaration-list type/const edge cases. The selected work package closes two concrete unsupported-form diagnostic gaps in anonymous aggregate object declarations: `struct { int x; } **slot;` now reports `pointer-to-pointer declarations are not supported` at the second `*`, and `struct { int x; } *slots[2];` now reports `pointer array declarations are not supported` at `[`, matching the named/typedef-backed pointer declaration boundary instead of falling through to generic missing-name/missing-`=` diagnostics. No pointer-to-pointer or pointer-array runtime support was added.
 
 Commands verified:
 

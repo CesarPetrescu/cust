@@ -1042,6 +1042,13 @@ fn supports_anonymous_aggregate_array_pointer_declaration_lists() {
 }
 
 #[test]
+fn supports_anonymous_aggregate_for_initializers() {
+    let program = include_str!("fixtures/valid/anonymous_aggregate_for_initializers.c");
+
+    assert_eq!(interpret(program).unwrap(), 17);
+}
+
+#[test]
 fn supports_inline_enum_object_declarations() {
     let program = include_str!("fixtures/valid/inline_enum_object_declarations.c");
 
