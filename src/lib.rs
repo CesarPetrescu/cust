@@ -2754,6 +2754,20 @@ impl Parser {
         Ok(Self::decl_type_to_return_type(decl_type))
     }
 
+    fn anonymous_aggregate_parameter_token(&self) -> Option<&LocatedToken> {
+        let index = self.skip_type_qualifiers_at(self.pos);
+        if matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Struct | Token::Union)
+        ) && matches!(
+            self.tokens.get(index + 1).map(|token| &token.kind),
+            Some(Token::LBrace)
+        ) {
+            return self.tokens.get(index);
+        }
+        None
+    }
+
     fn parse_params(&mut self, allow_unnamed: bool) -> CustResult<Vec<Param>> {
         let mut params = Vec::new();
         if self.check(&Token::RParen) {
@@ -2775,6 +2789,12 @@ impl Parser {
                 return Err(Self::error_at(
                     "variadic function parameters are not supported".to_string(),
                     self.peek_located(),
+                ));
+            }
+            if let Some(token) = self.anonymous_aggregate_parameter_token() {
+                return Err(Self::error_at(
+                    "anonymous aggregate parameters are not supported".to_string(),
+                    token,
                 ));
             }
             let (leading_const, decl_type) =

@@ -4,7 +4,23 @@ Last updated: 2026-06-22
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-22 autonomous enum forward-declaration diagnostic run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh exact diagnostics, additional const anonymous aggregate negative coverage, and more mixed supported-subset conformance fixtures. The selected work package closes a concrete parser-trust gap adjacent to the existing unsupported aggregate forward-declaration diagnostics: top-level `enum Color;` now reports targeted `forward enum declarations are not supported` at the semicolon instead of falling through to the misleading `undefined enum type 'Color'` message at the tag token. No incomplete enum runtime/type support was added.
+All passed after the 2026-06-22 autonomous anonymous aggregate parameter diagnostic run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for a fresh exact diagnostic, additional mixed supported-subset conformance fixtures, auditing storage/alignment declaration contexts for anonymous aggregates, and const anonymous aggregate negative coverage. The selected work package closes a concrete parser-trust gap adjacent to existing anonymous aggregate object/typedef support: function parameters spelled directly as anonymous aggregate types such as `struct { int x; } point` now report targeted `anonymous aggregate parameters are not supported` at the `struct` keyword instead of falling through to the generic `expected parameter type, found LBrace` message. No anonymous aggregate parameter runtime/type support was added.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_anonymous_aggregate_parameters_with_context -- --nocapture  # RED failed with old generic LBrace diagnostic; GREEN passed after parser parameter routing
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-22 autonomous enum forward-declaration diagnostic run. Ideation considered failing tests/builds (none; baseline `cargo test` passed), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh exact diagnostics, additional const anonymous aggregate negative coverage, and more mixed supported-subset conformance fixtures. The selected work package closes a concrete parser-trust gap adjacent to the existing unsupported aggregate forward-declaration diagnostics: top-level `enum Color;` now reports targeted `forward enum declarations are not supported` at the semicolon instead of falling through to the misleading `undefined enum type 'Color'` message at the tag token. No incomplete enum runtime/type support was added.
 
 Commands verified:
 

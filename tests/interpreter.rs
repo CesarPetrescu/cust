@@ -140,6 +140,18 @@ fn rejects_aggregate_bit_fields_with_context() {
 }
 
 #[test]
+fn rejects_anonymous_aggregate_parameters_with_context() {
+    let program = include_str!("fixtures/invalid/anonymous_aggregate_parameter.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "anonymous aggregate parameters are not supported at line 1, column 10"
+    );
+}
+
+#[test]
 fn rejects_generic_selections_with_context() {
     let program = include_str!("fixtures/invalid/generic_selection.c");
 
