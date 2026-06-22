@@ -4,7 +4,24 @@ Last updated: 2026-06-22
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-22 autonomous inline enum object declaration run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed supported-subset conformance fixtures, anonymous aggregate pointer/const-array coverage, and an audit of declaration contexts where parser-only enum/type metadata must survive into runtime initialization. The selected work package closes inline enum definition object declarations because it is a compact ordinary-C declaration gap adjacent to completed enum typedef/direct enum work: Cust now accepts `enum { A = 1 } value = A;`, `const enum { LOCKED = 7 } global = LOCKED;`, `enum Mode { IDLE = 11 } mode = IDLE;`, and same-declaration enum scalar lists such as `enum { ONE = 1 } first = ONE, second = first + 5;`. Inline enum constants are installed as runtime read-only enum constants before the associated variable declaration so same-statement initializers and later expressions can reference them, while const enum object declarations reuse existing scalar const assignment diagnostics.
+All passed after the 2026-06-22 autonomous inline enum declaration-context run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed supported-subset conformance fixtures, anonymous aggregate pointer-first/const-array coverage, and the follow-up audit from the prior inline-enum run. The selected work package closes inline enum object declarations in ordinary declaration contexts beyond simple local/global statements: Cust now accepts inline enum object declarations in `for` initializers (`for (enum { START = 2 } i = START; ...)`), block-scope `static enum { SAVED = 4 } saved = SAVED;`, and local `auto enum` / `register enum` declarations. Parser routing now allows `enum` after these storage/context specifiers, and static-local wrapping preserves the generated runtime `EnumDecl` before wrapping only the actual variable declarations as `StaticLocal`, so same-statement enum constants are visible during first-time static initialization without assigning static storage ids to enum-constant declarations.
+
+Commands verified:
+
+```bash
+cargo test --test interpreter inline_enum_object_declarations_in_storage -- --nocapture  # RED failed with `expected declaration after static, found Enum`; GREEN passed after parser/static-local wrapping changes
+cc -std=c11 -Wall -Wextra -Werror tests/fixtures/compat/valid/inline_enum_declaration_contexts.c -o /tmp/cust-inline-enum-contexts && /tmp/cust-inline-enum-contexts; printf 'exit=%s\n' "$?"  # native oracle returned 41; corrected new test expectation before GREEN
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Docker Compose emitted non-fatal `Docker Compose requires buildx plugin to be installed` warnings and fell back to the classic builder; both required Docker commands exited 0.
+
+Previous latest: All passed after the 2026-06-22 autonomous inline enum object declaration run. Ideation considered failing tests/builds (none after pull), active blockers (none), the first unchecked `status/todo.md` C-subset closure item, malformed-source fuzzing for fresh diagnostics, mixed supported-subset conformance fixtures, anonymous aggregate pointer/const-array coverage, and an audit of declaration contexts where parser-only enum/type metadata must survive into runtime initialization. The selected work package closes inline enum definition object declarations because it is a compact ordinary-C declaration gap adjacent to completed enum typedef/direct enum work: Cust now accepts `enum { A = 1 } value = A;`, `const enum { LOCKED = 7 } global = LOCKED;`, `enum Mode { IDLE = 11 } mode = IDLE;`, and same-declaration enum scalar lists such as `enum { ONE = 1 } first = ONE, second = first + 5;`. Inline enum constants are installed as runtime read-only enum constants before the associated variable declaration so same-statement initializers and later expressions can reference them, while const enum object declarations reuse existing scalar const assignment diagnostics.
 
 Commands verified:
 

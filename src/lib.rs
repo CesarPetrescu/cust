@@ -3178,7 +3178,6 @@ impl Parser {
     fn parse_static_local_decl(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Static)?;
         let id = self.next_static_local_id;
-        self.next_static_local_id += 1;
         self.consume_thread_local_specifiers();
         self.consume_alignment_specifiers()?;
         let decl = match self.peek() {
@@ -3192,7 +3191,8 @@ impl Parser {
             | Token::Const
             | Token::Volatile
             | Token::Restrict
-            | Token::Atomic => self.parse_var_decl()?,
+            | Token::Atomic
+            | Token::Enum => self.parse_var_decl()?,
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
             Token::Struct | Token::Union => self.parse_aggregate_var_decl()?,
             token => {
@@ -3202,24 +3202,36 @@ impl Parser {
                 ));
             }
         };
-        match decl {
-            Stmt::Many(declarations) => {
-                self.next_static_local_id += declarations.len().saturating_sub(1);
-                Ok(Stmt::Many(
-                    declarations
-                        .into_iter()
-                        .enumerate()
-                        .map(|(offset, declaration)| Stmt::StaticLocal {
-                            id: id + offset,
-                            decl: Box::new(declaration),
-                        })
-                        .collect(),
-                ))
+        let mut next_id = id;
+        let wrapped = Self::wrap_static_local_declarations(decl, &mut next_id)?;
+        self.next_static_local_id = next_id;
+        Ok(wrapped)
+    }
+
+    fn wrap_static_local_declarations(stmt: Stmt, next_id: &mut usize) -> CustResult<Stmt> {
+        match stmt {
+            Stmt::Many(declarations) => Ok(Stmt::Many(
+                declarations
+                    .into_iter()
+                    .map(|declaration| Self::wrap_static_local_declarations(declaration, next_id))
+                    .collect::<CustResult<Vec<_>>>()?,
+            )),
+            Stmt::EnumDecl { constants } => Ok(Stmt::EnumDecl { constants }),
+            declaration @ (Stmt::VarDecl { .. }
+            | Stmt::PointerDecl { .. }
+            | Stmt::ArrayDecl { .. }
+            | Stmt::StructVarDecl { .. }
+            | Stmt::StructArrayDecl { .. }) => {
+                let id = *next_id;
+                *next_id += 1;
+                Ok(Stmt::StaticLocal {
+                    id,
+                    decl: Box::new(declaration),
+                })
             }
-            declaration => Ok(Stmt::StaticLocal {
-                id,
-                decl: Box::new(declaration),
-            }),
+            _ => Err(CustError::new(
+                "static local declarations must declare variables",
+            )),
         }
     }
 
@@ -3240,7 +3252,8 @@ impl Parser {
             | Token::Const
             | Token::Volatile
             | Token::Restrict
-            | Token::Atomic => self.parse_var_decl(),
+            | Token::Atomic
+            | Token::Enum => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -3306,7 +3319,8 @@ impl Parser {
             | Token::Const
             | Token::Volatile
             | Token::Restrict
-            | Token::Atomic => self.parse_var_decl(),
+            | Token::Atomic
+            | Token::Enum => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -3342,7 +3356,8 @@ impl Parser {
             | Token::Const
             | Token::Volatile
             | Token::Restrict
-            | Token::Atomic => self.parse_var_decl(),
+            | Token::Atomic
+            | Token::Enum => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -5766,6 +5781,7 @@ impl Parser {
                 | Token::Volatile
                 | Token::Restrict
                 | Token::Atomic
+                | Token::Enum
                 | Token::Alignas
         ) || self.current_alias().is_some()
         {

@@ -1004,6 +1004,13 @@ fn supports_inline_enum_object_declarations() {
 }
 
 #[test]
+fn supports_inline_enum_object_declarations_in_storage_and_for_contexts() {
+    let program = include_str!("fixtures/valid/inline_enum_declaration_contexts.c");
+
+    assert_eq!(interpret(program).unwrap(), 41);
+}
+
+#[test]
 fn rejects_assignment_to_const_inline_enum_object() {
     let program = include_str!("fixtures/invalid/const_inline_enum_assignment.c");
 
