@@ -5918,6 +5918,10 @@ impl Parser {
             None
         } else if matches!(self.peek(), Token::Auto | Token::Register) {
             Some(Box::new(self.parse_auto_register_local_decl()?))
+        } else if self.starts_qualified_aggregate_declaration()
+            || matches!(self.peek(), Token::Struct | Token::Union)
+        {
+            Some(Box::new(self.parse_aggregate_var_decl()?))
         } else if matches!(
             self.peek(),
             Token::Int
@@ -5936,8 +5940,6 @@ impl Parser {
         ) || self.current_alias().is_some()
         {
             Some(Box::new(self.parse_var_decl()?))
-        } else if matches!(self.peek(), Token::Struct | Token::Union) {
-            Some(Box::new(self.parse_aggregate_var_decl()?))
         } else if self.starts_assignment_stmt() {
             Some(Box::new(self.parse_assign()?))
         } else if self.starts_expr() {

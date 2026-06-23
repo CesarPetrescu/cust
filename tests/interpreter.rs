@@ -1049,6 +1049,13 @@ fn supports_anonymous_aggregate_for_initializers() {
 }
 
 #[test]
+fn supports_qualified_anonymous_aggregate_for_initializers() {
+    let program = include_str!("fixtures/valid/qualified_anonymous_aggregate_for_initializers.c");
+
+    assert_eq!(interpret(program).unwrap(), 24);
+}
+
+#[test]
 fn supports_inline_enum_object_declarations() {
     let program = include_str!("fixtures/valid/inline_enum_object_declarations.c");
 
@@ -1123,6 +1130,15 @@ fn rejects_anonymous_aggregate_pointer_array_declarations_with_targeted_diagnost
         err.to_string(),
         "pointer array declarations are not supported at line 1, column 42"
     );
+}
+
+#[test]
+fn rejects_const_anonymous_aggregate_for_initializer_pointer_writes() {
+    let program =
+        include_str!("fixtures/invalid/const_anonymous_aggregate_for_initializer_pointer_write.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
 }
 
 #[test]
