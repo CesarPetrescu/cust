@@ -4,6 +4,21 @@ Last updated: 2026-06-23
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-23 autonomous const aggregate field nested-write run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source fuzzing for another exact diagnostic, additional mixed conformance fixtures, anonymous aggregate pointer declaration-list type/const edge cases, and a concrete const-enforcement audit for aggregate fields. The selected work package fixes a correctness gap for const-qualified aggregate fields: nested writes through named and anonymous const aggregate fields such as `box.point.x = 3` and `anon.point.y = 4` now report `cannot assign to const struct field 'point'` instead of mutating the nested scalar. Initializers and read paths remain unchanged. Implementation is a recursive const guard in `assign_scalar_field_in_map()` before descending into a nested `StructFieldValue::Struct`.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_assignment_to_nested_fields_of_const -- --nocapture  # RED failed with Ok(3)/Ok(4); GREEN passed after recursive const guard
+cargo test --test interpreter const_aggregate -- --nocapture
+cargo test --test interpreter const_struct -- --nocapture
+cargo test --test interpreter supports_anonymous_aggregate_fields -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-23 autonomous anonymous aggregate field run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed conformance fixtures, anonymous aggregate pointer declaration-list const/type edge cases, and a concrete anonymous aggregate declaration parity gap. The selected work package adds anonymous `struct { ... }` / `union { ... }` field definitions inside supported aggregate definitions: `struct Box { struct { int x; int y; } point; union { int value; char tag; } number; struct { int value; } items[2]; };` now parses through the shared anonymous aggregate definition body, creates unique internal type identities, and reuses existing nested aggregate field, array-field, initializer, field access, and copy semantics. A negative regression also locks in that separately spelled anonymous aggregate pointer types remain distinct and incompatible.
 
 Commands verified:

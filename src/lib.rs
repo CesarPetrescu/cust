@@ -9788,6 +9788,11 @@ impl Interpreter {
             let field_value = fields_map.get_mut(field).ok_or_else(|| {
                 CustError::new(format!("struct '{type_name}' has no field '{field}'"))
             })?;
+            if field_value.is_const() {
+                return Err(CustError::new(format!(
+                    "cannot assign to const struct field '{field}'"
+                )));
+            }
             match field_value {
                 StructFieldValue::Struct {
                     type_name: nested_type,
