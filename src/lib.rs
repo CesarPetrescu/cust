@@ -6551,6 +6551,15 @@ impl Parser {
             && matches!(self.peek_next(), Token::LBrace)
         {
             let (type_name, _, _) = self.parse_aggregate_definition_body(false, true)?;
+            if self.matches(&Token::Star) {
+                self.consume_type_qualifiers();
+                self.expect_closing_paren_after("cast type")?;
+                return Ok(Expr::PointerCast {
+                    pointee: PointeeType::Struct(type_name),
+                    points_to_const: leading_const,
+                    expr: Box::new(self.parse_unary()?),
+                });
+            }
             if self.matches(&Token::LBracket) {
                 let len = if self.check(&Token::RBracket) {
                     None
