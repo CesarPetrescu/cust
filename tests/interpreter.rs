@@ -893,6 +893,13 @@ fn supports_anonymous_aggregate_pointer_casts() {
 }
 
 #[test]
+fn supports_anonymous_aggregate_fields() {
+    let program = include_str!("fixtures/valid/anonymous_aggregate_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 21);
+}
+
+#[test]
 fn supports_addressable_scalar_and_aggregate_compound_literals() {
     let program = include_str!("fixtures/valid/addressable_compound_literals.c");
 
@@ -1150,6 +1157,18 @@ fn rejects_anonymous_aggregate_pointer_array_declarations_with_targeted_diagnost
     assert_eq!(
         err.to_string(),
         "pointer array declarations are not supported at line 1, column 42"
+    );
+}
+
+#[test]
+fn rejects_distinct_anonymous_aggregate_pointer_assignments() {
+    let program =
+        include_str!("fixtures/invalid/anonymous_aggregate_distinct_type_pointer_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string().contains("cannot convert pointer to struct"),
+        "unexpected error: {err}"
     );
 }
 

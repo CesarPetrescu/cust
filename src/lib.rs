@@ -4773,21 +4773,28 @@ impl Parser {
             };
             let leading_const = leading_const || alias_const;
             let decl_type = if matches!(self.peek(), Token::Struct | Token::Union) {
-                let field_kind = match self.advance().kind {
-                    Token::Struct => AggregateKind::Struct,
-                    Token::Union => AggregateKind::Union,
-                    token => unreachable!("expected aggregate field type, found {token:?}"),
-                };
-                let field_keyword = field_kind.keyword();
-                let field_type_name =
-                    self.expect_ident_after(&format!("{field_keyword} field type"))?;
-                let Some(field_internal_type_name) = self.resolve_aggregate_type(&field_type_name)
-                else {
-                    return Err(CustError::new(format!(
-                        "undefined {field_keyword} type '{field_type_name}'"
-                    )));
-                };
-                DeclType::Struct(field_internal_type_name)
+                if matches!(self.peek_next(), Token::LBrace) {
+                    let (field_internal_type_name, _, _) =
+                        self.parse_aggregate_definition_body(false, true)?;
+                    DeclType::Struct(field_internal_type_name)
+                } else {
+                    let field_kind = match self.advance().kind {
+                        Token::Struct => AggregateKind::Struct,
+                        Token::Union => AggregateKind::Union,
+                        token => unreachable!("expected aggregate field type, found {token:?}"),
+                    };
+                    let field_keyword = field_kind.keyword();
+                    let field_type_name =
+                        self.expect_ident_after(&format!("{field_keyword} field type"))?;
+                    let Some(field_internal_type_name) =
+                        self.resolve_aggregate_type(&field_type_name)
+                    else {
+                        return Err(CustError::new(format!(
+                            "undefined {field_keyword} type '{field_type_name}'"
+                        )));
+                    };
+                    DeclType::Struct(field_internal_type_name)
+                }
             } else {
                 self.parse_decl_type(&format!("{keyword} field type"))?
             };
