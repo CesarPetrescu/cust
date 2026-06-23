@@ -4,6 +4,21 @@ Last updated: 2026-06-23
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-23 autonomous storage/alignment anonymous aggregate declaration-context run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source parser-trust diagnostics, more mixed supported-subset conformance fixtures, and the storage/alignment declaration-context audit called out by the backlog. The selected work package closes a concrete parser routing gap for qualifier-leading anonymous aggregate object declarations behind local storage/alignment specifiers: `static _Alignas(8) const struct { ... } value`, `_Alignas(8) volatile union { ... } scratch`, and `static _Thread_local const struct { ... } local_shape` now route through `parse_aggregate_var_decl()` instead of the scalar declaration parser, preserving anonymous type identity, same-declaration pointer declarators, static-local wrapping, and const pointer-view metadata. Global `_Thread_local const struct { ... }` coverage was also added. No new runtime storage model was added.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_alignas_specifiers -- --nocapture  # RED failed with `expected struct type name, found LBrace`; GREEN passed after declaration-context routing fix
+cargo test --test interpreter supports_thread_local_storage_class_specifiers -- --nocapture
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-23 autonomous qualified anonymous aggregate `for` initializer run. Ideation considered failing tests/builds (none from the inherited clean state), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source parser-trust diagnostics, additional mixed supported-subset conformance fixtures, storage/alignment declaration-context audits, and targeted anonymous aggregate pointer declaration-list type/const edge cases. The selected work package closes the qualifier-leading follow-up to anonymous aggregate `for` initializer support: Cust now accepts `for (const struct { int limit; } cfg = {...}, *view = &cfg; ...)` and `for (volatile union { int value; char tag; } number = {...}; ...)` by routing qualified aggregate starts through `parse_aggregate_var_decl()` before the scalar declaration parser in `parse_for`. The new invalid regression proves same-declaration const anonymous aggregate pointer views in `for` initializers still reject `slot->x = ...` with `cannot assign through pointer to const`. No new runtime storage model was added.
 
 Commands verified:

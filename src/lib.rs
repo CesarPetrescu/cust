@@ -3318,6 +3318,13 @@ impl Parser {
         let id = self.next_static_local_id;
         self.consume_thread_local_specifiers();
         self.consume_alignment_specifiers()?;
+        if self.starts_qualified_aggregate_declaration() {
+            let decl = self.parse_aggregate_var_decl()?;
+            let mut next_id = id;
+            let wrapped = Self::wrap_static_local_declarations(decl, &mut next_id)?;
+            self.next_static_local_id = next_id;
+            return Ok(wrapped);
+        }
         let decl = match self.peek() {
             Token::Int
             | Token::Char
@@ -3379,6 +3386,9 @@ impl Parser {
             return self.parse_static_local_decl();
         }
         self.consume_alignment_specifiers()?;
+        if self.starts_qualified_aggregate_declaration() {
+            return self.parse_aggregate_var_decl();
+        }
         match self.peek() {
             Token::Int
             | Token::Char
@@ -3446,6 +3456,9 @@ impl Parser {
         };
         self.advance();
         self.consume_alignment_specifiers()?;
+        if self.starts_qualified_aggregate_declaration() {
+            return self.parse_aggregate_var_decl();
+        }
         match self.peek() {
             Token::Int
             | Token::Char
@@ -3483,6 +3496,9 @@ impl Parser {
 
     fn parse_aligned_decl(&mut self) -> CustResult<Stmt> {
         self.consume_alignment_specifiers()?;
+        if self.starts_qualified_aggregate_declaration() {
+            return self.parse_aggregate_var_decl();
+        }
         match self.peek() {
             Token::Int
             | Token::Char

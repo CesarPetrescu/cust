@@ -406,14 +406,14 @@ fn supports_alignof_type_names() {
 fn supports_alignas_specifiers() {
     let program = include_str!("fixtures/valid/alignas_specifiers.c");
 
-    assert_eq!(interpret(program).unwrap(), 16);
+    assert_eq!(interpret(program).unwrap(), 29);
 }
 
 #[test]
 fn supports_thread_local_storage_class_specifiers() {
     let program = include_str!("fixtures/valid/thread_local_storage_class.c");
 
-    assert_eq!(interpret(program).unwrap(), 17);
+    assert_eq!(interpret(program).unwrap(), 26);
 }
 
 #[test]
