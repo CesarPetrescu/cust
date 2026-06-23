@@ -4773,7 +4773,12 @@ impl Parser {
             };
             let leading_const = leading_const || alias_const;
             let decl_type = if matches!(self.peek(), Token::Struct | Token::Union) {
-                if matches!(self.peek_next(), Token::LBrace) {
+                if matches!(self.peek_next(), Token::LBrace)
+                    || matches!(
+                        self.tokens.get(self.pos + 2).map(|token| &token.kind),
+                        Some(Token::LBrace)
+                    )
+                {
                     let (field_internal_type_name, _, _) =
                         self.parse_aggregate_definition_body(false, true)?;
                     DeclType::Struct(field_internal_type_name)

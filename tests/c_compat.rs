@@ -66,6 +66,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/anonymous_aggregate_compound_literals.c",
     "tests/fixtures/compat/valid/anonymous_aggregate_pointer_casts.c",
     "tests/fixtures/compat/valid/anonymous_aggregate_fields.c",
+    "tests/fixtures/compat/valid/nested_named_aggregate_fields.c",
     "tests/fixtures/compat/valid/aggregate_array_designated_initializers.c",
     "tests/fixtures/compat/valid/aggregate_array_decay_to_pointers.c",
     "tests/fixtures/compat/valid/address_of_struct_fields.c",

@@ -900,6 +900,13 @@ fn supports_anonymous_aggregate_fields() {
 }
 
 #[test]
+fn supports_nested_named_aggregate_fields() {
+    let program = include_str!("fixtures/valid/nested_named_aggregate_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 59);
+}
+
+#[test]
 fn supports_addressable_scalar_and_aggregate_compound_literals() {
     let program = include_str!("fixtures/valid/addressable_compound_literals.c");
 

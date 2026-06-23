@@ -1,8 +1,22 @@
 # Cust Current State
 
-Last updated: 2026-06-23
+Last updated: 2026-06-24
 
 ## Latest autonomous verification
+
+All passed after the 2026-06-24 autonomous nested named aggregate field definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source fuzzing for another exact diagnostic, additional mixed supported-subset conformance fixtures, pointer/const diagnostic coverage through embedded/anonymous aggregate paths, and a concrete C aggregate declaration parity gap: field-local named `struct`/`union` definitions inside supported aggregate definitions. The selected work package lets declarations such as `struct Scene { struct Point { int x; int y; } origin, cursor; union Number { int value; char tag; } primary, secondary; struct Segment { struct Point start; struct Point end; } segments[2]; };` parse by recursing through the aggregate definition parser for `struct`/`union` followed by either `{` or `Ident {`, then reusing the existing field declarator-list loop. This preserves reusable nested tag metadata for later fields in the same definition and relies on existing nested field, array-field, initializer, access, mutation, and compiler-oracle paths.
+
+Commands verified:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_nested_named_aggregate_fields -- --nocapture  # RED: undefined struct type 'Point'; GREEN passed after field-definition parser routing
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
 
 All passed after the 2026-06-23 autonomous const embedded aggregate-array element copy-assignment run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source fuzzing for another exact diagnostic, additional mixed supported-subset conformance fixtures, and a concrete const/aggregate-array assignment gap from the backlog. The selected work package closes const enforcement for aggregate-array element copy assignment through struct pointers: `slot->points[0] = replacement` now rejects writes to `const struct Point points[2];` with `cannot assign to const struct field 'points'` instead of mutating through the address-of-struct-pointer-array-field path. Direct `line.points[1] = replacement` coverage was also added and already passed, proving the direct variable-backed path was safe. The implementation extends metadata-only const-origin tracing for `StructPtrArrayGet` / `AddressOfStructPtrArrayField` so pointer expressions derived from struct-pointer aggregate-array fields recover the parent const field label before assignment.
 
