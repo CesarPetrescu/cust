@@ -1152,6 +1152,31 @@ fn rejects_assignment_to_nested_fields_of_const_anonymous_aggregate_fields() {
 }
 
 #[test]
+fn rejects_assignment_to_nested_fields_of_const_aggregate_array_fields() {
+    let program =
+        include_str!("fixtures/invalid/const_aggregate_array_field_element_nested_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'points'"
+    );
+}
+
+#[test]
+fn rejects_assignment_to_nested_fields_of_const_aggregate_array_fields_on_compound_literals() {
+    let program = include_str!(
+        "fixtures/invalid/const_aggregate_compound_literal_array_field_nested_assignment.c"
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'points'"
+    );
+}
+
+#[test]
 fn rejects_assignment_to_const_anonymous_aggregate_array_elements() {
     let program =
         include_str!("fixtures/invalid/const_anonymous_aggregate_array_element_assignment.c");

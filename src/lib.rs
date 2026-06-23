@@ -8894,10 +8894,58 @@ impl Interpreter {
 
     fn ensure_pointer_expr_pointee_mutable(&self, expr: &Expr) -> CustResult<()> {
         if self.pointer_expr_points_to_const(expr) {
+            if let Some(field_label) = self.const_aggregate_field_label_in_pointer_expr(expr) {
+                return Err(CustError::new(format!(
+                    "cannot assign to const struct field '{field_label}'"
+                )));
+            }
             Err(CustError::new("cannot assign through pointer to const"))
         } else {
             Ok(())
         }
+    }
+
+    fn const_aggregate_field_label_in_pointer_expr(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                let Expr::AggregateLiteral { type_name, .. } = aggregate.as_ref() else {
+                    return None;
+                };
+                self.const_aggregate_field_label_for_path(type_name, fields)
+            }
+            Expr::Binary(left, BinaryOp::Add | BinaryOp::Sub, right) => self
+                .const_aggregate_field_label_in_pointer_expr(left)
+                .or_else(|| self.const_aggregate_field_label_in_pointer_expr(right)),
+            _ => None,
+        }
+    }
+
+    fn const_aggregate_field_label_for_path(
+        &self,
+        type_name: &str,
+        path: &[String],
+    ) -> Option<String> {
+        let mut current_type = type_name;
+        let mut traversed = Vec::new();
+        for field_name in path {
+            let struct_type = self.struct_types.get(current_type)?;
+            let field = struct_type
+                .fields
+                .iter()
+                .find(|field| field.name == *field_name)?;
+            traversed.push(field_name.clone());
+            if field.is_const {
+                return Some(Self::field_path_label(&traversed).to_string());
+            }
+            match &field.ty {
+                StructFieldType::Struct(nested_type) => current_type = nested_type,
+                StructFieldType::Scalar(_)
+                | StructFieldType::Array(_, _)
+                | StructFieldType::StructArray(_, _)
+                | StructFieldType::Pointer(_) => return None,
+            }
+        }
+        None
     }
 
     fn ensure_struct_pointer_target_mutable(&self, pointer: &PointerValue) -> CustResult<()> {

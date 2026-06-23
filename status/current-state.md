@@ -4,6 +4,21 @@ Last updated: 2026-06-23
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-23 autonomous const aggregate-array field compound-literal diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source fuzzing for a fresh parser-trust diagnostic, additional mixed supported-subset conformance fixtures, and a targeted const/aggregate edge from the current backlog. The selected work package tightens const diagnostics for nested scalar writes through const aggregate-array fields selected from aggregate compound literals: `((struct Box){{...}}).points[1].x = 9` now reports `cannot assign to const struct field 'points'` instead of the generic `cannot assign through pointer to const`. Direct variable-backed const aggregate-array field writes such as `box.points[1].x = 9` are also locked in with coverage. The implementation keeps the existing pointer-to-const safety gate but adds metadata-only origin tracing for `AggregateFieldGet` pointer expressions and pointer arithmetic over those expressions, avoiding evaluation of compound-literal initializers while recovering the const parent field label.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_assignment_to_nested_fields_of_const_aggregate_array_fields -- --nocapture  # passed immediately as existing direct-field behavior coverage
+cargo test --test interpreter rejects_assignment_to_nested_fields_of_const_aggregate_array_fields_on_compound_literals -- --nocapture  # RED failed with generic pointer-to-const diagnostic; GREEN passed after metadata-only field-label tracing
+cargo test --test interpreter const_aggregate -- --nocapture
+cargo test --test interpreter aggregate_compound_literal -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-23 autonomous const aggregate field nested-write run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source fuzzing for another exact diagnostic, additional mixed conformance fixtures, anonymous aggregate pointer declaration-list type/const edge cases, and a concrete const-enforcement audit for aggregate fields. The selected work package fixes a correctness gap for const-qualified aggregate fields: nested writes through named and anonymous const aggregate fields such as `box.point.x = 3` and `anon.point.y = 4` now report `cannot assign to const struct field 'point'` instead of mutating the nested scalar. Initializers and read paths remain unchanged. Implementation is a recursive const guard in `assign_scalar_field_in_map()` before descending into a nested `StructFieldValue::Struct`.
 
 Commands verified:
