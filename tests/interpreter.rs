@@ -879,6 +879,13 @@ fn supports_aggregate_array_compound_literals_as_pointer_expressions() {
 }
 
 #[test]
+fn supports_anonymous_aggregate_compound_literals() {
+    let program = include_str!("fixtures/valid/anonymous_aggregate_compound_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 21);
+}
+
+#[test]
 fn supports_addressable_scalar_and_aggregate_compound_literals() {
     let program = include_str!("fixtures/valid/addressable_compound_literals.c");
 

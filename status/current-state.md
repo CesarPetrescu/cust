@@ -4,6 +4,20 @@ Last updated: 2026-06-23
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-23 autonomous anonymous aggregate compound-literal run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source parser-trust diagnostics, additional mixed conformance fixtures, anonymous aggregate pointer declaration-list edge cases, and a concrete C99 type-name expression parity gap. The selected work package adds anonymous `struct`/`union` type-name support in aggregate compound literals: forms such as `((struct { int x; int y; }){.x = 2}).x`, `((union { int value; char tag; }){7}).value`, and anonymous aggregate-array compound literals such as `((struct { int x; int y; }[]){{1, 2}, {.y = 9}})[1].y` now parse through the shared anonymous aggregate definition body, create a unique internal type identity, and reuse existing aggregate/aggregate-array compound literal evaluation. No source-level tag or typedef alias is installed for these expression-local anonymous types.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_anonymous_aggregate_compound_literals -- --nocapture  # RED failed with `expected cast type, found LBrace`; GREEN passed after cast/type-name parser support
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-23 autonomous anonymous aggregate type-query run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, additional malformed-source diagnostics, more mixed supported-subset conformance fixtures, and a concrete remaining C type-query parity gap. The selected work package adds `sizeof` / `_Alignof` support for anonymous aggregate type-name operands: `sizeof(struct { int x; char tag; })`, `sizeof(union { int value; char tag; })`, `sizeof(const struct { ... })`, `sizeof(struct { ... } *)`, `sizeof(struct { ... }[N])`, and `_Alignof(struct/union { ... })` now parse through the shared anonymous aggregate definition body and evaluate with Cust's deterministic no-padding size/alignment model. No source-level tag or typedef alias is installed for these anonymous type operands.
 
 Commands verified:

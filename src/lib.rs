@@ -6547,6 +6547,36 @@ impl Parser {
         self.expect(Token::LParen)?;
         let leading_const = self.consume_type_qualifiers();
         let type_token = self.peek_located().clone();
+        if matches!(self.peek(), Token::Struct | Token::Union)
+            && matches!(self.peek_next(), Token::LBrace)
+        {
+            let (type_name, _, _) = self.parse_aggregate_definition_body(false, true)?;
+            if self.matches(&Token::LBracket) {
+                let len = if self.check(&Token::RBracket) {
+                    None
+                } else {
+                    Some(self.expect_array_len()?)
+                };
+                self.expect_closing_bracket_after("aggregate array compound literal type")?;
+                self.expect_closing_paren_after("cast type")?;
+                return Ok(Expr::AggregateArrayLiteral {
+                    init: self.parse_aggregate_array_compound_initializer(&type_name, len)?,
+                    len,
+                    type_name,
+                });
+            }
+            self.expect_closing_paren_after("cast type")?;
+            if !self.check(&Token::LBrace) {
+                return Err(Self::error_at(
+                    "aggregate casts are not supported".to_string(),
+                    &type_token,
+                ));
+            }
+            return Ok(Expr::AggregateLiteral {
+                init: self.parse_struct_initializer(&type_name)?,
+                type_name,
+            });
+        }
         if self.matches(&Token::Void) {
             self.expect_closing_paren_after("cast type")?;
             return Ok(Expr::VoidCast(Box::new(self.parse_unary()?)));
