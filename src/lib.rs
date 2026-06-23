@@ -697,6 +697,7 @@ impl PointeeType {
 enum SizeOfType {
     Scalar(CType),
     Struct(String),
+    AnonymousAggregate(StructTypeDef),
     Pointer,
     Array(PointeeType, usize),
 }
@@ -710,6 +711,7 @@ impl SizeOfType {
                 .map(|struct_type| struct_type.size(struct_types))
                 .transpose()?
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            SizeOfType::AnonymousAggregate(struct_type) => struct_type.size(struct_types),
             SizeOfType::Pointer => Ok(POINTER_SIZE),
             SizeOfType::Array(element_type, len) => {
                 let len =
@@ -727,6 +729,7 @@ impl SizeOfType {
                 .map(|struct_type| struct_type.alignment(struct_types))
                 .transpose()?
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            SizeOfType::AnonymousAggregate(struct_type) => struct_type.alignment(struct_types),
             SizeOfType::Pointer => Ok(POINTER_SIZE),
             SizeOfType::Array(element_type, _) => element_type.alignment(struct_types),
         }
@@ -6815,6 +6818,26 @@ impl Parser {
                 &found,
             ));
         }
+        if matches!(
+            (
+                self.peek(),
+                self.tokens.get(self.pos + 1).map(|token| &token.kind)
+            ),
+            (Token::Struct | Token::Union, Some(Token::LBrace))
+        ) {
+            let (type_name, _, _) = self.parse_aggregate_definition_body(false, true)?;
+            if self.matches(&Token::Star) {
+                return Ok(SizeOfType::Pointer);
+            }
+            if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
+                return Ok(SizeOfType::Array(PointeeType::Struct(type_name), len));
+            }
+            let struct_type = self.struct_types.get(&type_name).cloned().ok_or_else(|| {
+                CustError::new(format!("undefined anonymous aggregate type '{type_name}'"))
+            })?;
+            return Ok(SizeOfType::AnonymousAggregate(struct_type));
+        }
+
         match self.parse_decl_type(&format!("{operator} struct type name"))? {
             DeclType::Scalar(ty) => {
                 if self.matches(&Token::Star) {

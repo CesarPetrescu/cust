@@ -4,6 +4,19 @@ Last updated: 2026-06-23
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-23 autonomous anonymous aggregate type-query run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, additional malformed-source diagnostics, more mixed supported-subset conformance fixtures, and a concrete remaining C type-query parity gap. The selected work package adds `sizeof` / `_Alignof` support for anonymous aggregate type-name operands: `sizeof(struct { int x; char tag; })`, `sizeof(union { int value; char tag; })`, `sizeof(const struct { ... })`, `sizeof(struct { ... } *)`, `sizeof(struct { ... }[N])`, and `_Alignof(struct/union { ... })` now parse through the shared anonymous aggregate definition body and evaluate with Cust's deterministic no-padding size/alignment model. No source-level tag or typedef alias is installed for these anonymous type operands.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_sizeof_and_alignof_anonymous_aggregate_type_names -- --nocapture  # RED failed with `expected sizeof struct type name, found LBrace`; GREEN passed after type-query parser support
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-23 autonomous anonymous aggregate parenthesized pointer declarator diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, storage-class/anonymous-aggregate routing audits, and targeted negative coverage for anonymous aggregate pointer declaration-list edge cases. The selected work package closes a parser-trust gap for unsupported anonymous aggregate parenthesized pointer declarators: `struct { int x; } (*slot);` now reports `parenthesized pointer declarations are not supported` at the parenthesized declarator instead of the generic `expected struct variable name, found LParen` fallback. The fix is parser-local in `parse_aggregate_var_decl_after_type()` and mirrors the existing named/typedef-backed declaration guard; no parenthesized pointer declarator or function-pointer runtime support was added.
 
 Commands verified:
