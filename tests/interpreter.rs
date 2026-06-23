@@ -1133,6 +1133,18 @@ fn rejects_anonymous_aggregate_pointer_array_declarations_with_targeted_diagnost
 }
 
 #[test]
+fn rejects_anonymous_aggregate_parenthesized_pointer_declarations_with_targeted_diagnostic() {
+    let program =
+        include_str!("fixtures/invalid/anonymous_aggregate_parenthesized_pointer_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "parenthesized pointer declarations are not supported at line 1, column 36"
+    );
+}
+
+#[test]
 fn rejects_const_anonymous_aggregate_for_initializer_pointer_writes() {
     let program =
         include_str!("fixtures/invalid/const_anonymous_aggregate_for_initializer_pointer_write.c");

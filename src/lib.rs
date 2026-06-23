@@ -4991,6 +4991,18 @@ impl Parser {
             self.expect_semicolon_after(&format!("{keyword} pointer declaration"))?;
             return Ok(stmt);
         }
+        if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
+            if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
+                return Err(Self::error_at(
+                    "function pointer declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            return Err(Self::error_at(
+                "parenthesized pointer declarations are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
         let name = self.expect_ident_after(&format!("{keyword} variable name"))?;
         if self.matches(&Token::LBracket) {
             let (len, init) = if self.matches(&Token::RBracket) {

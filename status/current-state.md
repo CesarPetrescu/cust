@@ -4,6 +4,19 @@ Last updated: 2026-06-23
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-23 autonomous anonymous aggregate parenthesized pointer declarator diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, storage-class/anonymous-aggregate routing audits, and targeted negative coverage for anonymous aggregate pointer declaration-list edge cases. The selected work package closes a parser-trust gap for unsupported anonymous aggregate parenthesized pointer declarators: `struct { int x; } (*slot);` now reports `parenthesized pointer declarations are not supported` at the parenthesized declarator instead of the generic `expected struct variable name, found LParen` fallback. The fix is parser-local in `parse_aggregate_var_decl_after_type()` and mirrors the existing named/typedef-backed declaration guard; no parenthesized pointer declarator or function-pointer runtime support was added.
+
+Commands verified:
+
+```bash
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter anonymous_aggregate_parenthesized_pointer -- --nocapture  # RED failed with generic missing-name diagnostic; GREEN passed after parser lookahead fix
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-23 autonomous storage/alignment anonymous aggregate declaration-context run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source parser-trust diagnostics, more mixed supported-subset conformance fixtures, and the storage/alignment declaration-context audit called out by the backlog. The selected work package closes a concrete parser routing gap for qualifier-leading anonymous aggregate object declarations behind local storage/alignment specifiers: `static _Alignas(8) const struct { ... } value`, `_Alignas(8) volatile union { ... } scratch`, and `static _Thread_local const struct { ... } local_shape` now route through `parse_aggregate_var_decl()` instead of the scalar declaration parser, preserving anonymous type identity, same-declaration pointer declarators, static-local wrapping, and const pointer-view metadata. Global `_Thread_local const struct { ... }` coverage was also added. No new runtime storage model was added.
 
 Commands verified:
