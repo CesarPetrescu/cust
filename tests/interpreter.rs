@@ -1527,6 +1527,31 @@ fn rejects_embedded_aggregate_array_element_assignment_type_mismatch() {
 }
 
 #[test]
+fn rejects_const_embedded_aggregate_array_element_copy_assignment() {
+    let program =
+        include_str!("fixtures/invalid/const_embedded_aggregate_array_element_copy_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'points'"
+    );
+}
+
+#[test]
+fn rejects_const_embedded_aggregate_array_element_copy_assignment_through_pointer() {
+    let program = include_str!(
+        "fixtures/invalid/const_embedded_aggregate_array_element_copy_assignment_through_pointer.c"
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'points'"
+    );
+}
+
+#[test]
 fn supports_aggregate_pointer_dereference_values_and_assignment() {
     let program = include_str!("fixtures/valid/aggregate_pointer_dereference.c");
 

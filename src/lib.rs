@@ -8650,11 +8650,19 @@ impl Interpreter {
             Expr::StructElementGet { name, fields, .. } => {
                 self.struct_array_element_field_points_to_const(name, fields)
             }
-            Expr::StructPtrGet { pointer, .. }
-            | Expr::StructPtrArrayGet { pointer, .. }
-            | Expr::AddressOfStructPtrField { pointer, .. }
-            | Expr::AddressOfStructPtrArrayField { pointer, .. } => {
+            Expr::StructPtrGet { pointer, .. } | Expr::AddressOfStructPtrField { pointer, .. } => {
                 self.pointer_expr_points_to_const(pointer)
+            }
+            Expr::StructPtrArrayGet {
+                pointer, fields, ..
+            }
+            | Expr::AddressOfStructPtrArrayField {
+                pointer, fields, ..
+            } => {
+                self.pointer_expr_points_to_const(pointer)
+                    || self
+                        .const_aggregate_field_label_for_struct_pointer_expr(pointer, fields)
+                        .is_some()
             }
             Expr::AddressOfArray { name, .. } => match self.find_variable(name) {
                 Some(Value::Array(array)) => array.borrow().read_only,
@@ -8913,11 +8921,29 @@ impl Interpreter {
                 };
                 self.const_aggregate_field_label_for_path(type_name, fields)
             }
+            Expr::StructPtrArrayGet {
+                pointer, fields, ..
+            }
+            | Expr::AddressOfStructPtrArrayField {
+                pointer, fields, ..
+            } => self.const_aggregate_field_label_for_struct_pointer_expr(pointer, fields),
             Expr::Binary(left, BinaryOp::Add | BinaryOp::Sub, right) => self
                 .const_aggregate_field_label_in_pointer_expr(left)
                 .or_else(|| self.const_aggregate_field_label_in_pointer_expr(right)),
             _ => None,
         }
+    }
+
+    fn const_aggregate_field_label_for_struct_pointer_expr(
+        &self,
+        pointer: &Expr,
+        fields: &[String],
+    ) -> Option<String> {
+        let Some(PointeeType::Struct(type_name)) = self.pointer_expr_pointee_type(pointer).ok()?
+        else {
+            return None;
+        };
+        self.const_aggregate_field_label_for_path(&type_name, fields)
     }
 
     fn const_aggregate_field_label_for_path(
