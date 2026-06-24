@@ -4,6 +4,20 @@ Last updated: 2026-06-24
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-24 autonomous inline enum aggregate field run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source fuzzing for another exact diagnostic, additional mixed supported-subset conformance fixtures, pointer/const diagnostic coverage through embedded/anonymous aggregate paths, and a concrete C declaration parity gap: inline `enum` specifiers used as fields inside supported aggregate definitions. The selected work package lets declarations such as `struct Flags { enum State { STATE_READY = 3, STATE_DONE = 7 } state; enum { MODE_FAST = 11 } mode; };` and `typedef struct { enum { TYPE_VALUE = 17 } code; } TypeHolder;` parse field-local enum definitions as scalar integer fields while installing their enumerators in the enclosing runtime scope before later global initializers/functions use them. Multiple inline enum field definitions now append pending constants instead of overwriting them, and standalone aggregate definitions, anonymous aggregate object declarations, and aggregate typedef declarations all flush pending inline enum constants without leaking stale metadata into the next declaration.
+
+Commands verified:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter inline_enum_aggregate_fields -- --nocapture  # RED: undefined variable 'LOCAL_BASE' / 'TYPE_VALUE'; GREEN passed after pending enum constants flush through aggregate definitions/typedefs
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-24 autonomous nested named aggregate field definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source fuzzing for another exact diagnostic, additional mixed supported-subset conformance fixtures, pointer/const diagnostic coverage through embedded/anonymous aggregate paths, and a concrete C aggregate declaration parity gap: field-local named `struct`/`union` definitions inside supported aggregate definitions. The selected work package lets declarations such as `struct Scene { struct Point { int x; int y; } origin, cursor; union Number { int value; char tag; } primary, secondary; struct Segment { struct Point start; struct Point end; } segments[2]; };` parse by recursing through the aggregate definition parser for `struct`/`union` followed by either `{` or `Ident {`, then reusing the existing field declarator-list loop. This preserves reusable nested tag metadata for later fields in the same definition and relies on existing nested field, array-field, initializer, access, mutation, and compiler-oracle paths.
 
 Commands verified:

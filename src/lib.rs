@@ -1820,7 +1820,9 @@ impl Parser {
                 }
             } else if matches!(self.peek(), Token::Struct | Token::Union) {
                 if self.is_aggregate_definition() {
-                    self.parse_aggregate_definition()?;
+                    if let Some(stmt) = self.parse_aggregate_definition()? {
+                        globals.push(stmt);
+                    }
                 } else if self.is_aggregate_forward_declaration() {
                     let keyword = match self.peek() {
                         Token::Struct => "struct",
@@ -2106,7 +2108,7 @@ impl Parser {
             Token::Enum => {
                 if self.starts_enum_definition_after_keyword() {
                     let constants = self.parse_enum_decl_body_after_keyword(false)?;
-                    self.pending_inline_enum_constants = Some(constants);
+                    self.push_pending_inline_enum_constants(constants);
                     saw_const |= self.consume_type_qualifiers();
                     return Ok((saw_const, DeclType::Scalar(CType::Int)));
                 }
@@ -2372,6 +2374,7 @@ impl Parser {
 
     fn parse_typedef_decl(&mut self) -> CustResult<Option<Stmt>> {
         self.expect(Token::Typedef)?;
+        self.pending_inline_enum_constants = None;
         let mut enum_constants = None;
         let (base_type, alias_context, anonymous_aggregate, leading_const) = if self
             .starts_typedef_aggregate_definition()
@@ -2412,7 +2415,18 @@ impl Parser {
             }
         }
         self.expect_semicolon_after("typedef declaration")?;
-        Ok(enum_constants.map(|constants| Stmt::EnumDecl { constants }))
+        let mut stmts = Vec::new();
+        if let Some(constants) = enum_constants {
+            stmts.push(Stmt::EnumDecl { constants });
+        }
+        if let Some(stmt) = self.take_pending_inline_enum_decl() {
+            stmts.push(stmt);
+        }
+        Ok(match stmts.len() {
+            0 => None,
+            1 => stmts.pop(),
+            _ => Some(Stmt::Many(stmts)),
+        })
     }
 
     fn parse_typedef_declarator(
@@ -3490,9 +3504,22 @@ impl Parser {
         Ok(self.with_pending_inline_enum_decl(stmt))
     }
 
+    fn push_pending_inline_enum_constants(&mut self, constants: Vec<EnumConstant>) {
+        match &mut self.pending_inline_enum_constants {
+            Some(existing) => existing.extend(constants),
+            None => self.pending_inline_enum_constants = Some(constants),
+        }
+    }
+
+    fn take_pending_inline_enum_decl(&mut self) -> Option<Stmt> {
+        self.pending_inline_enum_constants
+            .take()
+            .map(|constants| Stmt::EnumDecl { constants })
+    }
+
     fn with_pending_inline_enum_decl(&mut self, stmt: Stmt) -> Stmt {
-        match self.pending_inline_enum_constants.take() {
-            Some(constants) => Stmt::Many(vec![Stmt::EnumDecl { constants }, stmt]),
+        match self.take_pending_inline_enum_decl() {
+            Some(enum_decl) => Stmt::Many(vec![enum_decl, stmt]),
             None => stmt,
         }
     }
@@ -4623,9 +4650,10 @@ impl Parser {
         Ok(values)
     }
 
-    fn parse_aggregate_definition(&mut self) -> CustResult<()> {
+    fn parse_aggregate_definition(&mut self) -> CustResult<Option<Stmt>> {
+        self.pending_inline_enum_constants = None;
         self.parse_aggregate_definition_body(true, false)?;
-        Ok(())
+        Ok(self.take_pending_inline_enum_decl())
     }
 
     fn starts_typedef_aggregate_definition(&self) -> bool {
@@ -4927,6 +4955,7 @@ impl Parser {
     }
 
     fn parse_aggregate_var_decl(&mut self) -> CustResult<Stmt> {
+        self.pending_inline_enum_constants = None;
         self.last_decl_had_initializer = false;
         self.consume_alignment_specifiers()?;
         let leading_const = self.consume_type_qualifiers();
@@ -4939,7 +4968,9 @@ impl Parser {
         ) {
             let (type_name, kind, _) = self.parse_aggregate_definition_body(false, true)?;
             let points_to_const = leading_const || self.consume_type_qualifiers();
-            return self.parse_aggregate_var_decl_after_type(kind, type_name, points_to_const);
+            let stmt =
+                self.parse_aggregate_var_decl_after_type(kind, type_name, points_to_const)?;
+            return Ok(self.with_pending_inline_enum_decl(stmt));
         }
 
         let kind = match self.advance().kind {
@@ -4955,7 +4986,9 @@ impl Parser {
             )));
         };
         let points_to_const = leading_const || self.consume_type_qualifiers();
-        self.parse_aggregate_var_decl_after_type(kind, internal_type_name, points_to_const)
+        let stmt =
+            self.parse_aggregate_var_decl_after_type(kind, internal_type_name, points_to_const)?;
+        Ok(self.with_pending_inline_enum_decl(stmt))
     }
 
     fn parse_aggregate_var_decl_after_type(
