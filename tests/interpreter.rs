@@ -591,6 +591,13 @@ fn supports_pointer_ordering_within_embedded_aggregate_array_fields() {
 }
 
 #[test]
+fn supports_scalar_array_field_decay_in_pointer_expressions() {
+    let program = include_str!("fixtures/valid/scalar_array_field_pointer_decay.c");
+
+    assert_eq!(interpret(program).unwrap(), 87);
+}
+
+#[test]
 fn supports_pointer_equality_within_embedded_aggregate_array_fields() {
     let program = include_str!("fixtures/valid/struct_field_pointer_equality.c");
 
@@ -618,6 +625,18 @@ fn rejects_pointer_ordering_between_different_embedded_aggregate_array_fields() 
 #[test]
 fn rejects_pointer_ordering_between_different_arrays() {
     let program = include_str!("fixtures/invalid/pointer_ordering_different_arrays.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot compare pointers to different arrays"
+    );
+}
+
+#[test]
+fn rejects_pointer_ordering_between_different_scalar_array_fields() {
+    let program =
+        include_str!("fixtures/invalid/scalar_array_field_pointer_ordering_different_arrays.c");
 
     let err = interpret(program).unwrap_err();
     assert_eq!(

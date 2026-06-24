@@ -10133,6 +10133,63 @@ impl Interpreter {
         )
     }
 
+    fn struct_field_decays_to_pointer(&self, name: &str, path: &[String]) -> bool {
+        matches!(
+            self.find_variable(name),
+            Some(Value::Struct { type_name, fields })
+                if matches!(
+                    Self::nested_field_value(type_name, fields, path),
+                    Ok((_, StructFieldValue::Pointer { .. } | StructFieldValue::Array { .. } | StructFieldValue::StructArray { .. }))
+                )
+        )
+    }
+
+    fn struct_element_field_decays_to_pointer(&self, name: &str, path: &[String]) -> bool {
+        matches!(
+            self.find_variable(name),
+            Some(Value::StructArray { type_name, elements, .. })
+                if elements.first().is_some_and(|fields| matches!(
+                    Self::nested_field_value(type_name, fields, path),
+                    Ok((_, StructFieldValue::Pointer { .. } | StructFieldValue::Array { .. } | StructFieldValue::StructArray { .. }))
+                ))
+        )
+    }
+
+    fn struct_pointer_field_decays_to_pointer(&self, pointer: &Expr, path: &[String]) -> bool {
+        let Ok(Some(PointeeType::Struct(mut current_type_name))) =
+            self.pointer_expr_pointee_type(pointer)
+        else {
+            return false;
+        };
+        for (index, field_name) in path.iter().enumerate() {
+            let Some(struct_type) = self.struct_types.get(&current_type_name) else {
+                return false;
+            };
+            let Some(field) = struct_type
+                .fields
+                .iter()
+                .find(|field| field.name == *field_name)
+            else {
+                return false;
+            };
+            let is_last = index + 1 == path.len();
+            match &field.ty {
+                StructFieldType::Pointer(_)
+                | StructFieldType::Array(_, _)
+                | StructFieldType::StructArray(_, _)
+                    if is_last =>
+                {
+                    return true;
+                }
+                StructFieldType::Struct(nested_type) if !is_last => {
+                    current_type_name = nested_type.clone();
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
     fn read_direct_struct_pointer_field(
         &self,
         name: &str,
@@ -13052,7 +13109,11 @@ impl Interpreter {
             | Expr::AddressOfArray { .. }
             | Expr::AddressOfStructField { .. }
             | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfStructArrayField { .. }
+            | Expr::AddressOfStructElementArrayField { .. }
             | Expr::AddressOfStructPtrField { .. }
+            | Expr::AddressOfStructPtrArrayField { .. }
+            | Expr::AddressOfAggregateField { .. }
             | Expr::StringLiteral(_)
             | Expr::ArrayLiteral { .. }
             | Expr::AggregateArrayLiteral { .. }
@@ -13063,7 +13124,13 @@ impl Interpreter {
                     Some(Value::Pointer { .. } | Value::Array(_) | Value::StructArray { .. })
                 )
             }
-            Expr::StructGet { name, fields } => self.struct_field_is_pointer(name, fields),
+            Expr::StructGet { name, fields } => self.struct_field_decays_to_pointer(name, fields),
+            Expr::StructElementGet { name, fields, .. } => {
+                self.struct_element_field_decays_to_pointer(name, fields)
+            }
+            Expr::StructPtrGet { pointer, fields } => {
+                self.struct_pointer_field_decays_to_pointer(pointer, fields)
+            }
             Expr::AggregateFieldGet { aggregate, fields } => matches!(
                 self.aggregate_literal_field_metadata(aggregate, fields),
                 Ok(Some((
@@ -13426,6 +13493,21 @@ impl Interpreter {
                     .map(|value| value != 0)
                     .ok_or_else(|| CustError::new(format!("undefined variable '{name}'"))),
             },
+            Expr::StructGet { name, fields }
+                if self.struct_field_decays_to_pointer(name, fields) =>
+            {
+                Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
+            }
+            Expr::StructElementGet { name, fields, .. }
+                if self.struct_element_field_decays_to_pointer(name, fields) =>
+            {
+                Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
+            }
+            Expr::StructPtrGet { pointer, fields }
+                if self.struct_pointer_field_decays_to_pointer(pointer, fields) =>
+            {
+                Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
+            }
             Expr::Deref(_)
             | Expr::DerefSet { .. }
             | Expr::DerefCompoundSet { .. }
