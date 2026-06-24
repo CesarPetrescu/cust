@@ -6660,6 +6660,7 @@ impl Parser {
                 | Token::Short
                 | Token::Struct
                 | Token::Union
+                | Token::Enum
                 | Token::Void
                 | Token::Const
                 | Token::Volatile

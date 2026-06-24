@@ -905,6 +905,13 @@ fn supports_scalar_compound_literals_in_expression_contexts() {
 }
 
 #[test]
+fn supports_enum_compound_literals() {
+    let program = include_str!("fixtures/valid/enum_compound_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 32);
+}
+
+#[test]
 fn supports_scalar_compound_literals_as_modifiable_lvalues() {
     let program = include_str!("fixtures/valid/scalar_compound_literal_lvalues.c");
 

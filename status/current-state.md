@@ -4,6 +4,20 @@ Last updated: 2026-06-25
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-25 autonomous enum compound-literal run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source parser-trust gaps, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits, targeted pointer-arithmetic negative coverage through embedded and anonymous aggregate paths, and a concrete C99 expression parity gap: direct named enum type spellings such as `(enum State){READY}` were already valid declaration/type-query spellings but not recognized by cast/compound-literal lookahead. The selected work package now accepts direct named enum type names in scalar and one-dimensional array compound literals by routing `Token::Enum` through the existing cast parser, reusing Cust's deterministic integer-backed enum storage model.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter enum_compound_literals -- --nocapture  # RED: expected expression, found Enum; GREEN passed after enum cast lookahead routing
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-25 autonomous scalar array-field pointer-expression run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, malformed-source parser-trust gaps, and a concrete pointer/array parity gap: scalar array fields already decayed in declarations/parameters but not in ordinary pointer expressions such as `packet.values < &packet.values[3]`, `packet.values + 1`, `&packet.values[3] - packet.values`, or field-array truthiness. The selected work package now classifies direct struct scalar-array fields, struct-array element scalar-array fields, and struct-pointer arrow scalar-array fields as pointer-valued in expression contexts, while preserving the narrower pointer-field assignment routing.
 
 Commands verified so far:
