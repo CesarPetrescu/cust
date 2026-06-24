@@ -2777,6 +2777,12 @@ impl Parser {
         let allow_unnamed_params = self.parameter_list_is_prototype();
         let params = self.parse_params(allow_unnamed_params)?;
         self.expect_closing_paren_after("function parameters")?;
+        if self.check(&Token::LBracket) {
+            return Err(Self::error_at(
+                "array return types are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
         if self.matches(&Token::Semi) {
             return Ok((
                 name,

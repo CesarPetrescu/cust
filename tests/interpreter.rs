@@ -3453,6 +3453,18 @@ fn reports_missing_pointer_parameter_names_after_stars() {
 }
 
 #[test]
+fn rejects_array_return_types_with_context() {
+    let program = include_str!("fixtures/invalid/array_return_type.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array return types are not supported at line 1, column 15"
+    );
+}
+
+#[test]
 fn rejects_pointer_to_pointer_parameters_with_context() {
     let program = "int load(int **value) { return **value; }\nint main() { return 0; }\n";
 
