@@ -384,11 +384,13 @@ enum Expr {
         elem_type: CType,
         len: Option<usize>,
         init: Vec<ArrayInitializer>,
+        read_only: bool,
     },
     AggregateArrayLiteral {
         type_name: String,
         len: Option<usize>,
         init: Vec<StructArrayInitializer>,
+        read_only: bool,
     },
     AggregateFieldGet {
         aggregate: Box<Expr>,
@@ -5697,6 +5699,7 @@ impl Parser {
                 elem_type,
                 len,
                 init,
+                ..
             } => {
                 let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
                 Ok(len as i64 * elem_type.size())
@@ -5711,6 +5714,7 @@ impl Parser {
                 type_name,
                 len,
                 init,
+                ..
             } => {
                 let len = len.unwrap_or_else(|| Self::infer_struct_array_initializer_len(init));
                 let element_size = self
@@ -6632,6 +6636,7 @@ impl Parser {
                     init: self.parse_aggregate_array_compound_initializer(&type_name, len)?,
                     len,
                     type_name,
+                    read_only: leading_const,
                 });
             }
             self.expect_closing_paren_after("cast type")?;
@@ -6650,6 +6655,11 @@ impl Parser {
             self.expect_closing_paren_after("cast type")?;
             return Ok(Expr::VoidCast(Box::new(self.parse_unary()?)));
         }
+        let alias_const = match &type_token.kind {
+            Token::Ident(name) => self.type_alias_is_const(name),
+            _ => false,
+        };
+        let compound_literal_read_only = leading_const || alias_const;
         let decl_type = self.parse_decl_type("cast type")?;
         if self.matches(&Token::Star) {
             let pointee = match decl_type {
@@ -6694,6 +6704,7 @@ impl Parser {
                         init: self.parse_aggregate_array_compound_initializer(&type_name, len)?,
                         len,
                         type_name,
+                        read_only: compound_literal_read_only,
                     });
                 }
                 self.expect_closing_paren_after("cast type")?;
@@ -6732,12 +6743,14 @@ impl Parser {
                         elem_type,
                         len: Some(len),
                         init: self.parse_array_compound_initializer(Some(len), elem_type)?,
+                        read_only: compound_literal_read_only,
                     }),
                     PointeeType::Struct(type_name) => Ok(Expr::AggregateArrayLiteral {
                         init: self
                             .parse_aggregate_array_compound_initializer(&type_name, Some(len))?,
                         len: Some(len),
                         type_name,
+                        read_only: compound_literal_read_only,
                     }),
                 };
             }
@@ -6754,6 +6767,7 @@ impl Parser {
                 elem_type: ty,
                 len,
                 init: self.parse_array_compound_initializer(len, ty)?,
+                read_only: compound_literal_read_only,
             });
         }
         self.expect_closing_paren_after("cast type")?;
@@ -8740,6 +8754,8 @@ impl Interpreter {
                 }) => *points_to_const,
                 _ => false,
             },
+            Expr::ArrayLiteral { read_only, .. }
+            | Expr::AggregateArrayLiteral { read_only, .. } => *read_only,
             Expr::Comma(_, right) => self.pointer_expr_points_to_const(right),
             Expr::PointerCast {
                 points_to_const,
@@ -9209,9 +9225,10 @@ impl Interpreter {
         len: Option<usize>,
         elem_type: CType,
         init: &[ArrayInitializer],
+        read_only: bool,
     ) -> CustResult<Rc<RefCell<ArrayValue>>> {
         let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
-        let Value::Array(array) = self.make_array_value(len, elem_type, init, false)? else {
+        let Value::Array(array) = self.make_array_value(len, elem_type, init, read_only)? else {
             unreachable!("make_array_value always returns Value::Array")
         };
         Ok(array)
@@ -9334,9 +9351,10 @@ impl Interpreter {
         type_name: &str,
         len: Option<usize>,
         init: &[StructArrayInitializer],
+        read_only: bool,
     ) -> CustResult<PointerValue> {
         let len = len.unwrap_or_else(|| Self::infer_struct_array_initializer_len(init));
-        let value = self.make_struct_array_value(type_name, len, init, false)?;
+        let value = self.make_struct_array_value(type_name, len, init, read_only)?;
         let scope_id = self
             .scopes
             .last()
@@ -12234,15 +12252,17 @@ impl Interpreter {
                 elem_type,
                 len,
                 init,
+                read_only,
             } => Ok(PointerValue::ArrayBase {
-                array: self.make_array_compound_literal(*len, *elem_type, init)?,
+                array: self.make_array_compound_literal(*len, *elem_type, init, *read_only)?,
                 source_name: None,
             }),
             Expr::AggregateArrayLiteral {
                 type_name,
                 len,
                 init,
-            } => self.make_aggregate_array_compound_literal(type_name, *len, init),
+                read_only,
+            } => self.make_aggregate_array_compound_literal(type_name, *len, init, *read_only),
             Expr::AggregateFieldGet { aggregate, fields } => {
                 self.eval_aggregate_literal_field_pointer(aggregate, fields)
             }
@@ -13725,6 +13745,7 @@ impl Interpreter {
                 elem_type,
                 len,
                 init,
+                ..
             } => {
                 let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
                 Ok(len as i64 * elem_type.size())
@@ -13733,6 +13754,7 @@ impl Interpreter {
                 type_name,
                 len,
                 init,
+                ..
             } => {
                 let len = len.unwrap_or_else(|| Self::infer_struct_array_initializer_len(init));
                 let element_size = self

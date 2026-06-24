@@ -900,6 +900,34 @@ fn supports_array_typedef_compound_literals_as_pointer_expressions() {
 }
 
 #[test]
+fn supports_const_array_typedef_compound_literals_as_const_pointer_expressions() {
+    let program = include_str!("fixtures/valid/const_array_typedef_compound_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 144);
+}
+
+#[test]
+fn rejects_const_array_typedef_compound_literal_const_discard() {
+    let program = include_str!("fixtures/invalid/const_array_typedef_compound_literal_discard.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_const_array_typedef_compound_literal_writes() {
+    let program = include_str!("fixtures/invalid/const_array_typedef_compound_literal_write.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
+}
+
+#[test]
 fn supports_aggregate_array_compound_literals_as_pointer_expressions() {
     let program = include_str!("fixtures/valid/aggregate_array_compound_literals.c");
 

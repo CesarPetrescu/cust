@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-06-24 autonomous array-typedef compound literal run after baseline `cargo test`, focused RED/GREEN interpreter coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-06-24 autonomous const array typedef compound literal run after baseline `cargo test`, focused RED/GREEN interpreter coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 
