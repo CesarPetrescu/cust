@@ -86,6 +86,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/const_array_typedef_compound_literals.c",
     "tests/fixtures/compat/valid/const_typedef_aliases.c",
     "tests/fixtures/compat/valid/comma_separated_typedef_aliases.c",
+    "tests/fixtures/compat/valid/parenthesized_typedef_declarators.c",
     "tests/fixtures/compat/valid/const_pointer_typedef_aliases.c",
     "tests/fixtures/compat/valid/postfix_const_qualifiers.c",
     "tests/fixtures/compat/valid/const_pointer_conversions.c",

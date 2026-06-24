@@ -4,6 +4,20 @@ Last updated: 2026-06-24
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-24 autonomous parenthesized typedef declarator run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class audits through nested and anonymous aggregate paths, and a concrete ordinary-C parser parity gap adjacent to the previous parenthesized declarator work: typedef alias declarators such as `typedef int (Count);`, `typedef int *(IntPtr);`, and `typedef int (Scores)[3];`. The selected work package now accepts parenthesized alias names for supported scalar, pointer, array, aggregate, aggregate-pointer, and aggregate-array typedef declarators while preserving the existing unsupported function-pointer typedef diagnostic for `(*name)` forms.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_parenthesized_typedef_declarators -- --nocapture  # RED: expected typedef alias name after type, found LParen; GREEN passed after reusing the parenthesized declarator-name helper in typedef parsing
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-24 autonomous parenthesized variable declarator run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, fresh malformed-source exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class audits through nested and anonymous aggregate paths, and a concrete ordinary-C parser parity gap adjacent to the previous function-declarator work: parenthesized ordinary declarator names such as `int (x)`, `int *(p)`, `int (values)[3]`, and `struct Point (point)`. The selected work package now accepts parenthesized declarator names for supported parameters, local/global declaration lists, pointer declarations, arrays, aggregate variables, aggregate pointers, and aggregate fields while preserving the existing `(*name)` unsupported function-pointer/pointer-to-array diagnostics.
 
 Commands verified so far:

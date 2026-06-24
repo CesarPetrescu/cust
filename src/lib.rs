@@ -2457,7 +2457,7 @@ impl Parser {
             ));
         }
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
-        let alias_name = self.expect_ident_after(alias_context)?;
+        let alias_name = self.parse_declarator_name(alias_context)?;
         let mut alias = if has_explicit_star {
             match base_type {
                 DeclType::Scalar(ty) => TypeAlias::Pointer {

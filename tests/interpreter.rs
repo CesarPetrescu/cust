@@ -396,6 +396,13 @@ fn supports_comma_separated_typedef_aliases() {
 }
 
 #[test]
+fn supports_parenthesized_typedef_declarators() {
+    let program = include_str!("fixtures/valid/parenthesized_typedef_declarators.c");
+
+    assert_eq!(interpret(program).unwrap(), 43);
+}
+
+#[test]
 fn supports_const_pointer_typedef_aliases() {
     let program = include_str!("fixtures/valid/const_pointer_typedef_aliases.c");
 
