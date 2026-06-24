@@ -893,6 +893,13 @@ fn supports_array_compound_literals_as_pointer_expressions() {
 }
 
 #[test]
+fn supports_array_typedef_compound_literals_as_pointer_expressions() {
+    let program = include_str!("fixtures/valid/array_typedef_compound_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 99);
+}
+
+#[test]
 fn supports_aggregate_array_compound_literals_as_pointer_expressions() {
     let program = include_str!("fixtures/valid/aggregate_array_compound_literals.c");
 

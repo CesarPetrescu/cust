@@ -6719,11 +6719,27 @@ impl Parser {
                     expr: Box::new(self.parse_unary()?),
                 });
             }
-            DeclType::Array(_, _) => {
-                return Err(Self::error_at(
-                    "pointer casts are not supported".to_string(),
-                    &type_token,
-                ));
+            DeclType::Array(pointee, len) => {
+                self.expect_closing_paren_after("cast type")?;
+                if !self.check(&Token::LBrace) {
+                    return Err(Self::error_at(
+                        "pointer casts are not supported".to_string(),
+                        &type_token,
+                    ));
+                }
+                return match pointee {
+                    PointeeType::Scalar(elem_type) => Ok(Expr::ArrayLiteral {
+                        elem_type,
+                        len: Some(len),
+                        init: self.parse_array_compound_initializer(Some(len), elem_type)?,
+                    }),
+                    PointeeType::Struct(type_name) => Ok(Expr::AggregateArrayLiteral {
+                        init: self
+                            .parse_aggregate_array_compound_initializer(&type_name, Some(len))?,
+                        len: Some(len),
+                        type_name,
+                    }),
+                };
             }
         };
         if self.matches(&Token::LBracket) {

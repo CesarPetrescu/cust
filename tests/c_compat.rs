@@ -24,6 +24,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/auto_register_storage_class.c",
     "tests/fixtures/compat/valid/array_typedef_aliases.c",
     "tests/fixtures/compat/valid/array_compound_literals.c",
+    "tests/fixtures/compat/valid/array_typedef_compound_literals.c",
     "tests/fixtures/compat/valid/alignof_type_names.c",
     "tests/fixtures/compat/valid/alignas_specifiers.c",
     "tests/fixtures/compat/valid/thread_local_storage_class.c",

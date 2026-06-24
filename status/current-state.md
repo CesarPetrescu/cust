@@ -4,6 +4,20 @@ Last updated: 2026-06-24
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-24 autonomous array-typedef compound literal run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, additional parser-trust diagnostics, mixed conformance fixtures, pointer/const/storage-class audits through nested/anonymous aggregate paths, targeted pointer-arithmetic negative coverage, and a concrete C99 type-name parity gap: compound literals whose type name is a one-dimensional array typedef alias. The selected work package now lets `typedef int Scores[3]; (Scores){1, 2, 3}`, `typedef char Word[4]; (Word){"cat"}`, and `typedef struct Point Points[2]; (Points){{...}}` lower through Cust's existing scalar-array and aggregate-array compound literal machinery while preserving the unsupported non-literal array-cast diagnostic.
+
+Commands verified:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter array_typedef_compound_literals -- --nocapture  # RED: pointer casts are not supported; GREEN passed after DeclType::Array compound-literal routing
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-24 autonomous aggregate-field parenthesized pointer diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, pointer/const/storage-class audits through nested/anonymous aggregate field paths, and a fresh parser-trust gap: unsupported parenthesized pointer declarators inside aggregate field lists. The selected work package keeps Cust's current no-function-pointer/no-parenthesized-pointer field boundary but reports targeted diagnostics for `struct Hooks { int (*callback)(int); };` and `struct Matrix { int (*row)[3]; };` instead of the misleading generic `expected struct field name after type, found LParen` fallback. Implementation reuses the existing parenthesized pointer declarator lookahead before aggregate field-name parsing.
 
 Commands verified:
