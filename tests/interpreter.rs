@@ -2440,6 +2440,13 @@ fn supports_function_prototypes_before_definitions() {
 }
 
 #[test]
+fn supports_parenthesized_function_declarators() {
+    let program = include_str!("fixtures/valid/parenthesized_function_declarators.c");
+
+    assert_eq!(interpret(program).unwrap(), 9);
+}
+
+#[test]
 fn supports_unnamed_function_prototype_parameters() {
     let program = include_str!("fixtures/valid/unnamed_prototype_parameters.c");
 

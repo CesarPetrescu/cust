@@ -2622,12 +2622,29 @@ impl Parser {
             index += 1;
         }
 
-        matches!(
+        if matches!(
             (
                 self.tokens.get(index).map(|token| &token.kind),
                 self.tokens.get(index + 1).map(|token| &token.kind)
             ),
             (Some(Token::Ident(_)), Some(Token::LParen))
+        ) {
+            return true;
+        }
+
+        matches!(
+            (
+                self.tokens.get(index).map(|token| &token.kind),
+                self.tokens.get(index + 1).map(|token| &token.kind),
+                self.tokens.get(index + 2).map(|token| &token.kind),
+                self.tokens.get(index + 3).map(|token| &token.kind)
+            ),
+            (
+                Some(Token::LParen),
+                Some(Token::Ident(_)),
+                Some(Token::RParen),
+                Some(Token::LParen)
+            )
         )
     }
 
@@ -2755,7 +2772,7 @@ impl Parser {
                 self.peek_located(),
             ));
         }
-        let name = self.expect_ident_after("function name after return type")?;
+        let name = self.parse_function_declarator_name()?;
         self.expect_opening_paren_after("function name")?;
         let allow_unnamed_params = self.parameter_list_is_prototype();
         let params = self.parse_params(allow_unnamed_params)?;
@@ -2775,6 +2792,17 @@ impl Parser {
                 body,
             }),
         ))
+    }
+
+    fn parse_function_declarator_name(&mut self) -> CustResult<String> {
+        if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Ident(_)) {
+            self.advance();
+            let name = self.expect_ident_after("function name after return type")?;
+            self.expect_closing_paren_after("parenthesized function name")?;
+            return Ok(name);
+        }
+
+        self.expect_ident_after("function name after return type")
     }
 
     fn parameter_list_is_prototype(&self) -> bool {

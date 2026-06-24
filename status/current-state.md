@@ -4,6 +4,20 @@ Last updated: 2026-06-24
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-24 autonomous parenthesized function declarator run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional mixed supported-subset conformance fixtures, targeted pointer/const negative coverage through embedded and anonymous aggregate paths, and a concrete ordinary-C parser parity gap: parenthesized function declarator names such as `int (add)(int, int);` and `int (main)(void)`. The selected work package now accepts parenthesized names for supported top-level function prototypes/definitions and block-scope function prototypes while preserving the existing unsupported function-pointer declarator diagnostic for `(*name)` forms.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter parenthesized_function_declarators -- --nocapture  # RED: expected function name after return type, found LParen; GREEN passed after function-name helper and lookahead update
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-24 autonomous const array typedef compound literal run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional mixed conformance fixtures, targeted pointer-arithmetic negative coverage, and a concrete const-correctness gap in the just-added array typedef compound literal path: `typedef const int Scores[2]; (Scores){1, 2}` and `typedef const struct Point Points[2]; (Points){{...}}` evaluated as mutable array compound literals. The selected work package now carries read-only metadata on scalar and aggregate array compound-literal expressions, preserves explicit `const` and const-qualified array typedef aliases during pointer-conversion metadata checks, rejects mutable pointer flows that would discard const, and stores the evaluated compound literal as read-only array/aggregate-array storage.
 
 Commands verified so far:
