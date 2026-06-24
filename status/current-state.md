@@ -4,6 +4,20 @@ Last updated: 2026-06-24
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-24 autonomous parenthesized pointer typedef diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, pointer/const/storage-class audits through nested and anonymous aggregate paths, and a fresh parser-trust gap adjacent to the recent parenthesized declarator work: unsupported pointer-to-array typedef spellings such as `typedef int (*Row)[3];` were reported as unsupported function-pointer typedef aliases. The selected work package keeps parenthesized pointer typedef aliases outside Cust's supported subset but now distinguishes function-shaped `(*name)(...)` aliases from pointer-to-array-style `(*name)[N]` aliases with `parenthesized pointer typedef aliases are not supported` at the `(` token.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter parenthesized_pointer_typedef -- --nocapture  # RED: got function-pointer typedef diagnostic; GREEN passed after parenthesized-pointer typedef lookahead split
+cargo test --test interpreter function_pointer_typedef -- --nocapture  # regression: existing function-pointer typedef diagnostic preserved
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-24 autonomous parenthesized typedef declarator run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class audits through nested and anonymous aggregate paths, and a concrete ordinary-C parser parity gap adjacent to the previous parenthesized declarator work: typedef alias declarators such as `typedef int (Count);`, `typedef int *(IntPtr);`, and `typedef int (Scores)[3];`. The selected work package now accepts parenthesized alias names for supported scalar, pointer, array, aggregate, aggregate-pointer, and aggregate-array typedef declarators while preserving the existing unsupported function-pointer typedef diagnostic for `(*name)` forms.
 
 Commands verified so far:

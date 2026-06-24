@@ -2438,8 +2438,14 @@ impl Parser {
         alias_context: &str,
     ) -> CustResult<(String, TypeAlias, bool)> {
         if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
+            if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
+                return Err(Self::error_at(
+                    "function pointer typedef aliases are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             return Err(Self::error_at(
-                "function pointer typedef aliases are not supported".to_string(),
+                "parenthesized pointer typedef aliases are not supported".to_string(),
                 self.peek_located(),
             ));
         }

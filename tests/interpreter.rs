@@ -3395,6 +3395,18 @@ fn rejects_function_pointer_typedef_aliases_with_context() {
 }
 
 #[test]
+fn rejects_parenthesized_pointer_typedef_aliases_with_context() {
+    let program = include_str!("fixtures/invalid/parenthesized_pointer_typedef_alias.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "parenthesized pointer typedef aliases are not supported at line 1, column 13"
+    );
+}
+
+#[test]
 fn rejects_function_typedef_aliases_with_context() {
     let program = include_str!("fixtures/invalid/function_typedef_alias.c");
 
