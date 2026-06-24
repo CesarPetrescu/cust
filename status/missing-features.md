@@ -14,6 +14,7 @@ Prioritized backlog for autonomous implementation.
 ## P1 — C subset expansion
 
 - [x] Function definitions and function calls, including ordinary C parenthesized function declarator names for supported top-level definitions/prototypes and block-scope prototypes (`int (add)(int, int);`, `int (main)(void)`) while preserving function-pointer declarator rejection
+- [x] Parenthesized ordinary declarator names for supported object/parameter/field forms; acceptance: `int (value)`, `int *(cursor)`, `int (items)[3]`, `struct Point (point)`, aggregate pointer declarations, declaration-list tails, and aggregate field names parse as the same declarations as their unparenthesized forms while `(*name)` function-pointer/pointer-to-array diagnostics remain targeted, with interpreter and C compiler-oracle coverage.
 - [x] Function prototypes/declarations at top level (`int helper(int);`, `int add(int, int);`, `void mutate(int *);`, `char first(char *);`) with semicolon-terminated parser support, C-style unnamed prototype parameter declarations, signature compatibility checks against definitions/earlier declarations, invalid conflicting-prototype diagnostics, and C compiler-oracle coverage
 - [x] `char` function return types and prototypes (`char first(char *text);`) with scalar return-shape diagnostics, `sizeof` call-size support, interpreter fixtures, and C compiler-oracle coverage
 - [x] Local function parameters

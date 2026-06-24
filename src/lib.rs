@@ -2811,6 +2811,17 @@ impl Parser {
         self.expect_ident_after("function name after return type")
     }
 
+    fn parse_declarator_name(&mut self, context: &str) -> CustResult<String> {
+        if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Ident(_)) {
+            self.advance();
+            let name = self.expect_ident_after(context)?;
+            self.expect_closing_paren_after("parenthesized declarator name")?;
+            return Ok(name);
+        }
+
+        self.expect_ident_after(context)
+    }
+
     fn parameter_list_is_prototype(&self) -> bool {
         let mut cursor = self.pos;
         while let Some(token) = self.tokens.get(cursor) {
@@ -3001,9 +3012,11 @@ impl Parser {
                 format!("__cust_prototype_param_{}", params.len())
             } else if has_explicit_star {
                 match &decl_type {
-                    DeclType::Scalar(_) => self.expect_ident_after("parameter name after '*'")?,
+                    DeclType::Scalar(_) => {
+                        self.parse_declarator_name("parameter name after '*'")?
+                    }
                     DeclType::Struct(_) => {
-                        self.expect_ident_after("struct pointer parameter name after '*'")?
+                        self.parse_declarator_name("struct pointer parameter name after '*'")?
                     }
                     DeclType::Pointer { .. } => {
                         unreachable!("pointer aliases with explicit stars return above")
@@ -3014,15 +3027,17 @@ impl Parser {
                 }
             } else {
                 match &decl_type {
-                    DeclType::Scalar(_) => self.expect_ident_after("parameter name after type")?,
+                    DeclType::Scalar(_) => {
+                        self.parse_declarator_name("parameter name after type")?
+                    }
                     DeclType::Struct(_) => {
-                        self.expect_ident_after("struct parameter name after type")?
+                        self.parse_declarator_name("struct parameter name after type")?
                     }
                     DeclType::Pointer { .. } => {
-                        self.expect_ident_after("pointer parameter name after type")?
+                        self.parse_declarator_name("pointer parameter name after type")?
                     }
                     DeclType::Array(_, _) => {
-                        self.expect_ident_after("array parameter name after type")?
+                        self.parse_declarator_name("array parameter name after type")?
                     }
                 }
             };
@@ -3624,8 +3639,10 @@ impl Parser {
         let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer { .. });
         let name = if has_explicit_star {
             match &decl_type {
-                DeclType::Scalar(_) => self.expect_ident_after("pointer name after '*'")?,
-                DeclType::Struct(_) => self.expect_ident_after("struct pointer name after '*'")?,
+                DeclType::Scalar(_) => self.parse_declarator_name("pointer name after '*'")?,
+                DeclType::Struct(_) => {
+                    self.parse_declarator_name("struct pointer name after '*'")?
+                }
                 DeclType::Array(_, _) => {
                     return Err(Self::error_at(
                         "pointer-to-array declarations are not supported".to_string(),
@@ -3638,10 +3655,12 @@ impl Parser {
             }
         } else {
             match &decl_type {
-                DeclType::Scalar(_) => self.expect_ident_after("variable name after type")?,
-                DeclType::Struct(_) => self.expect_ident_after("struct variable name")?,
-                DeclType::Pointer { .. } => self.expect_ident_after("pointer name after type")?,
-                DeclType::Array(_, _) => self.expect_ident_after("array name after type")?,
+                DeclType::Scalar(_) => self.parse_declarator_name("variable name after type")?,
+                DeclType::Struct(_) => self.parse_declarator_name("struct variable name")?,
+                DeclType::Pointer { .. } => {
+                    self.parse_declarator_name("pointer name after type")?
+                }
+                DeclType::Array(_, _) => self.parse_declarator_name("array name after type")?,
             }
         };
         if let DeclType::Array(pointee, len) = decl_type.clone() {
@@ -3969,8 +3988,10 @@ impl Parser {
         let is_pointer = has_explicit_star || matches!(base_type, DeclType::Pointer { .. });
         let name = if has_explicit_star {
             match &base_type {
-                DeclType::Scalar(_) => self.expect_ident_after("pointer name after '*'")?,
-                DeclType::Struct(_) => self.expect_ident_after("struct pointer name after '*'")?,
+                DeclType::Scalar(_) => self.parse_declarator_name("pointer name after '*'")?,
+                DeclType::Struct(_) => {
+                    self.parse_declarator_name("struct pointer name after '*'")?
+                }
                 DeclType::Array(_, _) => {
                     return Err(Self::error_at(
                         "pointer-to-array declarations are not supported".to_string(),
@@ -3981,10 +4002,12 @@ impl Parser {
             }
         } else {
             match &base_type {
-                DeclType::Scalar(_) => self.expect_ident_after("variable name after ','")?,
-                DeclType::Struct(_) => self.expect_ident_after("struct variable name after ','")?,
-                DeclType::Pointer { .. } => self.expect_ident_after("pointer name after ','")?,
-                DeclType::Array(_, _) => self.expect_ident_after("array name after ','")?,
+                DeclType::Scalar(_) => self.parse_declarator_name("variable name after ','")?,
+                DeclType::Struct(_) => {
+                    self.parse_declarator_name("struct variable name after ','")?
+                }
+                DeclType::Pointer { .. } => self.parse_declarator_name("pointer name after ','")?,
+                DeclType::Array(_, _) => self.parse_declarator_name("array name after ','")?,
             }
         };
 
@@ -4924,7 +4947,8 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
-                let name = self.expect_ident_after(&format!("{keyword} field name after type"))?;
+                let name =
+                    self.parse_declarator_name(&format!("{keyword} field name after type"))?;
                 if self.check(&Token::Colon) {
                     return Err(Self::error_at(
                         "bit-field aggregate fields are not supported".to_string(),
@@ -5057,7 +5081,7 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let name = self.expect_ident_after(&format!("{keyword} pointer name after '*'"))?;
+            let name = self.parse_declarator_name(&format!("{keyword} pointer name after '*'"))?;
             if self.check(&Token::LBracket) {
                 return Err(Self::error_at(
                     "pointer array declarations are not supported".to_string(),
@@ -5102,7 +5126,7 @@ impl Parser {
                 self.peek_located(),
             ));
         }
-        let name = self.expect_ident_after(&format!("{keyword} variable name"))?;
+        let name = self.parse_declarator_name(&format!("{keyword} variable name"))?;
         if self.matches(&Token::LBracket) {
             let (len, init) = if self.matches(&Token::RBracket) {
                 if !self.matches(&Token::Assign) {
