@@ -4,6 +4,19 @@ Last updated: 2026-06-24
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-24 autonomous aggregate-field parenthesized pointer diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, pointer/const/storage-class audits through nested/anonymous aggregate field paths, and a fresh parser-trust gap: unsupported parenthesized pointer declarators inside aggregate field lists. The selected work package keeps Cust's current no-function-pointer/no-parenthesized-pointer field boundary but reports targeted diagnostics for `struct Hooks { int (*callback)(int); };` and `struct Matrix { int (*row)[3]; };` instead of the misleading generic `expected struct field name after type, found LParen` fallback. Implementation reuses the existing parenthesized pointer declarator lookahead before aggregate field-name parsing.
+
+Commands verified:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_parenthesized_pointer_aggregate_fields_with_context -- --nocapture  # RED: generic missing field-name diagnostic; GREEN passed after aggregate-field parenthesized-pointer lookahead
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-24 autonomous inline enum aggregate field run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the first unchecked C-subset closure item in `status/todo.md`, malformed-source fuzzing for another exact diagnostic, additional mixed supported-subset conformance fixtures, pointer/const diagnostic coverage through embedded/anonymous aggregate paths, and a concrete C declaration parity gap: inline `enum` specifiers used as fields inside supported aggregate definitions. The selected work package lets declarations such as `struct Flags { enum State { STATE_READY = 3, STATE_DONE = 7 } state; enum { MODE_FAST = 11 } mode; };` and `typedef struct { enum { TYPE_VALUE = 17 } code; } TypeHolder;` parse field-local enum definitions as scalar integer fields while installing their enumerators in the enclosing runtime scope before later global initializers/functions use them. Multiple inline enum field definitions now append pending constants instead of overwriting them, and standalone aggregate definitions, anonymous aggregate object declarations, and aggregate typedef declarations all flush pending inline enum constants without leaking stale metadata into the next declaration.
 
 Commands verified:

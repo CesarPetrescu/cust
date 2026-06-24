@@ -4873,6 +4873,21 @@ impl Parser {
                     DeclType::Scalar(ty) => StructFieldType::Scalar(ty),
                     DeclType::Struct(type_name) => StructFieldType::Struct(type_name),
                 };
+                if !has_explicit_star
+                    && self.check(&Token::LParen)
+                    && matches!(self.peek_next(), Token::Star)
+                {
+                    if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
+                        return Err(Self::error_at(
+                            "function pointer aggregate fields are not supported".to_string(),
+                            self.peek_located(),
+                        ));
+                    }
+                    return Err(Self::error_at(
+                        "parenthesized pointer aggregate fields are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 let name = self.expect_ident_after(&format!("{keyword} field name after type"))?;
                 if self.check(&Token::Colon) {
                     return Err(Self::error_at(

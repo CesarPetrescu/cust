@@ -140,6 +140,27 @@ fn rejects_aggregate_bit_fields_with_context() {
 }
 
 #[test]
+fn rejects_parenthesized_pointer_aggregate_fields_with_context() {
+    let program = include_str!("fixtures/invalid/function_pointer_aggregate_field.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function pointer aggregate fields are not supported at line 2, column 9"
+    );
+
+    let program = include_str!("fixtures/invalid/parenthesized_pointer_aggregate_field.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "parenthesized pointer aggregate fields are not supported at line 2, column 9"
+    );
+}
+
+#[test]
 fn rejects_anonymous_aggregate_parameters_with_context() {
     let program = include_str!("fixtures/invalid/anonymous_aggregate_parameter.c");
 
