@@ -1208,6 +1208,13 @@ fn supports_inline_enum_return_type_definitions() {
 }
 
 #[test]
+fn supports_inline_enum_parameter_definitions_in_function_bodies() {
+    let program = include_str!("fixtures/valid/inline_enum_parameter_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 12);
+}
+
+#[test]
 fn supports_mixed_declaration_context_conformance_fixture() {
     let program = include_str!("fixtures/valid/mixed_declaration_contexts.c");
 

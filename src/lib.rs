@@ -2830,7 +2830,7 @@ impl Parser {
         self.expect_opening_paren_after("function name")?;
         let allow_unnamed_params = self.parameter_list_is_prototype();
         let params = self.parse_params(allow_unnamed_params)?;
-        self.pending_inline_enum_constants = None;
+        let inline_param_enum_decl = self.take_pending_inline_enum_decl();
         self.expect_closing_paren_after("function parameters")?;
         if self.check(&Token::LBracket) {
             return Err(Self::error_at(
@@ -2845,7 +2845,10 @@ impl Parser {
                 inline_return_enum_decl,
             ));
         }
-        let body = self.parse_block_after("function header")?;
+        let mut body = self.parse_block_after("function header")?;
+        if let Some(stmt) = inline_param_enum_decl {
+            body.insert(0, stmt);
+        }
         Ok((
             name,
             TopLevelFunction::Definition(Function {

@@ -4,7 +4,18 @@ Last updated: 2026-06-25
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-25 autonomous inline enum return-type run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, pointer/const/storage/type-query negative coverage, direct enum type-name parity in less-traveled contexts, and a concrete parser-routing gap: top-level function return type specifiers that define an enum inline, such as `enum Status { READY = 5 } choose(void);`, were being treated as variable declarations and failed with `expected '=' after variable declaration, found LParen`. The selected work package now lets function lookahead skip inline enum definition bodies, emits return-type inline enum constants as file-scope `EnumDecl`s before function registration, and clears parameter-list pending enum constants to avoid accidental leakage.
+All passed after the 2026-06-25 autonomous inline enum parameter-definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, pointer/const/storage/type-query negative coverage, direct enum type-name parity in less-traveled contexts, and a concrete enum-scope gap adjacent to the previous inline-enum return work: inline enum definitions in function parameter type specifiers parsed, but their enumerators were cleared after parameter parsing, so function-body references such as `int f(enum Mode { MODE_READY = 3 } value) { return MODE_READY; }` failed with `undefined variable 'MODE_READY'`. The selected work package now captures parameter-list pending enum declarations and inserts them as the first statement of function definitions only, preserving the existing no-file-scope-leak behavior for prototypes and return-type inline enum declarations.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter inline_enum_parameter -- --nocapture  # RED: undefined variable 'MODE_READY'; GREEN passed after function-body EnumDecl insertion
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest: All passed after the 2026-06-25 autonomous inline enum return-type run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, pointer/const/storage/type-query negative coverage, direct enum type-name parity in less-traveled contexts, and a concrete parser-routing gap: top-level function return type specifiers that define an enum inline, such as `enum Status { READY = 5 } choose(void);`, were being treated as variable declarations and failed with `expected '=' after variable declaration, found LParen`. The selected work package now lets function lookahead skip inline enum definition bodies, emits return-type inline enum constants as file-scope `EnumDecl`s before function registration, and clears parameter-list pending enum constants to avoid accidental leakage.
 
 Commands verified so far:
 
