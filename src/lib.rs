@@ -1959,13 +1959,10 @@ impl Parser {
         if !matches!(self.peek(), Token::Struct | Token::Union) {
             return false;
         }
-        if !matches!(
-            self.tokens.get(self.pos + 1).map(|token| &token.kind),
-            Some(Token::Ident(_))
-        ) {
+        let Some(mut index) = self.skip_aggregate_type_specifier_at(self.pos) else {
             return false;
-        }
-        let mut index = self.pos + 2;
+        };
+        index = self.skip_type_qualifiers_at(index);
         while matches!(
             self.tokens.get(index).map(|token| &token.kind),
             Some(Token::Star)
@@ -2124,11 +2121,24 @@ impl Parser {
                 Ok((saw_const, decl_type))
             }
             Token::Struct | Token::Union => {
-                let keyword = if matches!(found.kind, Token::Union) {
-                    "union"
+                let kind = if matches!(found.kind, Token::Union) {
+                    AggregateKind::Union
                 } else {
-                    "struct"
+                    AggregateKind::Struct
                 };
+                let keyword = kind.keyword();
+                if matches!(
+                    (
+                        self.peek(),
+                        self.tokens.get(self.pos + 1).map(|token| &token.kind)
+                    ),
+                    (Token::Ident(_), Some(Token::LBrace))
+                ) {
+                    let (internal_type_name, _, _) =
+                        self.parse_aggregate_definition_body_after_keyword(kind, false, false)?;
+                    saw_const |= self.consume_type_qualifiers();
+                    return Ok((saw_const, DeclType::Struct(internal_type_name)));
+                }
                 let type_name = self.expect_ident_after(context)?;
                 saw_const |= self.consume_type_qualifiers();
                 let Some(internal_type_name) = self.resolve_aggregate_type(&type_name) else {
@@ -2627,13 +2637,10 @@ impl Parser {
                 index = self.skip_type_qualifiers_at(index);
             }
             Some(Token::Struct | Token::Union) => {
-                if !matches!(
-                    self.tokens.get(index + 1).map(|token| &token.kind),
-                    Some(Token::Ident(_))
-                ) {
+                let Some(next_index) = self.skip_aggregate_type_specifier_at(index) else {
                     return false;
-                }
-                index += 2;
+                };
+                index = next_index;
                 index = self.skip_type_qualifiers_at(index);
             }
             Some(Token::Atomic) => {
@@ -2748,6 +2755,48 @@ impl Parser {
             Some(cursor)
         } else {
             None
+        }
+    }
+
+    fn skip_aggregate_type_specifier_at(&self, index: usize) -> Option<usize> {
+        if !matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Struct | Token::Union)
+        ) {
+            return None;
+        }
+
+        let mut cursor = index + 1;
+        if !matches!(
+            self.tokens.get(cursor).map(|token| &token.kind),
+            Some(Token::Ident(_))
+        ) {
+            return None;
+        }
+        cursor += 1;
+
+        if matches!(
+            self.tokens.get(cursor).map(|token| &token.kind),
+            Some(Token::LBrace)
+        ) {
+            let mut depth = 0usize;
+            while let Some(token) = self.tokens.get(cursor) {
+                match &token.kind {
+                    Token::LBrace => depth += 1,
+                    Token::RBrace => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(cursor + 1);
+                        }
+                    }
+                    Token::Eof => return None,
+                    _ => {}
+                }
+                cursor += 1;
+            }
+            None
+        } else {
+            Some(cursor)
         }
     }
 
@@ -4907,6 +4956,15 @@ impl Parser {
             Token::Union => AggregateKind::Union,
             token => unreachable!("expected aggregate keyword, found {token:?}"),
         };
+        self.parse_aggregate_definition_body_after_keyword(kind, require_semicolon, allow_anonymous)
+    }
+
+    fn parse_aggregate_definition_body_after_keyword(
+        &mut self,
+        kind: AggregateKind,
+        require_semicolon: bool,
+        allow_anonymous: bool,
+    ) -> CustResult<(String, AggregateKind, bool)> {
         let keyword = kind.keyword();
         let (type_name, is_anonymous) = if allow_anonymous && self.check(&Token::LBrace) {
             let anonymous_id = self.next_aggregate_type_id;

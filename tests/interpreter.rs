@@ -1808,6 +1808,13 @@ fn supports_named_aggregate_definition_declarators() {
 }
 
 #[test]
+fn supports_inline_aggregate_return_type_definitions() {
+    let program = include_str!("fixtures/valid/inline_aggregate_return_type_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 84);
+}
+
+#[test]
 fn supports_aggregate_tag_shadowing_with_distinct_type_identities() {
     let program = include_str!("fixtures/valid/aggregate_tag_shadowing.c");
 

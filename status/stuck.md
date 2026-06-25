@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-06-25 autonomous unparenthesized `sizeof` integer-constant-expression run after baseline `cargo test`, focused interpreter RED/GREEN coverage for enum/switch integer-constant-expression `sizeof "abc"` / `sizeof +1` / nested `sizeof`, `c_compat` compiler-oracle coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-06-25 autonomous inline aggregate return-type definition run after baseline `cargo test`, focused interpreter RED/GREEN coverage for `struct Pair { ... } make_pair(...)` / `union Number { ... } pick_number(...)` return type definitions, `c_compat` compiler-oracle coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 

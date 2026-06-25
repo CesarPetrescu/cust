@@ -4,7 +4,19 @@ Last updated: 2026-06-25
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-25 autonomous unparenthesized `sizeof` integer-constant-expression run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the generic C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, named aggregate definition declarator extensions, and a concrete parser-folding parity gap: enum initializers and switch case labels rejected unparenthesized `sizeof "abc"` with `expected integer constant in sizeof expression` and hard-coded unparenthesized `sizeof` results to `INT_SIZE` instead of reusing operand-size metadata. The selected work package now parses unparenthesized `sizeof` operands as non-evaluating unary expressions in integer constant contexts and folds supported operand sizes for string literals, unary scalar expressions, and nested `sizeof` forms.
+All passed after the 2026-06-25 autonomous inline aggregate return-type definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the generic C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, named aggregate definition declarator extensions, direct enum/inline enum edge contexts, and a concrete C declaration parity gap adjacent to the recent named aggregate definition work: top-level function return type specifiers that define a named aggregate inline, such as `struct Pair { int x; int y; } make_pair(int);`, were routed as aggregate variable declarations and failed with `expected ';' after struct variable declaration, found LParen`. The selected work package now lets function lookahead skip full inline `struct`/`union` definition bodies, parses named aggregate definitions in return-type contexts, registers the tag before the function declarator/body, and preserves existing pending inline enum handling for aggregate fields inside the return-type definition.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter inline_aggregate_return_type_definitions -- --nocapture  # RED: expected ';' after struct variable declaration, found LParen; GREEN passed after inline aggregate return-type routing
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest: All passed after the 2026-06-25 autonomous unparenthesized `sizeof` integer-constant-expression run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the generic C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, named aggregate definition declarator extensions, and a concrete parser-folding parity gap: enum initializers and switch case labels rejected unparenthesized `sizeof "abc"` with `expected integer constant in sizeof expression` and hard-coded unparenthesized `sizeof` results to `INT_SIZE` instead of reusing operand-size metadata. The selected work package now parses unparenthesized `sizeof` operands as non-evaluating unary expressions in integer constant contexts and folds supported operand sizes for string literals, unary scalar expressions, and nested `sizeof` forms.
 
 Commands verified so far:
 
