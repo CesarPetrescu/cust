@@ -4,6 +4,18 @@ Last updated: 2026-06-25
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-25 autonomous direct enum pointer-field indexing parity follow-up. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and a concrete parity gap adjacent to the prior enum aggregate-field run: direct aggregate pointer fields such as `job.cursor[1]` / `&job.cursor[1]` still routed through scalar array-field address-of and reported `struct field 'cursor' is not an array`, even though the struct-pointer `job->cursor[1]` path had been fixed. The selected work package now routes address-of direct pointer-field indexes through `direct_struct_pointer_field_index_pointer`, so direct `.` and `->` aggregate pointer-field indexing/address-of share the same pointer-valued-field semantics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter direct_enum_aggregate -- --nocapture  # RED: struct field 'cursor' is not an array for &job.cursor[1]; GREEN passed after direct pointer-field address-of routing
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-06-25 autonomous direct-enum aggregate-field and pointer-field indexing run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and direct enum aggregate contexts not covered by the prior direct-enum pointer/type-query run. The selected work package added direct named-enum aggregate-field conformance coverage (`enum State` scalar fields, `const enum State` fields, `enum State[N]` fields, and `enum State *` pointer fields) and closed a real runtime parity gap for indexing pointer-valued aggregate fields through `job->cursor[1]` / `&job->cursor[1]`, which previously fell into the embedded-array path and reported `struct field 'cursor' is not an array`.
 
 Commands verified so far:

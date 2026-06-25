@@ -10600,6 +10600,9 @@ impl Interpreter {
         fields: &[String],
         index: &Expr,
     ) -> CustResult<PointerValue> {
+        if self.struct_field_is_pointer(name, fields) {
+            return self.direct_struct_pointer_field_index_pointer(name, fields, index);
+        }
         if self
             .direct_struct_aggregate_array_field_type(name, fields)?
             .is_some()

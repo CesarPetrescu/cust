@@ -1130,7 +1130,7 @@ fn supports_direct_enum_pointer_parameters_casts_and_type_queries() {
 fn supports_direct_enum_aggregate_fields_arrays_and_pointers() {
     let program = include_str!("fixtures/valid/direct_enum_aggregate_fields.c");
 
-    assert_eq!(interpret(program).unwrap(), 31);
+    assert_eq!(interpret(program).unwrap(), 39);
 }
 
 #[test]

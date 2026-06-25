@@ -27,5 +27,6 @@ int score(struct Job *job, const enum State values[static 3]) {
 int main(void) {
     enum State values[3] = {READY, BUSY, 7};
     struct Job job = {READY, BUSY, {1, BUSY, 9}, values};
-    return score(&job, values) + job.states[2];
+    enum State *direct_middle = &job.cursor[1];
+    return score(&job, values) + job.states[2] + job.cursor[0] + *direct_middle;
 }

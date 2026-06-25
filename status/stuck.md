@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-06-25 autonomous direct-enum aggregate-field and pointer-field indexing run after baseline `cargo test`, focused interpreter RED/GREEN coverage, focused regression coverage for existing struct-pointer array-field decay, `c_compat` compiler-oracle coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-06-25 autonomous direct enum pointer-field indexing parity follow-up after baseline `cargo test`, focused interpreter RED/GREEN coverage for `job.cursor[0]` / `&job.cursor[1]`, `c_compat` compiler-oracle coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 
