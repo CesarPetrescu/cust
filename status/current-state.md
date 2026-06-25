@@ -4,7 +4,19 @@ Last updated: 2026-06-25
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-25 autonomous direct enum pointer-field indexing parity follow-up. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and a concrete parity gap adjacent to the prior enum aggregate-field run: direct aggregate pointer fields such as `job.cursor[1]` / `&job.cursor[1]` still routed through scalar array-field address-of and reported `struct field 'cursor' is not an array`, even though the struct-pointer `job->cursor[1]` path had been fixed. The selected work package now routes address-of direct pointer-field indexes through `direct_struct_pointer_field_index_pointer`, so direct `.` and `->` aggregate pointer-field indexing/address-of share the same pointer-valued-field semantics.
+All passed after the 2026-06-25 autonomous block-scoped named aggregate definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and a concrete C block-scope tag parity gap: Cust supported top-level named `struct`/`union` definitions and block-scoped aggregate typedef definitions, but plain local `struct Pair { ... };` / `union Number { ... };` definitions fell into aggregate-variable parsing and failed with `undefined struct type 'Pair'`. The selected work package now routes block-scope standalone named aggregate definitions through `parse_aggregate_definition()`, preserves inline enum constants inside local aggregate definitions via the returned `EnumDecl`, and lets local aggregate tags expire naturally with the block scope.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter block_scoped_named_aggregate -- --nocapture  # RED: undefined struct type 'Pair'; GREEN passed after local aggregate-definition routing
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest: All passed after the 2026-06-25 autonomous direct enum pointer-field indexing parity follow-up. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and a concrete parity gap adjacent to the prior enum aggregate-field run: direct aggregate pointer fields such as `job.cursor[1]` / `&job.cursor[1]` still routed through scalar array-field address-of and reported `struct field 'cursor' is not an array`, even though the struct-pointer `job->cursor[1]` path had been fixed. The selected work package now routes address-of direct pointer-field indexes through `direct_struct_pointer_field_index_pointer`, so direct `.` and `->` aggregate pointer-field indexing/address-of share the same pointer-valued-field semantics.
 
 Commands verified so far:
 

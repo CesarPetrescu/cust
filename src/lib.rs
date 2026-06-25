@@ -3315,7 +3315,25 @@ impl Parser {
                     self.parse_var_decl()
                 }
             }
-            Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
+            Token::Struct | Token::Union => {
+                if self.is_aggregate_definition() {
+                    Ok(self.parse_aggregate_definition()?.unwrap_or(Stmt::Empty))
+                } else if self.is_aggregate_forward_declaration() {
+                    let keyword = match self.peek() {
+                        Token::Struct => "struct",
+                        Token::Union => "union",
+                        _ => unreachable!("checked aggregate keyword above"),
+                    };
+                    Err(Self::error_at(
+                        format!("forward {keyword} declarations are not supported"),
+                        self.tokens
+                            .get(self.pos + 2)
+                            .expect("forward aggregate declaration has a semicolon"),
+                    ))
+                } else {
+                    self.parse_aggregate_var_decl()
+                }
+            }
             Token::Return => self.parse_return(),
             Token::LBrace => Ok(Stmt::Block(self.parse_block_after("block statement")?)),
             Token::If => self.parse_if(),

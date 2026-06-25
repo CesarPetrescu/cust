@@ -1786,6 +1786,13 @@ fn supports_block_scoped_typedef_aggregate_definitions() {
 }
 
 #[test]
+fn supports_block_scoped_named_aggregate_definitions() {
+    let program = include_str!("fixtures/valid/block_scoped_named_aggregate_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 57);
+}
+
+#[test]
 fn supports_aggregate_tag_shadowing_with_distinct_type_identities() {
     let program = include_str!("fixtures/valid/aggregate_tag_shadowing.c");
 
@@ -1795,6 +1802,14 @@ fn supports_aggregate_tag_shadowing_with_distinct_type_identities() {
 #[test]
 fn rejects_block_scoped_aggregate_typedef_alias_after_scope_exit() {
     let program = include_str!("fixtures/invalid/block_aggregate_typedef_alias_out_of_scope.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "undefined struct type 'Hidden'");
+}
+
+#[test]
+fn rejects_block_scoped_named_aggregate_tags_after_scope_exit() {
+    let program = include_str!("fixtures/invalid/block_scoped_named_aggregate_tag_out_of_scope.c");
 
     let err = interpret(program).unwrap_err();
     assert_eq!(err.to_string(), "undefined struct type 'Hidden'");
