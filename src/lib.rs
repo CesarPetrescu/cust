@@ -2905,35 +2905,40 @@ impl Parser {
         let name = self.parse_function_declarator_name()?;
         self.expect_opening_paren_after("function name")?;
         let allow_unnamed_params = self.parameter_list_is_prototype();
-        let params = self.parse_params(allow_unnamed_params)?;
-        let inline_param_enum_decl = self.take_pending_inline_enum_decl();
-        self.expect_closing_paren_after("function parameters")?;
-        if self.check(&Token::LBracket) {
-            return Err(Self::error_at(
-                "array return types are not supported".to_string(),
-                self.peek_located(),
-            ));
-        }
-        if self.matches(&Token::Semi) {
-            return Ok((
+        self.aggregate_type_scopes.push(HashMap::new());
+        let parsed = (|| {
+            let params = self.parse_params(allow_unnamed_params)?;
+            let inline_param_enum_decl = self.take_pending_inline_enum_decl();
+            self.expect_closing_paren_after("function parameters")?;
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "array return types are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.matches(&Token::Semi) {
+                return Ok((
+                    name,
+                    TopLevelFunction::Prototype(FunctionSignature::new(return_type, &params)),
+                    inline_return_enum_decl,
+                ));
+            }
+            let mut body = self.parse_block_after("function header")?;
+            if let Some(stmt) = inline_param_enum_decl {
+                body.insert(0, stmt);
+            }
+            Ok((
                 name,
-                TopLevelFunction::Prototype(FunctionSignature::new(return_type, &params)),
+                TopLevelFunction::Definition(Function {
+                    return_type,
+                    params,
+                    body,
+                }),
                 inline_return_enum_decl,
-            ));
-        }
-        let mut body = self.parse_block_after("function header")?;
-        if let Some(stmt) = inline_param_enum_decl {
-            body.insert(0, stmt);
-        }
-        Ok((
-            name,
-            TopLevelFunction::Definition(Function {
-                return_type,
-                params,
-                body,
-            }),
-            inline_return_enum_decl,
-        ))
+            ))
+        })();
+        self.aggregate_type_scopes.pop();
+        parsed
     }
 
     fn parse_function_declarator_name(&mut self) -> CustResult<String> {

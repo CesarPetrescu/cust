@@ -1815,6 +1815,21 @@ fn supports_inline_aggregate_return_type_definitions() {
 }
 
 #[test]
+fn supports_inline_aggregate_parameter_type_definitions() {
+    let program = include_str!("fixtures/valid/inline_aggregate_parameter_type_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 19);
+}
+
+#[test]
+fn rejects_inline_aggregate_parameter_tags_after_function_scope() {
+    let program = include_str!("fixtures/invalid/inline_aggregate_parameter_tag_leaks.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "undefined struct type 'Pair'");
+}
+
+#[test]
 fn supports_aggregate_tag_shadowing_with_distinct_type_identities() {
     let program = include_str!("fixtures/valid/aggregate_tag_shadowing.c");
 

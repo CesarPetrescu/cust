@@ -1,10 +1,27 @@
 # Cust Current State
 
-Last updated: 2026-06-25
+Last updated: 2026-06-26
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-25 autonomous inline aggregate return-type definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the generic C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, named aggregate definition declarator extensions, direct enum/inline enum edge contexts, and a concrete C declaration parity gap adjacent to the recent named aggregate definition work: top-level function return type specifiers that define a named aggregate inline, such as `struct Pair { int x; int y; } make_pair(int);`, were routed as aggregate variable declarations and failed with `expected ';' after struct variable declaration, found LParen`. The selected work package now lets function lookahead skip full inline `struct`/`union` definition bodies, parses named aggregate definitions in return-type contexts, registers the tag before the function declarator/body, and preserves existing pending inline enum handling for aggregate fields inside the return-type definition.
+All passed after the 2026-06-26 autonomous inline aggregate parameter type-definition run. Ideation considered failing tests/builds (none known after the previous verified run), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, more mixed supported-subset conformance fixtures, pointer/const/storage/type-query audits through nested and anonymous aggregate paths, and a concrete parser-scope gap adjacent to the recent inline aggregate return-type work: named `struct`/`union` definitions in function parameter type specifiers were accepted by the shared declaration-type parser but their tags leaked into file scope. The selected work package now parses parameter-list aggregate definitions in a temporary function-parameter aggregate scope that remains visible while parsing the function body and is popped before later file-scope declarations.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+date +%F
+cargo test --test interpreter inline_aggregate_parameter -- --nocapture  # RED: tag leak fixture returned Ok(3); GREEN passed after parameter aggregate scope fix
+cargo test --test interpreter inline_enum_parameter -- --nocapture
+cargo test --test interpreter inline_aggregate_return_type_definitions -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest: All passed after the 2026-06-25 autonomous inline aggregate return-type definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the generic C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, named aggregate definition declarator extensions, direct enum/inline enum edge contexts, and a concrete C declaration parity gap adjacent to the recent named aggregate definition work: top-level function return type specifiers that define a named aggregate inline, such as `struct Pair { int x; int y; } make_pair(int);`, were routed as aggregate variable declarations and failed with `expected ';' after struct variable declaration, found LParen`. The selected work package now lets function lookahead skip full inline `struct`/`union` definition bodies, parses named aggregate definitions in return-type contexts, registers the tag before the function declarator/body, and preserves existing pending inline enum handling for aggregate fields inside the return-type definition.
 
 Commands verified so far:
 
