@@ -4,7 +4,19 @@ Last updated: 2026-06-25
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-25 autonomous inline enum parameter-definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, pointer/const/storage/type-query negative coverage, direct enum type-name parity in less-traveled contexts, and a concrete enum-scope gap adjacent to the previous inline-enum return work: inline enum definitions in function parameter type specifiers parsed, but their enumerators were cleared after parameter parsing, so function-body references such as `int f(enum Mode { MODE_READY = 3 } value) { return MODE_READY; }` failed with `undefined variable 'MODE_READY'`. The selected work package now captures parameter-list pending enum declarations and inserts them as the first statement of function definitions only, preserving the existing no-file-scope-leak behavior for prototypes and return-type inline enum declarations.
+All passed after the 2026-06-25 autonomous direct-enum conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and direct enum type-name parity in less-traveled expression/type-query contexts. The selected work package locks in direct `enum Tag` pointer parameters, `const enum Tag` array-parameter decay, enum pointers, enum scalar casts, enum compound literals, `sizeof(enum Tag[N])`, `_Alignof(enum Tag[N])`, and `sizeof(enum Tag *)` with interpreter and native compiler-oracle fixtures. Focused RED passed immediately because the parser/runtime already supported the audited path; this was recorded as conformance coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter direct_enum_pointer -- --nocapture  # coverage GREEN immediately; no production-code change needed
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest: All passed after the 2026-06-25 autonomous inline enum parameter-definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, pointer/const/storage/type-query negative coverage, direct enum type-name parity in less-traveled contexts, and a concrete enum-scope gap adjacent to the previous inline-enum return work: inline enum definitions in function parameter type specifiers parsed, but their enumerators were cleared after parameter parsing, so function-body references such as `int f(enum Mode { MODE_READY = 3 } value) { return MODE_READY; }` failed with `undefined variable 'MODE_READY'`. The selected work package now captures parameter-list pending enum declarations and inserts them as the first statement of function definitions only, preserving the existing no-file-scope-leak behavior for prototypes and return-type inline enum declarations.
 
 Commands verified so far:
 

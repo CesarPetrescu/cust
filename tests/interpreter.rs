@@ -1120,6 +1120,13 @@ fn supports_direct_enum_type_declarations_parameters_returns_and_sizeof() {
 }
 
 #[test]
+fn supports_direct_enum_pointer_parameters_casts_and_type_queries() {
+    let program = include_str!("fixtures/valid/direct_enum_pointer_type_queries.c");
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
 fn rejects_aggregate_cast_expressions() {
     let program = include_str!("fixtures/invalid/aggregate_cast_unsupported.c");
 
