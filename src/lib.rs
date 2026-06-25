@@ -1899,7 +1899,7 @@ impl Parser {
     }
 
     fn is_aggregate_definition(&self) -> bool {
-        matches!(
+        if !matches!(
             (
                 self.peek(),
                 self.tokens.get(self.pos + 1).map(|token| &token.kind),
@@ -1910,7 +1910,34 @@ impl Parser {
                 Some(Token::Ident(_)),
                 Some(Token::LBrace)
             )
-        )
+        ) {
+            return false;
+        }
+
+        self.aggregate_definition_body_followed_by_semicolon(self.pos + 2)
+    }
+
+    fn aggregate_definition_body_followed_by_semicolon(&self, opening_brace: usize) -> bool {
+        let mut cursor = opening_brace;
+        let mut depth = 0;
+        while let Some(token) = self.tokens.get(cursor) {
+            match &token.kind {
+                Token::LBrace => depth += 1,
+                Token::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            self.tokens.get(cursor + 1).map(|token| &token.kind),
+                            Some(Token::Semi)
+                        );
+                    }
+                }
+                Token::Eof => return false,
+                _ => {}
+            }
+            cursor += 1;
+        }
+        false
     }
 
     fn is_aggregate_forward_declaration(&self) -> bool {
@@ -5120,6 +5147,25 @@ impl Parser {
             (Token::Struct | Token::Union, Some(Token::LBrace))
         ) {
             let (type_name, kind, _) = self.parse_aggregate_definition_body(false, true)?;
+            let points_to_const = leading_const || self.consume_type_qualifiers();
+            let stmt =
+                self.parse_aggregate_var_decl_after_type(kind, type_name, points_to_const)?;
+            return Ok(self.with_pending_inline_enum_decl(stmt));
+        }
+
+        if matches!(
+            (
+                self.peek(),
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                self.tokens.get(self.pos + 2).map(|token| &token.kind)
+            ),
+            (
+                Token::Struct | Token::Union,
+                Some(Token::Ident(_)),
+                Some(Token::LBrace)
+            )
+        ) {
+            let (type_name, kind, _) = self.parse_aggregate_definition_body(false, false)?;
             let points_to_const = leading_const || self.consume_type_qualifiers();
             let stmt =
                 self.parse_aggregate_var_decl_after_type(kind, type_name, points_to_const)?;

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-06-25 autonomous block-scoped named aggregate definition run after baseline `cargo test`, focused interpreter RED/GREEN coverage for local standalone `struct Pair { ... };` / `union Number { ... };` definitions and local tag expiry, `c_compat` compiler-oracle coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-06-25 autonomous named aggregate definition declarator run after baseline `cargo test`, focused interpreter RED/GREEN coverage for `struct Tag { ... } object` / `union Tag { ... } object` declarators, `c_compat` compiler-oracle coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 

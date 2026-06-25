@@ -79,6 +79,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/block_comments.c",
     "tests/fixtures/compat/valid/block_scoped_typedefs.c",
     "tests/fixtures/compat/valid/block_scoped_aggregate_typedef_definitions.c",
+    "tests/fixtures/compat/valid/named_aggregate_definition_declarators.c",
     "tests/fixtures/compat/valid/char_array_string_initializers.c",
     "tests/fixtures/compat/valid/struct_char_array_string_initializers.c",
     "tests/fixtures/compat/valid/char_return_functions.c",

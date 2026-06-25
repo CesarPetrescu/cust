@@ -1793,6 +1793,13 @@ fn supports_block_scoped_named_aggregate_definitions() {
 }
 
 #[test]
+fn supports_named_aggregate_definition_declarators() {
+    let program = include_str!("fixtures/valid/named_aggregate_definition_declarators.c");
+
+    assert_eq!(interpret(program).unwrap(), 58);
+}
+
+#[test]
 fn supports_aggregate_tag_shadowing_with_distinct_type_identities() {
     let program = include_str!("fixtures/valid/aggregate_tag_shadowing.c");
 

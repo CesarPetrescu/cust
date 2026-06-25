@@ -4,14 +4,14 @@ Last updated: 2026-06-25
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-25 autonomous block-scoped named aggregate definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and a concrete C block-scope tag parity gap: Cust supported top-level named `struct`/`union` definitions and block-scoped aggregate typedef definitions, but plain local `struct Pair { ... };` / `union Number { ... };` definitions fell into aggregate-variable parsing and failed with `undefined struct type 'Pair'`. The selected work package now routes block-scope standalone named aggregate definitions through `parse_aggregate_definition()`, preserves inline enum constants inside local aggregate definitions via the returned `EnumDecl`, and lets local aggregate tags expire naturally with the block scope.
+All passed after the 2026-06-25 autonomous named aggregate definition declarator run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and a concrete C declaration parity gap adjacent to the previous block-scope aggregate work: Cust accepted standalone `struct Pair { ... };` definitions and anonymous aggregate object declarations, but `struct Pair { ... } pair = {1, 2}, *slot = &pair;` failed by treating the definition prefix as standalone and requiring a semicolon immediately after the closing brace. The selected work package now distinguishes standalone named aggregate definitions from named aggregate definitions with declarators, then routes the declarator form through the existing aggregate declaration-list machinery for globals, locals, static locals, pointer declarators, unions, and inline enum fields.
 
 Commands verified so far:
 
 ```bash
 git checkout main && git pull --ff-only
 cargo test  # pre-change baseline; passed
-cargo test --test interpreter block_scoped_named_aggregate -- --nocapture  # RED: undefined struct type 'Pair'; GREEN passed after local aggregate-definition routing
+cargo test --test interpreter named_aggregate_definition_declarators -- --nocapture  # RED: expected ';' after struct declaration, found Ident("global_point"); GREEN passed after parser routing
 cargo test --test c_compat -- --nocapture
 # Full required gate was run after this status update; see final run report for exact pass/fail output.
 ```
