@@ -10278,6 +10278,23 @@ impl Interpreter {
         }
     }
 
+    fn direct_struct_pointer_field_index_pointer(
+        &mut self,
+        name: &str,
+        path: &[String],
+        index: &Expr,
+    ) -> CustResult<PointerValue> {
+        let field_pointer = self.read_direct_struct_pointer_field(name, path)?;
+        let index_value = self.eval(index)?;
+        let (array, source_name, index) =
+            self.checked_pointer_value_index(&field_pointer, index_value)?;
+        Ok(PointerValue::ArrayElement {
+            array,
+            source_name,
+            index,
+        })
+    }
+
     fn assign_direct_struct_pointer_field(
         &mut self,
         name: &str,
@@ -11919,6 +11936,23 @@ impl Interpreter {
         }
     }
 
+    fn struct_pointer_pointer_field_index_pointer(
+        &mut self,
+        pointer: &PointerValue,
+        path: &[String],
+        index: &Expr,
+    ) -> CustResult<PointerValue> {
+        let field_pointer = self.read_struct_pointer_pointer_field(pointer, path)?;
+        let index_value = self.eval(index)?;
+        let (array, source_name, index) =
+            self.checked_pointer_value_index(&field_pointer, index_value)?;
+        Ok(PointerValue::ArrayElement {
+            array,
+            source_name,
+            index,
+        })
+    }
+
     fn struct_pointer_pointer_field_points_to_const(
         &self,
         pointer: &PointerValue,
@@ -12405,7 +12439,14 @@ impl Interpreter {
                 index,
             } => {
                 let pointer = self.eval_pointer(pointer)?;
-                self.find_struct_pointer_array_field_pointer(&pointer, fields, index)
+                if self
+                    .struct_pointer_pointer_field_type(&pointer, fields)?
+                    .is_some()
+                {
+                    self.struct_pointer_pointer_field_index_pointer(&pointer, fields, index)
+                } else {
+                    self.find_struct_pointer_array_field_pointer(&pointer, fields, index)
+                }
             }
             Expr::AddressOfStructPtrField { pointer, fields } => {
                 let pointer = self.eval_pointer(pointer)?;
@@ -12584,7 +12625,14 @@ impl Interpreter {
                 index,
             } => {
                 let pointer = self.eval_pointer(pointer)?;
-                self.find_struct_pointer_array_field_pointer(&pointer, fields, index)
+                if self
+                    .struct_pointer_pointer_field_type(&pointer, fields)?
+                    .is_some()
+                {
+                    self.struct_pointer_pointer_field_index_pointer(&pointer, fields, index)
+                } else {
+                    self.find_struct_pointer_array_field_pointer(&pointer, fields, index)
+                }
             }
             Expr::StructSet {
                 name,
@@ -15370,8 +15418,14 @@ impl Interpreter {
                 fields,
                 index,
             } => {
-                let (array, index) = self.checked_struct_array_index(name, fields, index)?;
-                Ok(array.borrow().elements[index])
+                if self.struct_field_is_pointer(name, fields) {
+                    let pointer =
+                        self.direct_struct_pointer_field_index_pointer(name, fields, index)?;
+                    self.deref_pointer(&pointer)
+                } else {
+                    let (array, index) = self.checked_struct_array_index(name, fields, index)?;
+                    Ok(array.borrow().elements[index])
+                }
             }
             Expr::StructFieldArrayElementGet {
                 name,
@@ -15438,9 +15492,18 @@ impl Interpreter {
                 index,
             } => {
                 let pointer = self.eval_pointer(pointer)?;
-                let (array, index) =
-                    self.checked_struct_pointer_array_index(&pointer, fields, index)?;
-                Ok(array.borrow().elements[index])
+                if self
+                    .struct_pointer_pointer_field_type(&pointer, fields)?
+                    .is_some()
+                {
+                    let pointer =
+                        self.struct_pointer_pointer_field_index_pointer(&pointer, fields, index)?;
+                    self.deref_pointer(&pointer)
+                } else {
+                    let (array, index) =
+                        self.checked_struct_pointer_array_index(&pointer, fields, index)?;
+                    Ok(array.borrow().elements[index])
+                }
             }
             Expr::StructPtrGet { pointer, fields } => {
                 let pointer = self.eval_pointer(pointer)?;

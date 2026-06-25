@@ -1127,6 +1127,24 @@ fn supports_direct_enum_pointer_parameters_casts_and_type_queries() {
 }
 
 #[test]
+fn supports_direct_enum_aggregate_fields_arrays_and_pointers() {
+    let program = include_str!("fixtures/valid/direct_enum_aggregate_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 31);
+}
+
+#[test]
+fn rejects_assignment_to_const_enum_aggregate_fields() {
+    let program = include_str!("fixtures/invalid/const_enum_aggregate_field_assignment.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'fixed'"
+    );
+}
+
+#[test]
 fn rejects_aggregate_cast_expressions() {
     let program = include_str!("fixtures/invalid/aggregate_cast_unsupported.c");
 

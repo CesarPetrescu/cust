@@ -4,7 +4,21 @@ Last updated: 2026-06-25
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-25 autonomous direct-enum conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and direct enum type-name parity in less-traveled expression/type-query contexts. The selected work package locks in direct `enum Tag` pointer parameters, `const enum Tag` array-parameter decay, enum pointers, enum scalar casts, enum compound literals, `sizeof(enum Tag[N])`, `_Alignof(enum Tag[N])`, and `sizeof(enum Tag *)` with interpreter and native compiler-oracle fixtures. Focused RED passed immediately because the parser/runtime already supported the audited path; this was recorded as conformance coverage rather than a production-code fix.
+All passed after the 2026-06-25 autonomous direct-enum aggregate-field and pointer-field indexing run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and direct enum aggregate contexts not covered by the prior direct-enum pointer/type-query run. The selected work package added direct named-enum aggregate-field conformance coverage (`enum State` scalar fields, `const enum State` fields, `enum State[N]` fields, and `enum State *` pointer fields) and closed a real runtime parity gap for indexing pointer-valued aggregate fields through `job->cursor[1]` / `&job->cursor[1]`, which previously fell into the embedded-array path and reported `struct field 'cursor' is not an array`.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter direct_enum_aggregate -- --nocapture  # RED: struct field 'cursor' is not an array; GREEN passed after pointer-field indexed routing
+cargo test --test interpreter const_enum_aggregate -- --nocapture
+cargo test --test interpreter struct_pointer_array_field_decay -- --nocapture
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest: All passed after the 2026-06-25 autonomous direct-enum conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source fuzzing for fresh exact diagnostics, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits through nested and anonymous aggregate paths, targeted pointer-arithmetic negative coverage through embedded aggregate field paths, and direct enum type-name parity in less-traveled expression/type-query contexts. The selected work package locks in direct `enum Tag` pointer parameters, `const enum Tag` array-parameter decay, enum pointers, enum scalar casts, enum compound literals, `sizeof(enum Tag[N])`, `_Alignof(enum Tag[N])`, and `sizeof(enum Tag *)` with interpreter and native compiler-oracle fixtures. Focused RED passed immediately because the parser/runtime already supported the audited path; this was recorded as conformance coverage rather than a production-code fix.
 
 Commands verified so far:
 
