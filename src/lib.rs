@@ -1736,7 +1736,11 @@ impl Parser {
                 || self.starts_malformed_function_definition()
                 || self.check(&Token::Void)
             {
-                let (name, top_level_function) = self.parse_function_declaration()?;
+                let (name, top_level_function, inline_return_enum_decl) =
+                    self.parse_function_declaration()?;
+                if let Some(stmt) = inline_return_enum_decl {
+                    globals.push(stmt);
+                }
                 match top_level_function {
                     TopLevelFunction::Definition(function) => {
                         let signature = FunctionSignature::from_function(&function);
@@ -2589,13 +2593,10 @@ impl Parser {
                 index = next_index;
             }
             Some(Token::Enum) => {
-                if !matches!(
-                    self.tokens.get(index + 1).map(|token| &token.kind),
-                    Some(Token::Ident(_))
-                ) {
+                let Some(next_index) = self.skip_enum_type_specifier_at(index) else {
                     return false;
-                }
-                index += 2;
+                };
+                index = next_index;
                 index = self.skip_type_qualifiers_at(index);
             }
             Some(Token::Struct | Token::Union) => {
@@ -2678,6 +2679,49 @@ impl Parser {
             index = self.skip_type_qualifiers_at(index);
         }
         Some(index)
+    }
+
+    fn skip_enum_type_specifier_at(&self, index: usize) -> Option<usize> {
+        if !matches!(
+            self.tokens.get(index).map(|token| &token.kind),
+            Some(Token::Enum)
+        ) {
+            return None;
+        }
+
+        let mut cursor = index + 1;
+        if matches!(
+            self.tokens.get(cursor).map(|token| &token.kind),
+            Some(Token::Ident(_))
+        ) {
+            cursor += 1;
+        }
+
+        if matches!(
+            self.tokens.get(cursor).map(|token| &token.kind),
+            Some(Token::LBrace)
+        ) {
+            let mut depth = 0usize;
+            while let Some(token) = self.tokens.get(cursor) {
+                match &token.kind {
+                    Token::LBrace => depth += 1,
+                    Token::RBrace => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(cursor + 1);
+                        }
+                    }
+                    Token::Eof => return None,
+                    _ => {}
+                }
+                cursor += 1;
+            }
+            None
+        } else if cursor > index + 1 {
+            Some(cursor)
+        } else {
+            None
+        }
     }
 
     fn type_qualifier_at(&self, index: usize) -> bool {
@@ -2770,8 +2814,12 @@ impl Parser {
         )
     }
 
-    fn parse_function_declaration(&mut self) -> CustResult<(String, TopLevelFunction)> {
+    fn parse_function_declaration(
+        &mut self,
+    ) -> CustResult<(String, TopLevelFunction, Option<Stmt>)> {
+        self.pending_inline_enum_constants = None;
         let return_type = self.parse_function_return_type()?;
+        let inline_return_enum_decl = self.take_pending_inline_enum_decl();
         if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
             return Err(Self::error_at(
                 "function pointer declarations are not supported".to_string(),
@@ -2782,6 +2830,7 @@ impl Parser {
         self.expect_opening_paren_after("function name")?;
         let allow_unnamed_params = self.parameter_list_is_prototype();
         let params = self.parse_params(allow_unnamed_params)?;
+        self.pending_inline_enum_constants = None;
         self.expect_closing_paren_after("function parameters")?;
         if self.check(&Token::LBracket) {
             return Err(Self::error_at(
@@ -2793,6 +2842,7 @@ impl Parser {
             return Ok((
                 name,
                 TopLevelFunction::Prototype(FunctionSignature::new(return_type, &params)),
+                inline_return_enum_decl,
             ));
         }
         let body = self.parse_block_after("function header")?;
@@ -2803,6 +2853,7 @@ impl Parser {
                 params,
                 body,
             }),
+            inline_return_enum_decl,
         ))
     }
 
@@ -3341,7 +3392,7 @@ impl Parser {
     }
 
     fn parse_local_function_prototype_decl(&mut self) -> CustResult<Stmt> {
-        let (_, declaration) = self.parse_function_declaration()?;
+        let (_, declaration, _) = self.parse_function_declaration()?;
         match declaration {
             TopLevelFunction::Prototype(_) => Ok(Stmt::Empty),
             TopLevelFunction::Definition(_) => Err(CustError::new(

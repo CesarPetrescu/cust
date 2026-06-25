@@ -4,7 +4,19 @@ Last updated: 2026-06-25
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-25 autonomous enum compound-literal run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source parser-trust gaps, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits, targeted pointer-arithmetic negative coverage through embedded and anonymous aggregate paths, and a concrete C99 expression parity gap: direct named enum type spellings such as `(enum State){READY}` were already valid declaration/type-query spellings but not recognized by cast/compound-literal lookahead. The selected work package now accepts direct named enum type names in scalar and one-dimensional array compound literals by routing `Token::Enum` through the existing cast parser, reusing Cust's deterministic integer-backed enum storage model.
+All passed after the 2026-06-25 autonomous inline enum return-type run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional mixed supported-subset conformance fixtures, pointer/const/storage/type-query negative coverage, direct enum type-name parity in less-traveled contexts, and a concrete parser-routing gap: top-level function return type specifiers that define an enum inline, such as `enum Status { READY = 5 } choose(void);`, were being treated as variable declarations and failed with `expected '=' after variable declaration, found LParen`. The selected work package now lets function lookahead skip inline enum definition bodies, emits return-type inline enum constants as file-scope `EnumDecl`s before function registration, and clears parameter-list pending enum constants to avoid accidental leakage.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_inline_enum_return_type_definitions -- --nocapture  # RED: expected '=' after variable declaration, found LParen; GREEN passed after enum-return lookahead and pending EnumDecl routing
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest: Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source parser-trust gaps, additional mixed supported-subset conformance fixtures, pointer/const/storage-class/type-query audits, targeted pointer-arithmetic negative coverage through embedded and anonymous aggregate paths, and a concrete C99 expression parity gap: direct named enum type spellings such as `(enum State){READY}` were already valid declaration/type-query spellings but not recognized by cast/compound-literal lookahead. The selected work package now accepts direct named enum type names in scalar and one-dimensional array compound literals by routing `Token::Enum` through the existing cast parser, reusing Cust's deterministic integer-backed enum storage model.
 
 Commands verified so far:
 

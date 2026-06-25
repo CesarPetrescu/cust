@@ -1201,6 +1201,13 @@ fn supports_inline_enum_object_declarations_in_storage_and_for_contexts() {
 }
 
 #[test]
+fn supports_inline_enum_return_type_definitions() {
+    let program = include_str!("fixtures/valid/inline_enum_return_types.c");
+
+    assert_eq!(interpret(program).unwrap(), 37);
+}
+
+#[test]
 fn supports_mixed_declaration_context_conformance_fixture() {
     let program = include_str!("fixtures/valid/mixed_declaration_contexts.c");
 

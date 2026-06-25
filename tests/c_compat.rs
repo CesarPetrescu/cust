@@ -15,6 +15,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/qualified_anonymous_aggregate_for_initializers.c",
     "tests/fixtures/compat/valid/inline_enum_declaration_contexts.c",
     "tests/fixtures/compat/valid/inline_enum_object_declarations.c",
+    "tests/fixtures/compat/valid/inline_enum_return_types.c",
     "tests/fixtures/compat/valid/mixed_declaration_contexts.c",
     "tests/fixtures/compat/valid/anonymous_enum_typedefs.c",
     "tests/fixtures/compat/valid/address_of_dereference.c",
