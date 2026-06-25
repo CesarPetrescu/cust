@@ -851,6 +851,14 @@ fn supports_sizeof_pointer_expressions_without_evaluating_operands() {
 }
 
 #[test]
+fn supports_unparenthesized_sizeof_in_integer_constant_expressions() {
+    let program =
+        include_str!("fixtures/valid/sizeof_unparenthesized_integer_constant_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 20);
+}
+
+#[test]
 fn supports_uninitialized_scalar_and_pointer_declarations() {
     let program = include_str!("fixtures/valid/uninitialized_declarations.c");
 

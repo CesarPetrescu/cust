@@ -5821,11 +5821,11 @@ impl Parser {
             return Ok((value, operator));
         }
 
-        let (_value, _) = self.parse_integer_constant_unary(
-            local_constants,
-            "expected integer constant in sizeof expression",
-        )?;
-        Ok((INT_SIZE, operator))
+        let expr = self.parse_unary()?;
+        let value = self
+            .sizeof_integer_constant_expr(&expr, local_constants)
+            .map_err(|err| Self::error_at(err.to_string(), &operator))?;
+        Ok((value, operator))
     }
 
     fn sizeof_integer_constant_expr(
