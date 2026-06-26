@@ -1,8 +1,22 @@
 # Cust Current State
 
-Last updated: 2026-06-26
+Last updated: 2026-06-27
 
 ## Latest autonomous verification
+
+All passed after the 2026-06-27 autonomous inline enum `_Alignof` type-definition and assignment-statement wrapping run. Ideation considered failing tests/builds (none observed in the pulled tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, remaining less-traveled direct enum/inline enum contexts, assignment-like statement paths that might miss pending inline enum declarations, function parameter type-definition native-oracle feasibility, and compact mixed supported-subset conformance fixtures. The selected work package targeted `_Alignof(enum Tag { ... })` expression contexts adjacent to the prior `sizeof` work; the RED fixture exposed a real runtime gap where plain assignment statements parsed inline enum definitions on the RHS but returned `Stmt::Assign` without emitting pending enum declarations, so the next statement failed with `undefined variable 'LOCAL_ALIGN'`. Plain scalar assignments and scalar compound-assignment statements now wrap pending inline enum declarations before runtime evaluation, and interpreter plus warning-free native compiler-oracle fixtures cover `_Alignof` in assignments, declaration-list initializers, and return expressions.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+date +%F
+cargo test --test interpreter inline_enum_alignof_type_definitions -- --nocapture  # RED: undefined variable 'LOCAL_ALIGN'; GREEN passed after assignment-statement pending enum wrapper
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
 
 All passed after the 2026-06-26 autonomous inline enum `sizeof` type-definition conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing for newly discovered gaps, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, less-traveled direct enum and inline enum contexts, warning-free function parameter type-definition native-oracle feasibility, and compact mixed supported-subset conformance fixtures. The selected work package locks in inline enum definitions in ordinary `sizeof(enum Tag { ... })` type-name expressions because this is adjacent to the recent inline enum cast/control/static-assert/switch work and verifies generated enumerators are emitted before later statements in expression, declaration-list, and return contexts. Focused interpreter coverage passed immediately because the audited parser/runtime wrapper path was already supported, so this run records conformance coverage rather than a production-code fix.
 

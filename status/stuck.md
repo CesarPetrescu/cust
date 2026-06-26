@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-06-26 autonomous inline enum `sizeof` type-definition conformance run after focused interpreter coverage, C compiler-oracle coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-06-27 autonomous inline enum `_Alignof` type-definition and assignment-statement wrapping run after focused interpreter RED/GREEN coverage, C compiler-oracle coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 

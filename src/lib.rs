@@ -6200,18 +6200,20 @@ impl Parser {
             if require_semi {
                 self.expect_semicolon_after("assignment")?;
             }
-            return Ok(Stmt::Expr(Expr::CompoundAssign {
-                name,
-                op,
-                value: Box::new(value),
-            }));
+            return Ok(
+                self.with_pending_inline_enum_decl(Stmt::Expr(Expr::CompoundAssign {
+                    name,
+                    op,
+                    value: Box::new(value),
+                })),
+            );
         }
         self.expect_assign_after("assignment")?;
         let expr = self.parse_expr()?;
         if require_semi {
             self.expect_semicolon_after("assignment")?;
         }
-        Ok(Stmt::Assign(name, expr))
+        Ok(self.with_pending_inline_enum_decl(Stmt::Assign(name, expr)))
     }
 
     fn parse_expr_stmt_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
