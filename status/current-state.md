@@ -4,6 +4,20 @@ Last updated: 2026-06-26
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-26 autonomous inline enum cast type-definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted negative pointer-arithmetic diagnostics through embedded/anonymous aggregate paths, more mixed supported-subset conformance fixtures, and less-traveled inline enum contexts. The selected work package closed a real parser/runtime parity gap for inline enum definitions in cast type specifiers: `(enum Inline { A = 4 })0` parsed and made `A` visible to the parser, but expression and return statements did not emit the pending inline enum constants before runtime evaluation, producing `undefined variable 'A'`. Expression and return statements now reuse the pending-inline-enum wrapper already used by declarations, and fixtures cover expression statements, declaration-list initializers, return expressions, and warning-free native compiler-oracle comparison.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter inline_enum_cast_type_definitions -- --nocapture  # RED: undefined variable 'EXPR_VALUE'; GREEN passed after expression/return statement enum wrapper
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-26 autonomous enum typedef declaration-list conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic diagnostics through embedded/anonymous aggregate field paths, direct enum/inline enum edge contexts, function parameter aggregate-definition native-oracle feasibility, and a compact high-value conformance package for an uncovered ordinary-C enum typedef declaration-list form: `typedef enum State { ... } State, *StatePtr, StateArray[4];`. The selected work package added interpreter and warning-free native compiler-oracle fixtures that combine inline named enum typedef definitions, pointer aliases, array aliases, array-typedef parameter decay, enum compound literals, scalar enum casts, enum-array pointer arithmetic/indexing, and ABI-independent `sizeof`/`_Alignof` relationships. Focused coverage passed immediately, so this run records conformance coverage rather than a production-code fix.
 
 Commands verified so far:

@@ -6187,7 +6187,7 @@ impl Parser {
         if require_semi {
             self.expect_semicolon_after("expression statement")?;
         }
-        Ok(Stmt::Expr(expr))
+        Ok(self.with_pending_inline_enum_decl(Stmt::Expr(expr)))
     }
 
     fn parse_return(&mut self) -> CustResult<Stmt> {
@@ -6197,7 +6197,7 @@ impl Parser {
         }
         let expr = self.parse_expr()?;
         self.expect_semicolon_after("return statement")?;
-        Ok(Stmt::Return(Some(expr)))
+        Ok(self.with_pending_inline_enum_decl(Stmt::Return(Some(expr))))
     }
 
     fn parse_break(&mut self) -> CustResult<Stmt> {
