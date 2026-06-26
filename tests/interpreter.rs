@@ -1255,6 +1255,13 @@ fn supports_mixed_declaration_context_conformance_fixture() {
 }
 
 #[test]
+fn supports_mixed_aggregate_field_type_query_conformance_fixture() {
+    let program = include_str!("fixtures/valid/mixed_aggregate_field_type_queries.c");
+
+    assert_eq!(interpret(program).unwrap(), 52);
+}
+
+#[test]
 fn rejects_assignment_to_const_inline_enum_object() {
     let program = include_str!("fixtures/invalid/const_inline_enum_assignment.c");
 

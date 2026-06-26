@@ -4,7 +4,19 @@ Last updated: 2026-06-26
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-26 autonomous inline aggregate parameter type-definition run. Ideation considered failing tests/builds (none known after the previous verified run), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, more mixed supported-subset conformance fixtures, pointer/const/storage/type-query audits through nested and anonymous aggregate paths, and a concrete parser-scope gap adjacent to the recent inline aggregate return-type work: named `struct`/`union` definitions in function parameter type specifiers were accepted by the shared declaration-type parser but their tags leaked into file scope. The selected work package now parses parameter-list aggregate definitions in a temporary function-parameter aggregate scope that remains visible while parsing the function body and is popped before later file-scope declarations.
+All passed after the 2026-06-26 autonomous mixed aggregate-field type-query conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted negative pointer arithmetic through embedded/anonymous aggregate paths, direct enum and inline enum edge contexts, and a safe high-value conformance package that combines less-traveled supported surfaces: nested named aggregate field declaration lists, anonymous aggregate fields, typedef-backed pointer fields with const pointer-slot/pointee metadata, struct-pointer field access, array-field type queries, and aggregate `_Alignof` relationships. The selected work package added an interpreter fixture and warning-free native compiler-oracle fixture for that mixed supported-subset program; focused coverage passed immediately, so this run records conformance coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter mixed_aggregate_field_type_query -- --nocapture  # coverage GREEN immediately; no production-code change needed
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest: All passed after the 2026-06-26 autonomous inline aggregate parameter type-definition run. Ideation considered failing tests/builds (none known after the previous verified run), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, more mixed supported-subset conformance fixtures, pointer/const/storage/type-query audits through nested and anonymous aggregate paths, and a concrete parser-scope gap adjacent to the recent inline aggregate return-type work: named `struct`/`union` definitions in function parameter type specifiers were accepted by the shared declaration-type parser but their tags leaked into file scope. The selected work package now parses parameter-list aggregate definitions in a temporary function-parameter aggregate scope that remains visible while parsing the function body and is popped before later file-scope declarations.
 
 Commands verified so far:
 
