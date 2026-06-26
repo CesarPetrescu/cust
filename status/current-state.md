@@ -4,7 +4,19 @@ Last updated: 2026-06-26
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-26 autonomous mixed aggregate-field type-query conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted negative pointer arithmetic through embedded/anonymous aggregate paths, direct enum and inline enum edge contexts, and a safe high-value conformance package that combines less-traveled supported surfaces: nested named aggregate field declaration lists, anonymous aggregate fields, typedef-backed pointer fields with const pointer-slot/pointee metadata, struct-pointer field access, array-field type queries, and aggregate `_Alignof` relationships. The selected work package added an interpreter fixture and warning-free native compiler-oracle fixture for that mixed supported-subset program; focused coverage passed immediately, so this run records conformance coverage rather than a production-code fix.
+All passed after the 2026-06-26 autonomous named aggregate typedef declaration-list conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic diagnostics through embedded/anonymous aggregate field paths, direct enum/inline enum edge contexts, and a compact high-value conformance package for an uncovered ordinary-C declaration form: comma-separated aliases after inline named aggregate typedef definitions, such as `typedef struct Point { ... } Point, *PointPtr, PointArray[3];` and matching union aliases. The selected work package added interpreter and warning-free native compiler-oracle fixtures that combine inline named aggregate typedef definitions, pointer aliases, array aliases, array-typedef parameter decay, aggregate-pointer arithmetic, `->` mutation, indexed union pointer mutation, and ABI-independent `sizeof(array typedef) == N * sizeof(element)` checks. Focused coverage passed immediately, so this run records conformance coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter named_aggregate_typedef_declaration_lists -- --nocapture  # coverage GREEN immediately; no production-code change needed
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest: All passed after the 2026-06-26 autonomous mixed aggregate-field type-query conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted negative pointer arithmetic through embedded/anonymous aggregate paths, direct enum and inline enum edge contexts, and a safe high-value conformance package that combines less-traveled supported surfaces: nested named aggregate field declaration lists, anonymous aggregate fields, typedef-backed pointer fields with const pointer-slot/pointee metadata, struct-pointer field access, array-field type queries, and aggregate `_Alignof` relationships. The selected work package added an interpreter fixture and warning-free native compiler-oracle fixture for that mixed supported-subset program; focused coverage passed immediately, so this run records conformance coverage rather than a production-code fix.
 
 Commands verified so far:
 
