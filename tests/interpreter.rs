@@ -403,6 +403,13 @@ fn supports_named_aggregate_typedef_declaration_lists() {
 }
 
 #[test]
+fn supports_enum_typedef_declaration_lists() {
+    let program = include_str!("fixtures/valid/enum_typedef_declaration_lists.c");
+
+    assert_eq!(interpret(program).unwrap(), 38);
+}
+
+#[test]
 fn supports_parenthesized_typedef_declarators() {
     let program = include_str!("fixtures/valid/parenthesized_typedef_declarators.c");
 
