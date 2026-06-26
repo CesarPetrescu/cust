@@ -816,6 +816,13 @@ fn supports_c_style_block_comments_as_whitespace() {
 }
 
 #[test]
+fn supports_c_style_line_comments_as_whitespace() {
+    let program = include_str!("fixtures/valid/line_comments.c");
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
 fn supports_global_scalar_array_and_pointer_variables() {
     let program = include_str!("fixtures/valid/global_variables.c");
 

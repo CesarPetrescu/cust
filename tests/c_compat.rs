@@ -137,6 +137,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/signed_unsigned_char_types.c",
     "tests/fixtures/compat/valid/long_short_type_spellings.c",
     "tests/fixtures/compat/valid/long_long_type_spellings.c",
+    "tests/fixtures/compat/valid/line_comments.c",
     "tests/fixtures/compat/valid/bool_type_spellings.c",
     "tests/fixtures/compat/valid/permuted_scalar_type_specifiers.c",
     "tests/fixtures/compat/valid/parenthesized_function_declarators.c",
