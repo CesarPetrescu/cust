@@ -434,7 +434,7 @@ fn supports_postfix_const_qualifiers() {
 fn supports_static_assertions() {
     let program = include_str!("fixtures/valid/static_assertions.c");
 
-    assert_eq!(interpret(program).unwrap(), 17);
+    assert_eq!(interpret(program).unwrap(), 32);
 }
 
 #[test]

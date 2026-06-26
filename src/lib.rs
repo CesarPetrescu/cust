@@ -3529,7 +3529,7 @@ impl Parser {
         };
         self.expect_closing_paren_after("_Static_assert message")?;
         self.expect_semicolon_after("_Static_assert")?;
-        Ok(Stmt::StaticAssert { condition, message })
+        Ok(self.with_pending_inline_enum_decl(Stmt::StaticAssert { condition, message }))
     }
 
     fn static_assert_message(values: Vec<i64>) -> String {
