@@ -3728,9 +3728,41 @@ impl Parser {
     }
 
     fn with_pending_inline_enum_decl(&mut self, stmt: Stmt) -> Stmt {
-        match self.take_pending_inline_enum_decl() {
-            Some(enum_decl) => Stmt::Many(vec![enum_decl, stmt]),
+        Self::prepend_optional_stmt(self.take_pending_inline_enum_decl(), stmt)
+    }
+
+    fn prepend_optional_stmt(prefix: Option<Stmt>, stmt: Stmt) -> Stmt {
+        match prefix {
+            Some(prefix) => Stmt::Many(vec![prefix, stmt]),
             None => stmt,
+        }
+    }
+
+    fn split_leading_enum_decl(stmt: Stmt) -> (Option<Stmt>, Stmt) {
+        match stmt {
+            Stmt::Many(mut stmts) if matches!(stmts.first(), Some(Stmt::EnumDecl { .. })) => {
+                let enum_decl = stmts.remove(0);
+                let stmt = match stmts.len() {
+                    0 => Stmt::Empty,
+                    1 => stmts.remove(0),
+                    _ => Stmt::Many(stmts),
+                };
+                (Some(enum_decl), stmt)
+            }
+            stmt => (None, stmt),
+        }
+    }
+
+    fn append_optional_stmts(
+        init: Option<Box<Stmt>>,
+        optional_stmts: impl IntoIterator<Item = Option<Stmt>>,
+    ) -> Option<Box<Stmt>> {
+        let mut stmts = init.map(|stmt| vec![*stmt]).unwrap_or_default();
+        stmts.extend(optional_stmts.into_iter().flatten());
+        match stmts.len() {
+            0 => None,
+            1 => Some(Box::new(stmts.remove(0))),
+            _ => Some(Box::new(Stmt::Many(stmts))),
         }
     }
 
@@ -6217,17 +6249,19 @@ impl Parser {
         self.expect_opening_paren_after("if")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("if condition")?;
+        let inline_enum_decl = self.take_pending_inline_enum_decl();
         let then_branch = self.parse_control_body_after("if condition")?;
         let else_branch = if self.matches(&Token::Else) {
             self.parse_control_body_after("else")?
         } else {
             Vec::new()
         };
-        Ok(Stmt::If {
+        let stmt = Stmt::If {
             cond,
             then_branch,
             else_branch,
-        })
+        };
+        Ok(Self::prepend_optional_stmt(inline_enum_decl, stmt))
     }
 
     fn parse_while(&mut self) -> CustResult<Stmt> {
@@ -6235,8 +6269,12 @@ impl Parser {
         self.expect_opening_paren_after("while")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("while condition")?;
+        let inline_enum_decl = self.take_pending_inline_enum_decl();
         let body = self.parse_control_body_after("while condition")?;
-        Ok(Stmt::While { cond, body })
+        Ok(Self::prepend_optional_stmt(
+            inline_enum_decl,
+            Stmt::While { cond, body },
+        ))
     }
 
     fn parse_do_while(&mut self) -> CustResult<Stmt> {
@@ -6247,7 +6285,11 @@ impl Parser {
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("do-while condition")?;
         self.expect_semicolon_after("do-while condition")?;
-        Ok(Stmt::DoWhile { body, cond })
+        let inline_enum_decl = self.take_pending_inline_enum_decl();
+        Ok(Self::prepend_optional_stmt(
+            inline_enum_decl,
+            Stmt::DoWhile { body, cond },
+        ))
     }
 
     fn parse_for(&mut self) -> CustResult<Stmt> {
@@ -6304,6 +6346,7 @@ impl Parser {
             self.expect_semicolon_after("for condition")?;
             Some(expr)
         };
+        let cond_inline_enum_decl = self.take_pending_inline_enum_decl();
 
         let increment = if self.check(&Token::RParen) {
             None
@@ -6323,9 +6366,18 @@ impl Parser {
                 self.peek_located(),
             ));
         };
+        let (increment_inline_enum_decl, increment) = match increment {
+            Some(increment) => {
+                let (inline_enum_decl, increment) = Self::split_leading_enum_decl(*increment);
+                (inline_enum_decl, Some(Box::new(increment)))
+            }
+            None => (None, None),
+        };
         self.expect_closing_paren_after("for clauses")?;
 
         let body = self.parse_control_body_after("for clauses")?;
+        let init =
+            Self::append_optional_stmts(init, [cond_inline_enum_decl, increment_inline_enum_decl]);
         Ok(Stmt::For {
             init,
             cond,
@@ -6339,6 +6391,7 @@ impl Parser {
         self.expect_opening_paren_after("switch")?;
         let expr = self.parse_expr()?;
         self.expect_closing_paren_after("switch expression")?;
+        let inline_enum_decl = self.take_pending_inline_enum_decl();
         self.expect_opening_brace_after("switch expression")?;
 
         let mut sections = Vec::new();
@@ -6402,7 +6455,10 @@ impl Parser {
         }
 
         self.expect(Token::RBrace)?;
-        Ok(Stmt::Switch { expr, sections })
+        Ok(Self::prepend_optional_stmt(
+            inline_enum_decl,
+            Stmt::Switch { expr, sections },
+        ))
     }
 
     fn parse_switch_case_value(&mut self) -> CustResult<(i64, LocatedToken)> {

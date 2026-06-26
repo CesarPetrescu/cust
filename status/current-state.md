@@ -4,6 +4,19 @@ Last updated: 2026-06-26
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-26 autonomous inline enum control-expression run. Ideation considered failing tests/builds (none known after the previous verified run), active blockers (none), the remaining C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate paths, less-traveled direct enum contexts, additional mixed conformance fixtures, and a concrete inline-enum runtime gap adjacent to the previous cast type-definition work: inline enum definitions in control expressions parsed and made enumerators visible to later parser phases, but runtime execution did not emit pending enum constants before evaluating `if`/`while`/`for`/`switch` headers or loop bodies. Control statements now hoist pending inline enum declarations into the appropriate runtime statement sequence, and fixtures cover `if`, `while`, `for` init/condition/increment, and `switch` expression/case-label contexts with C compiler-oracle comparison.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter inline_enum_control_expr_definitions -- --nocapture  # RED: undefined variable 'WHILE_LIMIT'; GREEN passed after control-expression enum hoisting
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-26 autonomous inline enum cast type-definition run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted negative pointer-arithmetic diagnostics through embedded/anonymous aggregate paths, more mixed supported-subset conformance fixtures, and less-traveled inline enum contexts. The selected work package closed a real parser/runtime parity gap for inline enum definitions in cast type specifiers: `(enum Inline { A = 4 })0` parsed and made `A` visible to the parser, but expression and return statements did not emit the pending inline enum constants before runtime evaluation, producing `undefined variable 'A'`. Expression and return statements now reuse the pending-inline-enum wrapper already used by declarations, and fixtures cover expression statements, declaration-list initializers, return expressions, and warning-free native compiler-oracle comparison.
 
 Commands verified so far:
