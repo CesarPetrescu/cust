@@ -1276,6 +1276,13 @@ fn supports_inline_enum_cast_type_definitions() {
 }
 
 #[test]
+fn supports_inline_enum_sizeof_type_definitions() {
+    let program = include_str!("fixtures/valid/inline_enum_sizeof_type_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 24);
+}
+
+#[test]
 fn supports_inline_enum_control_expr_definitions() {
     let program = include_str!("fixtures/valid/inline_enum_control_expr_definitions.c");
 
