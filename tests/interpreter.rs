@@ -1276,6 +1276,13 @@ fn supports_inline_enum_control_expr_definitions() {
 }
 
 #[test]
+fn supports_inline_enum_switch_case_label_definitions() {
+    let program = include_str!("fixtures/valid/inline_enum_switch_case_labels.c");
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
 fn supports_mixed_declaration_context_conformance_fixture() {
     let program = include_str!("fixtures/valid/mixed_declaration_contexts.c");
 

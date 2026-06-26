@@ -6444,7 +6444,11 @@ impl Parser {
                 ));
             };
 
+            let label_inline_enum_decl = self.take_pending_inline_enum_decl();
             let mut statements = Vec::new();
+            if let Some(inline_enum_decl) = label_inline_enum_decl {
+                statements.push(inline_enum_decl);
+            }
             while !matches!(
                 self.peek(),
                 Token::Case | Token::Default | Token::RBrace | Token::Eof

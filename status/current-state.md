@@ -4,6 +4,20 @@ Last updated: 2026-06-26
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-26 autonomous inline enum switch-case-label run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted negative pointer-arithmetic coverage through embedded/anonymous aggregate field paths, function parameter type-definition native-oracle feasibility, additional mixed conformance fixtures, and another inline-enum runtime gap adjacent to recent cast/control/static-assert work: `case sizeof(enum CaseSize { CASE_SIZE = 7 }):` parsed and folded the case value but did not emit the generated enum constant before executing that switch section, so case body references failed with `undefined variable 'CASE_SIZE'`. Switch sections now prepend pending inline enum declarations produced by case-label integer constant expressions, and fixtures cover interpreter behavior plus warning-free C compiler-oracle comparison.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter inline_enum_switch_case_label -- --nocapture  # RED: undefined variable 'CASE_SIZE'; GREEN passed after case-section enum hoisting
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-26 autonomous inline enum `_Static_assert` run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining C-subset closure queue item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic diagnostics through embedded/anonymous aggregate paths, less-traveled direct enum and inline enum contexts, function parameter type-definition native-oracle feasibility, and a concrete inline-enum runtime gap adjacent to recent inline enum expression/control work: `_Static_assert(sizeof(enum E { A = 1 }) == sizeof(int), "...");` parsed the inline enum type definition but returned a bare `StaticAssert` statement, so generated enum constants were never emitted before the assertion or later statements. Static assertions now prepend pending inline enum declarations before runtime assertion evaluation, and fixtures cover top-level and block-scope inline enum type definitions inside `_Static_assert` conditions with C compiler-oracle comparison.
 
 Commands verified so far:
