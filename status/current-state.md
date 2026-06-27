@@ -4,6 +4,20 @@ Last updated: 2026-06-27
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-27 autonomous array-length comma-expression diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, remaining less-traveled direct enum/inline enum pointer/aggregate expression contexts, function parameter type-definition oracle feasibility, and a parser-trust gap adjacent to the recent array-length integer-constant-expression work: `int values[1, 2];` parsed the leading constant expression and then fell through to the generic bracket helper with `expected ']' after array length, found Comma`. The selected work package keeps comma expressions outside Cust's integer constant expression subset and now reports `comma operator is not allowed in integer constant expression` at the comma token for array declarator lengths, matching the existing enum/switch integer-constant-expression boundary while preserving non-constant identifier and empty/negative/zero diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_comma_operator_in_array_length_integer_constant_expressions -- --nocapture  # RED: generic expected-closing-bracket diagnostic; GREEN after array-length comma diagnostic
+cargo test --test interpreter rejects_non_constant_array_lengths_with_context -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-27 autonomous non-constant array-length diagnostic run. Ideation considered failing tests/builds (none in the pulled clean tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, remaining less-traveled direct enum/inline enum pointer/aggregate expression contexts, function parameter type-definition oracle feasibility, and a parser-trust gap adjacent to the just-completed array-length integer-constant-expression work: declarations such as `int values[n];` fell through to `expected array length, found Ident("n")` even though Cust's supported subset requires parser-folded integer constant expressions for fixed-size storage. The selected work package keeps variable-length array declarators unsupported but now reports `array length must be an integer constant expression` at the non-constant identifier before preserving existing empty, negative, zero, and flexible aggregate-field diagnostics.
 
 Commands verified so far:

@@ -6092,6 +6092,13 @@ impl Parser {
 
         let (value, first_token) =
             self.parse_integer_constant_expr(&HashMap::new(), "expected array length")?;
+        if self.check(&Token::Comma) {
+            let comma = self.peek_located().clone();
+            return Err(Self::error_at(
+                "comma operator is not allowed in integer constant expression".to_string(),
+                &comma,
+            ));
+        }
         if value <= 0 {
             return Err(Self::error_at(
                 "array length must be positive".to_string(),

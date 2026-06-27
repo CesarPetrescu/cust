@@ -162,6 +162,17 @@ fn rejects_non_constant_array_lengths_with_context() {
 }
 
 #[test]
+fn rejects_comma_operator_in_array_length_integer_constant_expressions() {
+    let program = include_str!("fixtures/invalid/array_length_comma_expression.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "comma operator is not allowed in integer constant expression at line 2, column 17"
+    );
+}
+
+#[test]
 fn rejects_parenthesized_pointer_aggregate_fields_with_context() {
     let program = include_str!("fixtures/invalid/function_pointer_aggregate_field.c");
 
