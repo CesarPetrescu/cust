@@ -1,8 +1,21 @@
 # Cust Current State
 
-Last updated: 2026-06-27
+Last updated: 2026-06-28
 
 ## Latest autonomous verification
+
+All passed after the 2026-06-28 autonomous aggregate-array-compound-literal pointer negative coverage run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through additional embedded/anonymous aggregate/string/compound-literal paths, remaining less-traveled direct enum/inline enum pointer/aggregate expression contexts, function parameter type-definition oracle feasibility, and more mixed supported-subset conformance fixtures. The selected work package locks in diagnostics for pointer subtraction and ordering between distinct aggregate-array compound literal storage roots: `((struct Point[]){{...}}) - ((struct Point[]){{...}})` reports `cannot subtract pointers to different arrays`, while relational ordering between separate aggregate-array compound literals reports `cannot compare pointers to different arrays`. Focused coverage passed immediately because existing aggregate-array compound-literal storage metadata already allocates distinct hidden array roots and routes through cross-array pointer arithmetic checks, so this run records conformance/diagnostic coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter different_aggregate_array_compound_literals -- --nocapture  # coverage GREEN immediately; no production-code change needed
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
 
 All passed after the 2026-06-27 autonomous array-compound-literal pointer negative coverage run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through field-backed, string-literal, and compound-literal storage paths, remaining less-traveled direct enum/inline enum pointer/aggregate expression contexts, function parameter type-definition oracle feasibility, and more mixed supported-subset conformance fixtures. The selected work package locks in diagnostics for pointer subtraction and ordering between distinct array compound literal storage roots: `((int[]){1, 2, 3}) - ((int[]){4, 5, 6})` reports `cannot subtract pointers to different arrays`, while relational ordering between separate array compound literals reports `cannot compare pointers to different arrays`. Focused coverage passed immediately because existing array-compound-literal storage metadata already allocates distinct hidden array roots and routes through the cross-array pointer arithmetic checks, so this run records conformance/diagnostic coverage rather than a production-code fix.
 
