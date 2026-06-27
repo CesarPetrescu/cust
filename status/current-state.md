@@ -4,6 +4,18 @@ Last updated: 2026-06-27
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-27 autonomous non-constant array-length diagnostic run. Ideation considered failing tests/builds (none in the pulled clean tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, remaining less-traveled direct enum/inline enum pointer/aggregate expression contexts, function parameter type-definition oracle feasibility, and a parser-trust gap adjacent to the just-completed array-length integer-constant-expression work: declarations such as `int values[n];` fell through to `expected array length, found Ident("n")` even though Cust's supported subset requires parser-folded integer constant expressions for fixed-size storage. The selected work package keeps variable-length array declarators unsupported but now reports `array length must be an integer constant expression` at the non-constant identifier before preserving existing empty, negative, zero, and flexible aggregate-field diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_non_constant_array_lengths_with_context -- --nocapture  # RED: generic expected-array-length diagnostic; GREEN after targeted non-constant array-length diagnostic
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-27 autonomous flexible-array aggregate-field diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, less-traveled direct enum/inline enum pointer/aggregate expression contexts, function parameter type-definition oracle feasibility, and a small parser-trust gap adjacent to the just-expanded array-length parser: C flexible array members such as `struct Packet { int data[]; };` fell through to the generic `expected array length before ']'` diagnostic. The selected work package keeps flexible array aggregate fields outside Cust's fixed-size deterministic aggregate model but now reports `flexible array aggregate fields are not supported` at the `]` token before the generic array-length helper runs.
 
 Commands verified so far:

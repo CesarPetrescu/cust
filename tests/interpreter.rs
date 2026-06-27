@@ -151,6 +151,17 @@ fn rejects_flexible_array_aggregate_fields_with_context() {
 }
 
 #[test]
+fn rejects_non_constant_array_lengths_with_context() {
+    let program = include_str!("fixtures/invalid/array_length_non_constant_identifier.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "array length must be an integer constant expression at line 3, column 16"
+    );
+}
+
+#[test]
 fn rejects_parenthesized_pointer_aggregate_fields_with_context() {
     let program = include_str!("fixtures/invalid/function_pointer_aggregate_field.c");
 

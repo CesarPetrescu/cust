@@ -6065,7 +6065,14 @@ impl Parser {
                 .or_else(|| self.lookup_enum_constant(name))
                 .map(|value| (value, found.clone()))
                 .ok_or_else(|| {
-                    Self::error_at(format!("{context}, found {:?}", found.kind), &found)
+                    if context == "expected array length" {
+                        Self::error_at(
+                            "array length must be an integer constant expression".to_string(),
+                            &found,
+                        )
+                    } else {
+                        Self::error_at(format!("{context}, found {:?}", found.kind), &found)
+                    }
                 }),
             token => Err(Self::error_at(
                 format!("{context}, found {token:?}"),
