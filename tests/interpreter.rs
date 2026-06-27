@@ -140,6 +140,17 @@ fn rejects_aggregate_bit_fields_with_context() {
 }
 
 #[test]
+fn rejects_flexible_array_aggregate_fields_with_context() {
+    let program = include_str!("fixtures/invalid/flexible_array_aggregate_field.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "flexible array aggregate fields are not supported at line 3, column 14"
+    );
+}
+
+#[test]
 fn rejects_parenthesized_pointer_aggregate_fields_with_context() {
     let program = include_str!("fixtures/invalid/function_pointer_aggregate_field.c");
 

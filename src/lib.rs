@@ -5162,6 +5162,12 @@ impl Parser {
                     ));
                 }
                 let ty = if self.matches(&Token::LBracket) {
+                    if self.check(&Token::RBracket) {
+                        return Err(Self::error_at(
+                            "flexible array aggregate fields are not supported".to_string(),
+                            self.peek_located(),
+                        ));
+                    }
                     match ty {
                         StructFieldType::Scalar(elem_type) => {
                             let len = self.expect_array_len()?;

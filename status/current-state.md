@@ -4,6 +4,19 @@ Last updated: 2026-06-27
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-27 autonomous flexible-array aggregate-field diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, less-traveled direct enum/inline enum pointer/aggregate expression contexts, function parameter type-definition oracle feasibility, and a small parser-trust gap adjacent to the just-expanded array-length parser: C flexible array members such as `struct Packet { int data[]; };` fell through to the generic `expected array length before ']'` diagnostic. The selected work package keeps flexible array aggregate fields outside Cust's fixed-size deterministic aggregate model but now reports `flexible array aggregate fields are not supported` at the `]` token before the generic array-length helper runs.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter flexible_array_aggregate_fields -- --nocapture  # RED: generic expected-array-length diagnostic; GREEN after aggregate-field [] diagnostic
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-27 autonomous array-length integer constant expression run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, remaining less-traveled direct enum/inline enum contexts, and a higher-impact parser parity gap: C array declarator lengths should accept integer constant expressions rather than only literal number tokens. The selected work package implemented parser-folded integer constant expression lengths for ordinary scalar arrays, typedef array declarators, aggregate fields, aggregate arrays, array parameters, and fixed-size array compound literal type names. The RED fixture failed at `typedef int Scores[TYPEDEF_LEN];` with `expected array length, found Ident("TYPEDEF_LEN")`; after the parser change it passes and compiler-oracle coverage verifies the same warning-free program under native C. Existing empty/negative/zero array-length diagnostics are preserved.
 
 Commands verified so far:
