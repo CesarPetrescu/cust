@@ -4,6 +4,19 @@ Last updated: 2026-06-27
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-27 autonomous inline enum function-call argument type-definition conformance run. Ideation considered failing tests/builds (none in the pulled clean tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, remaining less-traveled direct enum/inline enum contexts, and mixed supported-subset conformance fixtures. The selected work package targeted inline enum definitions nested inside function-call argument subexpressions because it is adjacent to recent pending-inline-enum statement wrapping work and was explicitly called out as a less-traveled context. Interpreter and warning-free native compiler-oracle fixtures now cover `sizeof(enum ArgSize { ... })`, `_Alignof(enum ArgAlign { ... })`, and `(enum ArgCast { ... })0` inside call arguments, plus later same-block enumerator visibility. Focused interpreter coverage passed immediately because the existing pending-inline-enum wrapper path already emits generated enumerators before evaluating the enclosing statement, so this run records conformance coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter inline_enum_call_argument_type_definitions -- --nocapture  # coverage GREEN immediately; no production-code change needed
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-27 autonomous inline enum assignment-lvalue type-definition run. Ideation considered failing tests/builds (none in the pulled clean tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate paths, less-traveled direct enum/inline enum contexts, function parameter type-definition oracle feasibility, and an audit of assignment-like statement paths that might still miss pending inline enum declarations. The selected work package targeted lvalue-specific assignment statements after the prior `_Alignof` assignment fix; the RED fixture exposed a real runtime gap where array, struct-field, struct-array-field, and dereference assignment/compound-assignment statement parsers returned early without emitting pending inline enum declarations, so RHS references such as `values[0] = _Alignof(enum ArrayAlign { ARRAY_ALIGN = 3 }) + ARRAY_ALIGN;` failed with `undefined variable 'ARRAY_ALIGN'`. Those statement paths now wrap pending inline enum declarations before runtime assignment evaluation, matching the existing expression/return/static-assert/control/declaration-list/plain-assignment behavior. Interpreter and warning-free native compiler-oracle fixtures cover scalar array lvalues, direct struct fields, struct array fields, pointer dereference lvalues, and compound assignment variants.
 
 Commands verified so far:
