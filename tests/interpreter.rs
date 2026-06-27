@@ -731,6 +731,19 @@ fn rejects_pointer_difference_between_different_anonymous_aggregate_array_fields
 }
 
 #[test]
+fn rejects_pointer_ordering_between_different_anonymous_aggregate_array_fields() {
+    let program = include_str!(
+        "fixtures/invalid/anonymous_aggregate_array_field_pointer_ordering_different_fields.c",
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot compare pointers to different arrays"
+    );
+}
+
+#[test]
 fn rejects_pointer_difference_between_different_string_literals() {
     let program =
         include_str!("fixtures/invalid/string_literal_pointer_difference_different_literals.c");
