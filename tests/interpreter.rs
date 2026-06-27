@@ -755,6 +755,32 @@ fn rejects_pointer_ordering_between_different_string_literals() {
 }
 
 #[test]
+fn rejects_pointer_difference_between_different_array_compound_literals() {
+    let program = include_str!(
+        "fixtures/invalid/array_compound_literal_pointer_difference_different_literals.c",
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot subtract pointers to different arrays"
+    );
+}
+
+#[test]
+fn rejects_pointer_ordering_between_different_array_compound_literals() {
+    let program = include_str!(
+        "fixtures/invalid/array_compound_literal_pointer_ordering_different_literals.c",
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot compare pointers to different arrays"
+    );
+}
+
+#[test]
 fn supports_struct_char_array_fields_initialized_from_string_literals() {
     let program = include_str!("fixtures/valid/struct_char_array_string_initializers.c");
 
