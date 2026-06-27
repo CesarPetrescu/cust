@@ -4,6 +4,20 @@ Last updated: 2026-06-27
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-27 autonomous array-length integer constant expression run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, remaining less-traveled direct enum/inline enum contexts, and a higher-impact parser parity gap: C array declarator lengths should accept integer constant expressions rather than only literal number tokens. The selected work package implemented parser-folded integer constant expression lengths for ordinary scalar arrays, typedef array declarators, aggregate fields, aggregate arrays, array parameters, and fixed-size array compound literal type names. The RED fixture failed at `typedef int Scores[TYPEDEF_LEN];` with `expected array length, found Ident("TYPEDEF_LEN")`; after the parser change it passes and compiler-oracle coverage verifies the same warning-free program under native C. Existing empty/negative/zero array-length diagnostics are preserved.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter supports_integer_constant_expressions_for_array_lengths -- --nocapture  # RED before implementation; GREEN after parser-folded array lengths
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-27 autonomous inline enum function-call argument type-definition conformance run. Ideation considered failing tests/builds (none in the pulled clean tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, remaining less-traveled direct enum/inline enum contexts, and mixed supported-subset conformance fixtures. The selected work package targeted inline enum definitions nested inside function-call argument subexpressions because it is adjacent to recent pending-inline-enum statement wrapping work and was explicitly called out as a less-traveled context. Interpreter and warning-free native compiler-oracle fixtures now cover `sizeof(enum ArgSize { ... })`, `_Alignof(enum ArgAlign { ... })`, and `(enum ArgCast { ... })0` inside call arguments, plus later same-block enumerator visibility. Focused interpreter coverage passed immediately because the existing pending-inline-enum wrapper path already emits generated enumerators before evaluating the enclosing statement, so this run records conformance coverage rather than a production-code fix.
 
 Commands verified so far:

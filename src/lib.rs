@@ -6069,23 +6069,24 @@ impl Parser {
     }
 
     fn expect_array_len(&mut self) -> CustResult<usize> {
-        let found = self.advance();
-        match &found.kind {
-            Token::Number(value) if *value > 0 => usize::try_from(*value)
-                .map_err(|_| Self::error_at("array length is too large".to_string(), &found)),
-            Token::Number(_) | Token::Minus => Err(Self::error_at(
-                "array length must be positive".to_string(),
-                &found,
-            )),
-            Token::RBracket => Err(Self::error_at(
+        if self.check(&Token::RBracket) {
+            let found = self.advance();
+            return Err(Self::error_at(
                 "expected array length before ']'".to_string(),
                 &found,
-            )),
-            token => Err(Self::error_at(
-                format!("expected array length, found {token:?}"),
-                &found,
-            )),
+            ));
         }
+
+        let (value, first_token) =
+            self.parse_integer_constant_expr(&HashMap::new(), "expected array length")?;
+        if value <= 0 {
+            return Err(Self::error_at(
+                "array length must be positive".to_string(),
+                &first_token,
+            ));
+        }
+        usize::try_from(value)
+            .map_err(|_| Self::error_at("array length is too large".to_string(), &first_token))
     }
 
     fn parse_assign(&mut self) -> CustResult<Stmt> {
