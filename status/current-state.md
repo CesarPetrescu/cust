@@ -4,6 +4,19 @@ Last updated: 2026-06-27
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-27 autonomous pointer-difference negative field-path coverage run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, remaining less-traveled direct enum/inline enum pointer/aggregate expression contexts, function parameter type-definition oracle feasibility, and more mixed supported-subset conformance fixtures. The selected work package locks in `cannot subtract pointers to different arrays` diagnostics for less-traveled field-backed array pointer difference paths: embedded aggregate-array fields from different fields, scalar array fields from different aggregate objects, and anonymous aggregate-array fields from different aggregate objects. Focused coverage passed immediately because the existing pointer owner/path metadata already distinguishes the different storage roots, so this run records conformance/diagnostic coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_pointer_difference_between_different -- --nocapture  # coverage GREEN immediately; no production-code change needed
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-27 autonomous array-length comma-expression diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through embedded/anonymous aggregate field paths, remaining less-traveled direct enum/inline enum pointer/aggregate expression contexts, function parameter type-definition oracle feasibility, and a parser-trust gap adjacent to the recent array-length integer-constant-expression work: `int values[1, 2];` parsed the leading constant expression and then fell through to the generic bracket helper with `expected ']' after array length, found Comma`. The selected work package keeps comma expressions outside Cust's integer constant expression subset and now reports `comma operator is not allowed in integer constant expression` at the comma token for array declarator lengths, matching the existing enum/switch integer-constant-expression boundary while preserving non-constant identifier and empty/negative/zero diagnostics.
 
 Commands verified so far:

@@ -693,6 +693,44 @@ fn rejects_pointer_ordering_between_different_scalar_array_fields() {
 }
 
 #[test]
+fn rejects_pointer_difference_between_different_embedded_aggregate_array_fields() {
+    let program = include_str!(
+        "fixtures/invalid/embedded_aggregate_array_field_pointer_difference_different_fields.c",
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot subtract pointers to different arrays"
+    );
+}
+
+#[test]
+fn rejects_pointer_difference_between_different_scalar_array_fields() {
+    let program =
+        include_str!("fixtures/invalid/scalar_array_field_pointer_difference_different_arrays.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot subtract pointers to different arrays"
+    );
+}
+
+#[test]
+fn rejects_pointer_difference_between_different_anonymous_aggregate_array_fields() {
+    let program = include_str!(
+        "fixtures/invalid/anonymous_aggregate_array_field_pointer_difference_different_fields.c",
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot subtract pointers to different arrays"
+    );
+}
+
+#[test]
 fn supports_struct_char_array_fields_initialized_from_string_literals() {
     let program = include_str!("fixtures/valid/struct_char_array_string_initializers.c");
 
