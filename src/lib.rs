@@ -6099,16 +6099,18 @@ impl Parser {
             self.advance();
             let value = self.parse_expr()?;
             self.expect_semicolon_after("assignment")?;
-            return Ok(Stmt::Expr(Expr::DerefCompoundSet {
-                pointer: Box::new(pointer),
-                op,
-                value: Box::new(value),
-            }));
+            return Ok(
+                self.with_pending_inline_enum_decl(Stmt::Expr(Expr::DerefCompoundSet {
+                    pointer: Box::new(pointer),
+                    op,
+                    value: Box::new(value),
+                })),
+            );
         }
         self.expect_assign_after("assignment")?;
         let value = self.parse_expr()?;
         self.expect_semicolon_after("assignment")?;
-        Ok(Stmt::DerefAssign { pointer, value })
+        Ok(self.with_pending_inline_enum_decl(Stmt::DerefAssign { pointer, value }))
     }
 
     fn parse_assign_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
@@ -6127,25 +6129,29 @@ impl Parser {
                     if require_semi {
                         self.expect_semicolon_after("assignment")?;
                     }
-                    return Ok(Stmt::Expr(Expr::StructArrayCompoundSet {
-                        name,
-                        fields,
-                        index: Box::new(index),
-                        op,
-                        value: Box::new(value),
-                    }));
+                    return Ok(self.with_pending_inline_enum_decl(Stmt::Expr(
+                        Expr::StructArrayCompoundSet {
+                            name,
+                            fields,
+                            index: Box::new(index),
+                            op,
+                            value: Box::new(value),
+                        },
+                    )));
                 }
                 self.expect_assign_after("struct array field assignment")?;
                 let value = self.parse_expr()?;
                 if require_semi {
                     self.expect_semicolon_after("assignment")?;
                 }
-                return Ok(Stmt::Expr(Expr::StructArraySet {
-                    name,
-                    fields,
-                    index: Box::new(index),
-                    value: Box::new(value),
-                }));
+                return Ok(
+                    self.with_pending_inline_enum_decl(Stmt::Expr(Expr::StructArraySet {
+                        name,
+                        fields,
+                        index: Box::new(index),
+                        value: Box::new(value),
+                    })),
+                );
             }
             if let Some(op) = self.compound_assignment_op() {
                 self.advance();
@@ -6153,23 +6159,25 @@ impl Parser {
                 if require_semi {
                     self.expect_semicolon_after("assignment")?;
                 }
-                return Ok(Stmt::Expr(Expr::StructCompoundSet {
-                    name,
-                    fields,
-                    op,
-                    value: Box::new(value),
-                }));
+                return Ok(self.with_pending_inline_enum_decl(Stmt::Expr(
+                    Expr::StructCompoundSet {
+                        name,
+                        fields,
+                        op,
+                        value: Box::new(value),
+                    },
+                )));
             }
             self.expect_assign_after("struct field assignment")?;
             let value = self.parse_expr()?;
             if require_semi {
                 self.expect_semicolon_after("assignment")?;
             }
-            return Ok(Stmt::StructAssign {
+            return Ok(self.with_pending_inline_enum_decl(Stmt::StructAssign {
                 name,
                 fields,
                 value,
-            });
+            }));
         }
         if self.matches(&Token::LBracket) {
             let index = self.parse_index_expr()?;
@@ -6180,19 +6188,25 @@ impl Parser {
                 if require_semi {
                     self.expect_semicolon_after("assignment")?;
                 }
-                return Ok(Stmt::Expr(Expr::ArrayCompoundSet {
-                    name,
-                    index: Box::new(index),
-                    op,
-                    value: Box::new(value),
-                }));
+                return Ok(self.with_pending_inline_enum_decl(Stmt::Expr(
+                    Expr::ArrayCompoundSet {
+                        name,
+                        index: Box::new(index),
+                        op,
+                        value: Box::new(value),
+                    },
+                )));
             }
             self.expect_assign_after("assignment")?;
             let value = self.parse_expr()?;
             if require_semi {
                 self.expect_semicolon_after("assignment")?;
             }
-            return Ok(Stmt::ArrayAssign { name, index, value });
+            return Ok(self.with_pending_inline_enum_decl(Stmt::ArrayAssign {
+                name,
+                index,
+                value,
+            }));
         }
         if let Some(op) = self.compound_assignment_op() {
             self.advance();
