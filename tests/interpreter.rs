@@ -1155,6 +1155,13 @@ fn supports_integer_constant_expressions_for_array_type_lengths() {
 }
 
 #[test]
+fn supports_inline_type_definitions_in_array_lengths() {
+    let program = include_str!("fixtures/valid/inline_type_definitions_in_array_lengths.c");
+
+    assert_eq!(interpret(program).unwrap(), 15);
+}
+
+#[test]
 fn supports_uninitialized_scalar_and_pointer_declarations() {
     let program = include_str!("fixtures/valid/uninitialized_declarations.c");
 

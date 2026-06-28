@@ -1,17 +1,18 @@
 # Cust Current State
 
-Last updated: 2026-06-28
+Last updated: 2026-06-29
 
 ## Latest autonomous verification
 
-All passed after the 2026-06-28 autonomous invalid scalar type-specifier diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic roots, less-traveled direct enum/inline enum contexts, function parameter type-definition coverage, and a parser-trust gap in malformed scalar declaration specifier combinations: `signed unsigned int value;` returned the unlocated diagnostic `invalid scalar type specifier combination`. The selected work package preserves Cust's existing deterministic scalar spelling subset while carrying `LocatedToken` metadata through scalar type-specifier parsing, replaying the consumed specifiers to report the token that first makes a combination invalid, and adding exact invalid fixture coverage.
+All passed after the 2026-06-29 autonomous inline type-definition array-length conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic roots, remaining less-traveled direct enum/inline enum contexts, function parameter type-definition coverage, mixed supported-subset conformance, and a type-query/array-length edge adjacent to the recent parser-folded integer-constant-expression work: inline enum and aggregate definitions inside array declarator lengths and array type-name length expressions should be locked in explicitly. The selected work package adds interpreter and warning-free native compiler-oracle coverage for `sizeof(enum Tag { ... })` in object array lengths, `sizeof(struct Tag { ... })` in typedef array lengths, inline enum definitions inside array type-name length expressions, and inline aggregate definitions inside aggregate array type-name operands with ABI-independent native relationships. Focused coverage passed immediately because the shared integer-constant-expression and type-name paths already preserve pending inline enum declarations and aggregate tag definitions, so this run records conformance coverage rather than a production-code fix.
 
 Commands verified so far:
 
 ```bash
 git checkout main && git pull --ff-only
 cargo test  # pre-change baseline; passed
-cargo test --test interpreter rejects_invalid_scalar_type_specifier_combinations_with_context -- --nocapture  # RED: unlocated diagnostic; GREEN after preserving scalar specifier locations
+cargo test --test interpreter supports_inline_type_definitions_in_array_lengths -- --nocapture  # coverage GREEN immediately; no production-code change needed
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
 # Full required gate was run after this status update; see final run report for exact pass/fail output.
 ```
 

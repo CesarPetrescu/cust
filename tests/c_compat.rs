@@ -17,6 +17,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/inline_enum_declaration_contexts.c",
     "tests/fixtures/compat/valid/inline_enum_cast_type_definitions.c",
     "tests/fixtures/compat/valid/inline_enum_sizeof_type_definitions.c",
+    "tests/fixtures/compat/valid/inline_type_definitions_in_array_lengths.c",
     "tests/fixtures/compat/valid/inline_enum_alignof_type_definitions.c",
     "tests/fixtures/compat/valid/inline_enum_call_argument_type_definitions.c",
     "tests/fixtures/compat/valid/inline_enum_assignment_lvalue_type_definitions.c",
