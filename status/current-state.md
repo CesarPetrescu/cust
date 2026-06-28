@@ -4,6 +4,18 @@ Last updated: 2026-06-28
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-28 autonomous aggregate compound-literal array-field negative pointer-arithmetic coverage run. Ideation considered failing tests/builds (no baseline failures known and the focused path compiled cleanly), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, more negative pointer-arithmetic paths through field-backed storage, remaining direct enum/inline enum contexts, function parameter type-definition coverage, and mixed supported-subset conformance. The selected work package locks in diagnostics for pointer subtraction and relational ordering between scalar array fields and embedded aggregate-array fields selected from separately evaluated aggregate compound literals. This complements earlier coverage for separate string literals, separate scalar/aggregate array compound literals, and distinct field-backed array roots. Focused coverage passed immediately because existing hidden aggregate compound-literal field storage already carries distinct array identity metadata, so this run records conformance/diagnostic coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter aggregate_compound_literal -- --nocapture  # coverage GREEN immediately; no production-code change needed
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-28 autonomous star-VLA array-length diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic paths, remaining direct enum/inline enum contexts, function parameter type-definition coverage, and a fresh parser-trust gap adjacent to the fixed-size array-length work: C variable-length-array star declarators such as `int values[*]` fell through to the generic `expected array length, found Star` diagnostic. The selected work package keeps VLA star declarators outside Cust's deterministic fixed-size array subset but adds targeted diagnostics for function prototype parameters, local/object arrays, aggregate fields, and typedef array aliases by handling `Token::Star` in the shared array-length parser.
 
 Commands verified so far:
