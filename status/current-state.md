@@ -4,6 +4,19 @@ Last updated: 2026-06-28
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-28 autonomous star-VLA array-length diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic paths, remaining direct enum/inline enum contexts, function parameter type-definition coverage, and a fresh parser-trust gap adjacent to the fixed-size array-length work: C variable-length-array star declarators such as `int values[*]` fell through to the generic `expected array length, found Star` diagnostic. The selected work package keeps VLA star declarators outside Cust's deterministic fixed-size array subset but adds targeted diagnostics for function prototype parameters, local/object arrays, aggregate fields, and typedef array aliases by handling `Token::Star` in the shared array-length parser.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_star_vla_array_lengths_with_context -- --nocapture  # RED: generic expected array length, found Star; GREEN after targeted diagnostic
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-28 autonomous inline-enum conditional/short-circuit conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic paths, extending function parameter type-definition coverage, mixed supported-subset conformance, and a less-traveled inline enum context not yet locked by fixtures: inline enum type definitions nested inside conditional (`?:`) branches and short-circuit logical operands. The selected work package adds interpreter and warning-free native compiler-oracle coverage proving generated enumerators from both selected and unselected conditional branches, plus unevaluated `&&`/`||` operands, are emitted before runtime evaluation and remain visible to later same-block expressions. Focused coverage passed immediately because existing enclosing-statement pending-inline-enum routing was already correct, so no production-code change was needed.
 
 Commands verified so far:

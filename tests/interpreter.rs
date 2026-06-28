@@ -173,6 +173,41 @@ fn rejects_comma_operator_in_array_length_integer_constant_expressions() {
 }
 
 #[test]
+fn rejects_star_vla_array_lengths_with_context() {
+    let program = include_str!("fixtures/invalid/array_length_star_vla.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "variable length array declarators are not supported at line 1, column 21"
+    );
+
+    let program = include_str!("fixtures/invalid/array_length_star_local.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "variable length array declarators are not supported at line 2, column 16"
+    );
+
+    let program = include_str!("fixtures/invalid/array_length_star_aggregate_field.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "variable length array declarators are not supported at line 2, column 16"
+    );
+
+    let program = include_str!("fixtures/invalid/array_length_star_typedef.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "variable length array declarators are not supported at line 1, column 20"
+    );
+}
+
+#[test]
 fn rejects_parenthesized_pointer_aggregate_fields_with_context() {
     let program = include_str!("fixtures/invalid/function_pointer_aggregate_field.c");
 

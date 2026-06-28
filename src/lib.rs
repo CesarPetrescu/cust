@@ -6098,6 +6098,13 @@ impl Parser {
                 &found,
             ));
         }
+        if self.check(&Token::Star) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "variable length array declarators are not supported".to_string(),
+                &found,
+            ));
+        }
 
         let (value, first_token) =
             self.parse_integer_constant_expr(&HashMap::new(), "expected array length")?;
