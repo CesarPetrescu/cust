@@ -4,6 +4,19 @@ Last updated: 2026-06-28
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-28 autonomous invalid scalar type-specifier diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic roots, less-traveled direct enum/inline enum contexts, function parameter type-definition coverage, and a parser-trust gap in malformed scalar declaration specifier combinations: `signed unsigned int value;` returned the unlocated diagnostic `invalid scalar type specifier combination`. The selected work package preserves Cust's existing deterministic scalar spelling subset while carrying `LocatedToken` metadata through scalar type-specifier parsing, replaying the consumed specifiers to report the token that first makes a combination invalid, and adding exact invalid fixture coverage.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_invalid_scalar_type_specifier_combinations_with_context -- --nocapture  # RED: unlocated diagnostic; GREEN after preserving scalar specifier locations
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-28 autonomous array type-name integer-constant-expression conformance run. Ideation considered failing tests/builds (no baseline failures known and the pulled worktree was clean), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic roots, remaining less-traveled direct enum/inline enum contexts, function parameter type-definition coverage, and a small type-query conformance gap adjacent to the already-completed array-length integer-constant-expression work: array type-name operands in `sizeof(...)` and `_Alignof(...)` should explicitly lock in parser-folded integer constant expression lengths. The selected work package adds interpreter and warning-free native compiler-oracle coverage for enum constants, `sizeof` operands, conditional expressions, typedef element names, direct aggregate typedefs, and ABI-independent `_Alignof(T[N]) == _Alignof(T)` relationships. Focused coverage passed immediately because the existing shared `expect_array_len()` path already handled these type-name array suffixes, so this run records conformance coverage rather than a production-code fix.
 
 Commands verified so far:

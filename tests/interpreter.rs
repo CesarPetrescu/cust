@@ -151,6 +151,17 @@ fn rejects_flexible_array_aggregate_fields_with_context() {
 }
 
 #[test]
+fn rejects_invalid_scalar_type_specifier_combinations_with_context() {
+    let program = include_str!("fixtures/invalid/invalid_scalar_type_specifier_combination.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "invalid scalar type specifier combination at line 2, column 12"
+    );
+}
+
+#[test]
 fn rejects_non_constant_array_lengths_with_context() {
     let program = include_str!("fixtures/invalid/array_length_non_constant_identifier.c");
 

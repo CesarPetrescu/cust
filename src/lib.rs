@@ -2111,7 +2111,7 @@ impl Parser {
             | Token::Signed
             | Token::Unsigned
             | Token::Long
-            | Token::Short => self.parse_scalar_decl_type_specifiers(found.kind),
+            | Token::Short => self.parse_scalar_decl_type_specifiers(found),
             Token::Atomic => {
                 self.expect_opening_paren_after("_Atomic")?;
                 let (nested_const, decl_type) =
@@ -2218,7 +2218,10 @@ impl Parser {
         }
     }
 
-    fn parse_scalar_decl_type_specifiers(&mut self, first: Token) -> CustResult<(bool, DeclType)> {
+    fn parse_scalar_decl_type_specifiers(
+        &mut self,
+        first: LocatedToken,
+    ) -> CustResult<(bool, DeclType)> {
         let mut saw_const = false;
         let mut saw_char = false;
         let mut saw_bool = false;
@@ -2226,9 +2229,10 @@ impl Parser {
         let mut saw_short = false;
         let mut long_count = 0;
         let mut sign_count = 0;
+        let mut specifiers = vec![first.clone()];
 
         Self::record_scalar_type_specifier(
-            first,
+            first.kind,
             &mut saw_char,
             &mut saw_bool,
             &mut saw_int,
@@ -2239,9 +2243,10 @@ impl Parser {
         saw_const |= self.consume_type_qualifiers();
 
         while Self::scalar_type_specifier_token(self.peek()) {
-            let specifier = self.advance().kind.clone();
+            let specifier = self.advance();
+            specifiers.push(specifier.clone());
             Self::record_scalar_type_specifier(
-                specifier,
+                specifier.kind,
                 &mut saw_char,
                 &mut saw_bool,
                 &mut saw_int,
@@ -2258,7 +2263,11 @@ impl Parser {
             || (saw_char && (saw_int || saw_short || long_count > 0 || saw_bool))
             || (saw_bool && (saw_int || saw_short || long_count > 0 || sign_count > 0))
         {
-            return Err(CustError::new("invalid scalar type specifier combination"));
+            let token = Self::invalid_scalar_type_specifier_token(&specifiers);
+            return Err(Self::error_at(
+                "invalid scalar type specifier combination".to_string(),
+                token,
+            ));
         }
 
         let ty = if saw_char {
@@ -2269,6 +2278,40 @@ impl Parser {
             CType::Int
         };
         Ok((saw_const, DeclType::Scalar(ty)))
+    }
+
+    fn invalid_scalar_type_specifier_token(specifiers: &[LocatedToken]) -> &LocatedToken {
+        let mut saw_char = false;
+        let mut saw_bool = false;
+        let mut saw_int = false;
+        let mut saw_short = false;
+        let mut long_count = 0;
+        let mut sign_count = 0;
+
+        for specifier in specifiers {
+            Self::record_scalar_type_specifier(
+                specifier.kind.clone(),
+                &mut saw_char,
+                &mut saw_bool,
+                &mut saw_int,
+                &mut saw_short,
+                &mut long_count,
+                &mut sign_count,
+            );
+
+            if sign_count > 1
+                || long_count > 2
+                || (saw_short && long_count > 0)
+                || (saw_char && (saw_int || saw_short || long_count > 0 || saw_bool))
+                || (saw_bool && (saw_int || saw_short || long_count > 0 || sign_count > 0))
+            {
+                return specifier;
+            }
+        }
+
+        specifiers
+            .last()
+            .expect("at least one scalar type specifier is present")
     }
 
     fn scalar_type_specifier_token(token: &Token) -> bool {
