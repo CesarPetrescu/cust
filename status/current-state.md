@@ -4,6 +4,19 @@ Last updated: 2026-06-28
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-28 autonomous local function-definition diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, fuzz/property expansion, more pointer-arithmetic negative coverage, function parameter type-definition coverage, mixed conformance fixtures, and a small parser-trust gap found in the unsupported local function-definition path. The selected work package adds exact invalid fixture coverage for a nested block-scope function definition and changes the parser to report the existing unsupported-feature message at the declaration start (`line 2, column 5`) instead of returning an unlocated error after parsing the nested body. Focused RED failed with the unlocated `function definitions are not supported inside blocks`; focused GREEN passed after capturing the local declaration start token before parsing the function header/body.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_local_function_definitions_with_context -- --nocapture  # RED: unlocated diagnostic; GREEN after source-location fix
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-28 autonomous inline-enum pointer/aggregate expression-statement conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional pointer-arithmetic negative coverage, extending function parameter type-definition coverage, and a less-traveled inline-enum runtime-routing context explicitly called out in the backlog: inline enum type definitions nested inside pointer-valued and aggregate-valued expression statements. The selected work package adds interpreter and warning-free native compiler-oracle fixtures covering a pointer assignment expression statement, an aggregate assignment expression statement with aggregate compound-literal initializers, and an aggregate compound literal passed through a call expression. Focused coverage passed immediately because the existing expression-statement pending-inline-enum wrapper already emits generated enumerators before runtime evaluation, so this run records conformance coverage rather than a production-code fix.
 
 Commands verified so far:

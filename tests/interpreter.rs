@@ -3742,6 +3742,17 @@ fn rejects_parenthesized_pointer_declarations_with_context() {
 }
 
 #[test]
+fn rejects_local_function_definitions_with_context() {
+    let program = include_str!("fixtures/invalid/local_function_definition.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "function definitions are not supported inside blocks at line 2, column 5"
+    );
+}
+
+#[test]
 fn rejects_function_pointer_declarations_with_context() {
     let program = include_str!("fixtures/invalid/function_pointer_declaration.c");
 

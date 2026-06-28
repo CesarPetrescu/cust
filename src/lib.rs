@@ -3494,11 +3494,13 @@ impl Parser {
     }
 
     fn parse_local_function_prototype_decl(&mut self) -> CustResult<Stmt> {
+        let declaration_start = self.peek_located().clone();
         let (_, declaration, _) = self.parse_function_declaration()?;
         match declaration {
             TopLevelFunction::Prototype(_) => Ok(Stmt::Empty),
-            TopLevelFunction::Definition(_) => Err(CustError::new(
-                "function definitions are not supported inside blocks",
+            TopLevelFunction::Definition(_) => Err(Self::error_at(
+                "function definitions are not supported inside blocks".to_string(),
+                &declaration_start,
             )),
         }
     }
