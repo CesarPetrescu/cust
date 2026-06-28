@@ -1479,6 +1479,14 @@ fn supports_inline_enum_pointer_aggregate_expression_statements() {
 }
 
 #[test]
+fn supports_inline_enum_aggregate_initializer_type_definitions() {
+    let program =
+        include_str!("fixtures/valid/inline_enum_aggregate_initializer_type_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 122);
+}
+
+#[test]
 fn supports_inline_enum_assignment_lvalue_type_definitions() {
     let program = include_str!("fixtures/valid/inline_enum_assignment_lvalue_type_definitions.c");
 

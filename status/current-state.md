@@ -4,6 +4,20 @@ Last updated: 2026-06-28
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-28 autonomous inline-enum aggregate-initializer conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic coverage, extending function parameter type-definition coverage, and a less-traveled inline enum runtime-routing context not yet locked by fixtures: inline enum type definitions inside nested aggregate initializer expressions and designator indexes. The selected work package adds interpreter and warning-free native compiler-oracle coverage for `sizeof(enum InitX { ... })`, enum casts, `_Alignof(enum TailValue { ... })`, and an inline-enum-derived designator index inside struct/array aggregate initializers. Focused coverage initially failed only because the expected fixture arithmetic was miscomputed (`116` vs the correct `122`), then passed after correcting the test expectation; no production-code change was needed because existing initializer pending-enum routing was already correct.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_inline_enum_aggregate_initializer_type_definitions -- --nocapture  # coverage GREEN after correcting expected arithmetic to 122
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-28 autonomous local function-definition diagnostic run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, fuzz/property expansion, more pointer-arithmetic negative coverage, function parameter type-definition coverage, mixed conformance fixtures, and a small parser-trust gap found in the unsupported local function-definition path. The selected work package adds exact invalid fixture coverage for a nested block-scope function definition and changes the parser to report the existing unsupported-feature message at the declaration start (`line 2, column 5`) instead of returning an unlocated error after parsing the nested body. Focused RED failed with the unlocated `function definitions are not supported inside blocks`; focused GREEN passed after capturing the local declaration start token before parsing the function header/body.
 
 Commands verified so far:
