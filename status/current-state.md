@@ -4,6 +4,19 @@ Last updated: 2026-06-28
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-28 autonomous array type-name integer-constant-expression conformance run. Ideation considered failing tests/builds (no baseline failures known and the pulled worktree was clean), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic roots, remaining less-traveled direct enum/inline enum contexts, function parameter type-definition coverage, and a small type-query conformance gap adjacent to the already-completed array-length integer-constant-expression work: array type-name operands in `sizeof(...)` and `_Alignof(...)` should explicitly lock in parser-folded integer constant expression lengths. The selected work package adds interpreter and warning-free native compiler-oracle coverage for enum constants, `sizeof` operands, conditional expressions, typedef element names, direct aggregate typedefs, and ABI-independent `_Alignof(T[N]) == _Alignof(T)` relationships. Focused coverage passed immediately because the existing shared `expect_array_len()` path already handled these type-name array suffixes, so this run records conformance coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter supports_integer_constant_expressions_for_array_type_lengths -- --nocapture  # coverage GREEN immediately; no production-code change needed
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-28 autonomous aggregate compound-literal array-field negative pointer-arithmetic coverage run. Ideation considered failing tests/builds (no baseline failures known and the focused path compiled cleanly), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, more negative pointer-arithmetic paths through field-backed storage, remaining direct enum/inline enum contexts, function parameter type-definition coverage, and mixed supported-subset conformance. The selected work package locks in diagnostics for pointer subtraction and relational ordering between scalar array fields and embedded aggregate-array fields selected from separately evaluated aggregate compound literals. This complements earlier coverage for separate string literals, separate scalar/aggregate array compound literals, and distinct field-backed array roots. Focused coverage passed immediately because existing hidden aggregate compound-literal field storage already carries distinct array identity metadata, so this run records conformance/diagnostic coverage rather than a production-code fix.
 
 Commands verified so far:
