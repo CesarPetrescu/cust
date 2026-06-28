@@ -1471,6 +1471,14 @@ fn supports_inline_enum_call_argument_type_definitions() {
 }
 
 #[test]
+fn supports_inline_enum_pointer_aggregate_expression_statements() {
+    let program =
+        include_str!("fixtures/valid/inline_enum_pointer_aggregate_expression_statements.c");
+
+    assert_eq!(interpret(program).unwrap(), 97);
+}
+
+#[test]
 fn supports_inline_enum_assignment_lvalue_type_definitions() {
     let program = include_str!("fixtures/valid/inline_enum_assignment_lvalue_type_definitions.c");
 

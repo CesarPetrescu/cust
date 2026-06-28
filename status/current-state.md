@@ -4,6 +4,20 @@ Last updated: 2026-06-28
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-28 autonomous inline-enum pointer/aggregate expression-statement conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional pointer-arithmetic negative coverage, extending function parameter type-definition coverage, and a less-traveled inline-enum runtime-routing context explicitly called out in the backlog: inline enum type definitions nested inside pointer-valued and aggregate-valued expression statements. The selected work package adds interpreter and warning-free native compiler-oracle fixtures covering a pointer assignment expression statement, an aggregate assignment expression statement with aggregate compound-literal initializers, and an aggregate compound literal passed through a call expression. Focused coverage passed immediately because the existing expression-statement pending-inline-enum wrapper already emits generated enumerators before runtime evaluation, so this run records conformance coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter inline_enum_pointer_aggregate_expression_statements -- --nocapture  # coverage GREEN immediately; no production-code change needed
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-28 autonomous integer-constant-expression designator index run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional pointer-arithmetic negative coverage, remaining direct enum/inline enum contexts, and a higher-impact parser parity gap adjacent to the existing parser-folded array-length work: C array/designator indexes such as `[SLOT_INDEX]`, `[sizeof(char)]`, and `[BASE + 2]` were rejected because Cust's designator parser consumed only numeric literal tokens. The selected work package now routes fixed and inferred array designator indexes through the integer-constant-expression folder, preserving non-negative/too-large bounds checks and comma-expression rejection, and adds interpreter plus native compiler-oracle fixtures covering scalar arrays, fixed and inferred array compound literals, scalar array fields, aggregate-array designators, and struct-array designators.
 
 Commands verified so far:
