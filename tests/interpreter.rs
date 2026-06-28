@@ -1373,6 +1373,13 @@ fn supports_designated_array_and_struct_initializers() {
 }
 
 #[test]
+fn supports_integer_constant_expressions_for_designator_indexes() {
+    let program = include_str!("fixtures/valid/integer_constant_designator_indexes.c");
+
+    assert_eq!(interpret(program).unwrap(), 240);
+}
+
+#[test]
 fn supports_anonymous_aggregate_object_declarations() {
     let program = include_str!("fixtures/valid/anonymous_aggregate_objects.c");
 

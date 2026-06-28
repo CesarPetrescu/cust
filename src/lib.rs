@@ -4582,18 +4582,16 @@ impl Parser {
 
     fn parse_unbounded_array_designator_index(&mut self) -> CustResult<usize> {
         self.expect(Token::LBracket)?;
-        let found = self.advance();
-        let index = match &found.kind {
-            Token::Number(value) if *value >= 0 => usize::try_from(*value).map_err(|_| {
-                Self::error_at("array designator index is too large".to_string(), &found)
-            })?,
-            token => {
-                return Err(Self::error_at(
-                    format!("expected array designator index, found {token:?}"),
-                    &found,
-                ));
-            }
-        };
+        let (value, first_token) =
+            self.parse_integer_constant_expr(&HashMap::new(), "expected array designator index")?;
+        let index = Self::array_designator_value_to_index(value, &first_token)?;
+        if self.check(&Token::Comma) {
+            let comma = self.peek_located().clone();
+            return Err(Self::error_at(
+                "comma operator is not allowed in integer constant expression".to_string(),
+                &comma,
+            ));
+        }
         self.expect_closing_bracket_after("array designator")?;
         Ok(index)
     }
@@ -4608,18 +4606,16 @@ impl Parser {
         len: usize,
     ) -> CustResult<usize> {
         self.expect(Token::LBracket)?;
-        let found = self.advance();
-        let index = match &found.kind {
-            Token::Number(value) if *value >= 0 => usize::try_from(*value).map_err(|_| {
-                Self::error_at("array designator index is too large".to_string(), &found)
-            })?,
-            token => {
-                return Err(Self::error_at(
-                    format!("expected array designator index, found {token:?}"),
-                    &found,
-                ));
-            }
-        };
+        let (value, first_token) =
+            self.parse_integer_constant_expr(&HashMap::new(), "expected array designator index")?;
+        let index = Self::array_designator_value_to_index(value, &first_token)?;
+        if self.check(&Token::Comma) {
+            let comma = self.peek_located().clone();
+            return Err(Self::error_at(
+                "comma operator is not allowed in integer constant expression".to_string(),
+                &comma,
+            ));
+        }
         self.expect_closing_bracket_after("array designator")?;
         if index >= len {
             return Err(CustError::new(format!(
@@ -4627,6 +4623,17 @@ impl Parser {
             )));
         }
         Ok(index)
+    }
+
+    fn array_designator_value_to_index(value: i64, token: &LocatedToken) -> CustResult<usize> {
+        if value < 0 {
+            return Err(Self::error_at(
+                "array designator index must be non-negative".to_string(),
+                token,
+            ));
+        }
+        usize::try_from(value)
+            .map_err(|_| Self::error_at("array designator index is too large".to_string(), token))
     }
 
     fn parse_struct_initializer(&mut self, type_name: &str) -> CustResult<Vec<StructInitializer>> {

@@ -19,6 +19,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/inline_enum_alignof_type_definitions.c",
     "tests/fixtures/compat/valid/inline_enum_call_argument_type_definitions.c",
     "tests/fixtures/compat/valid/inline_enum_assignment_lvalue_type_definitions.c",
+    "tests/fixtures/compat/valid/integer_constant_designator_indexes.c",
     "tests/fixtures/compat/valid/inline_enum_control_expr_definitions.c",
     "tests/fixtures/compat/valid/inline_enum_switch_case_labels.c",
     "tests/fixtures/compat/valid/inline_enum_object_declarations.c",

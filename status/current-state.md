@@ -4,6 +4,20 @@ Last updated: 2026-06-28
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-28 autonomous integer-constant-expression designator index run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional pointer-arithmetic negative coverage, remaining direct enum/inline enum contexts, and a higher-impact parser parity gap adjacent to the existing parser-folded array-length work: C array/designator indexes such as `[SLOT_INDEX]`, `[sizeof(char)]`, and `[BASE + 2]` were rejected because Cust's designator parser consumed only numeric literal tokens. The selected work package now routes fixed and inferred array designator indexes through the integer-constant-expression folder, preserving non-negative/too-large bounds checks and comma-expression rejection, and adds interpreter plus native compiler-oracle fixtures covering scalar arrays, fixed and inferred array compound literals, scalar array fields, aggregate-array designators, and struct-array designators.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter integer_constant_expressions_for_designator_indexes -- --nocapture  # RED: expected array designator index, found Ident("SLOT_INDEX"); GREEN after parser-folded designator indexes
+cargo test --test c_compat -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-28 autonomous anonymous aggregate-array field pointer ordering negative coverage run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, targeted pointer-arithmetic negative coverage through additional embedded/anonymous aggregate/string/compound-literal field paths, remaining less-traveled direct enum/inline enum pointer/aggregate expression contexts, function parameter type-definition oracle feasibility, and more mixed supported-subset conformance fixtures. The selected work package locks in `cannot compare pointers to different arrays` for relational ordering between anonymous aggregate-array fields belonging to distinct aggregate objects, complementing the existing same-path pointer-difference diagnostic coverage for `right.items - left.items`. Focused coverage passed immediately because existing `PointerValue::StructFieldElement` owner/path metadata already distinguishes anonymous aggregate-array field storage roots for ordering just as it did for subtraction, so this run records conformance/diagnostic coverage rather than a production-code fix.
 
 Commands verified so far:
