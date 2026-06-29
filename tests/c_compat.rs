@@ -95,6 +95,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/inline_aggregate_expression_type_definitions.c",
     "tests/fixtures/compat/valid/inline_aggregate_control_type_definitions.c",
     "tests/fixtures/compat/valid/inline_aggregate_for_clause_type_definitions.c",
+    "tests/fixtures/compat/valid/inline_aggregate_call_argument_type_definitions.c",
     "tests/fixtures/compat/valid/char_array_string_initializers.c",
     "tests/fixtures/compat/valid/struct_char_array_string_initializers.c",
     "tests/fixtures/compat/valid/char_return_functions.c",

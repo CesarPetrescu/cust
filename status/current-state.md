@@ -4,6 +4,19 @@ Last updated: 2026-06-29
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-29 autonomous inline aggregate call-argument type-definition conformance run. Ideation considered failing tests/builds (none in the clean pulled worktree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic storage roots, less-traveled direct enum/inline enum/inline aggregate contexts, function parameter type-definition coverage, and a call-expression edge adjacent to the existing inline enum call-argument coverage: inline named aggregate definitions inside function-call argument subexpressions. The selected work package adds interpreter and warning-free native compiler-oracle coverage for a function call whose arguments define `struct ArgBox`, `union ArgChoice`, and `struct LitBox` via `sizeof(type-name)` and aggregate compound-literal type-name contexts, then declares objects of those tags later in the same block. Focused coverage passed immediately because shared type-name/compound-literal parsing already installs inline aggregate tags in the enclosing block scope, so this run records conformance coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter supports_inline_aggregate_call_argument_type_definitions -- --nocapture  # coverage GREEN immediately; no production-code change needed
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-29 autonomous inline aggregate for-clause type-definition conformance run. Ideation considered failing tests/builds (none in the clean pulled worktree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic storage roots, remaining direct enum/inline enum/inline aggregate contexts, function parameter type-definition coverage, and an adjacent less-traveled control-flow edge not covered by the prior `if`/`while`/`switch` fixture: inline named aggregate definitions inside `for` initializer, condition, and increment clauses. The selected work package adds interpreter and warning-free native compiler-oracle coverage for `struct` definitions in a `for` initializer and condition plus a `union` definition in a `for` increment expression, then declares objects of those inline tags in the loop bodies. Focused coverage passed immediately because shared type-name parsing already installs inline aggregate tags in the enclosing statement/block scope, so this run records conformance coverage rather than a production-code fix.
 
 Commands verified so far:
