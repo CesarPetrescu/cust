@@ -100,6 +100,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/inline_aggregate_conditional_type_definitions.c",
     "tests/fixtures/compat/valid/inline_aggregate_declaration_assignment_type_definitions.c",
     "tests/fixtures/compat/valid/inline_aggregate_expression_statement_type_definitions.c",
+    "tests/fixtures/compat/valid/inline_aggregate_return_expression_type_definitions.c",
     "tests/fixtures/compat/valid/char_array_string_initializers.c",
     "tests/fixtures/compat/valid/struct_char_array_string_initializers.c",
     "tests/fixtures/compat/valid/char_return_functions.c",
