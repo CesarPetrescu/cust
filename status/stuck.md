@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-06-29 autonomous inline aggregate conditional/short-circuit type-definition conformance run after focused interpreter coverage, compiler-oracle coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-06-29 autonomous inline aggregate declaration/assignment type-definition conformance run after focused interpreter coverage, compiler-oracle coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 
