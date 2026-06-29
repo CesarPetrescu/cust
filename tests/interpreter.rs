@@ -2214,7 +2214,7 @@ fn supports_inline_aggregate_expression_type_definitions() {
 fn supports_inline_aggregate_control_type_definitions() {
     let program = include_str!("fixtures/valid/inline_aggregate_control_type_definitions.c");
 
-    assert_eq!(interpret(program).unwrap(), 16);
+    assert_eq!(interpret(program).unwrap(), 29);
 }
 
 #[test]

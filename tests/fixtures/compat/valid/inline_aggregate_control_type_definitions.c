@@ -21,5 +21,25 @@ int main(void) {
             total += 40;
     }
 
+    if (sizeof(union IfChoice { int value; char tag; }) == sizeof(union IfChoice)) {
+        union IfChoice choice = {3};
+        total += choice.value;
+    }
+
+    while (total < 23 && sizeof(union WhileChoice { int step; char tag; }) == sizeof(union WhileChoice)) {
+        union WhileChoice choice = {2};
+        total += choice.step;
+    }
+
+    switch (sizeof(union SwitchChoice { int value; char tag; }) == sizeof(union SwitchChoice)) {
+        case 1: {
+            union SwitchChoice choice = {6};
+            total += choice.value;
+            break;
+        }
+        default:
+            total += 40;
+    }
+
     return total;
 }

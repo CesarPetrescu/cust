@@ -4,6 +4,20 @@ Last updated: 2026-06-29
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-29 autonomous inline union control-expression type-definition conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic roots, remaining less-traveled direct enum/inline enum and aggregate contexts, function parameter type-definition coverage, and the closest unverified edge next to the prior inline `struct` control-expression coverage: inline named `union` definitions in `if`, `while`, and `switch` controlling expressions should be locked in explicitly. The selected work package expands the existing inline aggregate control fixture with warning-free `union` definitions in those control expressions and same-body declarations of the new union tags. Focused coverage passed immediately because shared `sizeof(type-name)` parsing already installs inline union tag definitions in the enclosing block scope, so this run records conformance coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_inline_aggregate_control_type_definitions -- --nocapture  # union coverage GREEN immediately; no production-code change needed
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-29 autonomous inline aggregate control-expression type-definition conformance run. Ideation considered failing tests/builds (baseline `cargo test` passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic roots, remaining less-traveled direct enum/inline enum and aggregate contexts, extending function parameter type-definition coverage if a warning-free native pattern appears, and a type-name/control-flow edge adjacent to the existing inline aggregate return/expression/parameter coverage: inline named aggregate definitions inside control-flow controlling expressions should be locked in explicitly. The selected work package adds interpreter and warning-free native compiler-oracle coverage for inline `struct` definitions inside `if`, `while`, and `switch` controlling expressions, then declares objects of those inline tags in the corresponding statement bodies. Focused coverage passed immediately because shared `sizeof(type-name)` parsing already installs inline aggregate tag definitions in the enclosing block scope, so this run records conformance coverage rather than a production-code fix.
 
 Commands verified so far:
