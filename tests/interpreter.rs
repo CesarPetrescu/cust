@@ -2211,6 +2211,13 @@ fn supports_inline_aggregate_expression_type_definitions() {
 }
 
 #[test]
+fn supports_inline_aggregate_control_type_definitions() {
+    let program = include_str!("fixtures/valid/inline_aggregate_control_type_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 16);
+}
+
+#[test]
 fn supports_inline_aggregate_parameter_type_definitions() {
     let program = include_str!("fixtures/valid/inline_aggregate_parameter_type_definitions.c");
 
