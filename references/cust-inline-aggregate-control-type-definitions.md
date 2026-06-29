@@ -17,3 +17,7 @@ Focused interpreter coverage passed immediately, and the fixture also passed the
 ## Fixture guidance
 
 Keep native checks ABI-independent by comparing `sizeof(struct T { ... }) == sizeof(struct T)` rather than asserting exact native aggregate sizes. Use the later declared `struct T` object inside the same control-flow body to prove the tag remains visible after the controlling expression.
+
+## Follow-up: for-clause expressions
+
+The 2026-06-29 inline aggregate for-clause run added the adjacent coverage for `for` initializer, condition, and increment expressions in `references/cust-inline-aggregate-for-clause-type-definitions.md`. Use the same ABI-independent `sizeof(Tag definition) == sizeof(Tag)` pattern and keep the loop bodies simple so native `-Wall -Wextra -Werror` stays warning-free.
