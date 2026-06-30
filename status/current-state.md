@@ -4,6 +4,21 @@ Last updated: 2026-06-30
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-30 autonomous inline aggregate pointer-comparison type-definition conformance run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic storage roots, further direct enum/inline enum contexts, and a less-traveled inline aggregate context adjacent to the prior pointer arithmetic/index coverage: inline named aggregate definitions inside pointer equality, relational, and difference expressions. The selected work package adds interpreter and warning-free native compiler-oracle coverage for inline `struct` and `union` definitions inside pointer comparison/difference operands, plus an adjacent aggregate compound-literal field-address initializer that leaves its inline tag available for a later same-block declaration. Focused coverage passed immediately because shared expression/type-name parsing and existing pointer comparison/difference evaluation already handle the scenario, so this run records conformance coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_inline_aggregate_pointer_comparison_type_definitions -- --nocapture  # coverage GREEN immediately; no production-code change needed
+cc -std=c11 -Wall -Wextra -Werror tests/fixtures/compat/valid/inline_aggregate_pointer_comparison_type_definitions.c -o /tmp/inline_aggregate_pointer_comparison_type_definitions && /tmp/inline_aggregate_pointer_comparison_type_definitions  # exit=65
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-30 autonomous inline aggregate pointer-arithmetic type-definition conformance run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic storage roots, further direct enum/inline enum contexts, and a less-traveled inline aggregate context adjacent to the prior pointer-initializer and compound-literal coverage: inline named aggregate definitions inside pointer arithmetic/index expressions. The selected work package adds interpreter and warning-free native compiler-oracle coverage for inline `struct` and `union` definitions inside pointer arithmetic offsets, pointer indexing offsets, aggregate compound-literal field-address initializers, and array index expressions used by pointer dereference writes, then declares objects of those inline tags later in the same block. Focused coverage passed immediately because shared pointer expression initializer/index parsing already installs inline aggregate tags through existing type-name and compound-literal paths, so this run records conformance coverage rather than a production-code fix.
 
 Commands verified so far:
