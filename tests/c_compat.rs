@@ -103,6 +103,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/inline_aggregate_return_expression_type_definitions.c",
     "tests/fixtures/compat/valid/inline_aggregate_initializer_type_definitions.c",
     "tests/fixtures/compat/valid/inline_aggregate_pointer_initializer_type_definitions.c",
+    "tests/fixtures/compat/valid/inline_aggregate_array_compound_literal_type_definitions.c",
     "tests/fixtures/compat/valid/char_array_string_initializers.c",
     "tests/fixtures/compat/valid/struct_char_array_string_initializers.c",
     "tests/fixtures/compat/valid/char_return_functions.c",
