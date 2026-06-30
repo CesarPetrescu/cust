@@ -4,6 +4,21 @@ Last updated: 2026-06-30
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-30 autonomous `sizeof` comma-expression type inference run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, more inline aggregate conformance contexts, malformed-source exact diagnostics, and a concrete runtime parity gap discovered during probing: `sizeof((side_effect, rhs))` was non-evaluating but reported `int` size instead of the comma expression RHS type. The selected work package fixes `sizeof` metadata for comma expressions so the left operand remains unevaluated and the result size follows the right operand for scalar, pointer, and array-index RHS forms. Focused RED reproduced the bug with `sizeof((marker = marker + 1, (char){7}))`; GREEN routes `Expr::Comma` through RHS `sizeof_expr` metadata.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_sizeof_comma_expression_rhs_types_without_evaluating_operands -- --nocapture  # RED first: returned 32/18 instead of RHS-type relationships; GREEN passed
+cc -std=c11 -Wall -Wextra -Werror tests/fixtures/compat/valid/sizeof_comma_expression_types.c -o /tmp/sizeof_comma_expression_types && /tmp/sizeof_comma_expression_types  # exit=4
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-30 autonomous restrict non-pointer diagnostic run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional inline aggregate conformance contexts, malformed-source exact-diagnostic fuzzing, and C11 qualifier syntax gaps. The selected work package closes a standards-conformance/parser-trust gap where Cust accepted `restrict int` on scalar declarations, parameters, and aggregate fields even though the supported `restrict` subset is pointer-declarator-only. Focused RED reproduced acceptance of `restrict int value`; GREEN rejects leading `restrict` qualifiers before base types while preserving post-star pointer declarators such as `int * restrict p`.
 
 Commands verified so far:

@@ -1160,6 +1160,13 @@ fn supports_sizeof_pointer_expressions_without_evaluating_operands() {
 }
 
 #[test]
+fn supports_sizeof_comma_expression_rhs_types_without_evaluating_operands() {
+    let program = include_str!("fixtures/valid/sizeof_comma_expression_types.c");
+
+    assert_eq!(interpret(program).unwrap(), 4);
+}
+
+#[test]
 fn supports_unparenthesized_sizeof_in_integer_constant_expressions() {
     let program =
         include_str!("fixtures/valid/sizeof_unparenthesized_integer_constant_expressions.c");

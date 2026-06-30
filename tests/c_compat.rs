@@ -168,6 +168,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/sizeof_operator.c",
     "tests/fixtures/compat/valid/sizeof_array_compound_literals.c",
     "tests/fixtures/compat/valid/sizeof_pointer_expressions.c",
+    "tests/fixtures/compat/valid/sizeof_comma_expression_types.c",
     "tests/fixtures/compat/valid/static_storage_class.c",
     "tests/fixtures/compat/valid/standard_escape_sequences.c",
     "tests/fixtures/compat/valid/struct_field_pointer_ordering.c",

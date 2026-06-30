@@ -14476,8 +14476,8 @@ impl Interpreter {
             | Expr::BitwiseNot(_)
             | Expr::LogicalNot(_)
             | Expr::Conditional { .. }
-            | Expr::Comma(_, _)
             | Expr::Binary(_, _, _) => Ok(INT_SIZE),
+            Expr::Comma(_, right) => self.sizeof_expr(right),
         }
     }
 

@@ -198,6 +198,8 @@ Prioritized backlog for autonomous implementation.
 - [x] Inline aggregate type definitions inside pointer comparison and pointer-difference expressions have conformance coverage; acceptance: pointer equality operands, pointer relational operands, and pointer-difference offset expressions containing `sizeof(struct PtrEq { ... })`, `sizeof(union PtrRel { ... })`, and `sizeof(struct PtrDiff { ... })` parse and evaluate through existing interpreter-owned pointer metadata, with interpreter and warning-free native compiler-oracle fixtures.
 - [x] Inline aggregate type definitions inside non-evaluating `sizeof(*pointer_expr)` operands have conformance coverage; acceptance: scalar pointer expressions, aggregate pointer expressions, and address-of aggregate compound-literal field expressions containing inline `struct`/`union` definitions infer the correct pointee type metadata without evaluating operands, with interpreter and warning-free native compiler-oracle fixtures using ABI-independent `sizeof(*ptr_expr) == sizeof(element-type)` relationships.
 
+- [x] `sizeof` over comma-expression operands preserves C's non-evaluating semantics while using the right operand's type metadata. Acceptance: `sizeof((marker = marker + 1, (char){7}))`, `sizeof((marker = marker + 10, values + 1))`, `sizeof((marker = marker + 100, text[1]))`, and `sizeof((marker = marker + 1000, values[0]))` leave `marker` unchanged and match `sizeof(char)`, pointer-expression size, `sizeof(char)`, and `sizeof(int)` respectively, with interpreter and ABI-independent native compiler-oracle coverage.
+
 ## P4 — product quality
 
 - [x] CLI flag: `--tokens`

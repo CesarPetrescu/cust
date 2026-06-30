@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-06-30 autonomous restrict non-pointer diagnostic run after focused RED/GREEN coverage, preservation coverage for valid pointer `restrict` declarators, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-06-30 autonomous `sizeof` comma-expression type inference run after focused RED/GREEN coverage, compiler-oracle fixture coverage, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 
