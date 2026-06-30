@@ -14815,9 +14815,15 @@ impl Interpreter {
             Some(Value::Array(_)) => Err(CustError::new(format!(
                 "array '{name}' requires indexed assignment"
             ))),
-            Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(CustError::new(
-                format!("struct variable '{name}' assignment is not supported"),
-            )),
+            Some(Value::Struct { type_name, .. }) => self
+                .struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.size(&self.struct_types))
+                .transpose()?
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            Some(Value::StructArray { .. }) => Err(CustError::new(format!(
+                "struct variable '{name}' assignment is not supported"
+            ))),
             None if self.find_enum_constant(name).is_some() => Err(CustError::new(format!(
                 "cannot assign to enum constant '{name}'"
             ))),

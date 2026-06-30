@@ -4,6 +4,20 @@ Last updated: 2026-06-30
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-30 autonomous `sizeof` aggregate assignment-expression metadata run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, pointer negative diagnostics, additional less-traveled inline type-definition contexts, and a concrete non-evaluating type-query parity gap discovered adjacent to the recent `sizeof` comma/conditional work: `sizeof((aggregate_var = rhs))` rejected supported aggregate assignment expressions with `struct variable '<name>' assignment is not supported` instead of reporting the assigned aggregate type size. The selected work package fixes `sizeof` metadata for aggregate assignment expressions by deriving `Value::Struct` assignment result size from the aggregate type table while preserving non-evaluation of direct assignment and comma-left side effects.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter supports_sizeof_aggregate_assignment_expressions_without_evaluating_operands -- --nocapture  # RED first: struct variable 'left' assignment is not supported; GREEN passed
+cc -std=c11 -Wall -Wextra -Werror tests/fixtures/compat/valid/sizeof_aggregate_assignment_expressions.c -o /tmp/sizeof_aggregate_assignment_expressions && /tmp/sizeof_aggregate_assignment_expressions  # exit=7
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-30 autonomous `sizeof` aggregate conditional-expression metadata run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional malformed-source exact diagnostics, less-traveled inline type-definition contexts, pointer negative diagnostics, and a concrete non-evaluating type-query parity gap discovered in `sizeof_expr`: `sizeof(cond ? aggregate_a : aggregate_b)` reported Cust `int` size instead of the common aggregate type. The selected work package fixes `sizeof` metadata for aggregate-valued conditional expressions while preserving non-evaluation of the condition and both branches, including side-effecting assignments nested in branches or comma-left operands.
 
 Commands verified so far:
