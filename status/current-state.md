@@ -4,6 +4,21 @@ Last updated: 2026-06-30
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-30 autonomous `sizeof` aggregate conditional-expression metadata run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional malformed-source exact diagnostics, less-traveled inline type-definition contexts, pointer negative diagnostics, and a concrete non-evaluating type-query parity gap discovered in `sizeof_expr`: `sizeof(cond ? aggregate_a : aggregate_b)` reported Cust `int` size instead of the common aggregate type. The selected work package fixes `sizeof` metadata for aggregate-valued conditional expressions while preserving non-evaluation of the condition and both branches, including side-effecting assignments nested in branches or comma-left operands.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_sizeof_aggregate_conditional_expressions_without_evaluating_operands -- --nocapture  # RED first: returned 2/6; GREEN passed
+cc -std=c11 -Wall -Wextra -Werror tests/fixtures/compat/valid/sizeof_aggregate_conditional_expressions.c -o /tmp/sizeof_aggregate_conditional_expressions && /tmp/sizeof_aggregate_conditional_expressions  # exit=6
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-30 autonomous `sizeof` comma-expression type inference run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, more inline aggregate conformance contexts, malformed-source exact diagnostics, and a concrete runtime parity gap discovered during probing: `sizeof((side_effect, rhs))` was non-evaluating but reported `int` size instead of the comma expression RHS type. The selected work package fixes `sizeof` metadata for comma expressions so the left operand remains unevaluated and the result size follows the right operand for scalar, pointer, and array-index RHS forms. Focused RED reproduced the bug with `sizeof((marker = marker + 1, (char){7}))`; GREEN routes `Expr::Comma` through RHS `sizeof_expr` metadata.
 
 Commands verified so far:

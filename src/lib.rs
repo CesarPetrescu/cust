@@ -14475,9 +14475,34 @@ impl Interpreter {
             | Expr::UnaryMinus(_)
             | Expr::BitwiseNot(_)
             | Expr::LogicalNot(_)
-            | Expr::Conditional { .. }
             | Expr::Binary(_, _, _) => Ok(INT_SIZE),
+            Expr::Conditional { .. } => self.sizeof_conditional_expr(expr),
             Expr::Comma(_, right) => self.sizeof_expr(right),
+        }
+    }
+
+    fn sizeof_conditional_expr(&self, expr: &Expr) -> CustResult<i64> {
+        match self.aggregate_expr_type_name(expr) {
+            Ok(type_name) => self
+                .struct_types
+                .get(&type_name)
+                .map(|struct_type| struct_type.size(&self.struct_types))
+                .transpose()?
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            Err(err)
+                if err
+                    .to_string()
+                    .contains("conditional branches have mismatched aggregate types") =>
+            {
+                Err(err)
+            }
+            Err(_) => {
+                if self.pointer_expr_pointee_type(expr)?.is_some() {
+                    Ok(POINTER_SIZE)
+                } else {
+                    Ok(INT_SIZE)
+                }
+            }
         }
     }
 
