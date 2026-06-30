@@ -1,8 +1,22 @@
 # Cust Current State
 
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 
 ## Latest autonomous verification
+
+All passed after the 2026-07-01 autonomous `sizeof` aggregate element-assignment metadata run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, and concrete non-evaluating type-query gaps adjacent to the recent `sizeof` aggregate assignment work. The selected work package fixes `sizeof` metadata for aggregate element assignment expressions: `sizeof((points[0] = replacement))` and `sizeof((line.points[1] = replacement))` now report the selected aggregate element type without evaluating or mutating the target, matching already-supported `*slot = replacement` and struct-pointer field-array forms.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter supports_sizeof_aggregate_element_assignment_expressions_without_evaluating_operands -- --nocapture  # RED first: struct variable 'points' is not an array / struct field 'points' is a struct array; GREEN passed
+cc -std=c11 -Wall -Wextra -Werror tests/fixtures/compat/valid/sizeof_aggregate_element_assignment_expressions.c -o /tmp/sizeof_aggregate_element_assignment_expressions && /tmp/sizeof_aggregate_element_assignment_expressions  # exit=12
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
 
 All passed after the 2026-06-30 autonomous `sizeof` aggregate assignment-expression metadata run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, pointer negative diagnostics, additional less-traveled inline type-definition contexts, and a concrete non-evaluating type-query parity gap discovered adjacent to the recent `sizeof` comma/conditional work: `sizeof((aggregate_var = rhs))` rejected supported aggregate assignment expressions with `struct variable '<name>' assignment is not supported` instead of reporting the assigned aggregate type size. The selected work package fixes `sizeof` metadata for aggregate assignment expressions by deriving `Value::Struct` assignment result size from the aggregate type table while preserving non-evaluation of direct assignment and comma-left side effects.
 

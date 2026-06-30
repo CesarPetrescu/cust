@@ -70,6 +70,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/sizeof_aggregate_expression_array_fields.c",
     "tests/fixtures/compat/valid/sizeof_aggregate_conditional_expressions.c",
     "tests/fixtures/compat/valid/sizeof_aggregate_assignment_expressions.c",
+    "tests/fixtures/compat/valid/sizeof_aggregate_element_assignment_expressions.c",
     "tests/fixtures/compat/valid/aggregate_pointer_arithmetic.c",
     "tests/fixtures/compat/valid/aggregate_pointer_indexing.c",
     "tests/fixtures/compat/valid/aggregate_pointer_indexed_values.c",

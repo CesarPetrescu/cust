@@ -14734,8 +14734,34 @@ impl Interpreter {
     }
 
     fn sizeof_struct_array_indexed_value(&self, name: &str, path: &[String]) -> CustResult<i64> {
-        let array = self.find_struct_array_field(name, path)?;
-        Ok(array.borrow().elem_type.size())
+        match self.find_variable(name) {
+            Some(Value::Struct { type_name, fields }) => {
+                let (_, field_value) = Self::nested_field_value(type_name, fields, path)?;
+                match field_value {
+                    StructFieldValue::Array { value, .. } => Ok(value.borrow().elem_type.size()),
+                    StructFieldValue::StructArray { type_name, .. } => self
+                        .struct_types
+                        .get(type_name)
+                        .map(|struct_type| struct_type.size(&self.struct_types))
+                        .transpose()?
+                        .ok_or_else(|| {
+                            CustError::new(format!("undefined struct type '{type_name}'"))
+                        }),
+                    StructFieldValue::Scalar { .. } | StructFieldValue::Pointer { .. } => {
+                        Err(CustError::new(format!(
+                            "struct field '{}' is not an array",
+                            Self::field_path_label(path)
+                        )))
+                    }
+                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                        "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(path)
+                    ))),
+                }
+            }
+            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
     }
 
     fn sizeof_struct_element_field(&self, name: &str, path: &[String]) -> CustResult<i64> {
@@ -14837,12 +14863,18 @@ impl Interpreter {
         match self.find_variable(name) {
             Some(Value::Array(array)) => Ok(array.borrow().elem_type.size()),
             Some(Value::Pointer { ty, .. }) => Ok(ty.size(&self.struct_types)?),
+            Some(Value::StructArray { type_name, .. }) => self
+                .struct_types
+                .get(type_name)
+                .map(|struct_type| struct_type.size(&self.struct_types))
+                .transpose()?
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
             Some(Value::Scalar { .. }) => {
                 Err(CustError::new(format!("variable '{name}' is not an array")))
             }
-            Some(Value::Struct { .. }) | Some(Value::StructArray { .. }) => Err(CustError::new(
-                format!("struct variable '{name}' is not an array"),
-            )),
+            Some(Value::Struct { .. }) => Err(CustError::new(format!(
+                "struct variable '{name}' is not an array"
+            ))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
