@@ -1188,6 +1188,13 @@ fn supports_sizeof_aggregate_element_assignment_expressions_without_evaluating_o
 }
 
 #[test]
+fn supports_sizeof_embedded_aggregate_array_element_field_types_without_evaluating_operands() {
+    let program = include_str!("fixtures/valid/sizeof_embedded_aggregate_array_element_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 4);
+}
+
+#[test]
 fn supports_unparenthesized_sizeof_in_integer_constant_expressions() {
     let program =
         include_str!("fixtures/valid/sizeof_unparenthesized_integer_constant_expressions.c");

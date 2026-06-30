@@ -4,6 +4,20 @@ Last updated: 2026-07-01
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-01 autonomous `sizeof` embedded aggregate-array element-field metadata run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, more malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, and nearby non-evaluating type-query gaps after the recent aggregate assignment and element-assignment `sizeof` work. The selected work package fixes `sizeof` metadata for fields selected from embedded aggregate-array elements: `sizeof(line.points[0].tag)` and comma-wrapped variants now report the selected field type (for example `char`) without evaluating indexes or comma-left side effects instead of falling back to Cust `int` size.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter supports_sizeof_embedded_aggregate_array_element_field_types_without_evaluating_operands -- --nocapture  # RED first: returned 2 instead of 4 because char fields were sized as int; GREEN passed
+cc -std=c11 -Wall -Wextra -Werror tests/fixtures/compat/valid/sizeof_embedded_aggregate_array_element_fields.c -o /tmp/sizeof_embedded_aggregate_array_element_fields && /tmp/sizeof_embedded_aggregate_array_element_fields  # exit=4
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-07-01 autonomous `sizeof` aggregate element-assignment metadata run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, and concrete non-evaluating type-query gaps adjacent to the recent `sizeof` aggregate assignment work. The selected work package fixes `sizeof` metadata for aggregate element assignment expressions: `sizeof((points[0] = replacement))` and `sizeof((line.points[1] = replacement))` now report the selected aggregate element type without evaluating or mutating the target, matching already-supported `*slot = replacement` and struct-pointer field-array forms.
 
 Commands verified so far:

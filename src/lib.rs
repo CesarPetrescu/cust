@@ -14338,26 +14338,21 @@ impl Interpreter {
             Expr::StructFieldArrayElementGet {
                 name,
                 array_fields,
-                index,
                 fields,
+                ..
             }
             | Expr::StructFieldArrayElementSet {
                 name,
                 array_fields,
-                index,
                 fields,
                 ..
             }
             | Expr::StructFieldArrayElementCompoundSet {
                 name,
                 array_fields,
-                index,
                 fields,
                 ..
-            } => {
-                let _ = (name, array_fields, index, fields);
-                Ok(INT_SIZE)
-            }
+            } => self.sizeof_struct_field_array_element_field(name, array_fields, fields),
             Expr::StructElementGet { name, fields, .. } => {
                 self.sizeof_struct_element_field(name, fields)
             }
@@ -14805,8 +14800,22 @@ impl Interpreter {
                 let (_, field_value) = Self::nested_field_value(type_name, first_element, path)?;
                 match field_value {
                     StructFieldValue::Array { value, .. } => Ok(value.borrow().elem_type.size()),
-                    _ => Err(CustError::new(format!(
-                        "struct field '{}' is not an array",
+                    StructFieldValue::StructArray { type_name, .. } => self
+                        .struct_types
+                        .get(type_name)
+                        .map(|struct_type| struct_type.size(&self.struct_types))
+                        .transpose()?
+                        .ok_or_else(|| {
+                            CustError::new(format!("undefined struct type '{type_name}'"))
+                        }),
+                    StructFieldValue::Scalar { .. } | StructFieldValue::Pointer { .. } => {
+                        Err(CustError::new(format!(
+                            "struct field '{}' is not an array",
+                            Self::field_path_label(path)
+                        )))
+                    }
+                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                        "struct field '{}' is a struct '{type_name}'",
                         Self::field_path_label(path)
                     ))),
                 }
@@ -14814,6 +14823,50 @@ impl Interpreter {
             Some(_) => Err(CustError::new(format!(
                 "variable '{name}' is not a struct array"
             ))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn sizeof_struct_field_array_element_field(
+        &self,
+        name: &str,
+        array_path: &[String],
+        field_path: &[String],
+    ) -> CustResult<i64> {
+        match self.find_variable(name) {
+            Some(Value::Struct { type_name, fields }) => {
+                let (_, field_value) = Self::nested_field_value(type_name, fields, array_path)?;
+                match field_value {
+                    StructFieldValue::StructArray { type_name, .. } => {
+                        if field_path.is_empty() {
+                            return self
+                                .struct_types
+                                .get(type_name)
+                                .map(|struct_type| struct_type.size(&self.struct_types))
+                                .transpose()?
+                                .ok_or_else(|| {
+                                    CustError::new(format!("undefined struct type '{type_name}'"))
+                                });
+                        }
+                        self.sizeof_aggregate_field_type(type_name, field_path)
+                    }
+                    StructFieldValue::Array { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is not a struct array",
+                        Self::field_path_label(array_path)
+                    ))),
+                    StructFieldValue::Scalar { .. } | StructFieldValue::Pointer { .. } => {
+                        Err(CustError::new(format!(
+                            "struct field '{}' is not an array",
+                            Self::field_path_label(array_path)
+                        )))
+                    }
+                    StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                        "struct field '{}' is a struct '{type_name}'",
+                        Self::field_path_label(array_path)
+                    ))),
+                }
+            }
+            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
     }
