@@ -2098,10 +2098,35 @@ impl Parser {
         Ok(decl_type)
     }
 
+    fn leading_restrict_qualifier_token(&self) -> Option<&LocatedToken> {
+        let mut offset = 0;
+        loop {
+            match self.tokens.get(self.pos + offset).map(|token| &token.kind) {
+                Some(Token::Restrict) => return self.tokens.get(self.pos + offset),
+                Some(Token::Const | Token::Volatile) => offset += 1,
+                Some(Token::Atomic) if self.bare_atomic_qualifier_at(self.pos + offset) => {
+                    offset += 1;
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    fn reject_leading_restrict_qualifier(&self) -> CustResult<()> {
+        if let Some(token) = self.leading_restrict_qualifier_token() {
+            return Err(Self::error_at(
+                "restrict qualifiers are only supported on pointer declarators".to_string(),
+                token,
+            ));
+        }
+        Ok(())
+    }
+
     fn parse_decl_type_with_embedded_qualifiers(
         &mut self,
         context: &str,
     ) -> CustResult<(bool, DeclType)> {
+        self.reject_leading_restrict_qualifier()?;
         let found = self.advance();
         let mut saw_const = false;
         match found.kind.clone() {
@@ -2401,6 +2426,7 @@ impl Parser {
     }
 
     fn parse_const_qualified_decl_type(&mut self, context: &str) -> CustResult<(bool, DeclType)> {
+        self.reject_leading_restrict_qualifier()?;
         let leading_const = self.consume_type_qualifiers();
         let alias_const = match self.peek() {
             Token::Ident(name) => self.type_alias_is_const(name),
@@ -5105,6 +5131,7 @@ impl Parser {
                 ));
             }
             self.consume_alignment_specifiers()?;
+            self.reject_leading_restrict_qualifier()?;
             let leading_const = self.consume_type_qualifiers();
             let alias_const = match self.peek() {
                 Token::Ident(name) => self.type_alias_is_const(name),

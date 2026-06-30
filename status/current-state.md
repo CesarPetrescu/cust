@@ -4,6 +4,21 @@ Last updated: 2026-06-30
 
 ## Latest autonomous verification
 
+All passed after the 2026-06-30 autonomous restrict non-pointer diagnostic run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, additional inline aggregate conformance contexts, malformed-source exact-diagnostic fuzzing, and C11 qualifier syntax gaps. The selected work package closes a standards-conformance/parser-trust gap where Cust accepted `restrict int` on scalar declarations, parameters, and aggregate fields even though the supported `restrict` subset is pointer-declarator-only. Focused RED reproduced acceptance of `restrict int value`; GREEN rejects leading `restrict` qualifiers before base types while preserving post-star pointer declarators such as `int * restrict p`.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cc -std=c11 -Wall -Wextra -Werror /tmp/restrict_scalar.c -o /tmp/restrict_scalar  # native oracle rejected leading scalar restrict as invalid use of 'restrict'
+cargo test --test interpreter rejects_restrict_on_non_pointer_declarations_with_context -- --nocapture  # RED first: accepted scalar restrict; GREEN after parser diagnostic
+cargo test --test interpreter supports_restrict_pointer_qualifiers -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-06-30 autonomous inline aggregate `sizeof(*pointer_expr)` type-definition conformance run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact-diagnostic fuzzing, additional negative pointer-arithmetic storage roots, function-parameter type-definition native pitfalls, and a less-traveled inline aggregate context adjacent to the recent pointer arithmetic/comparison coverage: inline named aggregate definitions inside non-evaluating `sizeof` operands that dereference pointer expressions. The selected work package adds interpreter and warning-free native compiler-oracle coverage for inline `struct`/`union` definitions inside `sizeof(*(values + ...))`, `sizeof(*(points + ...))`, and `sizeof(*(&((struct Inline){...}).field))` pointer-expression operands. Focused coverage passed after correcting the fixture to avoid assuming that tags introduced inside `sizeof` expression operands leak to later native declarations, so this run records conformance coverage rather than a production-code fix.
 
 Commands verified so far:
