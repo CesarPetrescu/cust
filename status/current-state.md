@@ -4,6 +4,23 @@ Last updated: 2026-07-01
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-01 autonomous parenthesized pointer cast/type-query diagnostic run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, and remaining less-traveled direct enum/inline aggregate contexts. The selected work package closes another parser-trust gap around unsupported parenthesized pointer type syntax in expression/type-query contexts: `(int (*)[3])0`, `sizeof(int (*)[3])`, and `_Alignof(int (*)[3])` previously fell through to generic closing-delimiter errors at the inner `(`; Cust now reports targeted parenthesized-pointer unsupported diagnostics at the `*` token while preserving supported ordinary pointer casts and `sizeof`/`_Alignof` type-name forms.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_parenthesized_pointer_cast_and_type_query_forms_with_context -- --nocapture  # RED first: generic `expected ')' after cast type, found LParen`; GREEN passed
+cargo test --test interpreter supports_pointer_cast_expressions -- --nocapture
+cargo test --test interpreter rejects_pointer_casts_that_discard_const_pointees -- --nocapture
+cargo test --test interpreter supports_sizeof_array_type_names -- --nocapture
+cargo test --test interpreter supports_alignof_type_names -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-07-01 autonomous unsupported `void *` diagnostics run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, more malformed-source exact diagnostics, negative pointer/storage-root diagnostics, less-traveled inline/direct enum and aggregate contexts, and the documented pointer-model non-goal `void *`. The selected work package closes a parser-trust gap: unsupported `void *` forms previously fell through to route-specific generic diagnostics such as `expected function name after return type`, `void parameter lists must be empty`, `(void)` cast delimiter errors, or `sizeof(void)` before recognizing the unsupported pointer. Cust now reports `void pointers are not supported` at the `*` token for return types, parameters, local declarations, casts, `sizeof(void *)`, and `_Alignof(void *)` while preserving supported `void` functions, empty `void` parameter lists, and `(void)expr` casts.
 
 Commands verified so far:

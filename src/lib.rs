@@ -3378,6 +3378,18 @@ impl Parser {
         None
     }
 
+    fn parenthesized_pointer_star_token_at_current(&self) -> Option<&LocatedToken> {
+        if matches!(self.peek(), Token::LParen)
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                Some(Token::Star)
+            )
+        {
+            return self.tokens.get(self.pos + 1);
+        }
+        None
+    }
+
     fn parse_array_parameter_length_and_qualifiers(&mut self) -> CustResult<bool> {
         let mut pointer_slot_const = false;
         loop {
@@ -7132,6 +7144,12 @@ impl Parser {
         };
         let compound_literal_read_only = leading_const || alias_const;
         let decl_type = self.parse_decl_type("cast type")?;
+        if let Some(token) = self.parenthesized_pointer_star_token_at_current() {
+            return Err(Self::error_at(
+                "parenthesized pointer casts are not supported".to_string(),
+                token,
+            ));
+        }
         if self.matches(&Token::Star) {
             let pointee = match decl_type {
                 DeclType::Scalar(ty) => PointeeType::Scalar(ty),
@@ -7444,7 +7462,15 @@ impl Parser {
             return Ok(SizeOfType::AnonymousAggregate(struct_type));
         }
 
-        match self.parse_decl_type(&format!("{operator} struct type name"))? {
+        let decl_type = self.parse_decl_type(&format!("{operator} struct type name"))?;
+        if let Some(token) = self.parenthesized_pointer_star_token_at_current() {
+            return Err(Self::error_at(
+                format!("parenthesized pointer {operator} types are not supported"),
+                token,
+            ));
+        }
+
+        match decl_type {
             DeclType::Scalar(ty) => {
                 if self.matches(&Token::Star) {
                     Ok(SizeOfType::Pointer)

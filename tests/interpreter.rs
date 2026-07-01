@@ -240,6 +240,33 @@ fn rejects_void_pointer_forms_with_context() {
 }
 
 #[test]
+fn rejects_parenthesized_pointer_cast_and_type_query_forms_with_context() {
+    let program = include_str!("fixtures/invalid/parenthesized_pointer_cast.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "parenthesized pointer casts are not supported at line 2, column 18"
+    );
+
+    let program = include_str!("fixtures/invalid/parenthesized_pointer_sizeof_type.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "parenthesized pointer sizeof types are not supported at line 2, column 24"
+    );
+
+    let program = include_str!("fixtures/invalid/parenthesized_pointer_alignof_type.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "parenthesized pointer _Alignof types are not supported at line 2, column 26"
+    );
+}
+
+#[test]
 fn rejects_non_constant_array_lengths_with_context() {
     let program = include_str!("fixtures/invalid/array_length_non_constant_identifier.c");
 
