@@ -4,6 +4,23 @@ Last updated: 2026-07-01
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-01 autonomous unsupported `void *` diagnostics run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, more malformed-source exact diagnostics, negative pointer/storage-root diagnostics, less-traveled inline/direct enum and aggregate contexts, and the documented pointer-model non-goal `void *`. The selected work package closes a parser-trust gap: unsupported `void *` forms previously fell through to route-specific generic diagnostics such as `expected function name after return type`, `void parameter lists must be empty`, `(void)` cast delimiter errors, or `sizeof(void)` before recognizing the unsupported pointer. Cust now reports `void pointers are not supported` at the `*` token for return types, parameters, local declarations, casts, `sizeof(void *)`, and `_Alignof(void *)` while preserving supported `void` functions, empty `void` parameter lists, and `(void)expr` casts.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_void_pointer_forms_with_context -- --nocapture  # RED first: generic function-name/sizeof(void) diagnostics; GREEN passed
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+Previous latest:
+
 All passed after the 2026-07-01 autonomous aggregate field-assignment result field-access run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, more malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, less-traveled direct enum/inline aggregate contexts, and an adjacent aggregate-expression parity gap discovered while extending recent aggregate assignment-result field-access coverage: `(line.start = replacement).x` failed in parsing with `invalid struct field access target` even though aggregate field assignment expressions should return the assigned by-value aggregate. The selected work package fixes parser, runtime, and metadata routing for field access on direct and struct-pointer aggregate field assignment results while preserving non-evaluating `sizeof((marker = marker + 1, (line.end = other).tag))` behavior.
 
 Commands verified so far:

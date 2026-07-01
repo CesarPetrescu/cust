@@ -189,6 +189,57 @@ fn rejects_restrict_on_non_pointer_declarations_with_context() {
 }
 
 #[test]
+fn rejects_void_pointer_forms_with_context() {
+    let program = include_str!("fixtures/invalid/void_pointer_return.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "void pointers are not supported at line 1, column 6"
+    );
+
+    let program = include_str!("fixtures/invalid/void_pointer_parameter.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "void pointers are not supported at line 1, column 18"
+    );
+
+    let program = include_str!("fixtures/invalid/void_pointer_local_declaration.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "void pointers are not supported at line 2, column 10"
+    );
+
+    let program = include_str!("fixtures/invalid/void_pointer_cast.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "void pointers are not supported at line 2, column 18"
+    );
+
+    let program = include_str!("fixtures/invalid/void_pointer_sizeof.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "void pointers are not supported at line 2, column 24"
+    );
+
+    let program = include_str!("fixtures/invalid/void_pointer_alignof.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "void pointers are not supported at line 2, column 26"
+    );
+}
+
+#[test]
 fn rejects_non_constant_array_lengths_with_context() {
     let program = include_str!("fixtures/invalid/array_length_non_constant_identifier.c");
 

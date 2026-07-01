@@ -1730,6 +1730,12 @@ impl Parser {
                     token,
                 ));
             }
+            if let Some(token) = self.void_pointer_star_token_at_current() {
+                return Err(Self::error_at(
+                    "void pointers are not supported".to_string(),
+                    token,
+                ));
+            }
             if self.starts_function_definition()
                 || self.starts_struct_function_declaration()
                 || self.starts_alias_function_declaration()
@@ -3051,6 +3057,12 @@ impl Parser {
 
     fn parse_function_return_type(&mut self) -> CustResult<ReturnType> {
         if self.check(&Token::Void) {
+            if let Some(token) = self.void_pointer_star_token_at_current() {
+                return Err(Self::error_at(
+                    "void pointers are not supported".to_string(),
+                    token,
+                ));
+            }
             self.advance();
             return Ok(ReturnType::Void);
         }
@@ -3148,6 +3160,12 @@ impl Parser {
             return Ok(params);
         }
         if self.check(&Token::Void) {
+            if let Some(token) = self.void_pointer_star_token_at_current() {
+                return Err(Self::error_at(
+                    "void pointers are not supported".to_string(),
+                    token,
+                ));
+            }
             let void_token = self.advance();
             if self.check(&Token::RParen) {
                 return Ok(params);
@@ -3348,6 +3366,18 @@ impl Parser {
         )
     }
 
+    fn void_pointer_star_token_at_current(&self) -> Option<&LocatedToken> {
+        if matches!(self.peek(), Token::Void)
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                Some(Token::Star)
+            )
+        {
+            return self.tokens.get(self.pos + 1);
+        }
+        None
+    }
+
     fn parse_array_parameter_length_and_qualifiers(&mut self) -> CustResult<bool> {
         let mut pointer_slot_const = false;
         loop {
@@ -3424,6 +3454,12 @@ impl Parser {
         if let Some(token) = self.anonymous_aggregate_return_type_token() {
             return Err(Self::error_at(
                 "anonymous aggregate return types are not supported".to_string(),
+                token,
+            ));
+        }
+        if let Some(token) = self.void_pointer_star_token_at_current() {
+            return Err(Self::error_at(
+                "void pointers are not supported".to_string(),
                 token,
             ));
         }
@@ -7081,6 +7117,12 @@ impl Parser {
             });
         }
         if self.matches(&Token::Void) {
+            if self.check(&Token::Star) {
+                return Err(Self::error_at(
+                    "void pointers are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             self.expect_closing_paren_after("cast type")?;
             return Ok(Expr::VoidCast(Box::new(self.parse_unary()?)));
         }
@@ -7345,6 +7387,12 @@ impl Parser {
     fn parse_sizeof_like_type_name(&mut self, operator: &str) -> CustResult<SizeOfType> {
         let is_const_qualified = self.consume_type_qualifiers();
         if self.check(&Token::Void) {
+            if let Some(token) = self.void_pointer_star_token_at_current() {
+                return Err(Self::error_at(
+                    "void pointers are not supported".to_string(),
+                    token,
+                ));
+            }
             let type_token = self.advance();
             return Err(Self::error_at(
                 format!("{operator}(void) is not supported"),
