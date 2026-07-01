@@ -7586,6 +7586,8 @@ impl Parser {
                     },
                     Expr::AggregateLiteral { .. }
                     | Expr::Assign { .. }
+                    | Expr::ArraySet { .. }
+                    | Expr::StructArraySet { .. }
                     | Expr::DerefSet { .. }
                     | Expr::Conditional { .. }
                     | Expr::Comma(_, _)
@@ -14513,6 +14515,28 @@ impl Interpreter {
                 Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
+            Expr::ArraySet { name, .. } => match self.find_variable(name) {
+                Some(Value::StructArray { type_name, .. }) => Ok(type_name.clone()),
+                Some(Value::Pointer {
+                    ty: PointeeType::Struct(type_name),
+                    ..
+                }) => Ok(type_name.clone()),
+                _ => Err(CustError::new("expected struct expression")),
+            },
+            Expr::StructArraySet { name, fields, .. } => {
+                if let Some(type_name) =
+                    self.direct_struct_aggregate_array_field_type(name, fields)?
+                {
+                    return Ok(type_name);
+                }
+                match self.find_variable(name) {
+                    Some(Value::Struct { type_name, .. }) => {
+                        self.aggregate_field_type_name(type_name, fields)
+                    }
+                    Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+                    None => Err(CustError::new(format!("undefined variable '{name}'"))),
+                }
+            }
             Expr::StructGet { name, fields } => match self.find_variable(name) {
                 Some(Value::Struct { type_name, .. }) => {
                     self.aggregate_field_type_name(type_name, fields)
