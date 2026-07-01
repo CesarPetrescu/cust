@@ -4,6 +4,22 @@ Last updated: 2026-07-01
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-01 autonomous break/continue source-location diagnostic run. Ideation considered failing tests/builds (focused baseline was clean), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, additional unsupported type-specifier diagnostics, less-traveled inline enum/aggregate conformance contexts, negative pointer/storage-root diagnostics, and malformed-source exact diagnostics. The selected work package closes a runtime diagnostic trust gap for unhandled control-flow statements: `break;` and `continue;` parsed with source locations but the runtime `ExecFlow` dropped them before reporting `break outside loop` / `continue outside loop`. Cust now carries `LocatedToken` metadata through `Stmt::Break`/`Stmt::Continue` and `ExecFlow`, reports `break outside loop or switch at line ..., column ...` and `continue outside loop at line ..., column ...`, and still consumes valid loop/switch `break`/`continue` normally.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_unhandled_break_and_continue_with_context -- --nocapture  # RED first: unlocated `break outside loop`; GREEN passed
+cargo test --test interpreter rejects_break_outside_loops -- --nocapture
+cargo test --test interpreter rejects_continue_outside_loops -- --nocapture
+cargo test --test interpreter supports_break_and_continue_in_while_and_for_loops -- --nocapture
+cargo test --test interpreter supports_switch_statements_with_cases_default_fallthrough_break_and_continue -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-07-01 autonomous unsupported complex type diagnostic run. Ideation considered failing tests/builds (none in the clean pulled worktree after focused baseline), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, and unsupported C numeric type specifiers adjacent to the just-completed floating-point diagnostics. The selected work package closes a parser-trust gap around unsupported C `_Complex` and `_Imaginary` type specifiers: they previously lexed as identifiers and produced generic top-level/type/cast errors. Cust now lexes them as dedicated tokens and reports `complex types are not supported` at the offending keyword in top-level declarations, block locals, parameters, `sizeof` type names, casts, and aggregate fields, without adding complex/imaginary runtime semantics.
 
 Commands verified so far:

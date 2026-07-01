@@ -896,8 +896,8 @@ enum Stmt {
     },
     Expr(Expr),
     Return(Option<Expr>),
-    Break,
-    Continue,
+    Break(LocatedToken),
+    Continue(LocatedToken),
     Block(Vec<Stmt>),
     If {
         cond: Expr,
@@ -6442,15 +6442,15 @@ impl Parser {
     }
 
     fn parse_break(&mut self) -> CustResult<Stmt> {
-        self.expect(Token::Break)?;
+        let token = self.advance();
         self.expect_semicolon_after("break statement")?;
-        Ok(Stmt::Break)
+        Ok(Stmt::Break(token))
     }
 
     fn parse_continue(&mut self) -> CustResult<Stmt> {
-        self.expect(Token::Continue)?;
+        let token = self.advance();
         self.expect_semicolon_after("continue statement")?;
-        Ok(Stmt::Continue)
+        Ok(Stmt::Continue(token))
     }
 
     fn parse_if(&mut self) -> CustResult<Stmt> {
@@ -8367,8 +8367,8 @@ struct StaticLocalStorage {
 enum ExecFlow {
     None,
     Return(Option<ReturnValue>),
-    Break,
-    Continue,
+    Break(LocatedToken),
+    Continue(LocatedToken),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8602,6 +8602,20 @@ impl Interpreter {
             .unwrap_or("struct")
     }
 
+    fn break_outside_loop_or_switch_error(token: &LocatedToken) -> CustError {
+        CustError::new(format!(
+            "break outside loop or switch at line {}, column {}",
+            token.line, token.column
+        ))
+    }
+
+    fn continue_outside_loop_error(token: &LocatedToken) -> CustError {
+        CustError::new(format!(
+            "continue outside loop at line {}, column {}",
+            token.line, token.column
+        ))
+    }
+
     fn run(&mut self, program: &Program) -> CustResult<i64> {
         self.functions = program.functions.clone();
         self.struct_types = program.struct_types.clone();
@@ -8610,8 +8624,10 @@ impl Interpreter {
             match self.exec_stmt(global)? {
                 ExecFlow::None => {}
                 ExecFlow::Return(_) => return Err(CustError::new("return outside function")),
-                ExecFlow::Break => return Err(CustError::new("break outside loop")),
-                ExecFlow::Continue => return Err(CustError::new("continue outside loop")),
+                ExecFlow::Break(token) => {
+                    return Err(Self::break_outside_loop_or_switch_error(&token));
+                }
+                ExecFlow::Continue(token) => return Err(Self::continue_outside_loop_error(&token)),
             }
         }
 
@@ -8720,8 +8736,8 @@ impl Interpreter {
                 ))),
                 ReturnType::Void => Ok(None),
             },
-            Ok(ExecFlow::Break) => Err(CustError::new("break outside loop")),
-            Ok(ExecFlow::Continue) => Err(CustError::new("continue outside loop")),
+            Ok(ExecFlow::Break(token)) => Err(Self::break_outside_loop_or_switch_error(&token)),
+            Ok(ExecFlow::Continue(token)) => Err(Self::continue_outside_loop_error(&token)),
             Err(error) => Err(error),
         };
         self.pop_scope();
@@ -15940,8 +15956,8 @@ impl Interpreter {
                 Ok(ExecFlow::None)
             }
             Stmt::Return(expr) => Ok(ExecFlow::Return(self.eval_return_value(expr.as_ref())?)),
-            Stmt::Break => Ok(ExecFlow::Break),
-            Stmt::Continue => Ok(ExecFlow::Continue),
+            Stmt::Break(token) => Ok(ExecFlow::Break(token.clone())),
+            Stmt::Continue(token) => Ok(ExecFlow::Continue(token.clone())),
             Stmt::Block(statements) => self.exec_block(statements),
             Stmt::If {
                 cond,
@@ -15963,8 +15979,8 @@ impl Interpreter {
                         return Err(CustError::new("loop iteration limit exceeded"));
                     }
                     match self.exec_control_body(body)? {
-                        ExecFlow::None | ExecFlow::Continue => {}
-                        ExecFlow::Break => break,
+                        ExecFlow::None | ExecFlow::Continue(_) => {}
+                        ExecFlow::Break(_) => break,
                         ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
                     }
                 }
@@ -16000,7 +16016,7 @@ impl Interpreter {
             for stmt in &section.statements {
                 match self.exec_stmt(stmt) {
                     Ok(ExecFlow::None) => {}
-                    Ok(ExecFlow::Break) => {
+                    Ok(ExecFlow::Break(_)) => {
                         self.pop_scope();
                         return Ok(ExecFlow::None);
                     }
@@ -16042,8 +16058,8 @@ impl Interpreter {
             }
 
             match self.exec_control_body(body)? {
-                ExecFlow::None | ExecFlow::Continue => {}
-                ExecFlow::Break => break,
+                ExecFlow::None | ExecFlow::Continue(_) => {}
+                ExecFlow::Break(_) => break,
                 ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
             }
 
@@ -16066,8 +16082,10 @@ impl Interpreter {
             match self.exec_stmt(init)? {
                 ExecFlow::None => {}
                 ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
-                ExecFlow::Break => return Err(CustError::new("break outside loop")),
-                ExecFlow::Continue => return Err(CustError::new("continue outside loop")),
+                ExecFlow::Break(token) => {
+                    return Err(Self::break_outside_loop_or_switch_error(&token));
+                }
+                ExecFlow::Continue(token) => return Err(Self::continue_outside_loop_error(&token)),
             }
         }
 
@@ -16085,8 +16103,8 @@ impl Interpreter {
             }
 
             match self.exec_control_body(body)? {
-                ExecFlow::None | ExecFlow::Continue => {}
-                ExecFlow::Break => break,
+                ExecFlow::None | ExecFlow::Continue(_) => {}
+                ExecFlow::Break(_) => break,
                 ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
             }
 
@@ -16094,8 +16112,12 @@ impl Interpreter {
                 match self.exec_stmt(increment)? {
                     ExecFlow::None => {}
                     ExecFlow::Return(value) => return Ok(ExecFlow::Return(value)),
-                    ExecFlow::Break => return Err(CustError::new("break outside loop")),
-                    ExecFlow::Continue => return Err(CustError::new("continue outside loop")),
+                    ExecFlow::Break(token) => {
+                        return Err(Self::break_outside_loop_or_switch_error(&token));
+                    }
+                    ExecFlow::Continue(token) => {
+                        return Err(Self::continue_outside_loop_error(&token));
+                    }
                 }
             }
         }

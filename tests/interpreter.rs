@@ -232,6 +232,25 @@ fn rejects_invalid_scalar_type_specifier_combinations_with_context() {
 }
 
 #[test]
+fn rejects_unhandled_break_and_continue_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    break;\n    return 0;\n}",
+            "break outside loop or switch at line 2, column 5",
+        ),
+        (
+            "int main(void) {\n    continue;\n    return 0;\n}",
+            "continue outside loop at line 2, column 5",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_restrict_on_non_pointer_declarations_with_context() {
     let program = include_str!("fixtures/invalid/restrict_scalar_declaration.c");
 
@@ -5307,7 +5326,10 @@ fn rejects_break_outside_loops() {
 
     let err = interpret(program).unwrap_err();
 
-    assert_eq!(err.to_string(), "break outside loop");
+    assert_eq!(
+        err.to_string(),
+        "break outside loop or switch at line 2, column 5"
+    );
 }
 
 #[test]
@@ -5316,7 +5338,7 @@ fn rejects_continue_outside_loops() {
 
     let err = interpret(program).unwrap_err();
 
-    assert_eq!(err.to_string(), "continue outside loop");
+    assert_eq!(err.to_string(), "continue outside loop at line 2, column 5");
 }
 
 #[test]
