@@ -7588,6 +7588,8 @@ impl Parser {
                     | Expr::Assign { .. }
                     | Expr::ArraySet { .. }
                     | Expr::StructArraySet { .. }
+                    | Expr::StructSet { .. }
+                    | Expr::StructPtrSet { .. }
                     | Expr::DerefSet { .. }
                     | Expr::Conditional { .. }
                     | Expr::Comma(_, _)
@@ -12428,6 +12430,109 @@ impl Interpreter {
         }
     }
 
+    fn assign_aggregate_field_in_map(
+        struct_types: &HashMap<String, StructTypeDef>,
+        root_type_name: &str,
+        fields: &mut HashMap<String, StructFieldValue>,
+        path: &[String],
+        rhs_type: String,
+        rhs_fields: HashMap<String, StructFieldValue>,
+    ) -> CustResult<ReturnValue> {
+        let (_, target) = Self::nested_field_value_mut(root_type_name, fields, path)?;
+        match target {
+            StructFieldValue::Struct {
+                type_name,
+                fields,
+                is_const,
+            } if *type_name == rhs_type => {
+                if *is_const {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(path)
+                    )));
+                }
+                if fields.values().any(StructFieldValue::is_const) {
+                    return Err(CustError::new(format!(
+                        "cannot assign to struct '{type_name}' with const fields"
+                    )));
+                }
+                *fields = StructFieldValue::deep_clone_fields(&rhs_fields);
+                Ok(ReturnValue::Struct {
+                    type_name: rhs_type,
+                    fields: rhs_fields,
+                })
+            }
+            StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
+                "cannot assign struct '{}' to struct '{}'",
+                Self::aggregate_label_from(struct_types, &rhs_type),
+                Self::aggregate_label_from(struct_types, type_name)
+            ))),
+            StructFieldValue::Scalar { .. }
+            | StructFieldValue::Array { .. }
+            | StructFieldValue::StructArray { .. }
+            | StructFieldValue::Pointer { .. } => {
+                Err(CustError::new("struct assignment requires struct value"))
+            }
+        }
+    }
+
+    fn eval_struct_field_assignment_expr(
+        &mut self,
+        name: &str,
+        path: &[String],
+        rhs: &Expr,
+    ) -> CustResult<ReturnValue> {
+        self.ensure_variable_mutable(name)?;
+        let (rhs_type, rhs_fields) = match self.eval_struct_expr(rhs)? {
+            ReturnValue::Struct { type_name, fields } => (type_name, fields),
+            ReturnValue::Scalar(_) | ReturnValue::Pointer { .. } => {
+                return Err(CustError::new("struct assignment requires struct value"));
+            }
+        };
+
+        let struct_types = self.struct_types.clone();
+        match self.find_variable_mut(name) {
+            Some(Value::Struct { type_name, fields }) => Self::assign_aggregate_field_in_map(
+                &struct_types,
+                type_name,
+                fields,
+                path,
+                rhs_type,
+                rhs_fields,
+            ),
+            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn eval_struct_pointer_field_assignment_expr(
+        &mut self,
+        pointer: &Expr,
+        path: &[String],
+        rhs: &Expr,
+    ) -> CustResult<ReturnValue> {
+        self.ensure_pointer_expr_pointee_mutable(pointer)?;
+        let pointer = self.eval_pointer(pointer)?;
+        self.ensure_struct_pointer_target_mutable(&pointer)?;
+        let (rhs_type, rhs_fields) = match self.eval_struct_expr(rhs)? {
+            ReturnValue::Struct { type_name, fields } => (type_name, fields),
+            ReturnValue::Scalar(_) | ReturnValue::Pointer { .. } => {
+                return Err(CustError::new("struct assignment requires struct value"));
+            }
+        };
+
+        let struct_types = self.struct_types.clone();
+        let (target_type, target_fields) = self.find_struct_pointer_fields_mut(&pointer)?;
+        Self::assign_aggregate_field_in_map(
+            &struct_types,
+            &target_type,
+            target_fields,
+            path,
+            rhs_type,
+            rhs_fields,
+        )
+    }
+
     fn eval_struct_index_assignment_expr(
         &mut self,
         name: &str,
@@ -14537,12 +14642,22 @@ impl Interpreter {
                     None => Err(CustError::new(format!("undefined variable '{name}'"))),
                 }
             }
-            Expr::StructGet { name, fields } => match self.find_variable(name) {
-                Some(Value::Struct { type_name, .. }) => {
-                    self.aggregate_field_type_name(type_name, fields)
+            Expr::StructGet { name, fields } | Expr::StructSet { name, fields, .. } => {
+                match self.find_variable(name) {
+                    Some(Value::Struct { type_name, .. }) => {
+                        self.aggregate_field_type_name(type_name, fields)
+                    }
+                    Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
+                    None => Err(CustError::new(format!("undefined variable '{name}'"))),
                 }
-                Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
-                None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            }
+            Expr::StructPtrSet {
+                pointer, fields, ..
+            } => match self.pointer_expr_pointee_type(pointer)? {
+                Some(PointeeType::Struct(type_name)) => {
+                    self.aggregate_field_type_name(&type_name, fields)
+                }
+                _ => Err(CustError::new("expected struct expression")),
             },
             Expr::ArrayGet { name, .. } => match self.find_variable(name) {
                 Some(Value::StructArray { type_name, .. }) => Ok(type_name.clone()),
@@ -15208,6 +15323,16 @@ impl Interpreter {
                 self.eval_struct_expr(right)
             }
             Expr::Assign { name, value } => self.eval_struct_assignment_expr(name, value),
+            Expr::StructSet {
+                name,
+                fields,
+                value,
+            } => self.eval_struct_field_assignment_expr(name, fields, value),
+            Expr::StructPtrSet {
+                pointer,
+                fields,
+                value,
+            } => self.eval_struct_pointer_field_assignment_expr(pointer, fields, value),
             Expr::ArraySet { name, index, value } => {
                 self.eval_struct_index_assignment_expr(name, index, value)
             }

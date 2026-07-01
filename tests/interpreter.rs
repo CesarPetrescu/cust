@@ -1202,6 +1202,13 @@ fn supports_field_access_on_aggregate_element_assignment_results() {
 }
 
 #[test]
+fn supports_field_access_on_aggregate_field_assignment_results() {
+    let program = include_str!("fixtures/valid/aggregate_field_assignment_field_access.c");
+
+    assert_eq!(interpret(program).unwrap(), 23);
+}
+
+#[test]
 fn supports_unparenthesized_sizeof_in_integer_constant_expressions() {
     let program =
         include_str!("fixtures/valid/sizeof_unparenthesized_integer_constant_expressions.c");

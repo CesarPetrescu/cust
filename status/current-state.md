@@ -4,6 +4,21 @@ Last updated: 2026-07-01
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-01 autonomous aggregate field-assignment result field-access run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, more malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, less-traveled direct enum/inline aggregate contexts, and an adjacent aggregate-expression parity gap discovered while extending recent aggregate assignment-result field-access coverage: `(line.start = replacement).x` failed in parsing with `invalid struct field access target` even though aggregate field assignment expressions should return the assigned by-value aggregate. The selected work package fixes parser, runtime, and metadata routing for field access on direct and struct-pointer aggregate field assignment results while preserving non-evaluating `sizeof((marker = marker + 1, (line.end = other).tag))` behavior.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter supports_field_access_on_aggregate_field_assignment_results -- --nocapture  # RED first: invalid struct field access target; GREEN passed
+cc -std=c11 -Wall -Wextra -Werror tests/fixtures/compat/valid/aggregate_field_assignment_field_access.c -o /tmp/aggregate_field_assignment_field_access && /tmp/aggregate_field_assignment_field_access  # exit=23
+cargo test --test c_compat supported_programs_match_c_compiler_exit_codes -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-07-01 autonomous aggregate element-assignment result field-access run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, more malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, less-traveled direct enum/inline aggregate contexts, and an adjacent aggregate-expression parity gap discovered while probing recent `sizeof` aggregate element-assignment work: `(points[0] = replacement).x` failed in parsing with `invalid struct field access target` even though aggregate assignment expressions return by-value aggregate copies. The selected work package fixes parser and metadata routing for field access on aggregate-array element assignment results, including root aggregate arrays, embedded aggregate-array fields, and struct-pointer embedded aggregate-array fields, while preserving non-evaluating `sizeof((marker = marker + 1, (points[1] = replacement).tag))` behavior.
 
 Commands verified so far:
