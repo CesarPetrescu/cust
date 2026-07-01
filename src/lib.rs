@@ -6605,12 +6605,8 @@ impl Parser {
             Some(Box::new(self.parse_assign()?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(true)?))
-        } else if matches!(self.peek(), Token::Break | Token::Continue) {
-            let control = self.loop_control_keyword();
-            return Err(Self::error_at(
-                format!("{control} is not allowed in for initializer"),
-                self.peek_located(),
-            ));
+        } else if let Some(message) = self.statement_only_control_flow_error("for initializer") {
+            return Err(Self::error_at(message, self.peek_located()));
         } else {
             return Err(Self::error_at(
                 format!("unexpected token in for initializer: {:?}", self.peek()),
@@ -6633,12 +6629,8 @@ impl Parser {
             Some(Box::new(self.parse_assign_with_semi(false)?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(false)?))
-        } else if matches!(self.peek(), Token::Break | Token::Continue) {
-            let control = self.loop_control_keyword();
-            return Err(Self::error_at(
-                format!("{control} is not allowed in for increment"),
-                self.peek_located(),
-            ));
+        } else if let Some(message) = self.statement_only_control_flow_error("for increment") {
+            return Err(Self::error_at(message, self.peek_located()));
         } else {
             return Err(Self::error_at(
                 format!("unexpected token in for increment: {:?}", self.peek()),
@@ -8362,6 +8354,25 @@ impl Parser {
             }
         }
         None
+    }
+
+    fn statement_only_control_flow_error(&self, context: &str) -> Option<String> {
+        match self.peek() {
+            Token::Return => Some(format!("return is not allowed in {context}")),
+            Token::Break | Token::Continue => Some(format!(
+                "{} is not allowed in {context}",
+                self.loop_control_keyword()
+            )),
+            Token::If => Some(format!("if statement is not allowed in {context}")),
+            Token::Else => Some("else without matching if".to_string()),
+            Token::While => Some(format!("while loop is not allowed in {context}")),
+            Token::Do => Some(format!("do loop is not allowed in {context}")),
+            Token::For => Some(format!("for loop is not allowed in {context}")),
+            Token::Switch => Some(format!("switch statement is not allowed in {context}")),
+            Token::Case => Some("case label outside switch".to_string()),
+            Token::Default => Some("default label outside switch".to_string()),
+            _ => None,
+        }
     }
 
     fn loop_control_keyword(&self) -> &'static str {

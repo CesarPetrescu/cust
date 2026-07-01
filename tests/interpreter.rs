@@ -299,6 +299,49 @@ fn rejects_unhandled_control_flow_with_context() {
 }
 
 #[test]
+fn rejects_statement_only_control_flow_in_for_clauses_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    for (return 1; ; ) { }\n    return 0;\n}",
+            "return is not allowed in for initializer at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (if (1) { return 1; }; ; ) { }\n    return 0;\n}",
+            "if statement is not allowed in for initializer at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (else { return 1; }; ; ) { }\n    return 0;\n}",
+            "else without matching if at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (while (1) { break; }; ; ) { }\n    return 0;\n}",
+            "while loop is not allowed in for initializer at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (switch (1) { default: break; }; ; ) { }\n    return 0;\n}",
+            "switch statement is not allowed in for initializer at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (case 1: return 1; ; ) { }\n    return 0;\n}",
+            "case label outside switch at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (; 1; return 1) { }\n    return 0;\n}",
+            "return is not allowed in for increment at line 2, column 15",
+        ),
+        (
+            "int main(void) {\n    for (; 1; if (1) { return 1; }) { }\n    return 0;\n}",
+            "if statement is not allowed in for increment at line 2, column 15",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_restrict_on_non_pointer_declarations_with_context() {
     let program = include_str!("fixtures/invalid/restrict_scalar_declaration.c");
 

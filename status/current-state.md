@@ -1,8 +1,20 @@
 # Cust Current State
 
-Last updated: 2026-07-01
+Last updated: 2026-07-02
 
 ## Latest autonomous verification
+
+All passed after the 2026-07-02 autonomous `for`-clause control-flow diagnostic run. Ideation considered failing tests/builds (none in the clean pulled tree), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, parser-trust gaps adjacent to the recent top-level/stray control-flow work, additional malformed-source exact diagnostics, negative pointer/storage-root coverage, and less-traveled enum/aggregate conformance contexts. The selected work package closes the next malformed-control-flow parser gap: statement-only control-flow keywords in `for` initializer/increment clauses now report targeted source-located diagnostics (`return is not allowed in for initializer`, `if statement is not allowed in for increment`, `case label outside switch`, etc.) instead of generic `unexpected token in for initializer/increment: ...`, while valid `for` loop `break`/`continue` behavior and prior top-level/function-body diagnostics remain unchanged.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_statement_only_control_flow_in_for_clauses_with_context -- --nocapture  # RED first: generic `unexpected token in for initializer: Return`; GREEN passed
+cargo test --test interpreter supports_break_and_continue_in_while_and_for_loops -- --nocapture
+cargo test --test interpreter rejects_unhandled_control_flow_with_context -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
 
 All passed after the 2026-07-01 autonomous stray control-flow diagnostic run. Ideation considered failing tests/builds (none in the clean pulled tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, parser-trust gaps adjacent to the just-completed top-level `return`/`break`/`continue` work, additional malformed-source exact diagnostics, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes the next control-flow parser diagnostic gap: file-scope `if`, `else`, `while`, `do`, `for`, `switch`, `case`, and `default` now report targeted source-located diagnostics instead of generic `unexpected token at top level`, and unmatched `else` inside function bodies now reports `else without matching if at line ..., column ...`. Valid loop/switch control-flow behavior remains unchanged.
 
