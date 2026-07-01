@@ -4,7 +4,19 @@ Last updated: 2026-07-01
 
 ## Latest autonomous verification
 
-All passed after the 2026-07-01 autonomous top-level control-flow diagnostic run. Ideation considered failing tests/builds (`cargo fmt --check` passed during the run and no active blocker was present), the only unchecked generic C-subset closure item in `status/todo.md`, more malformed-source exact diagnostics, negative pointer/storage-root coverage, and remaining less-traveled inline enum/aggregate contexts. The selected work package closes a parser-trust gap for control-flow keywords at file scope: top-level `return;`, `break;`, and `continue;` previously fell through to generic `unexpected token at top level: ...` errors even though Cust has targeted runtime diagnostics for the same unhandled flows. Cust now reports `return outside function at line ..., column ...`, `break outside loop or switch at line ..., column ...`, and `continue outside loop at line ..., column ...` directly from top-level parsing, while existing function-body invalid and valid loop/switch control-flow behavior remains unchanged.
+All passed after the 2026-07-01 autonomous stray control-flow diagnostic run. Ideation considered failing tests/builds (none in the clean pulled tree), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, parser-trust gaps adjacent to the just-completed top-level `return`/`break`/`continue` work, additional malformed-source exact diagnostics, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes the next control-flow parser diagnostic gap: file-scope `if`, `else`, `while`, `do`, `for`, `switch`, `case`, and `default` now report targeted source-located diagnostics instead of generic `unexpected token at top level`, and unmatched `else` inside function bodies now reports `else without matching if at line ..., column ...`. Valid loop/switch control-flow behavior remains unchanged.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_unhandled_control_flow_with_context -- --nocapture  # RED first: generic `unexpected token at top level: If`; GREEN passed
+cargo test --test interpreter supports_break_and_continue_in_while_and_for_loops -- --nocapture
+cargo test --test interpreter supports_switch_statements_with_cases_default_fallthrough_break_and_continue -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest: Ideation considered failing tests/builds (`cargo fmt --check` passed during the run and no active blocker was present), the only unchecked generic C-subset closure item in `status/todo.md`, more malformed-source exact diagnostics, negative pointer/storage-root coverage, and remaining less-traveled inline enum/aggregate contexts. The selected work package closes a parser-trust gap for control-flow keywords at file scope: top-level `return;`, `break;`, and `continue;` previously fell through to generic `unexpected token at top level: ...` errors even though Cust has targeted runtime diagnostics for the same unhandled flows. Cust now reports `return outside function at line ..., column ...`, `break outside loop or switch at line ..., column ...`, and `continue outside loop at line ..., column ...` directly from top-level parsing, while existing function-body invalid and valid loop/switch control-flow behavior remains unchanged.
 
 Commands verified so far:
 

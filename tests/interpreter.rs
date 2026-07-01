@@ -247,6 +247,42 @@ fn rejects_unhandled_control_flow_with_context() {
             "continue outside loop at line 1, column 1",
         ),
         (
+            "if (1) { return 1; }\nint main(void) { return 0; }",
+            "if statement outside function at line 1, column 1",
+        ),
+        (
+            "else { return 1; }\nint main(void) { return 0; }",
+            "else without matching if at line 1, column 1",
+        ),
+        (
+            "while (1) { break; }\nint main(void) { return 0; }",
+            "while loop outside function at line 1, column 1",
+        ),
+        (
+            "do { break; } while (0);\nint main(void) { return 0; }",
+            "do loop outside function at line 1, column 1",
+        ),
+        (
+            "for (;;) { break; }\nint main(void) { return 0; }",
+            "for loop outside function at line 1, column 1",
+        ),
+        (
+            "switch (1) { case 1: break; }\nint main(void) { return 0; }",
+            "switch statement outside function at line 1, column 1",
+        ),
+        (
+            "case 1: return 1;\nint main(void) { return 0; }",
+            "case label outside switch at line 1, column 1",
+        ),
+        (
+            "default: return 1;\nint main(void) { return 0; }",
+            "default label outside switch at line 1, column 1",
+        ),
+        (
+            "int main(void) {\n    else { return 1; }\n    return 0;\n}",
+            "else without matching if at line 2, column 5",
+        ),
+        (
             "int main(void) {\n    break;\n    return 0;\n}",
             "break outside loop or switch at line 2, column 5",
         ),

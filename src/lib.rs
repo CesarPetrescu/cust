@@ -1741,6 +1741,54 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            if self.check(&Token::If) {
+                return Err(Self::error_at(
+                    "if statement outside function".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.check(&Token::Else) {
+                return Err(Self::error_at(
+                    "else without matching if".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.check(&Token::While) {
+                return Err(Self::error_at(
+                    "while loop outside function".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.check(&Token::Do) {
+                return Err(Self::error_at(
+                    "do loop outside function".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.check(&Token::For) {
+                return Err(Self::error_at(
+                    "for loop outside function".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.check(&Token::Switch) {
+                return Err(Self::error_at(
+                    "switch statement outside function".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.check(&Token::Case) {
+                return Err(Self::error_at(
+                    "case label outside switch".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.check(&Token::Default) {
+                return Err(Self::error_at(
+                    "default label outside switch".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let _has_alignment_specifier = self.consume_alignment_specifiers()?;
             let leading_function_specifier = self.consume_function_specifiers();
             self.consume_thread_local_specifiers();
@@ -3597,6 +3645,10 @@ impl Parser {
             Token::Switch => self.parse_switch(),
             Token::Break => self.parse_break(),
             Token::Continue => self.parse_continue(),
+            Token::Else => Err(Self::error_at(
+                "else without matching if".to_string(),
+                self.peek_located(),
+            )),
             Token::Goto => Err(Self::error_at(
                 "goto statements are not supported".to_string(),
                 self.peek_located(),
