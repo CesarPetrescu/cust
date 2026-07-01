@@ -36,6 +36,8 @@ enum Token {
     Int,
     Char,
     Bool,
+    Float,
+    Double,
     Signed,
     Unsigned,
     Long,
@@ -1234,6 +1236,8 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     "int" => Token::Int,
                     "char" => Token::Char,
                     "_Bool" => Token::Bool,
+                    "float" => Token::Float,
+                    "double" => Token::Double,
                     "signed" => Token::Signed,
                     "unsigned" => Token::Unsigned,
                     "long" => Token::Long,
@@ -1801,6 +1805,8 @@ impl Parser {
                 Token::Int
                     | Token::Char
                     | Token::Bool
+                    | Token::Float
+                    | Token::Double
                     | Token::Signed
                     | Token::Unsigned
                     | Token::Long
@@ -2128,12 +2134,23 @@ impl Parser {
         Ok(())
     }
 
+    fn reject_floating_point_type_specifier(&self, token: &LocatedToken) -> CustResult<()> {
+        if matches!(token.kind, Token::Float | Token::Double) {
+            return Err(Self::error_at(
+                "floating-point types are not supported".to_string(),
+                token,
+            ));
+        }
+        Ok(())
+    }
+
     fn parse_decl_type_with_embedded_qualifiers(
         &mut self,
         context: &str,
     ) -> CustResult<(bool, DeclType)> {
         self.reject_leading_restrict_qualifier()?;
         let found = self.advance();
+        self.reject_floating_point_type_specifier(&found)?;
         let mut saw_const = false;
         match found.kind.clone() {
             Token::Int
@@ -3491,6 +3508,8 @@ impl Parser {
             Token::Int
             | Token::Char
             | Token::Bool
+            | Token::Float
+            | Token::Double
             | Token::Signed
             | Token::Unsigned
             | Token::Long
@@ -7066,6 +7085,8 @@ impl Parser {
                 Token::Int
                 | Token::Char
                 | Token::Bool
+                | Token::Float
+                | Token::Double
                 | Token::Signed
                 | Token::Unsigned
                 | Token::Long
@@ -7387,6 +7408,8 @@ impl Parser {
             Token::Int
                 | Token::Char
                 | Token::Bool
+                | Token::Float
+                | Token::Double
                 | Token::Signed
                 | Token::Unsigned
                 | Token::Long

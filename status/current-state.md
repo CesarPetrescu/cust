@@ -4,6 +4,20 @@ Last updated: 2026-07-01
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-01 autonomous unsupported floating-point type diagnostic run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, and remaining less-traveled direct enum/inline aggregate contexts. The selected work package closes a parser-trust gap around unsupported C floating-point type specifiers: `float` and `double` previously lexed as identifiers and produced generic top-level/statement/type-query/cast errors. Cust now lexes them as dedicated tokens and reports `floating-point types are not supported` at the offending keyword in top-level declarations, block locals, parameters, `sizeof` type names, casts, and aggregate fields, without adding floating-point runtime semantics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # pre-change baseline; passed
+cargo test --test interpreter rejects_floating_point_type_specifiers_with_context -- --nocapture  # RED first: generic unexpected token at top level for `float`; GREEN passed
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-07-01 autonomous parenthesized pointer cast/type-query diagnostic run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, and remaining less-traveled direct enum/inline aggregate contexts. The selected work package closes another parser-trust gap around unsupported parenthesized pointer type syntax in expression/type-query contexts: `(int (*)[3])0`, `sizeof(int (*)[3])`, and `_Alignof(int (*)[3])` previously fell through to generic closing-delimiter errors at the inner `(`; Cust now reports targeted parenthesized-pointer unsupported diagnostics at the `*` token while preserving supported ordinary pointer casts and `sizeof`/`_Alignof` type-name forms.
 
 Commands verified so far:

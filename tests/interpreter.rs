@@ -151,6 +151,41 @@ fn rejects_flexible_array_aggregate_fields_with_context() {
 }
 
 #[test]
+fn rejects_floating_point_type_specifiers_with_context() {
+    let cases = [
+        (
+            "float global_value;\nint main(void) { return 0; }",
+            "floating-point types are not supported at line 1, column 1",
+        ),
+        (
+            "int main(void) {\n    double local_value;\n    return 0;\n}",
+            "floating-point types are not supported at line 2, column 5",
+        ),
+        (
+            "int take(float value) { return 0; }\nint main(void) { return take(1); }",
+            "floating-point types are not supported at line 1, column 10",
+        ),
+        (
+            "int main(void) {\n    return sizeof(float);\n}",
+            "floating-point types are not supported at line 2, column 19",
+        ),
+        (
+            "int main(void) {\n    return (double)1;\n}",
+            "floating-point types are not supported at line 2, column 13",
+        ),
+        (
+            "struct Sample {\n    float value;\n};\nint main(void) { return 0; }",
+            "floating-point types are not supported at line 2, column 5",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_invalid_scalar_type_specifier_combinations_with_context() {
     let program = include_str!("fixtures/invalid/invalid_scalar_type_specifier_combination.c");
 
