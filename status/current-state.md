@@ -4,6 +4,20 @@ Last updated: 2026-07-01
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-01 autonomous unsupported complex type diagnostic run. Ideation considered failing tests/builds (none in the clean pulled worktree after focused baseline), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, and unsupported C numeric type specifiers adjacent to the just-completed floating-point diagnostics. The selected work package closes a parser-trust gap around unsupported C `_Complex` and `_Imaginary` type specifiers: they previously lexed as identifiers and produced generic top-level/type/cast errors. Cust now lexes them as dedicated tokens and reports `complex types are not supported` at the offending keyword in top-level declarations, block locals, parameters, `sizeof` type names, casts, and aggregate fields, without adding complex/imaginary runtime semantics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_complex_type_specifiers_with_context -- --nocapture  # RED first: generic unexpected token at top level for `_Complex`; GREEN passed
+cargo test --test interpreter rejects_floating_point_type_specifiers_with_context -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-07-01 autonomous unsupported floating-point type diagnostic run. Ideation considered failing tests/builds (`cargo test` baseline passed), active blockers (none), the remaining generic C-subset closure item in `status/todo.md`, malformed-source exact diagnostics, additional negative pointer/storage-root diagnostics, and remaining less-traveled direct enum/inline aggregate contexts. The selected work package closes a parser-trust gap around unsupported C floating-point type specifiers: `float` and `double` previously lexed as identifiers and produced generic top-level/statement/type-query/cast errors. Cust now lexes them as dedicated tokens and reports `floating-point types are not supported` at the offending keyword in top-level declarations, block locals, parameters, `sizeof` type names, casts, and aggregate fields, without adding floating-point runtime semantics.
 
 Commands verified so far:
