@@ -232,8 +232,20 @@ fn rejects_invalid_scalar_type_specifier_combinations_with_context() {
 }
 
 #[test]
-fn rejects_unhandled_break_and_continue_with_context() {
+fn rejects_unhandled_control_flow_with_context() {
     let cases = [
+        (
+            "return 7;\nint main(void) { return 0; }",
+            "return outside function at line 1, column 1",
+        ),
+        (
+            "break;\nint main(void) { return 0; }",
+            "break outside loop or switch at line 1, column 1",
+        ),
+        (
+            "continue;\nint main(void) { return 0; }",
+            "continue outside loop at line 1, column 1",
+        ),
         (
             "int main(void) {\n    break;\n    return 0;\n}",
             "break outside loop or switch at line 2, column 5",

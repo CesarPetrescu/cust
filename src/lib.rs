@@ -1723,6 +1723,24 @@ impl Parser {
                 globals.push(self.parse_static_assert()?);
                 continue;
             }
+            if self.check(&Token::Return) {
+                return Err(Self::error_at(
+                    "return outside function".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.check(&Token::Break) {
+                return Err(Self::error_at(
+                    "break outside loop or switch".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.check(&Token::Continue) {
+                return Err(Self::error_at(
+                    "continue outside loop".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let _has_alignment_specifier = self.consume_alignment_specifiers()?;
             let leading_function_specifier = self.consume_function_specifiers();
             self.consume_thread_local_specifiers();

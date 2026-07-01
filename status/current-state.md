@@ -4,6 +4,22 @@ Last updated: 2026-07-01
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-01 autonomous top-level control-flow diagnostic run. Ideation considered failing tests/builds (`cargo fmt --check` passed during the run and no active blocker was present), the only unchecked generic C-subset closure item in `status/todo.md`, more malformed-source exact diagnostics, negative pointer/storage-root coverage, and remaining less-traveled inline enum/aggregate contexts. The selected work package closes a parser-trust gap for control-flow keywords at file scope: top-level `return;`, `break;`, and `continue;` previously fell through to generic `unexpected token at top level: ...` errors even though Cust has targeted runtime diagnostics for the same unhandled flows. Cust now reports `return outside function at line ..., column ...`, `break outside loop or switch at line ..., column ...`, and `continue outside loop at line ..., column ...` directly from top-level parsing, while existing function-body invalid and valid loop/switch control-flow behavior remains unchanged.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_unhandled_control_flow_with_context -- --nocapture  # RED first: generic `unexpected token at top level: Return`; GREEN passed
+cargo test --test interpreter rejects_break_outside_loops -- --nocapture
+cargo test --test interpreter rejects_continue_outside_loops -- --nocapture
+cargo test --test interpreter supports_break_and_continue_in_while_and_for_loops -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+Previous latest:
+
 All passed after the 2026-07-01 autonomous break/continue source-location diagnostic run. Ideation considered failing tests/builds (focused baseline was clean), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, additional unsupported type-specifier diagnostics, less-traveled inline enum/aggregate conformance contexts, negative pointer/storage-root diagnostics, and malformed-source exact diagnostics. The selected work package closes a runtime diagnostic trust gap for unhandled control-flow statements: `break;` and `continue;` parsed with source locations but the runtime `ExecFlow` dropped them before reporting `break outside loop` / `continue outside loop`. Cust now carries `LocatedToken` metadata through `Stmt::Break`/`Stmt::Continue` and `ExecFlow`, reports `break outside loop or switch at line ..., column ...` and `continue outside loop at line ..., column ...`, and still consumes valid loop/switch `break`/`continue` normally.
 
 Commands verified so far:
