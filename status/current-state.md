@@ -4,6 +4,18 @@ Last updated: 2026-07-02
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-02 autonomous comma-operator missing-RHS diagnostic run. Ideation considered failing tests/builds (none in the clean pulled tree), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, malformed-source parser diagnostics adjacent to recent delimiter/control-flow work, negative pointer/storage-root coverage, and less-traveled enum/aggregate conformance contexts. The selected work package closes a parser-trust gap for malformed comma expressions: when the comma operator is followed by a delimiter or statement terminator, Cust now reports `expected expression after comma operator, found ...` at the delimiter instead of the generic primary-expression diagnostic, while valid comma-expression behavior remains unchanged.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_missing_rhs_after_comma_operator -- --nocapture  # RED first: generic `expected expression, found RParen`; GREEN passed
+cargo test --test interpreter supports_conditional_and_comma_expressions_for_aggregates -- --nocapture
+cargo test --test interpreter supports_sizeof_comma_expression_rhs_types_without_evaluating_operands -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-02 autonomous top-level unmatched-delimiter diagnostic run. Ideation considered failing tests/builds (none in the clean pulled tree), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, parser-trust gaps adjacent to recent top-level/control-flow diagnostic work, additional malformed-source exact diagnostics, negative pointer/storage-root coverage, and less-traveled enum/aggregate conformance contexts. The selected work package closes a fresh malformed-source parser gap: unmatched top-level `)` and `]` now report targeted source-located diagnostics (`unmatched ')' at top level`, `unmatched ']' at top level`) instead of generic `unexpected token at top level: RParen/RBracket`, while the existing unmatched top-level `}` and valid control-flow diagnostics remain unchanged.
 
 Commands verified so far:

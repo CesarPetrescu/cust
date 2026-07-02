@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-02 autonomous top-level unmatched-delimiter diagnostic run after focused RED/GREEN exact diagnostic coverage, adjacent parser diagnostic regression checks, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-07-02 autonomous comma-operator missing-RHS diagnostic run after focused RED/GREEN exact diagnostic coverage, adjacent comma-expression regression checks, full local verification, and required Docker verification passed. Docker Compose emitted non-fatal missing-buildx warnings but exited 0 for both required Docker commands.
 
 ## Blocker template
 

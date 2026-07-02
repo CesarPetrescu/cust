@@ -5045,14 +5045,25 @@ fn rejects_duplicate_switch_default_labels() {
 
 #[test]
 fn rejects_missing_rhs_after_comma_operator() {
-    let program = include_str!("fixtures/invalid/comma_missing_rhs.c");
+    let cases = [
+        (
+            include_str!("fixtures/invalid/comma_missing_rhs.c"),
+            "expected expression after comma operator, found RParen at line 3, column 19",
+        ),
+        (
+            "int main(void) {\n    return (1,];\n}\n",
+            "expected expression after comma operator, found RBracket at line 2, column 15",
+        ),
+        (
+            "int main(void) {\n    return 1,;\n}\n",
+            "expected expression after comma operator, found Semi at line 2, column 14",
+        ),
+    ];
 
-    let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "expected expression, found RParen at line 3, column 19"
-    );
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
 }
 
 #[test]

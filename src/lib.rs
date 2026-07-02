@@ -6763,6 +6763,18 @@ impl Parser {
     fn parse_comma_expr(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_assignment_expr()?;
         while self.matches(&Token::Comma) {
+            if matches!(
+                self.peek(),
+                Token::RParen | Token::RBracket | Token::Semi | Token::RBrace | Token::Eof
+            ) {
+                return Err(Self::error_at(
+                    format!(
+                        "expected expression after comma operator, found {:?}",
+                        self.peek()
+                    ),
+                    self.peek_located(),
+                ));
+            }
             let rhs = self.parse_assignment_expr()?;
             expr = Expr::Comma(Box::new(expr), Box::new(rhs));
         }
