@@ -7005,8 +7005,15 @@ impl Parser {
     fn parse_conditional_expr(&mut self) -> CustResult<Expr> {
         let cond = self.parse_logical_or()?;
         if self.matches(&Token::Question) {
+            self.reject_missing_conditional_operand("?", |token| matches!(token, Token::Colon))?;
             let then_expr = self.parse_expr()?;
             self.expect_colon_after("conditional then-expression")?;
+            self.reject_missing_conditional_operand(":", |token| {
+                matches!(
+                    token,
+                    Token::RParen | Token::RBracket | Token::Semi | Token::RBrace | Token::Eof
+                )
+            })?;
             let else_expr = self.parse_conditional_expr()?;
             Ok(Expr::Conditional {
                 cond: Box::new(cond),
@@ -7016,6 +7023,24 @@ impl Parser {
         } else {
             Ok(cond)
         }
+    }
+
+    fn reject_missing_conditional_operand(
+        &self,
+        marker: &str,
+        is_missing_operand_delimiter: impl FnOnce(&Token) -> bool,
+    ) -> CustResult<()> {
+        if is_missing_operand_delimiter(self.peek()) {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after '{}' in conditional operator, found {:?}",
+                    marker,
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
     }
 
     fn parse_logical_or(&mut self) -> CustResult<Expr> {

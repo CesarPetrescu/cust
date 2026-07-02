@@ -4,6 +4,18 @@ Last updated: 2026-07-02
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-02 autonomous conditional-operator missing-operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, malformed-source parser diagnostics adjacent to recent comma/delimiter work, negative pointer/storage-root coverage, and less-traveled enum/aggregate conformance contexts. The selected work package closes a parser-trust gap for malformed conditional expressions: missing `?:` then-operands and missing else-operands now report `expected expression after '?' in conditional operator, found ...` or `expected expression after ':' in conditional operator, found ...` at the delimiter/terminator instead of a generic primary-expression diagnostic, while valid conditional-expression parsing and existing missing-colon diagnostics remain unchanged.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_conditional_operator_operands_with_context -- --nocapture  # RED first: generic `expected expression, found Colon`; GREEN passed
+cargo test --test interpreter conditional -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-02 autonomous comma-operator missing-RHS diagnostic run. Ideation considered failing tests/builds (none in the clean pulled tree), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, malformed-source parser diagnostics adjacent to recent delimiter/control-flow work, negative pointer/storage-root coverage, and less-traveled enum/aggregate conformance contexts. The selected work package closes a parser-trust gap for malformed comma expressions: when the comma operator is followed by a delimiter or statement terminator, Cust now reports `expected expression after comma operator, found ...` at the delimiter instead of the generic primary-expression diagnostic, while valid comma-expression behavior remains unchanged.
 
 Commands verified so far:

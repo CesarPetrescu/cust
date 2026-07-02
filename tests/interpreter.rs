@@ -5154,6 +5154,29 @@ fn reports_missing_colon_in_conditional_operator() {
 }
 
 #[test]
+fn rejects_missing_conditional_operator_operands_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    return 1 ? : 2;\n}\n",
+            "expected expression after '?' in conditional operator, found Colon at line 2, column 16",
+        ),
+        (
+            "int main(void) {\n    return 1 ? 2 : ;\n}\n",
+            "expected expression after ':' in conditional operator, found Semi at line 2, column 20",
+        ),
+        (
+            "int main(void) {\n    return 1 ? 2 : );\n}\n",
+            "expected expression after ':' in conditional operator, found RParen at line 2, column 20",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn reports_missing_semicolon_after_do_while_conditions() {
     let program = include_str!("fixtures/invalid/do_while_missing_semicolon.c");
 
