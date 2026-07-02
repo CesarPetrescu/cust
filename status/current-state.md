@@ -4,6 +4,20 @@ Last updated: 2026-07-02
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-02 autonomous comma-leading function-call argument diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the next unchecked parser-trust closure item in `status/todo.md`, malformed function-call separators adjacent to the previous missing-initial-argument work, missing field-name coverage for `.`/`->` (already targeted by `expect_ident_after` in smoke checks), negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes a fresh malformed-source parser gap for comma-leading call arguments: `first(,)` and `add(, 2)` now report `expected function call argument, found Comma` at the comma instead of falling through to the generic primary-expression diagnostic. Valid function calls, empty zero-argument calls, and existing trailing-comma diagnostics remained unchanged in focused regression checks.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_initial_function_call_arguments_with_context -- --nocapture  # RED first for `first(,)`: generic `expected expression, found Comma`; GREEN passed
+cargo test --test interpreter reports_trailing_commas_in_function_call_argument_lists -- --nocapture
+cargo test --test interpreter supports_function_definitions_calls_and_parameters -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-02 autonomous function-call missing-initial-argument diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining generic parser-trust closure item in `status/todo.md`, malformed-source diagnostics adjacent to the recent expression/delimiter work, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes the next parser-trust gap for malformed function calls: `first(;` and `first(}` now report `expected function call argument, found ...` at the delimiter/terminator instead of falling through to the generic primary-expression diagnostic. Valid function-call behavior and existing trailing-comma call diagnostics remained unchanged in focused regression checks.
 
 Commands verified so far:

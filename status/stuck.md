@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-02 autonomous function-call missing-initial-argument diagnostic run after focused RED/GREEN exact diagnostic coverage, valid function-call and trailing-comma regression checks, full local Rust verification, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-07-02 autonomous comma-leading function-call argument diagnostic run after focused RED/GREEN exact diagnostic coverage, valid function-call and trailing-comma regression checks, full local Rust verification, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 

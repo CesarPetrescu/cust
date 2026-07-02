@@ -3909,6 +3909,14 @@ fn rejects_missing_initial_function_call_arguments_with_context() {
             "int first(int value) { return value; }\nint main() { return first(} }\n",
             "expected function call argument, found RBrace at line 2, column 27",
         ),
+        (
+            "int first(int value) { return value; }\nint main() { return first(,); }\n",
+            "expected function call argument, found Comma at line 2, column 27",
+        ),
+        (
+            "int add(int left, int right) { return left + right; }\nint main() { return add(, 2); }\n",
+            "expected function call argument, found Comma at line 2, column 25",
+        ),
     ];
 
     for (program, expected) in cases {

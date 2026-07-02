@@ -8162,7 +8162,7 @@ impl Parser {
         }
         if matches!(
             self.peek(),
-            Token::Semi | Token::LBrace | Token::RBrace | Token::Eof
+            Token::Comma | Token::Semi | Token::LBrace | Token::RBrace | Token::Eof
         ) {
             return Err(Self::error_at(
                 format!("expected function call argument, found {:?}", self.peek()),
