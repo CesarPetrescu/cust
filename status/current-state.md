@@ -4,6 +4,18 @@ Last updated: 2026-07-02
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-02 autonomous array-index missing-expression diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining generic parser-trust closure item in `status/todo.md`, malformed-source diagnostics adjacent to the recent comma/conditional/assignment/binary/unary/`sizeof` missing-operand work, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes the next parser-trust gap for malformed array, string, and postfix index expressions: `values[]`, `values[;`, `"hi"[]`, and `values[}` now report `expected array index expression, found ...` at the delimiter/terminator instead of falling through to the generic primary-expression diagnostic. Valid array, pointer, string, and aggregate-array indexing behavior remained unchanged in focused regression checks.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_array_index_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found RBracket`; GREEN passed
+cargo test --test interpreter array -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-02 autonomous `sizeof`/`_Alignof` missing-operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining generic parser-trust closure item in `status/todo.md`, malformed-source diagnostics adjacent to the recent comma/conditional/assignment/binary/unary missing-operand work, unsupported `sizeof`/`_Alignof` delimiter forms, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes the next parser-trust gap for malformed `sizeof` operands: `sizeof()`, `sizeof(,)`, and unparenthesized `sizeof;` now report `expected sizeof operand, found ...` at the delimiter/terminator instead of falling through to the generic primary-expression diagnostic. Adjacent `_Alignof()` / `_Alignof(,)` delimiter coverage was locked in with its existing targeted type diagnostic, and valid `sizeof`/`_Alignof` behavior remained unchanged in focused regression checks.
 
 Commands verified:

@@ -5098,6 +5098,33 @@ fn rejects_missing_rhs_after_comma_operator() {
 }
 
 #[test]
+fn rejects_missing_array_index_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    int values[2] = {1, 2};\n    return values[];\n}\n",
+            "expected array index expression, found RBracket at line 3, column 19",
+        ),
+        (
+            "int main(void) {\n    int values[2] = {1, 2};\n    return values[;\n}\n",
+            "expected array index expression, found Semi at line 3, column 19",
+        ),
+        (
+            "int main(void) {\n    return \"hi\"[];\n}\n",
+            "expected array index expression, found RBracket at line 2, column 17",
+        ),
+        (
+            "int main(void) {\n    int values[2] = {1, 2};\n    return values[};\n",
+            "expected array index expression, found RBrace at line 3, column 19",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_missing_rhs_after_binary_operators() {
     let cases = [
         (
