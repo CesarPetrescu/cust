@@ -7296,28 +7296,41 @@ impl Parser {
     fn parse_unary(&mut self) -> CustResult<Expr> {
         if self.matches(&Token::PlusPlus) {
             let operator = self.previous().clone();
+            self.reject_missing_unary_operand(&operator)?;
             let target = self.parse_unary()?;
             Self::increment_expr(target, IncrementOp::Inc, true, &operator)
         } else if self.matches(&Token::MinusMinus) {
             let operator = self.previous().clone();
+            self.reject_missing_unary_operand(&operator)?;
             let target = self.parse_unary()?;
             Self::increment_expr(target, IncrementOp::Dec, true, &operator)
         } else if self.matches(&Token::Plus) {
+            let operator = self.previous().clone();
+            self.reject_missing_unary_operand(&operator)?;
             Ok(Expr::UnaryPlus(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Minus) {
+            let operator = self.previous().clone();
+            self.reject_missing_unary_operand(&operator)?;
             Ok(Expr::UnaryMinus(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Tilde) {
+            let operator = self.previous().clone();
+            self.reject_missing_unary_operand(&operator)?;
             Ok(Expr::BitwiseNot(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Bang) {
+            let operator = self.previous().clone();
+            self.reject_missing_unary_operand(&operator)?;
             Ok(Expr::LogicalNot(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Sizeof) {
             self.parse_sizeof()
         } else if self.matches(&Token::Alignof) {
             self.parse_alignof()
         } else if self.matches(&Token::Star) {
+            let operator = self.previous().clone();
+            self.reject_missing_unary_operand(&operator)?;
             Ok(Expr::Deref(Box::new(self.parse_unary()?)))
         } else if self.matches(&Token::Amp) {
             let operator = self.previous().clone();
+            self.reject_missing_unary_operand(&operator)?;
             let target = self.parse_unary()?;
             Self::address_of_expr(target, &operator)
         } else if self.check(&Token::LParen) && self.starts_cast_type_after_lparen() {
@@ -7325,6 +7338,43 @@ impl Parser {
             self.parse_postfix_suffix(expr)
         } else {
             self.parse_postfix()
+        }
+    }
+
+    fn reject_missing_unary_operand(&self, operator: &LocatedToken) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Comma
+                | Token::Colon
+                | Token::RParen
+                | Token::RBracket
+                | Token::Semi
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after unary operator '{}', found {:?}",
+                    Self::unary_operator_label(&operator.kind),
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn unary_operator_label(token: &Token) -> &'static str {
+        match token {
+            Token::PlusPlus => "++",
+            Token::MinusMinus => "--",
+            Token::Plus => "+",
+            Token::Minus => "-",
+            Token::Tilde => "~",
+            Token::Bang => "!",
+            Token::Star => "*",
+            Token::Amp => "&",
+            _ => "<unknown>",
         }
     }
 

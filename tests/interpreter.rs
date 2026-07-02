@@ -3791,7 +3791,7 @@ fn reports_line_and_column_for_parser_expression_errors() {
 
     assert_eq!(
         err.to_string(),
-        "expected expression, found Semi at line 2, column 9"
+        "expected expression after unary operator '+', found Semi at line 2, column 9"
     );
 }
 
@@ -5084,6 +5084,37 @@ fn rejects_missing_rhs_after_binary_operators() {
         (
             "int main(void) {\n    if (1 == }) { return 1; }\n    return 0;\n}\n",
             "expected expression after binary operator '==', found RBrace at line 2, column 14",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_missing_operands_after_unary_operators() {
+    let cases = [
+        (
+            "int main(void) {\n    return !;\n}\n",
+            "expected expression after unary operator '!', found Semi at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return ~);\n}\n",
+            "expected expression after unary operator '~', found RParen at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return ++];\n}\n",
+            "expected expression after unary operator '++', found RBracket at line 2, column 14",
+        ),
+        (
+            "int main(void) {\n    return *}\n",
+            "expected expression after unary operator '*', found RBrace at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return &;\n}\n",
+            "expected expression after unary operator '&', found Semi at line 2, column 13",
         ),
     ];
 

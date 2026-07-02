@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-02 autonomous binary-operator missing-RHS diagnostic run after focused RED/GREEN exact diagnostic coverage, operator precedence regression checks, full local Rust verification, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-07-02 autonomous unary-operator missing-operand diagnostic run after focused RED/GREEN exact diagnostic coverage, unary/logical/bitwise/increment regression checks, full local Rust verification, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 
