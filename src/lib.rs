@@ -6371,7 +6371,8 @@ impl Parser {
         self.expect(Token::Star)?;
         let pointer = self.parse_unary()?;
         if let Some(op) = self.compound_assignment_op() {
-            self.advance();
+            let operator = self.advance();
+            self.reject_missing_assignment_rhs(&operator)?;
             let value = self.parse_expr()?;
             self.expect_semicolon_after("assignment")?;
             return Ok(
@@ -6382,7 +6383,8 @@ impl Parser {
                 })),
             );
         }
-        self.expect_assign_after("assignment")?;
+        let equals = self.expect_assignment_operator_after("assignment")?;
+        self.reject_missing_assignment_rhs(&equals)?;
         let value = self.parse_expr()?;
         self.expect_semicolon_after("assignment")?;
         Ok(self.with_pending_inline_enum_decl(Stmt::DerefAssign { pointer, value }))
@@ -6399,7 +6401,8 @@ impl Parser {
                 let index = self.parse_index_expr()?;
                 self.expect_closing_bracket_after("array index")?;
                 if let Some(op) = self.compound_assignment_op() {
-                    self.advance();
+                    let operator = self.advance();
+                    self.reject_missing_assignment_rhs(&operator)?;
                     let value = self.parse_expr()?;
                     if require_semi {
                         self.expect_semicolon_after("assignment")?;
@@ -6414,7 +6417,9 @@ impl Parser {
                         },
                     )));
                 }
-                self.expect_assign_after("struct array field assignment")?;
+                let equals =
+                    self.expect_assignment_operator_after("struct array field assignment")?;
+                self.reject_missing_assignment_rhs(&equals)?;
                 let value = self.parse_expr()?;
                 if require_semi {
                     self.expect_semicolon_after("assignment")?;
@@ -6429,7 +6434,8 @@ impl Parser {
                 );
             }
             if let Some(op) = self.compound_assignment_op() {
-                self.advance();
+                let operator = self.advance();
+                self.reject_missing_assignment_rhs(&operator)?;
                 let value = self.parse_expr()?;
                 if require_semi {
                     self.expect_semicolon_after("assignment")?;
@@ -6443,7 +6449,8 @@ impl Parser {
                     },
                 )));
             }
-            self.expect_assign_after("struct field assignment")?;
+            let equals = self.expect_assignment_operator_after("struct field assignment")?;
+            self.reject_missing_assignment_rhs(&equals)?;
             let value = self.parse_expr()?;
             if require_semi {
                 self.expect_semicolon_after("assignment")?;
@@ -6458,7 +6465,8 @@ impl Parser {
             let index = self.parse_index_expr()?;
             self.expect_closing_bracket_after("array index")?;
             if let Some(op) = self.compound_assignment_op() {
-                self.advance();
+                let operator = self.advance();
+                self.reject_missing_assignment_rhs(&operator)?;
                 let value = self.parse_expr()?;
                 if require_semi {
                     self.expect_semicolon_after("assignment")?;
@@ -6472,7 +6480,8 @@ impl Parser {
                     },
                 )));
             }
-            self.expect_assign_after("assignment")?;
+            let equals = self.expect_assignment_operator_after("assignment")?;
+            self.reject_missing_assignment_rhs(&equals)?;
             let value = self.parse_expr()?;
             if require_semi {
                 self.expect_semicolon_after("assignment")?;
@@ -6484,7 +6493,8 @@ impl Parser {
             }));
         }
         if let Some(op) = self.compound_assignment_op() {
-            self.advance();
+            let operator = self.advance();
+            self.reject_missing_assignment_rhs(&operator)?;
             let value = self.parse_expr()?;
             if require_semi {
                 self.expect_semicolon_after("assignment")?;
@@ -6497,7 +6507,8 @@ impl Parser {
                 })),
             );
         }
-        self.expect_assign_after("assignment")?;
+        let equals = self.expect_assignment_operator_after("assignment")?;
+        self.reject_missing_assignment_rhs(&equals)?;
         let expr = self.parse_expr()?;
         if require_semi {
             self.expect_semicolon_after("assignment")?;
@@ -6789,6 +6800,7 @@ impl Parser {
         let target = self.parse_conditional_expr()?;
         if let Some(op) = self.compound_assignment_op() {
             let operator = self.advance();
+            self.reject_missing_assignment_rhs(&operator)?;
             let value = self.parse_assignment_expr()?;
             match target {
                 Expr::Var(name) => Ok(Expr::CompoundAssign {
@@ -6901,6 +6913,7 @@ impl Parser {
             }
         } else if self.check(&Token::Assign) {
             let equals = self.advance();
+            self.reject_missing_assignment_rhs(&equals)?;
             let value = self.parse_assignment_expr()?;
             match target {
                 Expr::Var(name) => Ok(Expr::Assign {
@@ -6999,6 +7012,46 @@ impl Parser {
             }
         } else {
             Ok(target)
+        }
+    }
+
+    fn reject_missing_assignment_rhs(&self, operator: &LocatedToken) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Comma
+                | Token::Colon
+                | Token::RParen
+                | Token::RBracket
+                | Token::Semi
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after assignment operator '{}', found {:?}",
+                    Self::assignment_operator_label(&operator.kind),
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn assignment_operator_label(token: &Token) -> &'static str {
+        match token {
+            Token::Assign => "=",
+            Token::PlusAssign => "+=",
+            Token::MinusAssign => "-=",
+            Token::StarAssign => "*=",
+            Token::SlashAssign => "/=",
+            Token::PercentAssign => "%=",
+            Token::AmpAssign => "&=",
+            Token::PipeAssign => "|=",
+            Token::CaretAssign => "^=",
+            Token::ShiftLeftAssign => "<<=",
+            Token::ShiftRightAssign => ">>=",
+            _ => "<unknown>",
         }
     }
 
@@ -8096,9 +8149,13 @@ impl Parser {
     }
 
     fn expect_assign_after(&mut self, context: &str) -> CustResult<()> {
+        self.expect_assignment_operator_after(context).map(|_| ())
+    }
+
+    fn expect_assignment_operator_after(&mut self, context: &str) -> CustResult<LocatedToken> {
         let found = self.advance();
         if found.kind == Token::Assign {
-            Ok(())
+            Ok(found)
         } else {
             Err(Self::error_at(
                 format!("expected '=' after {context}, found {:?}", found.kind),

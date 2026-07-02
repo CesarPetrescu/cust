@@ -5142,6 +5142,29 @@ fn rejects_non_lvalue_compound_assignment_expressions() {
 }
 
 #[test]
+fn rejects_missing_rhs_after_assignment_operators() {
+    let cases = [
+        (
+            include_str!("fixtures/invalid/assignment_missing_rhs.c"),
+            "expected expression after assignment operator '=', found Semi at line 3, column 13",
+        ),
+        (
+            "int main(void) {\n    int value = 1;\n    value += );\n    return value;\n}\n",
+            "expected expression after assignment operator '+=', found RParen at line 3, column 14",
+        ),
+        (
+            "int main(void) {\n    int value = 1;\n    value <<= }\n",
+            "expected expression after assignment operator '<<=', found RBrace at line 3, column 15",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn reports_missing_colon_in_conditional_operator() {
     let program = include_str!("fixtures/invalid/conditional_missing_colon.c");
 
