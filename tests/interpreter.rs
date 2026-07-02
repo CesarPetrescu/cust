@@ -3938,6 +3938,25 @@ fn reports_trailing_commas_in_function_parameter_lists() {
 }
 
 #[test]
+fn rejects_missing_function_parameters_around_commas_with_context() {
+    let cases = [
+        (
+            "int add(, int b) { return b; }\nint main(void) { return add(1); }\n",
+            "expected function parameter, found Comma at line 1, column 9",
+        ),
+        (
+            "int add(int a,, int b) { return a + b; }\nint main(void) { return add(1, 2); }\n",
+            "expected function parameter after ',', found Comma at line 1, column 15",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn reports_missing_closing_brackets_after_array_lengths() {
     let program = "int main() {\nint values[2;\nreturn 0;\n}\n";
 

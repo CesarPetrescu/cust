@@ -3287,6 +3287,12 @@ impl Parser {
                 &void_token,
             ));
         }
+        if self.check(&Token::Comma) {
+            return Err(Self::error_at(
+                format!("expected function parameter, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
 
         loop {
             if self.starts_ellipsis() {
@@ -3439,7 +3445,12 @@ impl Parser {
             if self.matches(&Token::Comma) {
                 if matches!(
                     self.peek(),
-                    Token::RParen | Token::Semi | Token::LBrace | Token::RBrace | Token::Eof
+                    Token::Comma
+                        | Token::RParen
+                        | Token::Semi
+                        | Token::LBrace
+                        | Token::RBrace
+                        | Token::Eof
                 ) {
                     return Err(Self::error_at(
                         format!(

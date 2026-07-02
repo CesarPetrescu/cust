@@ -1,8 +1,22 @@
 # Cust Current State
 
-Last updated: 2026-07-02
+Last updated: 2026-07-03
 
 ## Latest autonomous verification
+
+All passed after the 2026-07-03 autonomous malformed function-parameter comma diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the next unchecked C-subset closure item in `status/todo.md`, remaining malformed-source parser trust gaps, missing field-name diagnostics after `.`/`->` (already targeted in current parser routes), negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes a fresh function-parameter list gap: leading parameter commas (`int add(, int b)`) now report `expected function parameter, found Comma`, and doubled parameter separators (`int add(int a,, int b)`) now report `expected function parameter after ',', found Comma`, instead of falling through to the generic parameter type parser. Existing trailing-comma diagnostics and valid function definitions/calls stayed green in focused regression checks.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_function_parameters_around_commas_with_context -- --nocapture  # RED first for leading comma: generic `expected type, found Comma`; GREEN passed
+cargo test --test interpreter reports_trailing_commas_in_function_parameter_lists -- --nocapture
+cargo test --test interpreter reports_trailing_commas_after_pointer_parameters -- --nocapture
+cargo test --test interpreter supports_function_definitions_calls_and_parameters -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
 
 All passed after the 2026-07-02 autonomous comma-leading function-call argument diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the next unchecked parser-trust closure item in `status/todo.md`, malformed function-call separators adjacent to the previous missing-initial-argument work, missing field-name coverage for `.`/`->` (already targeted by `expect_ident_after` in smoke checks), negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes a fresh malformed-source parser gap for comma-leading call arguments: `first(,)` and `add(, 2)` now report `expected function call argument, found Comma` at the comma instead of falling through to the generic primary-expression diagnostic. Valid function calls, empty zero-argument calls, and existing trailing-comma diagnostics remained unchanged in focused regression checks.
 
