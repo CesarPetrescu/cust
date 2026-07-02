@@ -8160,6 +8160,15 @@ impl Parser {
         if self.check(&Token::RParen) {
             return Ok(args);
         }
+        if matches!(
+            self.peek(),
+            Token::Semi | Token::LBrace | Token::RBrace | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!("expected function call argument, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
 
         loop {
             args.push(self.parse_assignment_expr()?);

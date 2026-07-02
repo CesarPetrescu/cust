@@ -3899,6 +3899,25 @@ fn reports_trailing_commas_in_function_call_argument_lists() {
 }
 
 #[test]
+fn rejects_missing_initial_function_call_arguments_with_context() {
+    let cases = [
+        (
+            "int first(int value) { return value; }\nint main() { return first(; }\n",
+            "expected function call argument, found Semi at line 2, column 27",
+        ),
+        (
+            "int first(int value) { return value; }\nint main() { return first(} }\n",
+            "expected function call argument, found RBrace at line 2, column 27",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn reports_trailing_commas_in_function_parameter_lists() {
     let program = "int add(int a,) { return a; }\nint main() { return add(1); }\n";
 

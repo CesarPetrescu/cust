@@ -4,6 +4,19 @@ Last updated: 2026-07-02
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-02 autonomous function-call missing-initial-argument diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining generic parser-trust closure item in `status/todo.md`, malformed-source diagnostics adjacent to the recent expression/delimiter work, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes the next parser-trust gap for malformed function calls: `first(;` and `first(}` now report `expected function call argument, found ...` at the delimiter/terminator instead of falling through to the generic primary-expression diagnostic. Valid function-call behavior and existing trailing-comma call diagnostics remained unchanged in focused regression checks.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_initial_function_call_arguments_with_context -- --nocapture  # RED first: generic `expected expression, found Semi`; GREEN passed
+cargo test --test interpreter supports_function_definitions_calls_and_parameters -- --nocapture
+cargo test --test interpreter reports_trailing_commas_in_function_call_argument_lists -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-02 autonomous array-index missing-expression diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining generic parser-trust closure item in `status/todo.md`, malformed-source diagnostics adjacent to the recent comma/conditional/assignment/binary/unary/`sizeof` missing-operand work, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes the next parser-trust gap for malformed array, string, and postfix index expressions: `values[]`, `values[;`, `"hi"[]`, and `values[}` now report `expected array index expression, found ...` at the delimiter/terminator instead of falling through to the generic primary-expression diagnostic. Valid array, pointer, string, and aggregate-array indexing behavior remained unchanged in focused regression checks.
 
 Commands verified so far:
