@@ -4,6 +4,18 @@ Last updated: 2026-07-02
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-02 autonomous top-level unmatched-delimiter diagnostic run. Ideation considered failing tests/builds (none in the clean pulled tree), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, parser-trust gaps adjacent to recent top-level/control-flow diagnostic work, additional malformed-source exact diagnostics, negative pointer/storage-root coverage, and less-traveled enum/aggregate conformance contexts. The selected work package closes a fresh malformed-source parser gap: unmatched top-level `)` and `]` now report targeted source-located diagnostics (`unmatched ')' at top level`, `unmatched ']' at top level`) instead of generic `unexpected token at top level: RParen/RBracket`, while the existing unmatched top-level `}` and valid control-flow diagnostics remain unchanged.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_unmatched_top_level_delimiters_with_context -- --nocapture  # RED first: generic `unexpected token at top level: RParen`; GREEN passed
+cargo test --test interpreter rejects_unhandled_control_flow_with_context -- --nocapture
+cargo test --test interpreter rejects_statement_only_control_flow_in_for_clauses_with_context -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-02 autonomous `for`-clause control-flow diagnostic run. Ideation considered failing tests/builds (none in the clean pulled tree), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, parser-trust gaps adjacent to the recent top-level/stray control-flow work, additional malformed-source exact diagnostics, negative pointer/storage-root coverage, and less-traveled enum/aggregate conformance contexts. The selected work package closes the next malformed-control-flow parser gap: statement-only control-flow keywords in `for` initializer/increment clauses now report targeted source-located diagnostics (`return is not allowed in for initializer`, `if statement is not allowed in for increment`, `case label outside switch`, etc.) instead of generic `unexpected token in for initializer/increment: ...`, while valid `for` loop `break`/`continue` behavior and prior top-level/function-body diagnostics remain unchanged.
 
 Commands verified so far:

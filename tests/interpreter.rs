@@ -232,6 +232,25 @@ fn rejects_invalid_scalar_type_specifier_combinations_with_context() {
 }
 
 #[test]
+fn rejects_unmatched_top_level_delimiters_with_context() {
+    let cases = [
+        (
+            ")\nint main(void) { return 0; }\n",
+            "unmatched ')' at top level at line 1, column 1",
+        ),
+        (
+            "]\nint main(void) { return 0; }\n",
+            "unmatched ']' at top level at line 1, column 1",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_unhandled_control_flow_with_context() {
     let cases = [
         (

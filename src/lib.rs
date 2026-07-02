@@ -1719,6 +1719,18 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            if self.check(&Token::RParen) {
+                return Err(Self::error_at(
+                    "unmatched ')' at top level".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            if self.check(&Token::RBracket) {
+                return Err(Self::error_at(
+                    "unmatched ']' at top level".to_string(),
+                    self.peek_located(),
+                ));
+            }
             if self.check(&Token::StaticAssert) {
                 globals.push(self.parse_static_assert()?);
                 continue;
