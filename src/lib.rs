@@ -7675,6 +7675,7 @@ impl Parser {
 
     fn parse_sizeof(&mut self) -> CustResult<Expr> {
         if self.matches(&Token::LParen) {
+            self.reject_missing_sizeof_operand()?;
             if self.is_type_name_start() {
                 let sizeof_type = self.parse_sizeof_like_type_name("sizeof")?;
                 self.expect_closing_paren_after("sizeof type")?;
@@ -7685,8 +7686,28 @@ impl Parser {
                 Ok(Expr::SizeOfValue(Box::new(expr)))
             }
         } else {
+            self.reject_missing_sizeof_operand()?;
             Ok(Expr::SizeOfValue(Box::new(self.parse_unary()?)))
         }
+    }
+
+    fn reject_missing_sizeof_operand(&self) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Comma
+                | Token::Colon
+                | Token::RParen
+                | Token::RBracket
+                | Token::Semi
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!("expected sizeof operand, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
     }
 
     fn parse_alignof(&mut self) -> CustResult<Expr> {

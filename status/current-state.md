@@ -4,6 +4,23 @@ Last updated: 2026-07-02
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-02 autonomous `sizeof`/`_Alignof` missing-operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining generic parser-trust closure item in `status/todo.md`, malformed-source diagnostics adjacent to the recent comma/conditional/assignment/binary/unary missing-operand work, unsupported `sizeof`/`_Alignof` delimiter forms, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes the next parser-trust gap for malformed `sizeof` operands: `sizeof()`, `sizeof(,)`, and unparenthesized `sizeof;` now report `expected sizeof operand, found ...` at the delimiter/terminator instead of falling through to the generic primary-expression diagnostic. Adjacent `_Alignof()` / `_Alignof(,)` delimiter coverage was locked in with its existing targeted type diagnostic, and valid `sizeof`/`_Alignof` behavior remained unchanged in focused regression checks.
+
+Commands verified:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_sizeof_and_alignof_operands_with_context -- --nocapture  # RED first for sizeof(): generic `expected expression, found RParen`; GREEN passed
+cargo test --test interpreter supports_sizeof_operator_for_types_scalars_arrays_strings_and_pointers -- --nocapture
+cargo test --test interpreter supports_alignof_type_names -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test  # passed; non-fatal missing-buildx warning emitted
+docker compose run --rm cust  # passed; non-fatal missing-buildx warning emitted, printed 10
+```
+
 All passed after the 2026-07-02 autonomous unary-operator missing-operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the already-completed high-level roadmap, the only unchecked generic C-subset closure item in `status/todo.md`, malformed-source parser diagnostics adjacent to the recent comma/conditional/assignment/binary missing-operand work, negative pointer/storage-root coverage, and less-traveled enum/aggregate conformance contexts. The selected work package closes the next parser-trust gap for malformed prefix unary expressions: `++`, `--`, unary `+`, unary `-`, `~`, `!`, dereference `*`, and address-of `&` now detect delimiter/terminator tokens immediately after the operator and report `expected expression after unary operator '<op>', found ...` at the offending token instead of falling through to generic primary-expression diagnostics. Valid unary, bitwise, logical, and prefix/postfix increment behavior remained unchanged in focused regression checks.
 
 Commands verified:

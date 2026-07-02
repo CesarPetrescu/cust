@@ -1437,6 +1437,37 @@ fn supports_sizeof_pointer_expressions_without_evaluating_operands() {
 }
 
 #[test]
+fn rejects_missing_sizeof_and_alignof_operands_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    return sizeof();\n}\n",
+            "expected sizeof operand, found RParen at line 2, column 19",
+        ),
+        (
+            "int main(void) {\n    return sizeof(,);\n}\n",
+            "expected sizeof operand, found Comma at line 2, column 19",
+        ),
+        (
+            "int main(void) {\n    return sizeof;\n}\n",
+            "expected sizeof operand, found Semi at line 2, column 18",
+        ),
+        (
+            "int main(void) {\n    return _Alignof();\n}\n",
+            "expected _Alignof type, found RParen at line 2, column 21",
+        ),
+        (
+            "int main(void) {\n    return _Alignof(,);\n}\n",
+            "expected _Alignof type, found Comma at line 2, column 21",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn supports_sizeof_comma_expression_rhs_types_without_evaluating_operands() {
     let program = include_str!("fixtures/valid/sizeof_comma_expression_types.c");
 
