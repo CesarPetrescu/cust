@@ -4,6 +4,24 @@ Last updated: 2026-07-02
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-02 autonomous binary-operator missing-RHS diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the already-completed high-level roadmap, the only unchecked generic C-subset closure item in `status/todo.md`, malformed-source parser diagnostics adjacent to the recent comma/conditional/assignment missing-operand work, negative pointer/storage-root coverage, and less-traveled enum/aggregate conformance contexts. The selected work package closes a parser-trust gap for malformed binary expressions: logical, bitwise, equality/comparison, shift, additive, multiplicative, and remainder operators now detect delimiter/terminator tokens immediately after the operator and report `expected expression after binary operator '<op>', found ...` at the offending token instead of falling through to the generic primary-expression diagnostic. Valid operator precedence and parsing behavior remained unchanged in focused regression checks.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_rhs_after_binary_operators -- --nocapture  # RED first: generic `expected expression, found Semi`; GREEN passed
+cargo test --test interpreter supports_bitwise_and_shift_operators_with_c_precedence -- --nocapture
+cargo test --test interpreter supports_logical_operators_short_circuiting_and_unary_plus -- --nocapture
+cargo test --test interpreter respects_arithmetic_precedence_with_unary_and_remainder -- --nocapture
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test  # passed; non-fatal missing-buildx warning emitted
+docker compose run --rm cust  # passed; non-fatal missing-buildx warning emitted, printed 10
+```
+
 All passed after the 2026-07-02 autonomous assignment-operator missing-RHS diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the only unchecked generic C-subset closure item in `status/todo.md`, malformed-source parser diagnostics adjacent to recent comma/conditional missing-operand work, negative pointer/storage-root coverage, and remaining less-traveled enum/aggregate conformance contexts. The selected work package closes a parser-trust gap for malformed assignment expressions and assignment statements: `=`, compound assignment operators such as `+=`, and shift/bitwise compound operators such as `<<=` now detect delimiter/terminator tokens immediately after the assignment operator and report `expected expression after assignment operator '<op>', found ...` at the offending token instead of a generic primary-expression diagnostic. The check covers expression-level assignments and statement-level scalar, dereference, array, struct-field, and embedded-array assignment routes.
 
 Commands verified so far:

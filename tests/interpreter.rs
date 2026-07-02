@@ -5067,6 +5067,33 @@ fn rejects_missing_rhs_after_comma_operator() {
 }
 
 #[test]
+fn rejects_missing_rhs_after_binary_operators() {
+    let cases = [
+        (
+            "int main(void) {\n    return 1 + ;\n}\n",
+            "expected expression after binary operator '+', found Semi at line 2, column 16",
+        ),
+        (
+            "int main(void) {\n    return (1 && );\n}\n",
+            "expected expression after binary operator '&&', found RParen at line 2, column 18",
+        ),
+        (
+            "int main(void) {\n    return 1 << ];\n}\n",
+            "expected expression after binary operator '<<', found RBracket at line 2, column 17",
+        ),
+        (
+            "int main(void) {\n    if (1 == }) { return 1; }\n    return 0;\n}\n",
+            "expected expression after binary operator '==', found RBrace at line 2, column 14",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_pointer_bitwise_operations() {
     let program = include_str!("fixtures/invalid/pointer_bitwise_operation.c");
 

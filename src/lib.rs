@@ -7098,7 +7098,8 @@ impl Parser {
 
     fn parse_logical_or(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_logical_and()?;
-        while self.matches(&Token::OrOr) {
+        while let Some(operator) = self.match_binary_operator(&Token::OrOr) {
+            self.reject_missing_binary_rhs(&operator)?;
             let rhs = self.parse_logical_and()?;
             expr = Expr::Binary(Box::new(expr), BinaryOp::LogicalOr, Box::new(rhs));
         }
@@ -7107,7 +7108,8 @@ impl Parser {
 
     fn parse_logical_and(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_bitwise_or()?;
-        while self.matches(&Token::AndAnd) {
+        while let Some(operator) = self.match_binary_operator(&Token::AndAnd) {
+            self.reject_missing_binary_rhs(&operator)?;
             let rhs = self.parse_bitwise_or()?;
             expr = Expr::Binary(Box::new(expr), BinaryOp::LogicalAnd, Box::new(rhs));
         }
@@ -7116,7 +7118,8 @@ impl Parser {
 
     fn parse_bitwise_or(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_bitwise_xor()?;
-        while self.matches(&Token::Pipe) {
+        while let Some(operator) = self.match_binary_operator(&Token::Pipe) {
+            self.reject_missing_binary_rhs(&operator)?;
             let rhs = self.parse_bitwise_xor()?;
             expr = Expr::Binary(Box::new(expr), BinaryOp::BitOr, Box::new(rhs));
         }
@@ -7125,7 +7128,8 @@ impl Parser {
 
     fn parse_bitwise_xor(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_bitwise_and()?;
-        while self.matches(&Token::Caret) {
+        while let Some(operator) = self.match_binary_operator(&Token::Caret) {
+            self.reject_missing_binary_rhs(&operator)?;
             let rhs = self.parse_bitwise_and()?;
             expr = Expr::Binary(Box::new(expr), BinaryOp::BitXor, Box::new(rhs));
         }
@@ -7134,7 +7138,8 @@ impl Parser {
 
     fn parse_bitwise_and(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_equality()?;
-        while self.matches(&Token::Amp) {
+        while let Some(operator) = self.match_binary_operator(&Token::Amp) {
+            self.reject_missing_binary_rhs(&operator)?;
             let rhs = self.parse_equality()?;
             expr = Expr::Binary(Box::new(expr), BinaryOp::BitAnd, Box::new(rhs));
         }
@@ -7144,13 +7149,14 @@ impl Parser {
     fn parse_equality(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_comparison()?;
         loop {
-            let op = if self.matches(&Token::Eq) {
-                BinaryOp::Eq
-            } else if self.matches(&Token::Ne) {
-                BinaryOp::Ne
+            let (op, operator) = if let Some(operator) = self.match_binary_operator(&Token::Eq) {
+                (BinaryOp::Eq, operator)
+            } else if let Some(operator) = self.match_binary_operator(&Token::Ne) {
+                (BinaryOp::Ne, operator)
             } else {
                 break;
             };
+            self.reject_missing_binary_rhs(&operator)?;
             let rhs = self.parse_comparison()?;
             expr = Expr::Binary(Box::new(expr), op, Box::new(rhs));
         }
@@ -7160,17 +7166,18 @@ impl Parser {
     fn parse_comparison(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_shift()?;
         loop {
-            let op = if self.matches(&Token::Lt) {
-                BinaryOp::Lt
-            } else if self.matches(&Token::Le) {
-                BinaryOp::Le
-            } else if self.matches(&Token::Gt) {
-                BinaryOp::Gt
-            } else if self.matches(&Token::Ge) {
-                BinaryOp::Ge
+            let (op, operator) = if let Some(operator) = self.match_binary_operator(&Token::Lt) {
+                (BinaryOp::Lt, operator)
+            } else if let Some(operator) = self.match_binary_operator(&Token::Le) {
+                (BinaryOp::Le, operator)
+            } else if let Some(operator) = self.match_binary_operator(&Token::Gt) {
+                (BinaryOp::Gt, operator)
+            } else if let Some(operator) = self.match_binary_operator(&Token::Ge) {
+                (BinaryOp::Ge, operator)
             } else {
                 break;
             };
+            self.reject_missing_binary_rhs(&operator)?;
             let rhs = self.parse_shift()?;
             expr = Expr::Binary(Box::new(expr), op, Box::new(rhs));
         }
@@ -7180,13 +7187,15 @@ impl Parser {
     fn parse_shift(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_term()?;
         loop {
-            let op = if self.matches(&Token::ShiftLeft) {
-                BinaryOp::ShiftLeft
-            } else if self.matches(&Token::ShiftRight) {
-                BinaryOp::ShiftRight
-            } else {
-                break;
-            };
+            let (op, operator) =
+                if let Some(operator) = self.match_binary_operator(&Token::ShiftLeft) {
+                    (BinaryOp::ShiftLeft, operator)
+                } else if let Some(operator) = self.match_binary_operator(&Token::ShiftRight) {
+                    (BinaryOp::ShiftRight, operator)
+                } else {
+                    break;
+                };
+            self.reject_missing_binary_rhs(&operator)?;
             let rhs = self.parse_term()?;
             expr = Expr::Binary(Box::new(expr), op, Box::new(rhs));
         }
@@ -7196,13 +7205,14 @@ impl Parser {
     fn parse_term(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_factor()?;
         loop {
-            let op = if self.matches(&Token::Plus) {
-                BinaryOp::Add
-            } else if self.matches(&Token::Minus) {
-                BinaryOp::Sub
+            let (op, operator) = if let Some(operator) = self.match_binary_operator(&Token::Plus) {
+                (BinaryOp::Add, operator)
+            } else if let Some(operator) = self.match_binary_operator(&Token::Minus) {
+                (BinaryOp::Sub, operator)
             } else {
                 break;
             };
+            self.reject_missing_binary_rhs(&operator)?;
             let rhs = self.parse_factor()?;
             expr = Expr::Binary(Box::new(expr), op, Box::new(rhs));
         }
@@ -7212,19 +7222,75 @@ impl Parser {
     fn parse_factor(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_unary()?;
         loop {
-            let op = if self.matches(&Token::Star) {
-                BinaryOp::Mul
-            } else if self.matches(&Token::Slash) {
-                BinaryOp::Div
-            } else if self.matches(&Token::Percent) {
-                BinaryOp::Rem
+            let (op, operator) = if let Some(operator) = self.match_binary_operator(&Token::Star) {
+                (BinaryOp::Mul, operator)
+            } else if let Some(operator) = self.match_binary_operator(&Token::Slash) {
+                (BinaryOp::Div, operator)
+            } else if let Some(operator) = self.match_binary_operator(&Token::Percent) {
+                (BinaryOp::Rem, operator)
             } else {
                 break;
             };
+            self.reject_missing_binary_rhs(&operator)?;
             let rhs = self.parse_unary()?;
             expr = Expr::Binary(Box::new(expr), op, Box::new(rhs));
         }
         Ok(expr)
+    }
+
+    fn match_binary_operator(&mut self, token: &Token) -> Option<LocatedToken> {
+        if self.check(token) {
+            Some(self.advance())
+        } else {
+            None
+        }
+    }
+
+    fn reject_missing_binary_rhs(&self, operator: &LocatedToken) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Comma
+                | Token::Colon
+                | Token::RParen
+                | Token::RBracket
+                | Token::Semi
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after binary operator '{}', found {:?}",
+                    Self::binary_operator_label(&operator.kind),
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn binary_operator_label(token: &Token) -> &'static str {
+        match token {
+            Token::OrOr => "||",
+            Token::AndAnd => "&&",
+            Token::Pipe => "|",
+            Token::Caret => "^",
+            Token::Amp => "&",
+            Token::Eq => "==",
+            Token::Ne => "!=",
+            Token::Lt => "<",
+            Token::Le => "<=",
+            Token::Gt => ">",
+            Token::Ge => ">=",
+            Token::ShiftLeft => "<<",
+            Token::ShiftRight => ">>",
+            Token::Plus => "+",
+            Token::Minus => "-",
+            Token::Star => "*",
+            Token::Slash => "/",
+            Token::Percent => "%",
+            _ => "<unknown>",
+        }
     }
 
     fn parse_unary(&mut self) -> CustResult<Expr> {
