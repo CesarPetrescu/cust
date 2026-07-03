@@ -4,6 +4,18 @@ Last updated: 2026-07-03
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-03 autonomous malformed path-designator diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the next unchecked parser/runtime parity gap in `status/todo.md`, malformed nested declaration/type-name routes, declaration-list edge cases after comma-separated pointer/aggregate declarators, remaining compound-literal/string-initializer source-location gaps, negative pointer/storage-root coverage, and less-traveled enum/inline aggregate conformance contexts. The selected work package closes a path-designator parser-trust slice: malformed struct initializer designators such as `.inner. = 1`, `.values[] = 1`, and `.values[;] = 1` now have exact regression coverage, and empty array path designators now report `expected array designator index before ']' at line ..., column ...` instead of the generic integer-constant diagnostic.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_malformed_path_designators_with_context -- --nocapture  # RED first: `.values[]` reported generic `expected array designator index, found RBracket`; GREEN passed after parser guard
+cargo test --test interpreter designator -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-03 autonomous compound-literal excess-initializer diagnostic source-location run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the next unchecked parser/runtime parity gap in `status/todo.md`, malformed designator paths, declaration-list edge cases after comma-separated declarators, negative pointer/storage-root diagnostics, less-traveled inline enum/aggregate contexts, and the candidate compound-literal excess-initializer source-location gap. The selected work package completes that parser-trust slice: fixed-size scalar array compound literals and aggregate-array compound literals now report `too many initializers for ... compound literal at line ..., column ...` at the first excess initializer token instead of returning unlocated diagnostics. Existing invalid compound-literal tests were tightened to assert exact locations.
 
 Commands verified so far:

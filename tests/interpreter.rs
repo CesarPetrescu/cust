@@ -3206,6 +3206,29 @@ fn rejects_struct_array_path_designators_outside_declared_length() {
 }
 
 #[test]
+fn rejects_malformed_path_designators_with_context() {
+    let cases = [
+        (
+            "struct Inner { int x; };\nstruct Box { struct Inner inner; };\nint main(void) {\n    struct Box box = { .inner. = 1 };\n    return 0;\n}\n",
+            "expected struct field name after '.', found Assign at line 4, column 32",
+        ),
+        (
+            "struct Packet { int values[2]; };\nint main(void) {\n    struct Packet packet = { .values[] = 1 };\n    return 0;\n}\n",
+            "expected array designator index before ']' at line 3, column 38",
+        ),
+        (
+            "struct Packet { int values[2]; };\nint main(void) {\n    struct Packet packet = { .values[;] = 1 };\n    return 0;\n}\n",
+            "expected array designator index, found Semi at line 3, column 38",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_struct_initializers_longer_than_declared_fields() {
     let program = include_str!("fixtures/invalid/struct_initializer_too_long.c");
 

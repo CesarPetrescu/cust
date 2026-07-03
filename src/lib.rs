@@ -4896,6 +4896,13 @@ impl Parser {
 
     fn parse_unbounded_array_designator_index(&mut self) -> CustResult<usize> {
         self.expect(Token::LBracket)?;
+        if self.check(&Token::RBracket) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected array designator index before ']'".to_string(),
+                &found,
+            ));
+        }
         let (value, first_token) =
             self.parse_integer_constant_expr(&HashMap::new(), "expected array designator index")?;
         let index = Self::array_designator_value_to_index(value, &first_token)?;
@@ -4920,6 +4927,13 @@ impl Parser {
         len: usize,
     ) -> CustResult<usize> {
         self.expect(Token::LBracket)?;
+        if self.check(&Token::RBracket) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected array designator index before ']'".to_string(),
+                &found,
+            ));
+        }
         let (value, first_token) =
             self.parse_integer_constant_expr(&HashMap::new(), "expected array designator index")?;
         let index = Self::array_designator_value_to_index(value, &first_token)?;
