@@ -1333,7 +1333,7 @@ fn reports_char_array_string_initializer_too_long() {
 
     assert_eq!(
         err.to_string(),
-        "initializer string for char array 'short_text' is too long"
+        "initializer string for char array 'short_text' is too long at line 2, column 26"
     );
 }
 
@@ -1345,7 +1345,7 @@ fn reports_struct_char_array_string_initializer_too_long() {
 
     assert_eq!(
         err.to_string(),
-        "initializer string for char array 'text' is too long"
+        "initializer string for char array 'text' is too long at line 6, column 27"
     );
 }
 
@@ -1803,7 +1803,7 @@ fn rejects_array_compound_literal_string_initializers_that_are_too_long() {
     let err = interpret(program).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "initializer string for char array compound literal is too long"
+        "initializer string for char array compound literal is too long at line 2, column 28"
     );
 }
 

@@ -1,8 +1,21 @@
 # Cust Current State
 
-Last updated: 2026-07-03
+Last updated: 2026-07-04
 
 ## Latest autonomous verification
+
+All passed after the 2026-07-04 autonomous char-array string initializer source-location diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the next unchecked parser-trust closure item in `status/todo.md`, inferred-array initializer delimiter routes, nested declaration/type-name delimiter gaps, non-`char` string initializer type-mismatch source locations, malformed designator path variants, negative pointer/storage-root diagnostics, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes a string-initializer diagnostic source-location gap: fixed char array declarations (`char short_text[2] = "abc"`), aggregate char-array field initializers (`struct Label label = {"toolong"}`), and fixed-size char array compound literals (`(char[3]){"four"}`) now report their existing too-long string diagnostics with exact `at line ..., column ...` metadata at the offending string literal token instead of returning unlocated parser errors.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter string_initializer_too_long -- --nocapture  # RED first: unlocated too-long string diagnostics; GREEN passed after preserving LocatedToken
+cargo test --test interpreter array_compound_literal_string_initializers_that_are_too_long -- --nocapture  # RED first corrected expected string column to 28; GREEN passed
+cargo test --test interpreter initializer -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
 
 All passed after the 2026-07-03 autonomous array/aggregate-array missing-initializer diagnostic run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the next unchecked parser/runtime parity gap in `status/todo.md`, malformed nested declaration/type-name routes, declaration-list edge cases after comma-separated pointer/aggregate declarators, remaining compound-literal/string-initializer source-location gaps, negative pointer/storage-root coverage, and less-traveled enum/inline aggregate conformance contexts. The selected work package closes a declaration-list parser-trust slice: fixed scalar array declarations (`int values[2] = ;`), array declaration-list tails (`int a[1] = {1}, b[2] = ;`), fixed aggregate-array declarations (`struct Point points[1] = ;`), and aggregate-array declaration-list tails now report `expected initializer expression after '=' in array/struct array declaration, found ...` at the delimiter instead of the less-specific `expected '{' after ... initializer` diagnostic.
 

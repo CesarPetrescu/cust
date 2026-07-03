@@ -4754,7 +4754,8 @@ impl Parser {
         len: usize,
         elem_type: CType,
     ) -> CustResult<Option<Vec<ArrayInitializer>>> {
-        let Token::StringLiteral(values) = self.peek().clone() else {
+        let token = self.peek_located().clone();
+        let Token::StringLiteral(values) = token.kind.clone() else {
             return Ok(None);
         };
         self.advance();
@@ -4767,9 +4768,10 @@ impl Parser {
         let too_long =
             values.len() > len && !(values.len() == len + 1 && values.last() == Some(&0));
         if too_long {
-            return Err(CustError::new(format!(
-                "initializer string for char array '{name}' is too long"
-            )));
+            return Err(Self::error_at(
+                format!("initializer string for char array '{name}' is too long"),
+                &token,
+            ));
         }
         Ok(Some(vec![ArrayInitializer::StringLiteral(values)]))
     }
@@ -4850,6 +4852,7 @@ impl Parser {
                 next_positional_index = index + 1;
                 values.push(ArrayInitializer::Designated { index, value });
             } else if let Token::StringLiteral(string_values) = self.peek().clone() {
+                let token = self.peek_located().clone();
                 self.advance();
                 let string_values = self.concatenate_adjacent_string_literals(string_values);
                 if elem_type != CType::Char {
@@ -4862,8 +4865,10 @@ impl Parser {
                         && !(string_values.len() == len + 1 && string_values.last() == Some(&0))
                 });
                 if too_long {
-                    return Err(CustError::new(
-                        "initializer string for char array compound literal is too long",
+                    return Err(Self::error_at(
+                        "initializer string for char array compound literal is too long"
+                            .to_string(),
+                        &token,
                     ));
                 }
                 next_positional_index = string_values.len();
