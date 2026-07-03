@@ -5428,6 +5428,29 @@ fn rejects_missing_braced_initializer_elements_with_context() {
 }
 
 #[test]
+fn rejects_missing_braced_scalar_initializer_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    int value = {,};\n    return value;\n}\n",
+            "expected initializer element in braced scalar initializer for variable 'value', found Comma at line 2, column 18",
+        ),
+        (
+            "int main(void) {\n    int value = {};\n    return value;\n}\n",
+            "expected initializer element in braced scalar initializer for variable 'value', found RBrace at line 2, column 18",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) {\n    struct Point point = { .x = {,} };\n    return 0;\n}\n",
+            "expected initializer element in braced scalar initializer for struct field 'x', found Comma at line 3, column 34",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn reports_missing_colon_in_conditional_operator() {
     let program = include_str!("fixtures/invalid/conditional_missing_colon.c");
 

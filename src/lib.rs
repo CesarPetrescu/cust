@@ -5109,6 +5109,9 @@ impl Parser {
             return self.parse_assignment_expr();
         }
         self.expect_opening_brace_after(context)?;
+        self.reject_missing_braced_initializer_element(&format!(
+            "braced scalar initializer for {context}"
+        ))?;
         let expr = self.parse_assignment_expr()?;
         if self.matches(&Token::Comma) {
             if self.matches(&Token::RBrace) {
