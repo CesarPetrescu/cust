@@ -4,6 +4,17 @@ Last updated: 2026-07-03
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-03 autonomous compound-literal excess-initializer diagnostic source-location run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the next unchecked parser/runtime parity gap in `status/todo.md`, malformed designator paths, declaration-list edge cases after comma-separated declarators, negative pointer/storage-root diagnostics, less-traveled inline enum/aggregate contexts, and the candidate compound-literal excess-initializer source-location gap. The selected work package completes that parser-trust slice: fixed-size scalar array compound literals and aggregate-array compound literals now report `too many initializers for ... compound literal at line ..., column ...` at the first excess initializer token instead of returning unlocated diagnostics. Existing invalid compound-literal tests were tightened to assert exact locations.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter compound_literals_longer_than_declared_length -- --nocapture  # RED first: unlocated too-many-initializers diagnostics; GREEN passed after parser fix
+cargo test --test interpreter initializers -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-03 autonomous excess braced-initializer diagnostic source-location run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the next unchecked parser-trust closure item in `status/todo.md`, malformed designator paths, declaration-list edge cases, scalar braced initializer excess-entry delimiter variants, negative pointer/storage-root diagnostics, and remaining less-traveled inline enum/aggregate conformance contexts. The selected work package closes a source-location gap for excess braced initializer entries: scalar braced initializers (`int value = {1, 2}`), scalar arrays, scalar struct/union initializers, nested struct-field initializers, and struct-array initializers now report `too many initializers for ... at line ..., column ...` at the first excess initializer token instead of returning an unlocated parser error. Existing too-many-initializer tests were tightened to assert exact locations.
 
 Commands verified so far:

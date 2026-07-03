@@ -4869,8 +4869,10 @@ impl Parser {
                 values.push(ArrayInitializer::StringLiteral(string_values));
             } else {
                 if matches!(len, Some(len) if next_positional_index == len) {
-                    return Err(CustError::new(
-                        "too many initializers for array compound literal",
+                    let token = self.peek_located().clone();
+                    return Err(Self::error_at(
+                        "too many initializers for array compound literal".to_string(),
+                        &token,
                     ));
                 }
                 values.push(ArrayInitializer::Expr(
@@ -5219,8 +5221,10 @@ impl Parser {
                 next_positional_index = index + 1;
             } else {
                 if matches!(len, Some(len) if next_positional_index == len) {
-                    return Err(CustError::new(
-                        "too many initializers for aggregate array compound literal",
+                    let token = self.peek_located().clone();
+                    return Err(Self::error_at(
+                        "too many initializers for aggregate array compound literal".to_string(),
+                        &token,
                     ));
                 }
                 values.push(StructArrayInitializer::Element(

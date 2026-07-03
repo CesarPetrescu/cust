@@ -1770,7 +1770,7 @@ fn rejects_aggregate_array_compound_literals_longer_than_declared_length() {
     let err = interpret(program).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "too many initializers for aggregate array compound literal"
+        "too many initializers for aggregate array compound literal at line 7, column 54"
     );
 }
 
@@ -1792,7 +1792,7 @@ fn rejects_array_compound_literals_longer_than_declared_length() {
     let err = interpret(program).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "too many initializers for array compound literal"
+        "too many initializers for array compound literal at line 2, column 34"
     );
 }
 
