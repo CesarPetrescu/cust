@@ -3722,6 +3722,33 @@ fn rejects_unknown_struct_fields() {
 }
 
 #[test]
+fn rejects_missing_struct_field_names_after_dot_and_arrow_with_context() {
+    let cases = [
+        (
+            "struct Point { int x; };\nint main(void) { struct Point p = {1}; return p.; }\n",
+            "expected struct field name after '.', found Semi at line 2, column 49",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) { struct Point p = {1}; return p.]; }\n",
+            "expected struct field name after '.', found RBracket at line 2, column 49",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) { struct Point p = {1}; struct Point *q = &p; return q->; }\n",
+            "expected struct field name after '->', found Semi at line 2, column 72",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) { struct Point p = {1}; struct Point *q = &p; return q->]; }\n",
+            "expected struct field name after '->', found RBracket at line 2, column 72",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_empty_returns_from_char_functions() {
     let program = include_str!("fixtures/invalid/char_function_empty_return.c");
 

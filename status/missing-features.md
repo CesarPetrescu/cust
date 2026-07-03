@@ -207,6 +207,8 @@ Prioritized backlog for autonomous implementation.
 - [x] Field access on aggregate-array element assignment results parses and evaluates as by-value aggregate result selection. Acceptance: `(points[0] = replacement).x`, `(line.points[1] = replacement).tag`, and `(line_ptr->points[0] = replacement).x` mutate the assignment target, return a copied aggregate value for field selection, and `sizeof((marker = marker + 1, (points[1] = replacement).tag))` remains non-evaluating with the selected field size, with interpreter and warning-free C compiler-oracle coverage.
 - [x] Field access on aggregate-field assignment results parses and evaluates as by-value aggregate result selection. Acceptance: `(line.start = replacement).x` and `(slot->end = other).tag` mutate the selected aggregate field, return a copied aggregate value for field selection, and `sizeof((marker = marker + 1, (line.end = other).tag))` remains non-evaluating with the selected field size, with interpreter and warning-free C compiler-oracle coverage.
 
+- [x] Field-access parser diagnostics after direct `.` and pointer `->` selectors have exact-output regression coverage. Acceptance covered by malformed `p.;`, `p.];`, `q->;`, and `q->];` reporting `expected struct field name after '.'/'->', found ...` with source locations; focused coverage passed immediately because the shared field-name parser helper already produced the desired contextual diagnostics.
+
 ## P4 — product quality
 
 - [x] CLI flag: `--tokens`

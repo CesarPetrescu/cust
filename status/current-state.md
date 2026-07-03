@@ -4,6 +4,17 @@ Last updated: 2026-07-03
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-03 autonomous missing struct-field-name diagnostic coverage run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the next unchecked parser-trust closure item in `status/todo.md`, whether missing field-name diagnostics after direct `.` and pointer `->` selectors needed stronger exact-output coverage, additional malformed declaration/type-name delimiter routes, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package locks in exact parser diagnostics for malformed field selectors: `p.;` / `p.];` now have regression coverage for `expected struct field name after '.', found ...`, and `q->;` / `q->];` now have regression coverage for `expected struct field name after '->', found ...`. Focused coverage passed immediately because the existing shared `expect_ident_after(...)` route already preserved the contextual diagnostic, so this is parser-trust coverage rather than a production-code fix.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_struct_field_names_after_dot_and_arrow_with_context -- --nocapture  # immediate GREEN; existing parser helper already produced exact contextual diagnostics
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-03 autonomous misplaced closing-bracket call/parameter diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the next unchecked C-subset parser-trust closure item in `status/todo.md`, field-name diagnostics after `.`/`->` (current `expect_ident_after` routes already preserve exact output), negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes a newly discovered malformed delimiter gap adjacent to the recent function call/parameter comma work: `first(]` now reports `expected function call argument, found RBracket`, `add(1,]` reports `expected function call argument after ',', found RBracket`, `int add(] int b)` reports `expected function parameter, found RBracket`, and `int add(int a,] int b)` reports `expected function parameter after ',', found RBracket` instead of falling through to generic expression/type diagnostics. Existing valid calls/definitions and trailing-comma diagnostics stayed green in focused regression checks.
 
 Commands verified so far:
