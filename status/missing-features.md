@@ -209,6 +209,7 @@ Prioritized backlog for autonomous implementation.
 
 - [x] Field-access parser diagnostics after direct `.` and pointer `->` selectors have exact-output regression coverage. Acceptance covered by malformed `p.;`, `p.];`, `q->;`, and `q->];` reporting `expected struct field name after '.'/'->', found ...` with source locations; focused coverage passed immediately because the shared field-name parser helper already produced the desired contextual diagnostics.
 - [x] Declaration initializer missing-expression diagnostics are targeted before generic expression parsing. Acceptance covered by `int value = ;`, `int value = 1, other = ;`, `int *slot = ,`, and `struct Point point = ;` reporting `expected initializer expression after '=' in ... declaration, found ...` at the delimiter/terminator, while omitted initializers (`int value;`, `int *slot;`) and braced aggregate initializers remain valid.
+- [x] Braced initializer missing-element diagnostics are targeted before generic expression parsing. Acceptance covered by scalar array initializer forms such as `int values[2] = {, 1}`, array designator values such as `[0] = ,`, struct/union initializer forms such as `struct Point point = {, 1}` and `.x = ,`, and aggregate-array initializers such as `struct Point points[2] = {, {1, 2}}` reporting `expected initializer element in ... initializer, found ...` at the offending delimiter while preserving empty `{}` and trailing-comma initializers.
 
 ## P4 — product quality
 

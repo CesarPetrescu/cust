@@ -4694,6 +4694,27 @@ impl Parser {
         Ok(())
     }
 
+    fn reject_missing_braced_initializer_element(&self, context: &str) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Comma
+                | Token::Semi
+                | Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected initializer element in {context}, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
     fn parse_array_initializer_or_string(
         &mut self,
         name: &str,
@@ -4764,9 +4785,12 @@ impl Parser {
             return Ok(values);
         }
         loop {
+            let context = format!("array '{name}' initializer");
+            self.reject_missing_braced_initializer_element(&context)?;
             if self.check(&Token::LBracket) {
                 let index = self.parse_array_designator_index(name, len)?;
                 self.expect_assign_after("array designator")?;
+                self.reject_missing_braced_initializer_element(&context)?;
                 let value =
                     self.parse_scalar_initializer_expr(&format!("array '{name}' element"))?;
                 next_positional_index = index + 1;
@@ -4808,6 +4832,7 @@ impl Parser {
             return Ok(values);
         }
         loop {
+            self.reject_missing_braced_initializer_element("array compound literal initializer")?;
             if self.check(&Token::LBracket) {
                 let index = match len {
                     Some(len) => self
@@ -4815,6 +4840,9 @@ impl Parser {
                     None => self.parse_unbounded_array_designator_index()?,
                 };
                 self.expect_assign_after("array designator")?;
+                self.reject_missing_braced_initializer_element(
+                    "array compound literal initializer",
+                )?;
                 let value = self.parse_scalar_initializer_expr("array compound literal element")?;
                 next_positional_index = index + 1;
                 values.push(ArrayInitializer::Designated { index, value });
@@ -4933,6 +4961,8 @@ impl Parser {
             return Ok(values);
         }
         loop {
+            let context = format!("{aggregate_keyword} '{type_name}' initializer");
+            self.reject_missing_braced_initializer_element(&context)?;
             if self.matches(&Token::Dot) {
                 let (field_index, field_name, value) =
                     self.parse_struct_designator_after_dot(type_name, &fields)?;
@@ -5033,6 +5063,9 @@ impl Parser {
             }
         } else {
             self.expect_assign_after("struct field designator")?;
+            self.reject_missing_braced_initializer_element(&format!(
+                "struct '{type_name}' initializer"
+            ))?;
             self.parse_struct_initializer_value(field)?
         };
         Ok((field_index, field_name, value))
@@ -5102,12 +5135,15 @@ impl Parser {
             return Ok(values);
         }
         loop {
+            let context = format!("struct array '{name}' initializer");
+            self.reject_missing_braced_initializer_element(&context)?;
             if self.check(&Token::LBracket) {
                 let index = self.parse_array_designator_index_with_context(
                     &format!("struct array '{name}'"),
                     len,
                 )?;
                 self.expect_assign_after("array designator")?;
+                self.reject_missing_braced_initializer_element(&context)?;
                 values.push(StructArrayInitializer::Designated {
                     index,
                     value: self.parse_struct_initializer(type_name)?,
@@ -5150,6 +5186,9 @@ impl Parser {
             return Ok(values);
         }
         loop {
+            self.reject_missing_braced_initializer_element(
+                "aggregate array compound literal initializer",
+            )?;
             if self.check(&Token::LBracket) {
                 let index = match len {
                     Some(len) => self.parse_array_designator_index_with_context(
@@ -5159,6 +5198,9 @@ impl Parser {
                     None => self.parse_unbounded_array_designator_index()?,
                 };
                 self.expect_assign_after("array designator")?;
+                self.reject_missing_braced_initializer_element(
+                    "aggregate array compound literal initializer",
+                )?;
                 values.push(StructArrayInitializer::Designated {
                     index,
                     value: self.parse_struct_initializer(type_name)?,

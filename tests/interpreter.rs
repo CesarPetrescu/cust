@@ -5397,6 +5397,37 @@ fn rejects_missing_declaration_initializer_expressions_with_context() {
 }
 
 #[test]
+fn rejects_missing_braced_initializer_elements_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    int values[2] = {, 1};\n    return 0;\n}\n",
+            "expected initializer element in array 'values' initializer, found Comma at line 2, column 22",
+        ),
+        (
+            "int main(void) {\n    int values[2] = { [0] = , 1};\n    return 0;\n}\n",
+            "expected initializer element in array 'values' initializer, found Comma at line 2, column 29",
+        ),
+        (
+            "struct Point { int x; int y; };\nint main(void) {\n    struct Point point = {, 1};\n    return 0;\n}\n",
+            "expected initializer element in struct 'Point' initializer, found Comma at line 3, column 27",
+        ),
+        (
+            "struct Point { int x; int y; };\nint main(void) {\n    struct Point point = {.x = , .y = 1};\n    return 0;\n}\n",
+            "expected initializer element in struct 'Point' initializer, found Comma at line 3, column 32",
+        ),
+        (
+            "struct Point { int x; int y; };\nint main(void) {\n    struct Point points[2] = {, {1, 2}};\n    return 0;\n}\n",
+            "expected initializer element in struct array 'points' initializer, found Comma at line 3, column 31",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn reports_missing_colon_in_conditional_operator() {
     let program = include_str!("fixtures/invalid/conditional_missing_colon.c");
 
