@@ -4,6 +4,17 @@ Last updated: 2026-07-03
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-03 autonomous declaration-initializer missing-expression diagnostic run. Ideation considered failing tests/builds (clean tree after pull; focused test suite compiled before the selected regression), active blockers (none), the next unchecked parser-trust closure item in `status/todo.md`, fresh malformed declaration/type-name delimiter routes, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes a newly discovered declaration initializer diagnostic gap: `int value = ;`, declaration-list tails like `int value = 1, other = ;`, pointer declarations like `int *slot = ,`, and aggregate declarations like `struct Point point = ;` now report `expected initializer expression after '=' in ... declaration, found ...` at the delimiter instead of falling through to the generic primary-expression parser. The fix is parser-local and preserves valid zero-initialized omitted declarations plus braced aggregate initializers.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_missing_declaration_initializer_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found Semi/Comma`; GREEN passed
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-03 autonomous missing struct-field-name diagnostic coverage run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the next unchecked parser-trust closure item in `status/todo.md`, whether missing field-name diagnostics after direct `.` and pointer `->` selectors needed stronger exact-output coverage, additional malformed declaration/type-name delimiter routes, negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package locks in exact parser diagnostics for malformed field selectors: `p.;` / `p.];` now have regression coverage for `expected struct field name after '.', found ...`, and `q->;` / `q->];` now have regression coverage for `expected struct field name after '->', found ...`. Focused coverage passed immediately because the existing shared `expect_ident_after(...)` route already preserved the contextual diagnostic, so this is parser-trust coverage rather than a production-code fix.
 
 Commands verified so far:

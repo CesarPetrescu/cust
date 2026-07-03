@@ -4181,6 +4181,7 @@ impl Parser {
             }
             let expr = if self.matches(&Token::Assign) {
                 self.last_decl_had_initializer = true;
+                self.reject_missing_declaration_initializer_expr("pointer declaration")?;
                 self.parse_assignment_expr()?
             } else if matches!(self.peek(), Token::Semi | Token::Comma) {
                 Expr::Number(0)
@@ -4295,6 +4296,9 @@ impl Parser {
                         self.parse_struct_initializer(type_name)?,
                     ))
                 } else {
+                    self.reject_missing_declaration_initializer_expr(
+                        "struct variable declaration",
+                    )?;
                     Some(StructVarInitializer::Expr(self.parse_assignment_expr()?))
                 }
             } else {
@@ -4508,6 +4512,7 @@ impl Parser {
             }
             let expr = if self.matches(&Token::Assign) {
                 self.last_decl_had_initializer = true;
+                self.reject_missing_declaration_initializer_expr("pointer declaration")?;
                 self.parse_assignment_expr()?
             } else if matches!(self.peek(), Token::Semi | Token::Comma) {
                 Expr::Number(0)
@@ -4623,6 +4628,9 @@ impl Parser {
                                 self.parse_struct_initializer(&type_name)?,
                             ))
                         } else {
+                            self.reject_missing_declaration_initializer_expr(
+                                "struct variable declaration",
+                            )?;
                             Some(StructVarInitializer::Expr(self.parse_assignment_expr()?))
                         }
                     } else {
@@ -4648,6 +4656,7 @@ impl Parser {
     ) -> CustResult<Stmt> {
         let expr = if self.matches(&Token::Assign) {
             self.last_decl_had_initializer = true;
+            self.reject_missing_declaration_initializer_expr("variable declaration")?;
             self.parse_scalar_initializer_expr(&format!("variable '{name}'"))?
         } else if matches!(self.peek(), Token::Semi | Token::Comma) {
             Expr::Number(0)
@@ -4661,6 +4670,28 @@ impl Parser {
             expr,
             is_const,
         })
+    }
+
+    fn reject_missing_declaration_initializer_expr(&self, context: &str) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Comma
+                | Token::Colon
+                | Token::RParen
+                | Token::RBracket
+                | Token::Semi
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected initializer expression after '=' in {context}, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
     }
 
     fn parse_array_initializer_or_string(
@@ -5574,6 +5605,9 @@ impl Parser {
             }
             let expr = if self.matches(&Token::Assign) {
                 self.last_decl_had_initializer = true;
+                self.reject_missing_declaration_initializer_expr(&format!(
+                    "{keyword} pointer declaration"
+                ))?;
                 self.parse_assignment_expr()?
             } else if matches!(self.peek(), Token::Semi | Token::Comma) {
                 Expr::Number(0)
@@ -5656,6 +5690,9 @@ impl Parser {
                     self.parse_struct_initializer(&type_name)?,
                 ))
             } else {
+                self.reject_missing_declaration_initializer_expr(&format!(
+                    "{keyword} variable declaration"
+                ))?;
                 Some(StructVarInitializer::Expr(self.parse_assignment_expr()?))
             }
         } else {

@@ -5370,6 +5370,33 @@ fn rejects_missing_rhs_after_assignment_operators() {
 }
 
 #[test]
+fn rejects_missing_declaration_initializer_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    int value = ;\n    return value;\n}\n",
+            "expected initializer expression after '=' in variable declaration, found Semi at line 2, column 17",
+        ),
+        (
+            "int main(void) {\n    int value = 1, other = ;\n    return value + other;\n}\n",
+            "expected initializer expression after '=' in variable declaration, found Semi at line 2, column 28",
+        ),
+        (
+            "int main(void) {\n    int value = 1;\n    int *slot = , fallback = 0;\n    return value;\n}\n",
+            "expected initializer expression after '=' in pointer declaration, found Comma at line 3, column 17",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) {\n    struct Point point = ;\n    return 0;\n}\n",
+            "expected initializer expression after '=' in struct variable declaration, found Semi at line 3, column 26",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn reports_missing_colon_in_conditional_operator() {
     let program = include_str!("fixtures/invalid/conditional_missing_colon.c");
 
