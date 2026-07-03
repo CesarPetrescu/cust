@@ -4797,9 +4797,11 @@ impl Parser {
                 values.push(ArrayInitializer::Designated { index, value });
             } else {
                 if next_positional_index == len {
-                    return Err(CustError::new(format!(
-                        "too many initializers for array '{name}'"
-                    )));
+                    let token = self.peek_located().clone();
+                    return Err(Self::error_at(
+                        format!("too many initializers for array '{name}'"),
+                        &token,
+                    ));
                 }
                 values.push(ArrayInitializer::Expr(self.parse_scalar_initializer_expr(
                     &format!("array '{name}' element"),
@@ -4975,9 +4977,11 @@ impl Parser {
                 if next_positional_index == fields.len()
                     || (struct_type.kind == AggregateKind::Union && next_positional_index > 0)
                 {
-                    return Err(CustError::new(format!(
-                        "too many initializers for {aggregate_keyword} '{type_name}'"
-                    )));
+                    let token = self.peek_located().clone();
+                    return Err(Self::error_at(
+                        format!("too many initializers for {aggregate_keyword} '{type_name}'"),
+                        &token,
+                    ));
                 }
                 let field = &fields[next_positional_index];
                 let value = self.parse_struct_initializer_value(field)?;
@@ -5117,9 +5121,11 @@ impl Parser {
             if self.matches(&Token::RBrace) {
                 return Ok(expr);
             }
-            return Err(CustError::new(format!(
-                "too many initializers for {context}"
-            )));
+            let token = self.peek_located().clone();
+            return Err(Self::error_at(
+                format!("too many initializers for {context}"),
+                &token,
+            ));
         }
         self.expect_closing_brace_after(context)?;
         Ok(expr)
@@ -5154,9 +5160,11 @@ impl Parser {
                 next_positional_index = index + 1;
             } else {
                 if next_positional_index == len {
-                    return Err(CustError::new(format!(
-                        "too many initializers for struct array '{name}'"
-                    )));
+                    let token = self.peek_located().clone();
+                    return Err(Self::error_at(
+                        format!("too many initializers for struct array '{name}'"),
+                        &token,
+                    ));
                 }
                 values.push(StructArrayInitializer::Element(
                     self.parse_struct_initializer(type_name)?,

@@ -1781,7 +1781,7 @@ fn rejects_scalar_compound_literals_with_too_many_initializers() {
     let err = interpret(program).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "too many initializers for scalar compound literal"
+        "too many initializers for scalar compound literal at line 2, column 21"
     );
 }
 
@@ -2908,7 +2908,10 @@ fn rejects_union_initializers_longer_than_one_field() {
 
     let err = interpret(program).unwrap_err();
 
-    assert_eq!(err.to_string(), "too many initializers for union 'Number'");
+    assert_eq!(
+        err.to_string(),
+        "too many initializers for union 'Number' at line 7, column 26"
+    );
 }
 
 #[test]
@@ -3122,7 +3125,10 @@ fn rejects_struct_array_initializers_longer_than_declared_length() {
 
     let err = interpret(program).unwrap_err();
 
-    assert_eq!(err.to_string(), "too many initializers for array 'values'");
+    assert_eq!(
+        err.to_string(),
+        "too many initializers for array 'values' at line 6, column 36"
+    );
 }
 
 #[test]
@@ -3133,7 +3139,7 @@ fn rejects_struct_array_variable_initializers_longer_than_declared_length() {
 
     assert_eq!(
         err.to_string(),
-        "too many initializers for struct array 'points'"
+        "too many initializers for struct array 'points' at line 7, column 39"
     );
 }
 
@@ -3151,7 +3157,10 @@ fn rejects_array_initializers_longer_than_declared_length() {
 
     let err = interpret(program).unwrap_err();
 
-    assert_eq!(err.to_string(), "too many initializers for array 'values'");
+    assert_eq!(
+        err.to_string(),
+        "too many initializers for array 'values' at line 2, column 28"
+    );
 }
 
 #[test]
@@ -3202,7 +3211,10 @@ fn rejects_struct_initializers_longer_than_declared_fields() {
 
     let err = interpret(program).unwrap_err();
 
-    assert_eq!(err.to_string(), "too many initializers for struct 'Point'");
+    assert_eq!(
+        err.to_string(),
+        "too many initializers for struct 'Point' at line 7, column 33"
+    );
 }
 
 #[test]
@@ -3211,7 +3223,10 @@ fn rejects_nested_struct_initializers_longer_than_nested_fields() {
 
     let err = interpret(program).unwrap_err();
 
-    assert_eq!(err.to_string(), "too many initializers for struct 'Point'");
+    assert_eq!(
+        err.to_string(),
+        "too many initializers for struct 'Point' at line 12, column 32"
+    );
 }
 
 #[test]
@@ -5441,6 +5456,33 @@ fn rejects_missing_braced_scalar_initializer_expressions_with_context() {
         (
             "struct Point { int x; };\nint main(void) {\n    struct Point point = { .x = {,} };\n    return 0;\n}\n",
             "expected initializer element in braced scalar initializer for struct field 'x', found Comma at line 3, column 34",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn reports_too_many_braced_initializer_entries_with_source_locations() {
+    let cases = [
+        (
+            "int main(void) {\n    int value = {1, 2};\n    return value;\n}\n",
+            "too many initializers for variable 'value' at line 2, column 21",
+        ),
+        (
+            "int main(void) {\n    int values[1] = {1, 2};\n    return values[0];\n}\n",
+            "too many initializers for array 'values' at line 2, column 25",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) {\n    struct Point point = {1, 2};\n    return point.x;\n}\n",
+            "too many initializers for struct 'Point' at line 3, column 30",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) {\n    struct Point points[1] = {{1}, {2}};\n    return points[0].x;\n}\n",
+            "too many initializers for struct array 'points' at line 3, column 36",
         ),
     ];
 
