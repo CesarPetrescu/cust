@@ -5426,6 +5426,22 @@ fn rejects_missing_declaration_initializer_expressions_with_context() {
             "struct Point { int x; };\nint main(void) {\n    struct Point point = ;\n    return 0;\n}\n",
             "expected initializer expression after '=' in struct variable declaration, found Semi at line 3, column 26",
         ),
+        (
+            "int main(void) {\n    int values[2] = ;\n    return 0;\n}\n",
+            "expected initializer expression after '=' in array declaration, found Semi at line 2, column 21",
+        ),
+        (
+            "int main(void) {\n    int first[1] = {1}, second[2] = ;\n    return first[0];\n}\n",
+            "expected initializer expression after '=' in array declaration, found Semi at line 2, column 37",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) {\n    struct Point points[1] = ;\n    return 0;\n}\n",
+            "expected initializer expression after '=' in struct array declaration, found Semi at line 3, column 30",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) {\n    struct Point first[1] = {{1}}, second[1] = ;\n    return first[0].x;\n}\n",
+            "expected initializer expression after '=' in struct array declaration, found Semi at line 3, column 48",
+        ),
     ];
 
     for (program, expected) in cases {

@@ -4721,6 +4721,7 @@ impl Parser {
         len: usize,
         elem_type: CType,
     ) -> CustResult<Vec<ArrayInitializer>> {
+        self.reject_missing_declaration_initializer_expr("array declaration")?;
         if let Some(init) = self.parse_string_literal_array_initializer(name, len, elem_type)? {
             return Ok(init);
         }
@@ -5153,6 +5154,7 @@ impl Parser {
         type_name: &str,
         len: usize,
     ) -> CustResult<Vec<StructArrayInitializer>> {
+        self.reject_missing_declaration_initializer_expr("struct array declaration")?;
         self.expect_opening_brace_after("struct array initializer")?;
         let mut values = Vec::new();
         let mut next_positional_index = 0usize;
