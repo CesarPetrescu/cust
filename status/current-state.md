@@ -4,6 +4,21 @@ Last updated: 2026-07-03
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-03 autonomous misplaced closing-bracket call/parameter diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the next unchecked C-subset parser-trust closure item in `status/todo.md`, field-name diagnostics after `.`/`->` (current `expect_ident_after` routes already preserve exact output), negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes a newly discovered malformed delimiter gap adjacent to the recent function call/parameter comma work: `first(]` now reports `expected function call argument, found RBracket`, `add(1,]` reports `expected function call argument after ',', found RBracket`, `int add(] int b)` reports `expected function parameter, found RBracket`, and `int add(int a,] int b)` reports `expected function parameter after ',', found RBracket` instead of falling through to generic expression/type diagnostics. Existing valid calls/definitions and trailing-comma diagnostics stayed green in focused regression checks.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_initial_function_call_arguments_with_context -- --nocapture  # RED first for `first(]`: generic `expected expression, found RBracket`; GREEN passed
+cargo test --test interpreter rejects_missing_function_parameters_around_commas_with_context -- --nocapture  # RED first for `int add(] int b)`: generic `expected type, found RBracket`; GREEN passed
+cargo test --test interpreter reports_trailing_commas -- --nocapture
+cargo test --test interpreter supports_function_definitions_calls_and_parameters -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-03 autonomous malformed function-parameter comma diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the next unchecked C-subset closure item in `status/todo.md`, remaining malformed-source parser trust gaps, missing field-name diagnostics after `.`/`->` (already targeted in current parser routes), negative pointer/storage-root coverage, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes a fresh function-parameter list gap: leading parameter commas (`int add(, int b)`) now report `expected function parameter, found Comma`, and doubled parameter separators (`int add(int a,, int b)`) now report `expected function parameter after ',', found Comma`, instead of falling through to the generic parameter type parser. Existing trailing-comma diagnostics and valid function definitions/calls stayed green in focused regression checks.
 
 Commands verified so far:

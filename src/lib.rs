@@ -3287,7 +3287,7 @@ impl Parser {
                 &void_token,
             ));
         }
-        if self.check(&Token::Comma) {
+        if matches!(self.peek(), Token::Comma | Token::RBracket) {
             return Err(Self::error_at(
                 format!("expected function parameter, found {:?}", self.peek()),
                 self.peek_located(),
@@ -3447,6 +3447,7 @@ impl Parser {
                     self.peek(),
                     Token::Comma
                         | Token::RParen
+                        | Token::RBracket
                         | Token::Semi
                         | Token::LBrace
                         | Token::RBrace
@@ -8173,7 +8174,12 @@ impl Parser {
         }
         if matches!(
             self.peek(),
-            Token::Comma | Token::Semi | Token::LBrace | Token::RBrace | Token::Eof
+            Token::Comma
+                | Token::RBracket
+                | Token::Semi
+                | Token::LBrace
+                | Token::RBrace
+                | Token::Eof
         ) {
             return Err(Self::error_at(
                 format!("expected function call argument, found {:?}", self.peek()),
@@ -8187,7 +8193,12 @@ impl Parser {
             if self.matches(&Token::Comma) {
                 if matches!(
                     self.peek(),
-                    Token::RParen | Token::Semi | Token::LBrace | Token::RBrace | Token::Eof
+                    Token::RParen
+                        | Token::RBracket
+                        | Token::Semi
+                        | Token::LBrace
+                        | Token::RBrace
+                        | Token::Eof
                 ) {
                     return Err(Self::error_at(
                         format!(

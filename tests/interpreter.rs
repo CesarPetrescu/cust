@@ -3917,6 +3917,14 @@ fn rejects_missing_initial_function_call_arguments_with_context() {
             "int add(int left, int right) { return left + right; }\nint main() { return add(, 2); }\n",
             "expected function call argument, found Comma at line 2, column 25",
         ),
+        (
+            "int first(int value) { return value; }\nint main() { return first(]; }\n",
+            "expected function call argument, found RBracket at line 2, column 27",
+        ),
+        (
+            "int add(int left, int right) { return left + right; }\nint main() { return add(1,]); }\n",
+            "expected function call argument after ',', found RBracket at line 2, column 27",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -3947,6 +3955,14 @@ fn rejects_missing_function_parameters_around_commas_with_context() {
         (
             "int add(int a,, int b) { return a + b; }\nint main(void) { return add(1, 2); }\n",
             "expected function parameter after ',', found Comma at line 1, column 15",
+        ),
+        (
+            "int add(] int b) { return b; }\nint main(void) { return add(1); }\n",
+            "expected function parameter, found RBracket at line 1, column 9",
+        ),
+        (
+            "int add(int a,] int b) { return a + b; }\nint main(void) { return add(1, 2); }\n",
+            "expected function parameter after ',', found RBracket at line 1, column 15",
         ),
     ];
 
