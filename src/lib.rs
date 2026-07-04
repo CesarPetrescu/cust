@@ -1984,6 +1984,7 @@ impl Parser {
         while self.matches(&Token::Alignas) {
             consumed = true;
             self.expect_opening_paren_after("_Alignas")?;
+            self.reject_missing_alignas_argument()?;
             if self.is_type_name_start() {
                 self.parse_sizeof_like_type_name("_Alignas")?;
             } else {
@@ -1992,6 +1993,24 @@ impl Parser {
             self.expect_closing_paren_after("_Alignas specifier")?;
         }
         Ok(consumed)
+    }
+
+    fn reject_missing_alignas_argument(&self) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Comma
+                | Token::RParen
+                | Token::RBracket
+                | Token::Semi
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!("expected _Alignas argument, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
     }
 
     fn is_aggregate_definition(&self) -> bool {

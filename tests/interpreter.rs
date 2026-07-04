@@ -835,6 +835,46 @@ fn supports_alignas_specifiers() {
 }
 
 #[test]
+fn rejects_missing_alignas_arguments_with_context() {
+    let missing_argument = r#"
+        _Alignas() int value;
+        int main(void) { return 0; }
+    "#;
+    let err = interpret(missing_argument).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("expected _Alignas argument, found RParen at line 2, column 18"),
+        "unexpected error: {err}"
+    );
+
+    let comma_argument = r#"
+        int main(void) {
+            _Alignas(,) int value;
+            return 0;
+        }
+    "#;
+    let err = interpret(comma_argument).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("expected _Alignas argument, found Comma at line 3, column 22"),
+        "unexpected error: {err}"
+    );
+
+    let semicolon_argument = r#"
+        int main(void) {
+            _Alignas(; int value;
+            return 0;
+        }
+    "#;
+    let err = interpret(semicolon_argument).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("expected _Alignas argument, found Semi at line 3, column 22"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn supports_thread_local_storage_class_specifiers() {
     let program = include_str!("fixtures/valid/thread_local_storage_class.c");
 
