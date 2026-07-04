@@ -8036,7 +8036,29 @@ impl Parser {
     }
 
     fn parse_sizeof_like_type_name(&mut self, operator: &str) -> CustResult<SizeOfType> {
+        let first_qualifier = if matches!(
+            self.peek(),
+            Token::Const | Token::Volatile | Token::Restrict
+        ) || self.bare_atomic_qualifier_at(self.pos)
+        {
+            Some(self.peek_located().clone())
+        } else {
+            None
+        };
         let is_const_qualified = self.consume_type_qualifiers();
+        match first_qualifier.as_ref() {
+            Some(qualifier) if !self.is_type_name_start() => {
+                return Err(Self::error_at(
+                    format!(
+                        "expected {operator} type after type qualifier '{}', found {:?}",
+                        Self::type_qualifier_label(&qualifier.kind),
+                        self.peek()
+                    ),
+                    self.peek_located(),
+                ));
+            }
+            _ => {}
+        }
         if self.check(&Token::Void) {
             if let Some(token) = self.void_pointer_star_token_at_current() {
                 return Err(Self::error_at(

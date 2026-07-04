@@ -1611,6 +1611,33 @@ fn rejects_missing_sizeof_and_alignof_operands_with_context() {
 }
 
 #[test]
+fn rejects_qualifier_only_sizeof_and_alignof_types_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    return sizeof(volatile);\n}\n",
+            "expected sizeof type after type qualifier 'volatile', found RParen at line 2, column 27",
+        ),
+        (
+            "int main(void) {\n    return sizeof(_Atomic);\n}\n",
+            "expected sizeof type after type qualifier '_Atomic', found RParen at line 2, column 26",
+        ),
+        (
+            "int main(void) {\n    return _Alignof(volatile);\n}\n",
+            "expected _Alignof type after type qualifier 'volatile', found RParen at line 2, column 29",
+        ),
+        (
+            "int main(void) {\n    return _Alignof(_Atomic);\n}\n",
+            "expected _Alignof type after type qualifier '_Atomic', found RParen at line 2, column 28",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn supports_sizeof_comma_expression_rhs_types_without_evaluating_operands() {
     let program = include_str!("fixtures/valid/sizeof_comma_expression_types.c");
 

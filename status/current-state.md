@@ -4,6 +4,20 @@ Last updated: 2026-07-04
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-04 autonomous qualifier-only `sizeof`/`_Alignof` type diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the now-open C-subset closure queue item in `status/todo.md`, malformed nested declaration/type-name routes, unsupported near-future C forms, negative pointer/storage-root diagnostics, less-traveled inline enum/aggregate conformance contexts, and adjacent parser-trust gaps around type queries. The selected work package closes qualifier-only type-query diagnostics: `sizeof(volatile)`, `sizeof(_Atomic)`, `_Alignof(volatile)`, and `_Alignof(_Atomic)` now report `expected sizeof/_Alignof type after type qualifier '<qualifier>', found RParen` at the missing type location instead of falling through to the generic `expected type, found RParen`, while valid qualified type queries remain unchanged.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_qualifier_only_sizeof_and_alignof_types_with_context -- --nocapture  # RED first: generic `expected type, found RParen`; GREEN passed after parser guard
+cargo test --test interpreter sizeof -- --nocapture
+cargo test --test interpreter alignof -- --nocapture
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-04 autonomous qualifier-only cast diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the checked C-subset/product backlog, malformed nested declaration/type-name routes, unsupported near-future C forms, negative pointer/storage-root diagnostics, less-traveled inline enum/aggregate conformance contexts, and adjacent parser-trust gaps around casts/type queries. The selected work package closes qualifier-only cast type diagnostics: `(const);`, `(volatile);`, and `(_Atomic);` now report `expected cast type after type qualifier '<qualifier>', found RParen` at the missing type location instead of falling through to the generic `expected type, found RParen`, while valid qualified casts and existing missing-cast-operand diagnostics remain unchanged.
 
 Commands verified so far:

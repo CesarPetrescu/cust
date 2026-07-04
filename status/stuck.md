@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-04 autonomous qualifier-only cast diagnostic run after focused cast parser regression coverage passed, focused cast tests passed, full local Rust verification passed, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-07-04 autonomous qualifier-only `sizeof`/`_Alignof` type diagnostic run after focused type-query parser regression coverage passed, focused sizeof/_Alignof tests passed, full local Rust verification passed, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 
