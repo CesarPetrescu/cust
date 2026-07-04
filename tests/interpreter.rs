@@ -466,6 +466,29 @@ fn rejects_parenthesized_pointer_cast_and_type_query_forms_with_context() {
 }
 
 #[test]
+fn rejects_missing_cast_operands_with_context() {
+    let cases = [
+        (
+            include_str!("fixtures/invalid/scalar_cast_missing_operand.c"),
+            "expected expression after cast, found Semi at line 2, column 17",
+        ),
+        (
+            include_str!("fixtures/invalid/pointer_cast_missing_operand.c"),
+            "expected expression after cast, found Semi at line 2, column 20",
+        ),
+        (
+            include_str!("fixtures/invalid/void_cast_missing_operand.c"),
+            "expected expression after cast, found Semi at line 2, column 11",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_non_constant_array_lengths_with_context() {
     let program = include_str!("fixtures/invalid/array_length_non_constant_identifier.c");
 

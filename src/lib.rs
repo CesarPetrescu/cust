@@ -7604,6 +7604,7 @@ impl Parser {
             if self.matches(&Token::Star) {
                 self.consume_type_qualifiers();
                 self.expect_closing_paren_after("cast type")?;
+                self.reject_missing_cast_operand()?;
                 return Ok(Expr::PointerCast {
                     pointee: PointeeType::Struct(type_name),
                     points_to_const: leading_const,
@@ -7645,6 +7646,7 @@ impl Parser {
                 ));
             }
             self.expect_closing_paren_after("cast type")?;
+            self.reject_missing_cast_operand()?;
             return Ok(Expr::VoidCast(Box::new(self.parse_unary()?)));
         }
         let alias_const = match &type_token.kind {
@@ -7678,6 +7680,7 @@ impl Parser {
             };
             self.consume_type_qualifiers();
             self.expect_closing_paren_after("cast type")?;
+            self.reject_missing_cast_operand()?;
             return Ok(Expr::PointerCast {
                 pointee,
                 points_to_const: leading_const,
@@ -7722,6 +7725,7 @@ impl Parser {
                 points_to_const,
             } => {
                 self.expect_closing_paren_after("cast type")?;
+                self.reject_missing_cast_operand()?;
                 return Ok(Expr::PointerCast {
                     pointee,
                     points_to_const: leading_const || points_to_const,
@@ -7777,8 +7781,30 @@ impl Parser {
         }
         Ok(Expr::Cast {
             ty,
-            expr: Box::new(self.parse_unary()?),
+            expr: {
+                self.reject_missing_cast_operand()?;
+                Box::new(self.parse_unary()?)
+            },
         })
+    }
+
+    fn reject_missing_cast_operand(&self) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Comma
+                | Token::Colon
+                | Token::RParen
+                | Token::RBracket
+                | Token::Semi
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!("expected expression after cast, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
     }
 
     fn address_of_expr(target: Expr, operator: &LocatedToken) -> CustResult<Expr> {

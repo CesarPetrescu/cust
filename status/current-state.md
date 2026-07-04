@@ -4,6 +4,18 @@ Last updated: 2026-07-04
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-04 autonomous cast missing-operand diagnostic run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the remaining unchecked C-subset closure item in `status/todo.md`, malformed nested declaration/type-name delimiter routes, unsupported near-future C forms, negative pointer/storage-root diagnostics, less-traveled inline enum/aggregate conformance contexts, and a narrow cast-expression parser-trust gap. The selected work package closes missing operands after scalar, pointer, and void casts: `(int);`, `(int *) ;`, and `(void);` now report `expected expression after cast, found ...` at the offending delimiter instead of falling through to the generic primary-expression parser.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_missing_cast_operands_with_context -- --nocapture  # RED first: generic `expected expression, found Semi`; GREEN passed after parser guard
+cargo test --test interpreter cast -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-04 autonomous `_Alignas` missing-argument diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining unchecked C-subset closure item in `status/todo.md`, malformed nested declaration/type-name delimiter routes, unsupported near-future C forms, negative pointer/storage-root diagnostics, less-traveled inline enum/aggregate conformance contexts, and a narrow C11 `_Alignas` declaration-specifier parser gap. The selected work package closes the `_Alignas` malformed-argument slice: `_Alignas()`, `_Alignas(,)`, and `_Alignas(;` now report `expected _Alignas argument, found ...` at the offending delimiter instead of falling through to generic assignment-expression parsing.
 
 Commands verified so far:
