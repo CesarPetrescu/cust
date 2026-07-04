@@ -2515,6 +2515,28 @@ impl Parser {
         }
     }
 
+    fn leading_type_qualifier_token(&self) -> Option<LocatedToken> {
+        if matches!(
+            self.peek(),
+            Token::Const | Token::Volatile | Token::Restrict
+        ) || self.bare_atomic_qualifier_at(self.pos)
+        {
+            Some(self.peek_located().clone())
+        } else {
+            None
+        }
+    }
+
+    fn type_qualifier_label(token: &Token) -> &'static str {
+        match token {
+            Token::Const => "const",
+            Token::Volatile => "volatile",
+            Token::Restrict => "restrict",
+            Token::Atomic => "_Atomic",
+            _ => "<unknown>",
+        }
+    }
+
     fn consume_type_qualifiers(&mut self) -> bool {
         let mut saw_const = false;
         while matches!(
@@ -7632,7 +7654,21 @@ impl Parser {
 
     fn parse_cast(&mut self) -> CustResult<Expr> {
         self.expect(Token::LParen)?;
+        let leading_qualifier = self.leading_type_qualifier_token();
         let leading_const = self.consume_type_qualifiers();
+        match leading_qualifier.as_ref() {
+            Some(qualifier) if !self.is_type_name_start() => {
+                return Err(Self::error_at(
+                    format!(
+                        "expected cast type after type qualifier '{}', found {:?}",
+                        Self::type_qualifier_label(&qualifier.kind),
+                        self.peek()
+                    ),
+                    self.peek_located(),
+                ));
+            }
+            _ => {}
+        }
         let type_token = self.peek_located().clone();
         if matches!(self.peek(), Token::Struct | Token::Union)
             && matches!(self.peek_next(), Token::LBrace)

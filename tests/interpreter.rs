@@ -520,6 +520,29 @@ fn rejects_missing_cast_operands_with_context() {
 }
 
 #[test]
+fn rejects_missing_cast_types_after_qualifiers_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    return (const);\n}\n",
+            "expected cast type after type qualifier 'const', found RParen at line 2, column 18",
+        ),
+        (
+            "int main(void) {\n    return (volatile);\n}\n",
+            "expected cast type after type qualifier 'volatile', found RParen at line 2, column 21",
+        ),
+        (
+            "int main(void) {\n    return (_Atomic);\n}\n",
+            "expected cast type after type qualifier '_Atomic', found RParen at line 2, column 20",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_non_constant_array_lengths_with_context() {
     let program = include_str!("fixtures/invalid/array_length_non_constant_identifier.c");
 
