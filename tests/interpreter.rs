@@ -1875,6 +1875,31 @@ fn rejects_scalar_compound_literals_with_too_many_initializers() {
 }
 
 #[test]
+fn rejects_missing_scalar_compound_literal_initializers_with_context() {
+    let cases = [
+        (
+            include_str!("fixtures/invalid/scalar_compound_literal_missing_initializer.c"),
+            "expected initializer element in braced scalar initializer for scalar compound literal, found RBrace at line 2, column 18",
+        ),
+        (
+            include_str!("fixtures/invalid/scalar_compound_literal_comma_missing_initializer.c"),
+            "expected initializer element in braced scalar initializer for scalar compound literal, found Comma at line 2, column 19",
+        ),
+        (
+            include_str!(
+                "fixtures/invalid/scalar_compound_literal_semicolon_missing_initializer.c"
+            ),
+            "expected initializer element in braced scalar initializer for scalar compound literal, found Semi at line 2, column 18",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_array_compound_literals_longer_than_declared_length() {
     let program = include_str!("fixtures/invalid/array_compound_literal_too_many_initializers.c");
 
