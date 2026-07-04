@@ -439,6 +439,37 @@ fn rejects_void_pointer_forms_with_context() {
 }
 
 #[test]
+fn rejects_void_object_and_typedef_forms_with_context() {
+    let cases = [
+        (
+            include_str!("fixtures/invalid/void_global_object.c"),
+            "void object declarations are not supported at line 1, column 1",
+        ),
+        (
+            include_str!("fixtures/invalid/void_local_object.c"),
+            "void object declarations are not supported at line 2, column 5",
+        ),
+        (
+            include_str!("fixtures/invalid/void_parameter_name.c"),
+            "void parameter lists must be empty at line 1, column 10",
+        ),
+        (
+            include_str!("fixtures/invalid/void_aggregate_field.c"),
+            "void object declarations are not supported at line 2, column 5",
+        ),
+        (
+            include_str!("fixtures/invalid/void_typedef_alias.c"),
+            "void typedef aliases are not supported at line 1, column 9",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_parenthesized_pointer_cast_and_type_query_forms_with_context() {
     let program = include_str!("fixtures/invalid/parenthesized_pointer_cast.c");
 

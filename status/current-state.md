@@ -4,6 +4,17 @@ Last updated: 2026-07-04
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-04 autonomous void object/typedef diagnostic run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the remaining unchecked C-subset closure item in `status/todo.md`, malformed nested declaration/type-name routes, unsupported near-future C forms, negative pointer/storage-root diagnostics, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes unsupported `void` object and typedef forms: file-scope `void value;`, block-local `void value;`, aggregate fields `void value;`, and `typedef void Void;` now report targeted source-located diagnostics instead of function/type parser fallthroughs, while existing empty `void` parameter lists, named-void-parameter diagnostics, `void` functions, `(void)expr` casts, and `void *` diagnostics remain unchanged.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_void_object_and_typedef_forms_with_context -- --nocapture  # RED first: global `void value;` reported `expected '(' after function name`; GREEN passed after parser guards
+cargo test --test interpreter void -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-04 autonomous scalar compound-literal missing-initializer diagnostic coverage run. Ideation considered failing tests/builds (clean pulled tree), active blockers (none), the remaining unchecked C-subset closure item in `status/todo.md`, malformed nested declaration/type-name delimiter routes, unsupported near-future C forms, negative pointer/storage-root diagnostics, less-traveled inline enum/aggregate conformance contexts, and a narrow compound-literal parser-trust gap. The selected work package locks in missing initializer diagnostics for scalar compound literals: `(int){}`, `(char){,}`, and `(int){;}` now have exact regression coverage for `expected initializer element in braced scalar initializer for scalar compound literal, found ...` at the offending delimiter. Focused coverage passed immediately because the shared braced-scalar initializer guard already handled scalar compound literals, so this is parser-trust coverage rather than a production-code fix.
 
 Commands verified so far:

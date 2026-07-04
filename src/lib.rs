@@ -1822,6 +1822,12 @@ impl Parser {
                     token,
                 ));
             }
+            if self.check(&Token::Void) && !self.starts_function_definition() {
+                return Err(Self::error_at(
+                    "void object declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             if self.starts_function_definition()
                 || self.starts_struct_function_declaration()
                 || self.starts_alias_function_declaration()
@@ -2644,6 +2650,11 @@ impl Parser {
                 false,
                 false,
             )
+        } else if self.check(&Token::Void) {
+            return Err(Self::error_at(
+                "void typedef aliases are not supported".to_string(),
+                self.peek_located(),
+            ));
         } else {
             let (leading_const, base_type) =
                 self.parse_const_qualified_decl_type("typedef struct type name")?;
@@ -3616,6 +3627,12 @@ impl Parser {
             return Err(Self::error_at(
                 "void pointers are not supported".to_string(),
                 token,
+            ));
+        }
+        if self.check(&Token::Void) && !self.starts_function_definition() {
+            return Err(Self::error_at(
+                "void object declarations are not supported".to_string(),
+                self.peek_located(),
             ));
         }
         if self.starts_local_function_declaration() {
@@ -5469,6 +5486,12 @@ impl Parser {
             }
             self.consume_alignment_specifiers()?;
             self.reject_leading_restrict_qualifier()?;
+            if self.check(&Token::Void) {
+                return Err(Self::error_at(
+                    "void object declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let leading_const = self.consume_type_qualifiers();
             let alias_const = match self.peek() {
                 Token::Ident(name) => self.type_alias_is_const(name),
