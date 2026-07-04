@@ -4062,6 +4062,33 @@ fn reports_inferred_array_declarations_without_initializers() {
 }
 
 #[test]
+fn rejects_missing_inferred_array_initializer_expressions_with_context() {
+    let cases = [
+        (
+            "int main() {\nint values[] = ;\nreturn 0;\n}\n",
+            "expected initializer expression after '=' in inferred array declaration, found Semi at line 2, column 16",
+        ),
+        (
+            "int main() {\nint first[] = {1}, second[] = ;\nreturn 0;\n}\n",
+            "expected initializer expression after '=' in inferred array declaration, found Semi at line 2, column 31",
+        ),
+        (
+            "struct Point { int x; };\nint main() {\nstruct Point points[] = ;\nreturn 0;\n}\n",
+            "expected initializer expression after '=' in inferred aggregate array declaration, found Semi at line 3, column 25",
+        ),
+        (
+            "struct Point { int x; };\nint main() {\nstruct Point first[] = {{1}}, second[] = ;\nreturn 0;\n}\n",
+            "expected initializer expression after '=' in inferred aggregate array declaration, found Semi at line 3, column 42",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn reports_inferred_aggregate_array_declarations_without_initializers() {
     let program = "struct Point { int x; };\nint main() {\nstruct Point points[];\nreturn 0;\n}\n";
 

@@ -4245,6 +4245,9 @@ impl Parser {
                         unreachable!("expect_assign_after only returns Ok after consuming '='")
                     }
                     self.last_decl_had_initializer = true;
+                    self.reject_missing_declaration_initializer_expr(
+                        "inferred aggregate array declaration",
+                    )?;
                     let init = self.parse_aggregate_array_compound_initializer(type_name, None)?;
                     let len = Self::infer_struct_array_initializer_len(&init);
                     (len, init)
@@ -4334,6 +4337,7 @@ impl Parser {
                     unreachable!("expect_assign_after only returns Ok after consuming '='")
                 }
                 self.last_decl_had_initializer = true;
+                self.reject_missing_declaration_initializer_expr("inferred array declaration")?;
                 let init = self.parse_inferred_array_initializer_or_string(&name, ty)?;
                 let len = Self::infer_array_initializer_len(&init);
                 (len, init)
@@ -4553,6 +4557,9 @@ impl Parser {
                             unreachable!("expect_assign_after only returns Ok after consuming '='")
                         }
                         self.last_decl_had_initializer = true;
+                        self.reject_missing_declaration_initializer_expr(
+                            "inferred array declaration",
+                        )?;
                         let init = self.parse_inferred_array_initializer_or_string(&name, ty)?;
                         let len = Self::infer_array_initializer_len(&init);
                         (len, init)
@@ -4592,6 +4599,9 @@ impl Parser {
                             unreachable!("expect_assign_after only returns Ok after consuming '='")
                         }
                         self.last_decl_had_initializer = true;
+                        self.reject_missing_declaration_initializer_expr(
+                            "inferred aggregate array declaration",
+                        )?;
                         let init =
                             self.parse_aggregate_array_compound_initializer(&type_name, None)?;
                         let len = Self::infer_struct_array_initializer_len(&init);
@@ -5730,6 +5740,9 @@ impl Parser {
                     unreachable!("expect_assign_after only returns Ok after consuming '='")
                 }
                 self.last_decl_had_initializer = true;
+                self.reject_missing_declaration_initializer_expr(
+                    "inferred aggregate array declaration",
+                )?;
                 let init = self.parse_aggregate_array_compound_initializer(&type_name, None)?;
                 let len = Self::infer_struct_array_initializer_len(&init);
                 (len, init)
