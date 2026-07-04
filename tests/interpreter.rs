@@ -388,6 +388,41 @@ fn rejects_restrict_on_non_pointer_declarations_with_context() {
 }
 
 #[test]
+fn rejects_missing_atomic_type_arguments_with_context() {
+    let cases = [
+        (
+            "_Atomic() global_value;\nint main(void) { return 0; }\n",
+            "expected _Atomic type, found RParen at line 1, column 9",
+        ),
+        (
+            "int main(void) {\n    _Atomic(,) local_value;\n    return 0;\n}\n",
+            "expected _Atomic type, found Comma at line 2, column 13",
+        ),
+        (
+            "int take(_Atomic() value) { return 0; }\nint main(void) { return take(1); }\n",
+            "expected _Atomic type, found RParen at line 1, column 18",
+        ),
+        (
+            "int main(void) {\n    return sizeof(_Atomic());\n}\n",
+            "expected _Atomic type, found RParen at line 2, column 27",
+        ),
+        (
+            "int main(void) {\n    return (_Atomic())0;\n}\n",
+            "expected _Atomic type, found RParen at line 2, column 21",
+        ),
+        (
+            "struct Sample {\n    _Atomic() value;\n};\nint main(void) { return 0; }\n",
+            "expected _Atomic type, found RParen at line 2, column 13",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_void_pointer_forms_with_context() {
     let program = include_str!("fixtures/invalid/void_pointer_return.c");
 

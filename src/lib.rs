@@ -2282,6 +2282,22 @@ impl Parser {
             | Token::Short => self.parse_scalar_decl_type_specifiers(found),
             Token::Atomic => {
                 self.expect_opening_paren_after("_Atomic")?;
+                if matches!(
+                    self.peek(),
+                    Token::Comma
+                        | Token::Colon
+                        | Token::RParen
+                        | Token::RBracket
+                        | Token::Semi
+                        | Token::RBrace
+                        | Token::Eof
+                ) {
+                    let found = self.peek_located().clone();
+                    return Err(Self::error_at(
+                        format!("expected _Atomic type, found {:?}", found.kind),
+                        &found,
+                    ));
+                }
                 let (nested_const, decl_type) =
                     self.parse_decl_type_with_embedded_qualifiers("_Atomic type name")?;
                 self.expect_closing_paren_after("_Atomic type")?;
