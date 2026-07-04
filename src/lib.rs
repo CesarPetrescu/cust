@@ -6730,9 +6730,23 @@ impl Parser {
         if self.matches(&Token::Semi) {
             return Ok(Stmt::Return(None));
         }
+        self.reject_missing_return_expr()?;
         let expr = self.parse_expr()?;
         self.expect_semicolon_after("return statement")?;
         Ok(self.with_pending_inline_enum_decl(Stmt::Return(Some(expr))))
+    }
+
+    fn reject_missing_return_expr(&self) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Comma | Token::RParen | Token::RBracket | Token::RBrace | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!("expected expression after return, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
     }
 
     fn parse_break(&mut self) -> CustResult<Stmt> {

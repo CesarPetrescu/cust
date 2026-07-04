@@ -5603,6 +5603,29 @@ fn rejects_missing_rhs_after_assignment_operators() {
 }
 
 #[test]
+fn rejects_missing_return_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    return ,;\n}\n",
+            "expected expression after return, found Comma at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    return );\n}\n",
+            "expected expression after return, found RParen at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    return }\n",
+            "expected expression after return, found RBrace at line 2, column 12",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_missing_declaration_initializer_expressions_with_context() {
     let cases = [
         (
