@@ -3757,6 +3757,20 @@ impl Parser {
     fn parse_static_assert(&mut self) -> CustResult<Stmt> {
         self.expect(Token::StaticAssert)?;
         self.expect_opening_paren_after("_Static_assert")?;
+        if matches!(
+            self.peek(),
+            Token::Comma
+                | Token::RParen
+                | Token::RBracket
+                | Token::Semi
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!("expected _Static_assert condition, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
         let condition = self.parse_assignment_expr()?;
         if !self.matches(&Token::Comma) {
             return Err(Self::error_at(

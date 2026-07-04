@@ -865,6 +865,32 @@ fn rejects_failing_static_assertions() {
 }
 
 #[test]
+fn rejects_missing_static_assert_arguments_with_context() {
+    let missing_condition = r#"
+        _Static_assert(, "condition required");
+        int main(void) { return 0; }
+    "#;
+    let err = interpret(missing_condition).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("expected _Static_assert condition, found Comma at line 2, column 24"),
+        "unexpected error: {err}"
+    );
+
+    let missing_message = r#"
+        _Static_assert(1, );
+        int main(void) { return 0; }
+    "#;
+    let err = interpret(missing_message).unwrap_err();
+    assert!(
+        err.to_string().contains(
+            "expected string literal after _Static_assert condition, found RParen at line 2, column 27"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_assignment_to_const_typedef_alias_variables() {
     let program = include_str!("fixtures/invalid/const_typedef_alias_assignment.c");
 

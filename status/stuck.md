@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-04 autonomous non-char string initializer type-mismatch diagnostic run after focused RED/GREEN parser regressions passed, focused string-initializer regression tests passed, full local Rust verification passed, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-07-04 autonomous `_Static_assert` missing-argument diagnostic run after clean-tree `cargo test` passed, focused RED/GREEN parser regression passed, focused static-assert regression tests passed, full local Rust verification passed, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 
