@@ -1808,6 +1808,29 @@ fn rejects_array_compound_literal_string_initializers_that_are_too_long() {
 }
 
 #[test]
+fn reports_non_char_array_string_initializer_type_mismatches_with_source_locations() {
+    let cases = [
+        (
+            include_str!("fixtures/invalid/non_char_array_string_initializer.c"),
+            "string literal initializer requires char array 'values' at line 2, column 21",
+        ),
+        (
+            include_str!("fixtures/invalid/non_char_inferred_array_string_initializer.c"),
+            "string literal initializer requires char array 'values' at line 2, column 20",
+        ),
+        (
+            include_str!("fixtures/invalid/non_char_array_compound_literal_string_initializer.c"),
+            "string literal initializer requires char array compound literal at line 2, column 27",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn supports_direct_enum_type_declarations_parameters_returns_and_sizeof() {
     let program = include_str!("fixtures/valid/direct_enum_types.c");
 

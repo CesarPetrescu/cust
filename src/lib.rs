@@ -4744,13 +4744,15 @@ impl Parser {
         name: &str,
         elem_type: CType,
     ) -> CustResult<Vec<ArrayInitializer>> {
-        if let Token::StringLiteral(values) = self.peek().clone() {
+        let token = self.peek_located().clone();
+        if let Token::StringLiteral(values) = token.kind.clone() {
             self.advance();
             let values = self.concatenate_adjacent_string_literals(values);
             if elem_type != CType::Char {
-                return Err(CustError::new(format!(
-                    "string literal initializer requires char array '{name}'"
-                )));
+                return Err(Self::error_at(
+                    format!("string literal initializer requires char array '{name}'"),
+                    &token,
+                ));
             }
             return Ok(vec![ArrayInitializer::StringLiteral(values)]);
         }
@@ -4771,9 +4773,10 @@ impl Parser {
         self.advance();
         let values = self.concatenate_adjacent_string_literals(values);
         if elem_type != CType::Char {
-            return Err(CustError::new(format!(
-                "string literal initializer requires char array '{name}'"
-            )));
+            return Err(Self::error_at(
+                format!("string literal initializer requires char array '{name}'"),
+                &token,
+            ));
         }
         let too_long =
             values.len() > len && !(values.len() == len + 1 && values.last() == Some(&0));
@@ -4866,8 +4869,10 @@ impl Parser {
                 self.advance();
                 let string_values = self.concatenate_adjacent_string_literals(string_values);
                 if elem_type != CType::Char {
-                    return Err(CustError::new(
-                        "string literal initializer requires char array compound literal",
+                    return Err(Self::error_at(
+                        "string literal initializer requires char array compound literal"
+                            .to_string(),
+                        &token,
                     ));
                 }
                 let too_long = len.is_some_and(|len| {
