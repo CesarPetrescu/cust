@@ -6787,6 +6787,22 @@ impl Parser {
         Ok(())
     }
 
+    fn reject_missing_control_condition_expr(&self, keyword: &str) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::RParen | Token::Semi | Token::RBrace | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after {keyword}, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
     fn parse_break(&mut self) -> CustResult<Stmt> {
         let token = self.advance();
         self.expect_semicolon_after("break statement")?;
@@ -6802,6 +6818,7 @@ impl Parser {
     fn parse_if(&mut self) -> CustResult<Stmt> {
         self.expect(Token::If)?;
         self.expect_opening_paren_after("if")?;
+        self.reject_missing_control_condition_expr("if")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("if condition")?;
         let inline_enum_decl = self.take_pending_inline_enum_decl();
@@ -6822,6 +6839,7 @@ impl Parser {
     fn parse_while(&mut self) -> CustResult<Stmt> {
         self.expect(Token::While)?;
         self.expect_opening_paren_after("while")?;
+        self.reject_missing_control_condition_expr("while")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("while condition")?;
         let inline_enum_decl = self.take_pending_inline_enum_decl();
@@ -6837,6 +6855,7 @@ impl Parser {
         let body = self.parse_control_body_after("do")?;
         self.expect_keyword_after(&Token::While, "do body")?;
         self.expect_opening_paren_after("do-while")?;
+        self.reject_missing_control_condition_expr("do-while")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("do-while condition")?;
         self.expect_semicolon_after("do-while condition")?;
@@ -6936,6 +6955,7 @@ impl Parser {
     fn parse_switch(&mut self) -> CustResult<Stmt> {
         self.expect(Token::Switch)?;
         self.expect_opening_paren_after("switch")?;
+        self.reject_missing_switch_expr()?;
         let expr = self.parse_expr()?;
         self.expect_closing_paren_after("switch expression")?;
         let inline_enum_decl = self.take_pending_inline_enum_decl();
@@ -7018,6 +7038,19 @@ impl Parser {
             &empty_constants,
             "expected integer constant after switch case",
         )
+    }
+
+    fn reject_missing_switch_expr(&self) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::RParen | Token::Semi | Token::RBrace | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!("expected expression after switch, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
     }
 
     fn parse_expr(&mut self) -> CustResult<Expr> {

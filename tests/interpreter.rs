@@ -5410,6 +5410,54 @@ fn rejects_missing_colon_after_switch_case_label() {
 }
 
 #[test]
+fn rejects_missing_switch_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) { switch () { default: return 1; } }",
+            "expected expression after switch, found RParen at line 1, column 26",
+        ),
+        (
+            "int main(void) { switch (; }",
+            "expected expression after switch, found Semi at line 1, column 26",
+        ),
+        (
+            "int main(void) { switch (} }",
+            "expected expression after switch, found RBrace at line 1, column 26",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn rejects_missing_control_flow_condition_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) { if () { return 1; } return 0; }",
+            "expected expression after if, found RParen at line 1, column 22",
+        ),
+        (
+            "int main(void) { while (; }",
+            "expected expression after while, found Semi at line 1, column 25",
+        ),
+        (
+            "int main(void) { do { } while (); }",
+            "expected expression after do-while, found RParen at line 1, column 32",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_duplicate_switch_case_labels() {
     let program = include_str!("fixtures/invalid/switch_duplicate_case.c");
 

@@ -4,7 +4,21 @@ Last updated: 2026-07-05
 
 ## Latest autonomous verification
 
-All passed after the 2026-07-05 autonomous `_Atomic(...)` missing-type diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the open C-subset closure queue item in `status/todo.md`, malformed nested declaration/type-name routes, unsupported near-future C forms, negative pointer/storage-root diagnostics, and less-traveled inline enum/aggregate conformance contexts. The selected work package closes malformed `_Atomic(type-name)` specifier diagnostics: `_Atomic()` and `_Atomic(,)` now report `expected _Atomic type, found ...` at the missing type location in global, local, parameter, aggregate-field, `sizeof`, and cast/type-name routes instead of falling through to the generic `expected type, found ...`, while valid bare `_Atomic` qualifiers and `_Atomic(type-name)` forms remain unchanged.
+All passed after the 2026-07-05 autonomous control-flow missing-condition diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), completed roadmap/backlog status, and the next useful parser-trust gap. Selected a tightly scoped diagnostics work package for missing `if`/`while`/`do while`/`switch` controlling expressions because those routes still delegated delimiter-only conditions to generic expression parsing. TDD RED first showed `switch ()` and `if ()` reported generic `expected expression` messages; GREEN added source-located contextual guards and focused parser regression coverage.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_switch_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found RParen`; GREEN passed after parser guard
+cargo test --test interpreter rejects_missing_control_flow_condition_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found RParen`; GREEN passed after shared control-condition guard
+cargo test --test interpreter control_flow -- --nocapture
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+All passed after the 2026-07-05 autonomous `_Atomic(...)` missing-type diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the open C-subset closure queue item in `status/todo.md`, and parser-trust gaps around qualifier/specifier forms. Selected missing `_Atomic(type-name)` argument diagnostics as the best finishable work package because `_Atomic()` / `_Atomic(,)` were still falling through to generic type parsing across declaration, parameter, field, cast/type-query, and static-assert contexts. TDD RED first showed the generic `expected type, found RParen` diagnostic for `_Atomic()` globals; GREEN added a guarded `_Atomic(...)` type-argument parser and regression coverage for every shared route.
 
 Commands verified so far:
 
