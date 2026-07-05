@@ -5012,6 +5012,20 @@ impl Parser {
                 &found,
             ));
         }
+        if self.check(&Token::Semi) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected array designator index before ';'".to_string(),
+                &found,
+            ));
+        }
+        if self.check(&Token::RBrace) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected array designator index before '}'".to_string(),
+                &found,
+            ));
+        }
         let (value, first_token) =
             self.parse_integer_constant_expr(&HashMap::new(), "expected array designator index")?;
         let index = Self::array_designator_value_to_index(value, &first_token)?;
@@ -5040,6 +5054,20 @@ impl Parser {
             let found = self.advance();
             return Err(Self::error_at(
                 "expected array designator index before ']'".to_string(),
+                &found,
+            ));
+        }
+        if self.check(&Token::Semi) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected array designator index before ';'".to_string(),
+                &found,
+            ));
+        }
+        if self.check(&Token::RBrace) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected array designator index before '}'".to_string(),
                 &found,
             ));
         }
