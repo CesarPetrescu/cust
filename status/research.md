@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-07-05: No external documentation was needed for semicolon/brace delimiter-only array-length diagnostics. Root cause: `expect_array_len()` had targeted checks for `]` and `)` after `[`, but delegated `;` and `}` to the generic integer-constant-expression parser, producing `expected array length, found Semi/RBrace` in malformed declaration/type-name routes. Added shared guards in `src/lib.rs` so these terminators report `expected array length before ';'` / `expected array length before '}'` at the delimiter, with focused coverage in `tests/interpreter.rs`.
+
 - 2026-07-05: No external documentation was needed for missing control-flow condition diagnostics. Root cause: `parse_if`, `parse_while`, `parse_do_while`, and `parse_switch` consumed the opening parenthesis and then delegated delimiter-only conditions to generic expression parsing, producing `expected expression` instead of contextual parser-trust diagnostics. Added shared guards for `if`/`while`/`do-while` plus a switch-specific guard in `src/lib.rs` and exact-output coverage in `tests/interpreter.rs`.
 
 - 2026-07-05: No external documentation was needed for missing `_Atomic(type-name)` specifier diagnostics. Root cause: `parse_decl_type_with_embedded_qualifiers(...)` consumed `_Atomic(` and delegated delimiter-leading missing type arguments to generic type parsing, so `_Atomic()` / `_Atomic(,)` reported `expected type, found ...` rather than a contextual specifier diagnostic. Added a guarded `_Atomic(...)` argument parser and cross-route regression coverage in `tests/interpreter.rs`.

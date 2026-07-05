@@ -4,6 +4,18 @@ Last updated: 2026-07-05
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-05 autonomous semicolon/brace array-length diagnostic run. Ideation considered failing tests/builds (clean pulled tree, no active blockers), the now-complete broad feature backlog, and the open parser-trust continuation item in `status/todo.md`. Selected a narrow continuation of the shared array-declarator/type-name diagnostic work because `[` followed by `;` or `}` still fell through to the generic integer-constant parser as `expected array length, found Semi/RBrace`, while the previous run had only covered `)` and the older empty-`]` path. TDD RED first captured the generic semicolon diagnostic; GREEN added source-located `expected array length before ';'` and `expected array length before '}'` guards in the shared `expect_array_len()` helper while preserving existing `[]`, `[)`, `[*]`, non-constant identifier, comma-expression, and positive-length diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_delimiter_only_array_lengths_with_context -- --nocapture  # RED first: generic `expected array length, found Semi`; GREEN passed after shared semicolon/brace array-length guards
+cargo test --test interpreter array_length -- --nocapture
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-05 autonomous delimiter-only array-length diagnostic run. Ideation considered failing tests/builds (clean pulled tree, no active blockers), the completed broad C-subset backlog, and the open parser-trust queue item in `status/todo.md`. Selected a narrow but cross-route parser diagnostic work package for array declarators/type-name lengths where `[` was followed by `)`: local arrays, function parameters, aggregate fields, typedef aliases, and `sizeof(int[)` previously fell through to the generic integer-constant parser as `expected array length, found RParen`. TDD RED first captured the generic diagnostic; GREEN added a source-located `expected array length before ')'` guard in the shared `expect_array_len()` helper while preserving existing `[]`, `[*]`, non-constant identifier, comma-expression, and positive-length diagnostics.
 
 Commands verified so far:
