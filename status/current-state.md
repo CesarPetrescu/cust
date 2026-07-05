@@ -4,6 +4,18 @@ Last updated: 2026-07-05
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-05 autonomous misplaced function-call argument diagnostic run. Ideation considered failing tests/builds (clean pull and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, malformed declaration/type-name routes, compound-literal initializer gaps, and an adjacent function-call parser diagnostic gap. Selected misplaced function-call arguments because `take([)` and `take(?)`, including after-comma forms, still delegated to generic expression parsing even though delimiter-leading call arguments already had contextual diagnostics. TDD RED first captured `take([)` reporting `expected expression, found LBracket`; GREEN extended `parse_call_args()` guards so misplaced `[` and `?` report contextual function-call-argument diagnostics before generic primary-expression parsing.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_misplaced_function_call_arguments_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after call-argument guard expansion
+cargo test --test interpreter function_call -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-05 autonomous missing grouped-expression operand diagnostic run. Ideation considered failing tests/builds (clean pull and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, malformed nested declaration/type-name routes, and a fresh expression parser diagnostic gap. Selected missing grouped-expression operands because `return ();`, `return (, 1);`, `return (;`, and `return (];` still delegated to generic primary-expression parsing after `(` was consumed, even though adjacent parser routes already provide contextual missing-operand diagnostics. TDD RED first captured `return ();` reporting `expected expression, found RParen`; GREEN added a narrow grouped-expression delimiter guard in `parse_primary()`.
 
 Commands verified so far:

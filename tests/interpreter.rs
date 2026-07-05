@@ -4598,6 +4598,33 @@ fn reports_missing_closing_parens_after_function_call_arguments() {
 }
 
 #[test]
+fn rejects_misplaced_function_call_arguments_with_context() {
+    let cases = [
+        (
+            "int take(int value) { return value; }\nint main(void) {\n    return take([);\n}\n",
+            "expected function call argument, found LBracket at line 3, column 17",
+        ),
+        (
+            "int take(int value) { return value; }\nint main(void) {\n    return take(?);\n}\n",
+            "expected function call argument, found Question at line 3, column 17",
+        ),
+        (
+            "int add(int a, int b) { return a + b; }\nint main(void) {\n    return add(1, [);\n}\n",
+            "expected function call argument after ',', found LBracket at line 3, column 19",
+        ),
+        (
+            "int add(int a, int b) { return a + b; }\nint main(void) {\n    return add(1, ?);\n}\n",
+            "expected function call argument after ',', found Question at line 3, column 19",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn reports_missing_closing_parens_after_if_conditions() {
     let program = "int main() {\nif (1 {\nreturn 1;\n}\nreturn 0;\n}\n";
 

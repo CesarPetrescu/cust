@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-05 autonomous missing grouped-expression operand diagnostic run after clean startup inspection, focused RED/GREEN grouped-expression diagnostic coverage, full local Rust verification, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-07-05 autonomous misplaced function-call argument diagnostic run after clean startup inspection, focused RED/GREEN function-call diagnostic coverage, full local Rust verification, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 

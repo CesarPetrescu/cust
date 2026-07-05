@@ -20,6 +20,8 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## Findings
 
+- 2026-07-05: No external documentation was needed for misplaced function-call argument diagnostics. Root cause: `parse_call_args()` had contextual guards for missing delimiter-leading arguments such as `,`, `;`, `]`, and braces, but let invalid operand-start tokens `[` and `?` delegate into assignment-expression parsing, producing generic `expected expression, found ...` for `take([)` / `take(?)` and after-comma forms. Added those tokens to the initial and after-comma call-argument guards in `src/lib.rs`, with exact-output coverage in `tests/interpreter.rs`.
+
 - 2026-07-05: No external documentation was needed for missing grouped-expression operand diagnostics. Root cause: `parse_primary()` consumed `(` and immediately delegated delimiter-leading grouped expressions such as `()`, `(, 1)`, `(;`, and `(]` to generic expression parsing, producing `expected expression, found ...`. Added a narrow grouped-expression delimiter guard in `src/lib.rs` so these malformed operands report `expected grouped expression, found ...` at the offending token while preserving existing missing-closing-paren diagnostics.
 
 - 2026-07-05: No external documentation was needed for misplaced `sizeof` operand diagnostics. Root cause: `reject_missing_sizeof_operand()` treated delimiters/terminators such as `)` and `;` as missing operands, but let misplaced starter tokens `[` and `?` delegate to generic expression parsing, producing `expected expression, found LBracket/Question` for malformed `sizeof([)` / `sizeof(?)`. Added those tokens to the shared guard in `src/lib.rs` so the parser reports `expected sizeof operand, found ...` at the offending token.
