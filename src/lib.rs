@@ -5183,6 +5183,40 @@ impl Parser {
                         ))?,
                     }])
                 }
+                StructFieldType::StructArray(element_type, len) => {
+                    let index = self.parse_array_designator_index_with_context(
+                        &format!("array field '{}'", field.name),
+                        *len,
+                    )?;
+                    if self.matches(&Token::Dot) {
+                        let nested_fields = self
+                            .struct_types
+                            .get(element_type)
+                            .map(|struct_type| struct_type.fields.clone())
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{element_type}'"))
+                            })?;
+                        let (_, nested_field, nested_value) =
+                            self.parse_struct_designator_after_dot(element_type, &nested_fields)?;
+                        StructInitializer::StructArray(vec![StructArrayInitializer::Designated {
+                            index,
+                            value: vec![StructInitializer::Designated {
+                                field: nested_field,
+                                value: Box::new(nested_value),
+                            }],
+                        }])
+                    } else {
+                        self.expect_assign_after("array designator")?;
+                        self.reject_missing_braced_initializer_element(&format!(
+                            "struct array field '{}' initializer",
+                            field.name
+                        ))?;
+                        StructInitializer::StructArray(vec![StructArrayInitializer::Designated {
+                            index,
+                            value: self.parse_struct_initializer(element_type)?,
+                        }])
+                    }
+                }
                 _ => {
                     return Err(CustError::new(format!(
                         "field '{}' is not an array for path designator",
@@ -10951,19 +10985,60 @@ impl Interpreter {
             }
             (
                 StructFieldType::StructArray(type_name, len),
-                field_value,
+                StructFieldValue::StructArray { elements, .. },
                 StructInitializer::StructArray(init),
             ) => {
-                let Value::StructArray { elements, .. } =
-                    self.make_struct_array_value(type_name, *len, init, field.is_const)?
-                else {
-                    unreachable!("make_struct_array_value returns a struct array value")
-                };
-                *field_value = StructFieldValue::StructArray {
-                    type_name: type_name.clone(),
-                    elements,
-                    is_const: field.is_const,
-                };
+                let nested_type_def =
+                    self.struct_types.get(type_name).cloned().ok_or_else(|| {
+                        CustError::new(format!("undefined struct type '{type_name}'"))
+                    })?;
+                let mut next_positional_index = 0usize;
+                for initializer in init {
+                    match initializer {
+                        StructArrayInitializer::Element(element_init) => {
+                            if next_positional_index == *len {
+                                return Err(CustError::new(
+                                    "too many initializers for struct array",
+                                ));
+                            }
+                            elements[next_positional_index] =
+                                self.make_struct_fields(type_name, element_init.as_slice())?;
+                            next_positional_index += 1;
+                        }
+                        StructArrayInitializer::Designated { index, value } => {
+                            for nested_initializer in value {
+                                let StructInitializer::Designated { field, value } =
+                                    nested_initializer
+                                else {
+                                    unreachable!(
+                                        "nested struct array initializer parsing resolves positional entries to fields"
+                                    )
+                                };
+                                let nested_field_def = nested_type_def
+                                    .fields
+                                    .iter()
+                                    .find(|field_def| field_def.name == *field)
+                                    .ok_or_else(|| {
+                                        CustError::new(format!(
+                                            "struct '{type_name}' has no field '{field}'"
+                                        ))
+                                    })?;
+                                self.apply_struct_field_initializer(
+                                    &mut elements[*index],
+                                    nested_field_def,
+                                    value,
+                                )?;
+                                if nested_type_def.kind == AggregateKind::Union {
+                                    Self::sync_union_scalar_fields_from_active(
+                                        &mut elements[*index],
+                                        field,
+                                    )?;
+                                }
+                            }
+                            next_positional_index = index + 1;
+                        }
+                    }
+                }
             }
             (
                 StructFieldType::StructArray(_, _),

@@ -2464,6 +2464,13 @@ fn supports_path_designated_struct_initializers() {
 }
 
 #[test]
+fn supports_aggregate_array_field_path_designators() {
+    let program = include_str!("fixtures/valid/aggregate_array_field_path_designators.c");
+
+    assert_eq!(interpret(program).unwrap(), 84);
+}
+
+#[test]
 fn supports_scalar_union_variables_fields_initializers_and_sizeof() {
     let program = include_str!("fixtures/valid/unions.c");
 
@@ -3487,14 +3494,21 @@ fn rejects_unknown_path_designator_fields() {
 
 #[test]
 fn rejects_struct_array_path_designators_outside_declared_length() {
-    let program = include_str!("fixtures/invalid/struct_array_path_designator_out_of_bounds.c");
+    let cases = [
+        (
+            include_str!("fixtures/invalid/struct_array_path_designator_out_of_bounds.c"),
+            "array designator index 2 out of bounds for array field 'values'",
+        ),
+        (
+            include_str!("fixtures/invalid/aggregate_array_field_path_designator_out_of_bounds.c"),
+            "array designator index 2 out of bounds for array field 'points'",
+        ),
+    ];
 
-    let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "array designator index 2 out of bounds for array field 'values'"
-    );
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
 }
 
 #[test]

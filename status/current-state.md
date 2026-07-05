@@ -4,6 +4,20 @@ Last updated: 2026-07-05
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-05 autonomous aggregate-array field path-designator run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining open C-subset closure item in `status/todo.md`, parser-trust diagnostic gaps, and a more substantial supported-C initializer parity gap. Selected aggregate-array field path designators because Cust already supported scalar array-field path designators such as `.values[1] = 2` and aggregate-array variables, but rejected C-compatible nested aggregate-array field initializer paths such as `.points[1].x = 7` with `field 'points' is not an array for path designator`. TDD RED first captured that runtime/parser gap; GREEN added parser lowering for `StructFieldType::StructArray` path designators, including whole aggregate-array element designators (`.points[1] = {2, 3}`), nested scalar field designators (`.points[2].x = 5`), union aggregate-array field paths, and out-of-bounds diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter aggregate_array_field_path_designators -- --nocapture  # RED first: `field 'points' is not an array for path designator`; GREEN passed after StructArray path-designator support
+cargo test --test interpreter rejects_struct_array_path_designators_outside_declared_length -- --nocapture
+cargo test --test c_compat -- --nocapture
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-05 autonomous semicolon/brace array-length diagnostic run. Ideation considered failing tests/builds (clean pulled tree, no active blockers), the now-complete broad feature backlog, and the open parser-trust continuation item in `status/todo.md`. Selected a narrow continuation of the shared array-declarator/type-name diagnostic work because `[` followed by `;` or `}` still fell through to the generic integer-constant parser as `expected array length, found Semi/RBrace`, while the previous run had only covered `)` and the older empty-`]` path. TDD RED first captured the generic semicolon diagnostic; GREEN added source-located `expected array length before ';'` and `expected array length before '}'` guards in the shared `expect_array_len()` helper while preserving existing `[]`, `[)`, `[*]`, non-constant identifier, comma-expression, and positive-length diagnostics.
 
 Commands verified so far:
