@@ -8534,6 +8534,20 @@ impl Parser {
                 }
             }
             Token::LParen => {
+                if matches!(
+                    self.peek(),
+                    Token::Comma
+                        | Token::RParen
+                        | Token::RBracket
+                        | Token::Semi
+                        | Token::RBrace
+                        | Token::Eof
+                ) {
+                    return Err(Self::error_at(
+                        format!("expected grouped expression, found {:?}", self.peek()),
+                        self.peek_located(),
+                    ));
+                }
                 let expr = self.parse_expr()?;
                 self.expect_closing_paren_after("grouped expression")?;
                 Ok(expr)

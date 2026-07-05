@@ -4547,6 +4547,33 @@ fn reports_missing_closing_parens_after_grouped_expressions() {
 }
 
 #[test]
+fn rejects_missing_grouped_expression_operands_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    return ();\n}\n",
+            "expected grouped expression, found RParen at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return (, 1);\n}\n",
+            "expected grouped expression, found Comma at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return (;\n}\n",
+            "expected grouped expression, found Semi at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return (];\n}\n",
+            "expected grouped expression, found RBracket at line 2, column 13",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn reports_missing_closing_parens_after_function_definition_parameters() {
     let program = "int add(int a, int b { return a + b; }\nint main() { return add(1, 2); }\n";
 

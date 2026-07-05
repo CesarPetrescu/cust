@@ -4,6 +4,17 @@ Last updated: 2026-07-05
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-05 autonomous missing grouped-expression operand diagnostic run. Ideation considered failing tests/builds (clean pull and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, malformed nested declaration/type-name routes, and a fresh expression parser diagnostic gap. Selected missing grouped-expression operands because `return ();`, `return (, 1);`, `return (;`, and `return (];` still delegated to generic primary-expression parsing after `(` was consumed, even though adjacent parser routes already provide contextual missing-operand diagnostics. TDD RED first captured `return ();` reporting `expected expression, found RParen`; GREEN added a narrow grouped-expression delimiter guard in `parse_primary()`.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_missing_grouped_expression_operands_with_context -- --nocapture  # RED first: generic `expected expression, found RParen`; GREEN passed after grouped-expression guard
+cargo test --test interpreter grouped -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-05 autonomous sizeof misplaced-operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining broad parser-trust continuation item in `status/todo.md`, malformed nested declaration/type-name routes, and less-traveled conformance fixtures. Selected a focused parser-trust slice for malformed `sizeof` expression operands because delimiter-only operands such as `sizeof()` were already contextual, but misplaced operand-start tokens such as `sizeof([)` and `sizeof(?)` still fell through to generic expression parsing. TDD RED first captured `sizeof([)` reporting `expected expression, found LBracket`; GREEN extended the shared `reject_missing_sizeof_operand()` guard so both `[` and `?` now report source-located `expected sizeof operand, found ...` before generic primary-expression parsing.
 
 Commands verified so far:
