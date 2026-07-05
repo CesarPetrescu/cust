@@ -8088,6 +8088,8 @@ impl Parser {
                 | Token::Colon
                 | Token::RParen
                 | Token::RBracket
+                | Token::LBracket
+                | Token::Question
                 | Token::Semi
                 | Token::RBrace
                 | Token::Eof

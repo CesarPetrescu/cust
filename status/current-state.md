@@ -4,6 +4,18 @@ Last updated: 2026-07-05
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-05 autonomous sizeof misplaced-operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining broad parser-trust continuation item in `status/todo.md`, malformed nested declaration/type-name routes, and less-traveled conformance fixtures. Selected a focused parser-trust slice for malformed `sizeof` expression operands because delimiter-only operands such as `sizeof()` were already contextual, but misplaced operand-start tokens such as `sizeof([)` and `sizeof(?)` still fell through to generic expression parsing. TDD RED first captured `sizeof([)` reporting `expected expression, found LBracket`; GREEN extended the shared `reject_missing_sizeof_operand()` guard so both `[` and `?` now report source-located `expected sizeof operand, found ...` before generic primary-expression parsing.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_sizeof_and_alignof_operands_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after sizeof operand guard expansion
+cargo test --test interpreter sizeof -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-05 autonomous aggregate-array field path-designator run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining open C-subset closure item in `status/todo.md`, parser-trust diagnostic gaps, and a more substantial supported-C initializer parity gap. Selected aggregate-array field path designators because Cust already supported scalar array-field path designators such as `.values[1] = 2` and aggregate-array variables, but rejected C-compatible nested aggregate-array field initializer paths such as `.points[1].x = 7` with `field 'points' is not an array for path designator`. TDD RED first captured that runtime/parser gap; GREEN added parser lowering for `StructFieldType::StructArray` path designators, including whole aggregate-array element designators (`.points[1] = {2, 3}`), nested scalar field designators (`.points[2].x = 5`), union aggregate-array field paths, and out-of-bounds diagnostics.
 
 Commands verified so far:

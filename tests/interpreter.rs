@@ -1657,6 +1657,14 @@ fn supports_sizeof_pointer_expressions_without_evaluating_operands() {
 fn rejects_missing_sizeof_and_alignof_operands_with_context() {
     let cases = [
         (
+            "int main(void) { sizeof([); return 0; }",
+            "expected sizeof operand, found LBracket at line 1, column 25",
+        ),
+        (
+            "int main(void) { sizeof(?); return 0; }",
+            "expected sizeof operand, found Question at line 1, column 25",
+        ),
+        (
             "int main(void) {\n    return sizeof();\n}\n",
             "expected sizeof operand, found RParen at line 2, column 19",
         ),

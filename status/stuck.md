@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-05 autonomous aggregate-array field path-designator run after focused interpreter regression coverage passed, focused out-of-bounds diagnostic coverage passed, full local Rust verification passed, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-07-05 autonomous sizeof misplaced-operand diagnostic run after clean startup `cargo test`, focused RED/GREEN sizeof diagnostic coverage, focused `sizeof` coverage, full local Rust verification, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 
