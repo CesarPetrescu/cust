@@ -1,8 +1,19 @@
 # Cust Current State
 
-Last updated: 2026-07-05
+Last updated: 2026-07-06
 
 ## Latest autonomous verification
+
+All passed after the 2026-07-06 autonomous misplaced array-index diagnostic run. Ideation considered failing tests/builds (clean pull and no active blocker), the checked broad C-subset backlog, the remaining parser-trust continuation item in `status/todo.md`, malformed nested declaration/type-name routes, invalid operand-start tokens in other expression contexts, and unsupported near-future C forms. Selected invalid-start array/string index operands because delimiter-only index expressions such as `values[]`, `values[;`, and `values[}` already had contextual diagnostics, but `values[[)` and `"hi"[?]` still delegated to generic primary-expression parsing and reported `expected expression, found ...`. TDD RED first captured the generic `LBracket` failure; GREEN extended the shared `parse_index_expr()` guard to report `expected array index expression, found LBracket/Question` at the offending token while preserving valid array, pointer, string, and aggregate-array indexing.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_missing_array_index_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after parse_index_expr guard expansion
+cargo test --test interpreter array_index -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
 
 All passed after the 2026-07-05 autonomous comma-leading array-designator diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), already-completed broad C-subset backlog items, parser-trust continuation slices, malformed nested declaration/type-name routes, and unsupported near-future C forms. Selected comma-leading array designator indexes because the prior delimiter-only array-designator work covered empty `[]`, semicolon, and brace starts, but `[ , ]` in struct path designators and scalar array compound literals still delegated to generic integer-constant parsing. TDD RED first captured `.values[,]` reporting `expected array designator index, found Comma`; GREEN added comma guards in both bounded and unbounded array-designator index parsers.
 

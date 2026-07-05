@@ -5703,6 +5703,14 @@ fn rejects_missing_array_index_expressions_with_context() {
             "expected array index expression, found RBracket at line 2, column 17",
         ),
         (
+            "int main(void) {\n    int values[2] = {1, 2};\n    return values[[);\n}\n",
+            "expected array index expression, found LBracket at line 3, column 19",
+        ),
+        (
+            "int main(void) {\n    return \"hi\"[?];\n}\n",
+            "expected array index expression, found Question at line 2, column 17",
+        ),
+        (
             "int main(void) {\n    int values[2] = {1, 2};\n    return values[};\n",
             "expected array index expression, found RBrace at line 3, column 19",
         ),

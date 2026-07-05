@@ -7178,7 +7178,13 @@ impl Parser {
     fn parse_index_expr(&mut self) -> CustResult<Expr> {
         if matches!(
             self.peek(),
-            Token::RBracket | Token::RParen | Token::Semi | Token::RBrace | Token::Eof
+            Token::LBracket
+                | Token::Question
+                | Token::RBracket
+                | Token::RParen
+                | Token::Semi
+                | Token::RBrace
+                | Token::Eof
         ) {
             return Err(Self::error_at(
                 format!("expected array index expression, found {:?}", self.peek()),
