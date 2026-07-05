@@ -4,6 +4,18 @@ Last updated: 2026-07-05
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-05 autonomous delimiter-only array-length diagnostic run. Ideation considered failing tests/builds (clean pulled tree, no active blockers), the completed broad C-subset backlog, and the open parser-trust queue item in `status/todo.md`. Selected a narrow but cross-route parser diagnostic work package for array declarators/type-name lengths where `[` was followed by `)`: local arrays, function parameters, aggregate fields, typedef aliases, and `sizeof(int[)` previously fell through to the generic integer-constant parser as `expected array length, found RParen`. TDD RED first captured the generic diagnostic; GREEN added a source-located `expected array length before ')'` guard in the shared `expect_array_len()` helper while preserving existing `[]`, `[*]`, non-constant identifier, comma-expression, and positive-length diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_delimiter_only_array_lengths_with_context -- --nocapture  # RED first: generic `expected array length, found RParen`; GREEN passed after shared array-length guard
+cargo test --test interpreter array_length -- --nocapture
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-05 autonomous control-flow missing-condition diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), completed roadmap/backlog status, and the next useful parser-trust gap. Selected a tightly scoped diagnostics work package for missing `if`/`while`/`do while`/`switch` controlling expressions because those routes still delegated delimiter-only conditions to generic expression parsing. TDD RED first showed `switch ()` and `if ()` reported generic `expected expression` messages; GREEN added source-located contextual guards and focused parser regression coverage.
 
 Commands verified so far:

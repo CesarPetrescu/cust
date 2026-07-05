@@ -600,6 +600,37 @@ fn rejects_comma_operator_in_array_length_integer_constant_expressions() {
 }
 
 #[test]
+fn rejects_delimiter_only_array_lengths_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    int values[);\n    return 0;\n}\n",
+            "expected array length before ')' at line 2, column 16",
+        ),
+        (
+            "int f(int values[));\nint main(void) { return 0; }\n",
+            "expected array length before ')' at line 1, column 18",
+        ),
+        (
+            "struct Packet { int values[); };\nint main(void) { return 0; }\n",
+            "expected array length before ')' at line 1, column 28",
+        ),
+        (
+            "typedef int Values[);\nint main(void) { return 0; }\n",
+            "expected array length before ')' at line 1, column 20",
+        ),
+        (
+            "int main(void) {\n    return sizeof(int[);\n}\n",
+            "expected array length before ')' at line 2, column 23",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_star_vla_array_lengths_with_context() {
     let program = include_str!("fixtures/invalid/array_length_star_vla.c");
 

@@ -6575,6 +6575,13 @@ impl Parser {
                 &found,
             ));
         }
+        if self.check(&Token::RParen) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected array length before ')'".to_string(),
+                &found,
+            ));
+        }
         if self.check(&Token::Star) {
             let found = self.advance();
             return Err(Self::error_at(
