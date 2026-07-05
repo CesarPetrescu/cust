@@ -4,6 +4,18 @@ Last updated: 2026-07-05
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-05 autonomous comma-leading array-designator diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), already-completed broad C-subset backlog items, parser-trust continuation slices, malformed nested declaration/type-name routes, and unsupported near-future C forms. Selected comma-leading array designator indexes because the prior delimiter-only array-designator work covered empty `[]`, semicolon, and brace starts, but `[ , ]` in struct path designators and scalar array compound literals still delegated to generic integer-constant parsing. TDD RED first captured `.values[,]` reporting `expected array designator index, found Comma`; GREEN added comma guards in both bounded and unbounded array-designator index parsers.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_malformed_path_designators_with_context -- --nocapture  # RED first: generic `expected array designator index, found Comma`; GREEN passed after comma designator-index guards
+cargo test --test interpreter designator -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-05 autonomous array-designator delimiter diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining generic parser-trust continuation item in `status/todo.md`, additional malformed nested declaration/type-name routes, unsupported near-future C forms, and a fresh malformed designator-path gap. Selected delimiter-only array designator indexes because empty `[ ]` already had a contextual `expected array designator index before ']'` diagnostic, but `[;]` and `[}` forms in struct path designators and scalar array compound literals still delegated to generic integer-constant parsing. TDD RED first captured `.values[;]` reporting `expected array designator index, found Semi`; GREEN added semicolon/brace guards in both bounded and unbounded array-designator index parsers.
 
 Commands verified so far:

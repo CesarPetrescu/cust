@@ -5019,6 +5019,13 @@ impl Parser {
                 &found,
             ));
         }
+        if self.check(&Token::Comma) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected array designator index before ','".to_string(),
+                &found,
+            ));
+        }
         if self.check(&Token::RBrace) {
             let found = self.advance();
             return Err(Self::error_at(
@@ -5061,6 +5068,13 @@ impl Parser {
             let found = self.advance();
             return Err(Self::error_at(
                 "expected array designator index before ';'".to_string(),
+                &found,
+            ));
+        }
+        if self.check(&Token::Comma) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected array designator index before ','".to_string(),
                 &found,
             ));
         }

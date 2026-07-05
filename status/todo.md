@@ -4,7 +4,8 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
-1. [x] Single-statement control-flow bodies and `else if` chains for `if`/`else`/`while`/`do`/`for`, including C dangling-`else` binding and compiler-oracle coverage
+1. [ ] Continue parser recovery/error-message expansion only for newly discovered malformed programs not already covered by the exact-error suite; next acceptance target should be a concrete RED/GREEN parser-trust slice such as another list/delimiter boundary that still falls through to a generic `expected expression` / `expected type` / integer-constant diagnostic, with focused exact-output tests before implementation.
+2. [x] Single-statement control-flow bodies and `else if` chains for `if`/`else`/`while`/`do`/`for`, including C dangling-`else` binding and compiler-oracle coverage
 2. [x] C-style block comments `/* ... */` as lexer whitespace, including multi-line/inline comments, exact unterminated-comment diagnostics, and compiler-oracle coverage
 3. [x] `void` helper functions and `return;` support; acceptance: lexer/parser/interpreter handle `void name(...) { ... }`, empty returns in void functions, side-effect-only void calls, int/void return-shape diagnostics, scalar-use diagnostics for void calls, and C compiler-oracle coverage
 4. [x] Top-level global variables for scalar `int`/`char`, arrays, and supported pointer globals; acceptance: globals initialize before `main()`, persist in an outer scope, are visible/mutable from helper functions, reject duplicates in the global scope, and include valid/invalid interpreter fixtures plus C compiler-oracle coverage.

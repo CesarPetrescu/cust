@@ -3535,12 +3535,20 @@ fn rejects_malformed_path_designators_with_context() {
             "expected array designator index before ';' at line 3, column 38",
         ),
         (
+            "struct Packet { int values[2]; };\nint main(void) {\n    struct Packet packet = { .values[,] = 1 };\n    return 0;\n}\n",
+            "expected array designator index before ',' at line 3, column 38",
+        ),
+        (
             "struct Packet { int values[2]; };\nint main(void) {\n    struct Packet packet = { .values[} = 1 };\n    return 0;\n}\n",
             "expected array designator index before '}' at line 3, column 38",
         ),
         (
             "int main(void) {\n    int *values = (int[]){[;] = 1};\n    return 0;\n}\n",
             "expected array designator index before ';' at line 2, column 28",
+        ),
+        (
+            "int main(void) {\n    int *values = (int[]){[,] = 1};\n    return 0;\n}\n",
+            "expected array designator index before ',' at line 2, column 28",
         ),
         (
             "int main(void) {\n    int *values = (int[]){[} = 1};\n    return 0;\n}\n",
