@@ -6901,7 +6901,13 @@ impl Parser {
     fn reject_missing_return_expr(&self) -> CustResult<()> {
         if matches!(
             self.peek(),
-            Token::Comma | Token::RParen | Token::RBracket | Token::RBrace | Token::Eof
+            Token::Comma
+                | Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::LBracket
+                | Token::Question
+                | Token::Eof
         ) {
             return Err(Self::error_at(
                 format!("expected expression after return, found {:?}", self.peek()),

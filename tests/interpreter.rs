@@ -5937,6 +5937,14 @@ fn rejects_missing_return_expressions_with_context() {
             "int main(void) {\n    return }\n",
             "expected expression after return, found RBrace at line 2, column 12",
         ),
+        (
+            "int main(void) {\n    return [;\n}\n",
+            "expected expression after return, found LBracket at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    return ?;\n}\n",
+            "expected expression after return, found Question at line 2, column 12",
+        ),
     ];
 
     for (program, expected) in cases {

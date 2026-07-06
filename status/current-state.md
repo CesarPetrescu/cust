@@ -4,6 +4,18 @@ Last updated: 2026-07-06
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-06 autonomous return invalid-start expression diagnostic run. Ideation considered failing tests/builds (clean startup inspection and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, invalid-start return expressions, additional expression-list boundaries, unsupported near-future C forms, and broader conformance/tooling work. Selected malformed `return` value starts because delimiter-leading value returns such as `return ,;`, `return );`, and `return }` were contextual, but invalid operand-start tokens such as `return [;` and `return ?;` still delegated to generic expression parsing. TDD RED first captured the generic `expected expression, found LBracket`; GREEN extended the return-expression guard so these malformed returns report source-located `expected expression after return...` diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_missing_return_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after return-expression guard expansion
+cargo test --test interpreter return -- --nocapture
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-06 autonomous braced-initializer designator-value invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed braced initializer value boundaries, additional declaration/type-name delimiters, and unsupported near-future C forms. Selected invalid-start initializer values after array/field designators because delimiter-only forms such as `[0] = ,` and `.x = ,` were contextual, but invalid operand-start tokens such as `int values[2] = {[0] = ?};` and `struct Point point = {.x = [?]};` still delegated to generic expression parsing. TDD RED first captured the generic `expected expression, found LBracket`; GREEN added a value-position braced-initializer guard that rejects `[`/`?` after designator `=` without breaking valid array designator starts.
 
 Commands verified so far:
