@@ -1,8 +1,20 @@
 # Cust Current State
 
-Last updated: 2026-07-06
+Last updated: 2026-07-07
 
 ## Latest autonomous verification
+
+All passed after the 2026-07-07 autonomous array-designator invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled designator path variants, type-query/compound-literal operand starts, additional pointer-arithmetic negative coverage, and broader conformance-only fixture work. Selected invalid operand-start array designator indexes because delimiter-only designators (`[]`, `[;]`, `[,]`, `[}`) were contextual, but malformed starts such as `.values[[] = 1`, `.values[?] = 1`, `(int[]){[[] = 1}`, and `(int[]){[?] = 1}` still delegated to generic integer-constant parsing. TDD RED first captured `expected array designator index, found LBracket`; GREEN extended both bounded and unbounded array-designator index guards so `[` and `?` report source-located `expected array designator index before ...` diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_malformed_path_designators_with_context -- --nocapture  # RED first: generic `expected array designator index, found LBracket`; GREEN passed after array-designator invalid-start guard expansion
+cargo test --test interpreter designator -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
 
 All passed after the 2026-07-06 autonomous function-parameter invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed function parameter starts, malformed declaration/type-name starts, additional expression/list boundaries, and broader conformance/tooling work. Selected invalid-start function parameter tokens because comma/`]` list-boundary forms already had contextual parameter diagnostics, but malformed starts such as `int add([ int b)` and `int add(int a,? int b)` still delegated to generic type parsing. TDD RED first captured `expected type, found LBracket`; GREEN extended the function-parameter list guards so `[` and `?` report source-located `expected function parameter...` diagnostics at the initial and after-comma positions.
 

@@ -19,6 +19,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Array-length invalid-start diagnostics: malformed fixed-size array lengths such as `int values[?];` and nested type-name forms such as `sizeof(int[[)` now report contextual `expected array length before '?'/'['` messages instead of falling through to generic integer-constant parsing.
 - [x] `_Alignas` and `_Static_assert` invalid-start diagnostics: malformed declaration-specifier/assertion operands such as `_Alignas([)`, `_Alignas(?)`, `_Static_assert([, "msg")`, and `_Static_assert(?, "msg")` now report contextual source-located route errors instead of falling through to generic expression parsing.
 - [x] Function-parameter invalid-start diagnostics: malformed parameter starts such as `int add([ int b)`, `int add(? int b)`, `int add(int a,[ int b)`, and `int add(int a,? int b)` now report contextual `expected function parameter...` messages instead of falling through to generic type parsing.
+- [x] Array-designator invalid-start diagnostics: malformed bounded and unbounded designator indexes such as `.values[[] = 1`, `.values[?] = 1`, `(int[]){[[] = 1}`, and `(int[]){[?] = 1}` now report contextual `expected array designator index before '['/'?'` messages instead of falling through to generic integer-constant parsing.
 - [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 
