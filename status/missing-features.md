@@ -13,6 +13,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Array/string index missing/misplaced operand diagnostics: delimiter-leading and invalid operand-start index forms such as `values[]`, `values[;`, `values[}`, `values[[)`, and `"hi"[?]` now report contextual `expected array index expression...` messages instead of falling through to generic expression parsing.
 - [x] Declaration initializer missing/misplaced operand diagnostics: delimiter-leading and invalid operand-start initializer forms such as `int value = ;`, `int *slot = , fallback = 0`, `int value = [?];`, and `int *slot = ?;` now report contextual `expected initializer expression after '=' in ... declaration...` messages instead of falling through to generic expression parsing.
 - [x] Array designator delimiter diagnostics: malformed bounded and unbounded designator indexes such as `.values[]`, `.values[;]`, `.values[,]`, `.values[}`, `(int[]){[,] = 1}`, and `(int[]){[} = 1}` now report contextual `expected array designator index before ...` messages instead of falling through to generic integer-constant parsing.
+- [x] Control-flow condition invalid-start diagnostics: malformed `if`/`while`/`do while`/`switch` conditions such as `if ([)`, `while (?)`, `do { } while ([);`, and `switch ([)` now report contextual `expected expression after <keyword>...` messages instead of falling through to generic expression parsing.
 - [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 

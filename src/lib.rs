@@ -6889,7 +6889,12 @@ impl Parser {
     fn reject_missing_control_condition_expr(&self, keyword: &str) -> CustResult<()> {
         if matches!(
             self.peek(),
-            Token::RParen | Token::Semi | Token::RBrace | Token::Eof
+            Token::RParen
+                | Token::Semi
+                | Token::RBrace
+                | Token::LBracket
+                | Token::Question
+                | Token::Eof
         ) {
             return Err(Self::error_at(
                 format!(
@@ -7142,7 +7147,12 @@ impl Parser {
     fn reject_missing_switch_expr(&self) -> CustResult<()> {
         if matches!(
             self.peek(),
-            Token::RParen | Token::Semi | Token::RBrace | Token::Eof
+            Token::RParen
+                | Token::Semi
+                | Token::RBrace
+                | Token::LBracket
+                | Token::Question
+                | Token::Eof
         ) {
             return Err(Self::error_at(
                 format!("expected expression after switch, found {:?}", self.peek()),

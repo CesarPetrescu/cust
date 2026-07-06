@@ -5559,6 +5559,10 @@ fn rejects_missing_switch_expressions_with_context() {
             "int main(void) { switch (} }",
             "expected expression after switch, found RBrace at line 1, column 26",
         ),
+        (
+            "int main(void) { switch ([) { default: return 1; } }",
+            "expected expression after switch, found LBracket at line 1, column 26",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -5576,12 +5580,24 @@ fn rejects_missing_control_flow_condition_expressions_with_context() {
             "expected expression after if, found RParen at line 1, column 22",
         ),
         (
+            "int main(void) { if ([) { return 1; } return 0; }",
+            "expected expression after if, found LBracket at line 1, column 22",
+        ),
+        (
             "int main(void) { while (; }",
             "expected expression after while, found Semi at line 1, column 25",
         ),
         (
+            "int main(void) { while (?) { return 1; } return 0; }",
+            "expected expression after while, found Question at line 1, column 25",
+        ),
+        (
             "int main(void) { do { } while (); }",
             "expected expression after do-while, found RParen at line 1, column 32",
+        ),
+        (
+            "int main(void) { do { } while ([); }",
+            "expected expression after do-while, found LBracket at line 1, column 32",
         ),
     ];
 
