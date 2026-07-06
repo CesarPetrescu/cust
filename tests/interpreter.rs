@@ -630,6 +630,14 @@ fn rejects_delimiter_only_array_lengths_with_context() {
             "int main(void) {\n    int values[}\n",
             "expected array length before '}' at line 2, column 16",
         ),
+        (
+            "int main(void) {\n    int values[?];\n    return 0;\n}\n",
+            "expected array length before '?' at line 2, column 16",
+        ),
+        (
+            "int main(void) {\n    return sizeof(int[[);\n}\n",
+            "expected array length before '[' at line 2, column 23",
+        ),
     ];
 
     for (program, expected) in cases {

@@ -4,6 +4,17 @@ Last updated: 2026-07-06
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-06 autonomous array-length invalid-start diagnostic run. Ideation considered failing tests/builds (clean startup inspection and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, malformed array-length tokens in declaration/type-name routes, designator path invalid starts, unsupported near-future C forms, and broader conformance fixture work. Selected invalid operand-start array lengths because delimiter-only forms such as `int values[);`, `int values[;`, and `sizeof(int[)` were contextual, but malformed starts such as `int values[?];` and `sizeof(int[[)` still delegated to generic integer-constant parsing. TDD RED first captured `expected array length, found Question`; GREEN extended the shared array-length helper so `?` and nested `[` starts report source-located `expected array length before '?'/'['` diagnostics across every array-length route.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_delimiter_only_array_lengths_with_context -- --nocapture  # RED first: generic `expected array length, found Question`; GREEN passed after guard expansion
+cargo test --test interpreter array_lengths -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-06 autonomous operator RHS invalid-start diagnostic run. Ideation considered failing tests/builds (clean startup inspection and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, invalid-start operator RHS operands, additional nested declaration/type-name delimiters, unsupported near-future C forms, and broader conformance/tooling work. Selected invalid operand-start tokens after comma, assignment, binary, and conditional operators because delimiter-only missing RHS forms were contextual, but malformed starts such as `return 1 + [;`, `value = [;`, `value += ?;`, `return 1, [;`, `return 1 ? [ : 2;`, and `return 1 ? 2 : [;` still delegated to generic expression parsing. TDD RED first captured the generic `expected expression, found LBracket`; GREEN extended the operator RHS guards so these malformed operator operands report source-located contextual diagnostics.
 
 Commands verified so far:
