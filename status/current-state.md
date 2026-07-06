@@ -4,6 +4,17 @@ Last updated: 2026-07-06
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-06 autonomous declaration-initializer invalid-start diagnostic run. Ideation considered failing tests/builds (clean pull and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, nearby initializer/list delimiter diagnostics, malformed nested type-name routes, and unsupported near-future C forms. Selected invalid-start declaration initializer expressions because delimiter-only forms such as `int value = ;` and pointer/array/aggregate initializer separators already had contextual diagnostics, but invalid operand-start tokens such as `int value = [?];` and `int *slot = ?;` still delegated to generic expression parsing and reported `expected expression, found ...`. TDD RED first captured the generic `LBracket` failure; GREEN extended the shared declaration-initializer guard to report `expected initializer expression after '=' in ... declaration, found LBracket/Question` at the offending token while preserving existing scalar, pointer, array, and aggregate initializer routes.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_missing_declaration_initializer_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after declaration-initializer guard expansion
+cargo test --test interpreter initializer -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-06 autonomous misplaced array-index diagnostic run. Ideation considered failing tests/builds (clean pull and no active blocker), the checked broad C-subset backlog, the remaining parser-trust continuation item in `status/todo.md`, malformed nested declaration/type-name routes, invalid operand-start tokens in other expression contexts, and unsupported near-future C forms. Selected invalid-start array/string index operands because delimiter-only index expressions such as `values[]`, `values[;`, and `values[}` already had contextual diagnostics, but `values[[)` and `"hi"[?]` still delegated to generic primary-expression parsing and reported `expected expression, found ...`. TDD RED first captured the generic `LBracket` failure; GREEN extended the shared `parse_index_expr()` guard to report `expected array index expression, found LBracket/Question` at the offending token while preserving valid array, pointer, string, and aggregate-array indexing.
 
 Commands verified so far:

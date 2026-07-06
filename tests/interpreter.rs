@@ -5913,8 +5913,16 @@ fn rejects_missing_declaration_initializer_expressions_with_context() {
             "expected initializer expression after '=' in variable declaration, found Semi at line 2, column 28",
         ),
         (
+            "int main(void) {\n    int value = [?];\n    return value;\n}\n",
+            "expected initializer expression after '=' in variable declaration, found LBracket at line 2, column 17",
+        ),
+        (
             "int main(void) {\n    int value = 1;\n    int *slot = , fallback = 0;\n    return value;\n}\n",
             "expected initializer expression after '=' in pointer declaration, found Comma at line 3, column 17",
+        ),
+        (
+            "int main(void) {\n    int value = 1;\n    int *slot = ?;\n    return value;\n}\n",
+            "expected initializer expression after '=' in pointer declaration, found Question at line 3, column 17",
         ),
         (
             "struct Point { int x; };\nint main(void) {\n    struct Point point = ;\n    return 0;\n}\n",
