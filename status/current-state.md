@@ -4,6 +4,19 @@ Last updated: 2026-07-06
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-06 autonomous operator RHS invalid-start diagnostic run. Ideation considered failing tests/builds (clean startup inspection and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, invalid-start operator RHS operands, additional nested declaration/type-name delimiters, unsupported near-future C forms, and broader conformance/tooling work. Selected invalid operand-start tokens after comma, assignment, binary, and conditional operators because delimiter-only missing RHS forms were contextual, but malformed starts such as `return 1 + [;`, `value = [;`, `value += ?;`, `return 1, [;`, `return 1 ? [ : 2;`, and `return 1 ? 2 : [;` still delegated to generic expression parsing. TDD RED first captured the generic `expected expression, found LBracket`; GREEN extended the operator RHS guards so these malformed operator operands report source-located contextual diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_misplaced_operator_rhs_operands_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after operator-RHS guard expansion
+cargo test --test interpreter rejects_missing_conditional_operator_operands_with_context -- --nocapture
+cargo test --test interpreter operator -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-06 autonomous return invalid-start expression diagnostic run. Ideation considered failing tests/builds (clean startup inspection and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, invalid-start return expressions, additional expression-list boundaries, unsupported near-future C forms, and broader conformance/tooling work. Selected malformed `return` value starts because delimiter-leading value returns such as `return ,;`, `return );`, and `return }` were contextual, but invalid operand-start tokens such as `return [;` and `return ?;` still delegated to generic expression parsing. TDD RED first captured the generic `expected expression, found LBracket`; GREEN extended the return-expression guard so these malformed returns report source-located `expected expression after return...` diagnostics.
 
 Commands verified so far:

@@ -6120,6 +6120,41 @@ fn rejects_missing_conditional_operator_operands_with_context() {
             "int main(void) {\n    return 1 ? 2 : );\n}\n",
             "expected expression after ':' in conditional operator, found RParen at line 2, column 20",
         ),
+        (
+            "int main(void) {\n    return 1 ? [ : 2;\n}\n",
+            "expected expression after '?' in conditional operator, found LBracket at line 2, column 16",
+        ),
+        (
+            "int main(void) {\n    return 1 ? 2 : [;\n}\n",
+            "expected expression after ':' in conditional operator, found LBracket at line 2, column 20",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_misplaced_operator_rhs_operands_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    return 1 + [;\n}\n",
+            "expected expression after binary operator '+', found LBracket at line 2, column 16",
+        ),
+        (
+            "int main(void) {\n    int value = 1;\n    value = [;\n    return value;\n}\n",
+            "expected expression after assignment operator '=', found LBracket at line 3, column 13",
+        ),
+        (
+            "int main(void) {\n    int value = 1;\n    value += ?;\n    return value;\n}\n",
+            "expected expression after assignment operator '+=', found Question at line 3, column 14",
+        ),
+        (
+            "int main(void) {\n    return 1, [;\n}\n",
+            "expected expression after comma operator, found LBracket at line 2, column 15",
+        ),
     ];
 
     for (program, expected) in cases {

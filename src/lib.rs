@@ -7211,7 +7211,13 @@ impl Parser {
         while self.matches(&Token::Comma) {
             if matches!(
                 self.peek(),
-                Token::RParen | Token::RBracket | Token::Semi | Token::RBrace | Token::Eof
+                Token::LBracket
+                    | Token::Question
+                    | Token::RParen
+                    | Token::RBracket
+                    | Token::Semi
+                    | Token::RBrace
+                    | Token::Eof
             ) {
                 return Err(Self::error_at(
                     format!(
@@ -7468,7 +7474,9 @@ impl Parser {
     fn reject_missing_assignment_rhs(&self, operator: &LocatedToken) -> CustResult<()> {
         if matches!(
             self.peek(),
-            Token::Comma
+            Token::LBracket
+                | Token::Question
+                | Token::Comma
                 | Token::Colon
                 | Token::RParen
                 | Token::RBracket
@@ -7508,13 +7516,21 @@ impl Parser {
     fn parse_conditional_expr(&mut self) -> CustResult<Expr> {
         let cond = self.parse_logical_or()?;
         if self.matches(&Token::Question) {
-            self.reject_missing_conditional_operand("?", |token| matches!(token, Token::Colon))?;
+            self.reject_missing_conditional_operand("?", |token| {
+                matches!(token, Token::LBracket | Token::Question | Token::Colon)
+            })?;
             let then_expr = self.parse_expr()?;
             self.expect_colon_after("conditional then-expression")?;
             self.reject_missing_conditional_operand(":", |token| {
                 matches!(
                     token,
-                    Token::RParen | Token::RBracket | Token::Semi | Token::RBrace | Token::Eof
+                    Token::LBracket
+                        | Token::Question
+                        | Token::RParen
+                        | Token::RBracket
+                        | Token::Semi
+                        | Token::RBrace
+                        | Token::Eof
                 )
             })?;
             let else_expr = self.parse_conditional_expr()?;
@@ -7699,7 +7715,9 @@ impl Parser {
     fn reject_missing_binary_rhs(&self, operator: &LocatedToken) -> CustResult<()> {
         if matches!(
             self.peek(),
-            Token::Comma
+            Token::LBracket
+                | Token::Question
+                | Token::Comma
                 | Token::Colon
                 | Token::RParen
                 | Token::RBracket
