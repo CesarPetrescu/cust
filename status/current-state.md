@@ -4,6 +4,20 @@ Last updated: 2026-07-06
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-06 autonomous `for` clause invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed `for` initializer/condition/increment boundaries, additional list/delimiter routes, and unsupported near-future C forms. Selected malformed `for` condition/increment expressions because recent control-flow condition coverage included `if`/`while`/`do while`/`switch`, but `for (init; [; inc)` still delegated to generic expression parsing and `for (init; cond; [)` reported an uncontextual `unexpected token in for increment`. TDD RED first captured the generic `LBracket` failure; GREEN reused the shared control-condition guard for `for` conditions and added a narrow `for` increment invalid-start guard for `[`/`?`.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_control_flow_condition_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after for-condition guard
+cargo test --test interpreter rejects_misplaced_for_increment_expressions_with_context -- --nocapture  # RED first: uncontextual for-increment failure; GREEN passed after increment guard
+cargo test --test interpreter control -- --nocapture
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-06 autonomous control-flow invalid-start condition diagnostic run. Ideation considered failing tests/builds (clean pull and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, malformed expression-start tokens in control-flow headers, additional list/delimiter routes, and unsupported near-future C forms. Selected invalid-start control-flow conditions because delimiter-only `if`/`while`/`do while`/`switch` conditions were already contextual, but malformed starters such as `if ([)`, `while (?)`, `do { } while ([);`, and `switch ([)` still delegated to generic expression parsing and reported `expected expression, found ...`. TDD RED first captured the generic `LBracket` failure; GREEN extended the shared control-condition and switch-expression guards to report contextual `expected expression after <keyword>...` diagnostics while preserving valid control-flow parsing.
 
 Commands verified so far:

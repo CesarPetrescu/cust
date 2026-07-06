@@ -7016,6 +7016,7 @@ impl Parser {
         let cond = if self.matches(&Token::Semi) {
             None
         } else {
+            self.reject_missing_control_condition_expr("for condition")?;
             let expr = self.parse_expr()?;
             self.expect_semicolon_after("for condition")?;
             Some(expr)
@@ -7028,6 +7029,14 @@ impl Parser {
             Some(Box::new(self.parse_assign_with_semi(false)?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(false)?))
+        } else if matches!(self.peek(), Token::LBracket | Token::Question) {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after for increment, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
         } else if let Some(message) = self.statement_only_control_flow_error("for increment") {
             return Err(Self::error_at(message, self.peek_located()));
         } else {

@@ -5599,6 +5599,34 @@ fn rejects_missing_control_flow_condition_expressions_with_context() {
             "int main(void) { do { } while ([); }",
             "expected expression after do-while, found LBracket at line 1, column 32",
         ),
+        (
+            "int main(void) { for (int i = 0; [; i = i + 1) { return i; } return 0; }",
+            "expected expression after for condition, found LBracket at line 1, column 34",
+        ),
+        (
+            "int main(void) { for (int i = 0; ?; i = i + 1) { return i; } return 0; }",
+            "expected expression after for condition, found Question at line 1, column 34",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn rejects_misplaced_for_increment_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) { for (int i = 0; i < 3; [) { return i; } return 0; }",
+            "expected expression after for increment, found LBracket at line 1, column 41",
+        ),
+        (
+            "int main(void) { for (int i = 0; i < 3; ?) { return i; } return 0; }",
+            "expected expression after for increment, found Question at line 1, column 41",
+        ),
     ];
 
     for (program, expected) in cases {
