@@ -3357,7 +3357,10 @@ impl Parser {
                 &void_token,
             ));
         }
-        if matches!(self.peek(), Token::Comma | Token::RBracket) {
+        if matches!(
+            self.peek(),
+            Token::Comma | Token::RBracket | Token::LBracket | Token::Question
+        ) {
             return Err(Self::error_at(
                 format!("expected function parameter, found {:?}", self.peek()),
                 self.peek_located(),
@@ -3518,6 +3521,8 @@ impl Parser {
                     Token::Comma
                         | Token::RParen
                         | Token::RBracket
+                        | Token::LBracket
+                        | Token::Question
                         | Token::Semi
                         | Token::LBrace
                         | Token::RBrace

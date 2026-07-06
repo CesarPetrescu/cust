@@ -4,6 +4,18 @@ Last updated: 2026-07-06
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-06 autonomous function-parameter invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed function parameter starts, malformed declaration/type-name starts, additional expression/list boundaries, and broader conformance/tooling work. Selected invalid-start function parameter tokens because comma/`]` list-boundary forms already had contextual parameter diagnostics, but malformed starts such as `int add([ int b)` and `int add(int a,? int b)` still delegated to generic type parsing. TDD RED first captured `expected type, found LBracket`; GREEN extended the function-parameter list guards so `[` and `?` report source-located `expected function parameter...` diagnostics at the initial and after-comma positions.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_function_parameters_around_commas_with_context -- --nocapture  # RED first: generic `expected type, found LBracket`; GREEN passed after parameter invalid-start guard expansion
+cargo test --test interpreter function_parameter -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-06 autonomous declaration-specifier assertion invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed declaration-specifier/assertion arguments, malformed array designator indexes, generic parameter/type starts, and broader conformance/tooling work. Selected `_Alignas(...)` and `_Static_assert(...)` invalid operand-start diagnostics because delimiter-only forms already had contextual messages, but malformed starts such as `_Alignas([)` and `_Static_assert(?, "msg")` still delegated to generic expression parsing. TDD RED first captured the generic `expected expression, found LBracket`; GREEN extended both route-local guards so `[` and `?` report source-located contextual diagnostics.
 
 Commands verified so far:

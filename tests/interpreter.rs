@@ -4419,6 +4419,22 @@ fn rejects_missing_function_parameters_around_commas_with_context() {
             "int add(int a,] int b) { return a + b; }\nint main(void) { return add(1, 2); }\n",
             "expected function parameter after ',', found RBracket at line 1, column 15",
         ),
+        (
+            "int add([ int b) { return b; }\nint main(void) { return add(1); }\n",
+            "expected function parameter, found LBracket at line 1, column 9",
+        ),
+        (
+            "int add(? int b) { return b; }\nint main(void) { return add(1); }\n",
+            "expected function parameter, found Question at line 1, column 9",
+        ),
+        (
+            "int add(int a,[ int b) { return a + b; }\nint main(void) { return add(1, 2); }\n",
+            "expected function parameter after ',', found LBracket at line 1, column 15",
+        ),
+        (
+            "int add(int a,? int b) { return a + b; }\nint main(void) { return add(1, 2); }\n",
+            "expected function parameter after ',', found Question at line 1, column 15",
+        ),
     ];
 
     for (program, expected) in cases {

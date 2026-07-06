@@ -18,6 +18,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Operator RHS invalid-start diagnostics: malformed comma, assignment, binary, and conditional operands such as `return 1, [;`, `value = [;`, `value += ?;`, `return 1 + [;`, `return 1 ? [ : 2;`, and `return 1 ? 2 : [;` now report contextual `expected expression after ... operator...` messages instead of falling through to generic expression parsing.
 - [x] Array-length invalid-start diagnostics: malformed fixed-size array lengths such as `int values[?];` and nested type-name forms such as `sizeof(int[[)` now report contextual `expected array length before '?'/'['` messages instead of falling through to generic integer-constant parsing.
 - [x] `_Alignas` and `_Static_assert` invalid-start diagnostics: malformed declaration-specifier/assertion operands such as `_Alignas([)`, `_Alignas(?)`, `_Static_assert([, "msg")`, and `_Static_assert(?, "msg")` now report contextual source-located route errors instead of falling through to generic expression parsing.
+- [x] Function-parameter invalid-start diagnostics: malformed parameter starts such as `int add([ int b)`, `int add(? int b)`, `int add(int a,[ int b)`, and `int add(int a,? int b)` now report contextual `expected function parameter...` messages instead of falling through to generic type parsing.
 - [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 
