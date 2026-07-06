@@ -4798,6 +4798,30 @@ impl Parser {
         if matches!(
             self.peek(),
             Token::Comma
+                | Token::Question
+                | Token::Semi
+                | Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected initializer element in {context}, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_invalid_braced_initializer_value(&self, context: &str) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Comma
+                | Token::LBracket
+                | Token::Question
                 | Token::Semi
                 | Token::RParen
                 | Token::RBracket
@@ -4896,7 +4920,7 @@ impl Parser {
             if self.check(&Token::LBracket) {
                 let index = self.parse_array_designator_index(name, len)?;
                 self.expect_assign_after("array designator")?;
-                self.reject_missing_braced_initializer_element(&context)?;
+                self.reject_invalid_braced_initializer_value(&context)?;
                 let value =
                     self.parse_scalar_initializer_expr(&format!("array '{name}' element"))?;
                 next_positional_index = index + 1;
@@ -4948,9 +4972,7 @@ impl Parser {
                     None => self.parse_unbounded_array_designator_index()?,
                 };
                 self.expect_assign_after("array designator")?;
-                self.reject_missing_braced_initializer_element(
-                    "array compound literal initializer",
-                )?;
+                self.reject_invalid_braced_initializer_value("array compound literal initializer")?;
                 let value = self.parse_scalar_initializer_expr("array compound literal element")?;
                 next_positional_index = index + 1;
                 values.push(ArrayInitializer::Designated { index, value });
@@ -5219,6 +5241,9 @@ impl Parser {
                         *len,
                     )?;
                     self.expect_assign_after("array designator")?;
+                    self.reject_invalid_braced_initializer_value(&format!(
+                        "struct '{type_name}' initializer"
+                    ))?;
                     StructInitializer::Array(vec![ArrayInitializer::Designated {
                         index,
                         value: self.parse_scalar_initializer_expr(&format!(
@@ -5270,7 +5295,7 @@ impl Parser {
             }
         } else {
             self.expect_assign_after("struct field designator")?;
-            self.reject_missing_braced_initializer_element(&format!(
+            self.reject_invalid_braced_initializer_value(&format!(
                 "struct '{type_name}' initializer"
             ))?;
             self.parse_struct_initializer_value(field)?

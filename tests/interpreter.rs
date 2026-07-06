@@ -6016,6 +6016,14 @@ fn rejects_missing_braced_initializer_elements_with_context() {
             "expected initializer element in struct 'Point' initializer, found Comma at line 3, column 32",
         ),
         (
+            "struct Point { int x; int y; };\nint main(void) {\n    struct Point point = {.x = [?], .y = 1};\n    return 0;\n}\n",
+            "expected initializer element in struct 'Point' initializer, found LBracket at line 3, column 32",
+        ),
+        (
+            "int main(void) {\n    int values[2] = {[0] = ?};\n    return 0;\n}\n",
+            "expected initializer element in array 'values' initializer, found Question at line 2, column 28",
+        ),
+        (
             "struct Point { int x; int y; };\nint main(void) {\n    struct Point points[2] = {, {1, 2}};\n    return 0;\n}\n",
             "expected initializer element in struct array 'points' initializer, found Comma at line 3, column 31",
         ),

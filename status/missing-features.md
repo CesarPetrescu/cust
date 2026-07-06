@@ -235,6 +235,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Missing control-flow controlling expressions are targeted before generic expression parsing. Acceptance covered by malformed `if ()`, `while (;`, `do { } while ();`, `switch ()`, `switch (;`, and `switch (}` reporting `expected expression after <keyword>, found ...` at the offending delimiter.
 - [x] Misplaced `sizeof` expression operands are targeted before generic expression parsing. Acceptance covered by malformed `sizeof([)` and `sizeof(?)` reporting `expected sizeof operand, found LBracket/Question` at the offending token instead of generic primary-expression diagnostics, while existing delimiter-only `sizeof()` / `sizeof(;)` and valid type/expression operands remain unchanged.
 - [x] Missing grouped-expression operands are targeted before generic primary-expression parsing. Acceptance covered by malformed `()`, `(, 1)`, `(;`, and `(]` reporting `expected grouped expression, found ...` at the offending delimiter/terminator while preserving valid grouped expressions and existing `expected ')' after grouped expression` diagnostics.
+- [x] Invalid-start braced-initializer designator values are targeted before generic expression parsing. Acceptance covered by malformed designator values such as `struct Point point = {.x = [?], .y = 1};` and `int values[2] = {[0] = ?};` reporting contextual `expected initializer element in ... initializer, found LBracket/Question` diagnostics at the offending token while preserving valid array designator starts like `[0] = value`.
 
 ## P4 — product quality
 
