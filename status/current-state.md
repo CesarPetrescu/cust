@@ -4,6 +4,19 @@ Last updated: 2026-07-06
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-06 autonomous declaration-specifier assertion invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed declaration-specifier/assertion arguments, malformed array designator indexes, generic parameter/type starts, and broader conformance/tooling work. Selected `_Alignas(...)` and `_Static_assert(...)` invalid operand-start diagnostics because delimiter-only forms already had contextual messages, but malformed starts such as `_Alignas([)` and `_Static_assert(?, "msg")` still delegated to generic expression parsing. TDD RED first captured the generic `expected expression, found LBracket`; GREEN extended both route-local guards so `[` and `?` report source-located contextual diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_alignas_arguments_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after _Alignas guard expansion
+cargo test --test interpreter rejects_missing_static_assert_arguments_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after _Static_assert guard expansion
+cargo test --test interpreter missing -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-06 autonomous array-length invalid-start diagnostic run. Ideation considered failing tests/builds (clean startup inspection and no active blocker), the remaining parser-trust continuation item in `status/todo.md`, malformed array-length tokens in declaration/type-name routes, designator path invalid starts, unsupported near-future C forms, and broader conformance fixture work. Selected invalid operand-start array lengths because delimiter-only forms such as `int values[);`, `int values[;`, and `sizeof(int[)` were contextual, but malformed starts such as `int values[?];` and `sizeof(int[[)` still delegated to generic integer-constant parsing. TDD RED first captured `expected array length, found Question`; GREEN extended the shared array-length helper so `?` and nested `[` starts report source-located `expected array length before '?'/'['` diagnostics across every array-length route.
 
 Commands verified so far:

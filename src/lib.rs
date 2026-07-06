@@ -2005,6 +2005,8 @@ impl Parser {
         if matches!(
             self.peek(),
             Token::Comma
+                | Token::LBracket
+                | Token::Question
                 | Token::RParen
                 | Token::RBracket
                 | Token::Semi
@@ -3834,6 +3836,8 @@ impl Parser {
         if matches!(
             self.peek(),
             Token::Comma
+                | Token::LBracket
+                | Token::Question
                 | Token::RParen
                 | Token::RBracket
                 | Token::Semi

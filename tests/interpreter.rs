@@ -1031,6 +1031,32 @@ fn rejects_missing_alignas_arguments_with_context() {
             .contains("expected _Alignas argument, found Semi at line 3, column 22"),
         "unexpected error: {err}"
     );
+
+    let misplaced_bracket_argument = r#"
+        int main(void) {
+            _Alignas([) int value;
+            return 0;
+        }
+    "#;
+    let err = interpret(misplaced_bracket_argument).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("expected _Alignas argument, found LBracket at line 3, column 22"),
+        "unexpected error: {err}"
+    );
+
+    let misplaced_question_argument = r#"
+        int main(void) {
+            _Alignas(?) int value;
+            return 0;
+        }
+    "#;
+    let err = interpret(misplaced_question_argument).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("expected _Alignas argument, found Question at line 3, column 22"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -1085,6 +1111,28 @@ fn rejects_missing_static_assert_arguments_with_context() {
         err.to_string().contains(
             "expected string literal after _Static_assert condition, found RParen at line 2, column 27"
         ),
+        "unexpected error: {err}"
+    );
+
+    let misplaced_bracket_condition = r#"
+        _Static_assert([, "condition required");
+        int main(void) { return 0; }
+    "#;
+    let err = interpret(misplaced_bracket_condition).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("expected _Static_assert condition, found LBracket at line 2, column 24"),
+        "unexpected error: {err}"
+    );
+
+    let misplaced_question_condition = r#"
+        _Static_assert(?, "condition required");
+        int main(void) { return 0; }
+    "#;
+    let err = interpret(misplaced_question_condition).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("expected _Static_assert condition, found Question at line 2, column 24"),
         "unexpected error: {err}"
     );
 }
