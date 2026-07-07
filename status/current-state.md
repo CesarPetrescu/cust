@@ -4,6 +4,18 @@ Last updated: 2026-07-07
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-07 autonomous `for` initializer invalid-start diagnostic run. Ideation considered failing tests/builds (none on clean startup status), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed expression/list boundaries not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected malformed `for` initializer starts because `for ([; ; )`, `for (?; ; )`, and `for (,; ; )` still reported the generic `unexpected token in for initializer: ...` fallback while adjacent condition/increment and statement-expression routes had contextual diagnostics. TDD RED first captured `unexpected token in for initializer: LBracket`; GREEN added a narrow `for` initializer guard for invalid expression-start tokens while preserving declaration initializers, assignment/expression initializers, statement-only control-flow diagnostics, and valid `for` loops.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_invalid_start_for_initializer_expressions_with_context -- --nocapture  # RED first: generic `unexpected token in for initializer: LBracket`; GREEN passed after parser guard
+cargo test --test interpreter for_initializer -- --nocapture
+cargo test --test interpreter for_clauses -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-07 autonomous return/control keyword invalid-start diagnostic run. Ideation considered failing tests/builds (none on clean startup status), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed expression operand routes, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected keyword invalid-start diagnostics for return/control expressions because delimiter/`[`/`?` forms were contextual, but malformed starts such as `return int;`, `if (return)`, `while (int)`, `do ... while (struct)`, `for (...; return; ...)`, and `for (...; ...; struct)` still delegated to generic `expected expression` / `unexpected token in for increment` fallbacks. TDD RED first captured `expected expression, found Int`; GREEN added a shared keyword-start expression guard for return/control conditions and a matching for-increment guard while preserving existing delimiter, bracket/question, statement-only control-flow, and valid expression behavior.
 
 Commands verified so far:

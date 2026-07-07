@@ -384,6 +384,29 @@ fn rejects_unhandled_control_flow_with_context() {
 }
 
 #[test]
+fn rejects_invalid_start_for_initializer_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    for ([; ; ) { }\n    return 0;\n}\n",
+            "expected expression after for initializer, found LBracket at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (?; ; ) { }\n    return 0;\n}\n",
+            "expected expression after for initializer, found Question at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (,; ; ) { }\n    return 0;\n}\n",
+            "expected expression after for initializer, found Comma at line 2, column 10",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_statement_only_control_flow_in_for_clauses_with_context() {
     let cases = [
         (

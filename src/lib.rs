@@ -7195,6 +7195,17 @@ impl Parser {
             Some(Box::new(self.parse_assign()?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(true)?))
+        } else if matches!(
+            self.peek(),
+            Token::LBracket | Token::Question | Token::Comma
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after for initializer, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
         } else if let Some(message) = self.statement_only_control_flow_error("for initializer") {
             return Err(Self::error_at(message, self.peek_located()));
         } else {
