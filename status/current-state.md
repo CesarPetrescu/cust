@@ -4,6 +4,18 @@ Last updated: 2026-07-07
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-07 autonomous enum constant invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled integer-constant-expression routes, type-query/compound-literal operand starts, additional pointer-arithmetic negative coverage, and broader conformance fixture work. Selected enum constant value invalid-start diagnostics because missing/delimiter enum values were contextual, but malformed starts such as `enum Bad { FIRST = [?] };` and `enum Bad { FIRST = ? };` still delegated to generic integer-constant parsing. TDD RED first captured `expected integer constant after enum constant '=', found LBracket/Question`; GREEN added enum-value guards so these forms report source-located `expected integer constant after enum constant '=' before '['/'?'` diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_invalid_start_enum_constant_values_with_context -- --nocapture  # RED first: generic `found LBracket/Question`; GREEN passed after enum-value invalid-start guards
+cargo test --test interpreter enum -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-07 autonomous array-designator invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled designator path variants, type-query/compound-literal operand starts, additional pointer-arithmetic negative coverage, and broader conformance-only fixture work. Selected invalid operand-start array designator indexes because delimiter-only designators (`[]`, `[;]`, `[,]`, `[}`) were contextual, but malformed starts such as `.values[[] = 1`, `.values[?] = 1`, `(int[]){[[] = 1}`, and `(int[]){[?] = 1}` still delegated to generic integer-constant parsing. TDD RED first captured `expected array designator index, found LBracket`; GREEN extended both bounded and unbounded array-designator index guards so `[` and `?` report source-located `expected array designator index before ...` diagnostics.
 
 Commands verified so far:

@@ -6152,6 +6152,20 @@ impl Parser {
         &mut self,
         local_constants: &HashMap<String, i64>,
     ) -> CustResult<i64> {
+        if self.check(&Token::LBracket) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected integer constant after enum constant '=' before '['".to_string(),
+                &found,
+            ));
+        }
+        if self.check(&Token::Question) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected integer constant after enum constant '=' before '?'".to_string(),
+                &found,
+            ));
+        }
         let (value, _) = self.parse_integer_constant_expr(
             local_constants,
             "expected integer constant after enum constant '='",

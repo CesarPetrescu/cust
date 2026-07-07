@@ -4238,6 +4238,26 @@ fn rejects_missing_enum_constant_values_with_context() {
 }
 
 #[test]
+fn rejects_invalid_start_enum_constant_values_with_context() {
+    let program = include_str!("fixtures/invalid/enum_invalid_start_value.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected integer constant after enum constant '=' before '[' at line 2, column 29"
+    );
+
+    let program = include_str!("fixtures/invalid/enum_question_value.c");
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected integer constant after enum constant '=' before '?' at line 2, column 29"
+    );
+}
+
+#[test]
 fn rejects_sizeof_void_with_context() {
     let program = include_str!("fixtures/invalid/sizeof_void.c");
 
