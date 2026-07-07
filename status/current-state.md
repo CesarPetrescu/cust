@@ -4,6 +4,18 @@ Last updated: 2026-07-07
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-07 autonomous array-length keyword invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled declaration/type-name routes, malformed array length starts beyond delimiter/`?`/nested-`[` coverage, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected keyword/statement-token array length diagnostics because malformed fixed array lengths such as `int values[int];`, `char text[char]`, aggregate fields with `[struct]`, typedef aliases with `[return]`, and type-name lengths like `sizeof(int[while])` still delegated to generic integer-constant parsing. TDD RED first captured `expected array length, found Int`; GREEN added a shared array-length invalid-start label guard while preserving valid integer-constant-expression starts such as `sizeof(...)` and `_Alignof(...)`.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_delimiter_only_array_lengths_with_context -- --nocapture  # RED first: generic `expected array length, found Int`; GREEN passed after keyword/statement-token array-length guard
+cargo test --test interpreter array_length -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-07 autonomous switch case-label invalid-start diagnostic run. Ideation considered failing tests/builds (clean pulled tree and focused switch suite available), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled integer-constant-expression routes, additional type-query/compound-literal operand starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected switch `case` label invalid-start diagnostics because enum value and array-length routes had contextual invalid-start guards, but malformed case labels such as `case [:` and `case ?:` still delegated to generic integer-constant parsing. TDD RED first captured `expected integer constant after switch case, found LBracket`; GREEN added switch-case value guards so these forms report source-located `expected integer constant after switch case before '['/'?'` diagnostics.
 
 Commands verified so far:

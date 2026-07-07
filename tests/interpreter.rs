@@ -638,6 +638,26 @@ fn rejects_delimiter_only_array_lengths_with_context() {
             "int main(void) {\n    return sizeof(int[[);\n}\n",
             "expected array length before '[' at line 2, column 23",
         ),
+        (
+            "int main(void) {\n    int values[int];\n    return 0;\n}\n",
+            "expected array length before 'int' at line 2, column 16",
+        ),
+        (
+            "int f(char text[char]);\nint main(void) { return 0; }\n",
+            "expected array length before 'char' at line 1, column 17",
+        ),
+        (
+            "struct Packet { int values[struct]; };\nint main(void) { return 0; }\n",
+            "expected array length before 'struct' at line 1, column 28",
+        ),
+        (
+            "typedef int Values[return];\nint main(void) { return 0; }\n",
+            "expected array length before 'return' at line 1, column 20",
+        ),
+        (
+            "int main(void) {\n    return sizeof(int[while]);\n}\n",
+            "expected array length before 'while' at line 2, column 23",
+        ),
     ];
 
     for (program, expected) in cases {

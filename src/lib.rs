@@ -6721,6 +6721,54 @@ impl Parser {
         }
     }
 
+    fn array_length_invalid_start_label(&self) -> Option<&'static str> {
+        match self.peek() {
+            Token::Int => Some("int"),
+            Token::Char => Some("char"),
+            Token::Bool => Some("_Bool"),
+            Token::Float => Some("float"),
+            Token::Double => Some("double"),
+            Token::Complex => Some("_Complex"),
+            Token::Imaginary => Some("_Imaginary"),
+            Token::Signed => Some("signed"),
+            Token::Unsigned => Some("unsigned"),
+            Token::Long => Some("long"),
+            Token::Short => Some("short"),
+            Token::Const => Some("const"),
+            Token::Volatile => Some("volatile"),
+            Token::Restrict => Some("restrict"),
+            Token::Atomic => Some("_Atomic"),
+            Token::Static => Some("static"),
+            Token::Extern => Some("extern"),
+            Token::ThreadLocal => Some("_Thread_local"),
+            Token::Inline => Some("inline"),
+            Token::Noreturn => Some("_Noreturn"),
+            Token::Auto => Some("auto"),
+            Token::Register => Some("register"),
+            Token::Void => Some("void"),
+            Token::Enum => Some("enum"),
+            Token::Struct => Some("struct"),
+            Token::Union => Some("union"),
+            Token::Typedef => Some("typedef"),
+            Token::Alignas => Some("_Alignas"),
+            Token::StaticAssert => Some("_Static_assert"),
+            Token::Generic => Some("_Generic"),
+            Token::Return => Some("return"),
+            Token::If => Some("if"),
+            Token::Else => Some("else"),
+            Token::While => Some("while"),
+            Token::Do => Some("do"),
+            Token::For => Some("for"),
+            Token::Switch => Some("switch"),
+            Token::Case => Some("case"),
+            Token::Default => Some("default"),
+            Token::Break => Some("break"),
+            Token::Continue => Some("continue"),
+            Token::Goto => Some("goto"),
+            _ => None,
+        }
+    }
+
     fn expect_array_len(&mut self) -> CustResult<usize> {
         if self.check(&Token::RBracket) {
             let found = self.advance();
@@ -6761,6 +6809,13 @@ impl Parser {
             let found = self.advance();
             return Err(Self::error_at(
                 "expected array length before '['".to_string(),
+                &found,
+            ));
+        }
+        if let Some(label) = self.array_length_invalid_start_label() {
+            let found = self.advance();
+            return Err(Self::error_at(
+                format!("expected array length before '{label}'"),
                 &found,
             ));
         }
