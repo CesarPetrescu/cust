@@ -4,6 +4,17 @@ Last updated: 2026-07-07
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-07 autonomous array-designator keyword invalid-start diagnostic run. Ideation considered failing tests/builds (none on clean startup status), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed integer-constant routes, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected bounded/unbounded array designator keyword invalid-start diagnostics because designator indexes already handled delimiter starts and `[`/`?`, but malformed starts such as `[int]`, `[return]`, and `[struct]` still delegated to generic integer-constant parsing. TDD RED first captured `expected array designator index, found Int`; GREEN reused the shared integer-constant invalid-start keyword label guard for both bounded and unbounded designator index parsers while preserving existing delimiter, comma-expression, bounds, and valid constant-expression behavior.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_invalid_start_array_designator_indexes_with_keyword_context -- --nocapture  # RED first: generic `expected array designator index, found Int`; GREEN passed after designator keyword guard
+cargo test --test interpreter array_designator -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-07 autonomous expression-statement invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled statement-start routes, malformed declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected expression-statement invalid-start diagnostics because statement-leading malformed tokens such as `[;`, `?;`, and `,;` still reported generic `unexpected token in statement: ...` instead of a contextual expression-statement diagnostic. TDD RED first captured the generic `unexpected token in statement: LBracket`; GREEN added a narrow statement-start guard for comma/colon/bracket/question tokens while preserving unmatched `)` / `]` diagnostics and block-ending `}` behavior.
 
 Commands verified so far:

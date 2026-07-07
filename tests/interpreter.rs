@@ -95,6 +95,42 @@ fn rejects_invalid_start_expression_statements_with_context() {
 }
 
 #[test]
+fn rejects_invalid_start_array_designator_indexes_with_keyword_context() {
+    let program = "int main() {\nint values[2] = {[int] = 1};\nreturn values[0];\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected array designator index before 'int' at line 2, column 19"
+    );
+
+    let program = "int main() {\nint *values = (int[]){[return] = 1};\nreturn values[0];\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected array designator index before 'return' at line 2, column 24"
+    );
+
+    let program = r#"
+struct Point { int x; int y; };
+int main(void) {
+    struct Point points[2] = {[struct] = {1, 2}};
+    return points[0].x;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected array designator index before 'struct' at line 4, column 32"
+    );
+}
+
+#[test]
 fn reports_source_context_for_out_of_range_integer_literal() {
     let program = "int main() {\nreturn 999999999999999999999999999999;\n}\n";
 
