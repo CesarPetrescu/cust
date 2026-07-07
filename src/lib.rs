@@ -7059,6 +7059,7 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        self.reject_keyword_start_expression("return")?;
         Ok(())
     }
 
@@ -7077,6 +7078,20 @@ impl Parser {
                     "expected expression after {keyword}, found {:?}",
                     self.peek()
                 ),
+                self.peek_located(),
+            ));
+        }
+        self.reject_keyword_start_expression(keyword)?;
+        Ok(())
+    }
+
+    fn reject_keyword_start_expression(&self, context: &str) -> CustResult<()> {
+        if self.check(&Token::Generic) {
+            return Ok(());
+        }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!("expected expression after {context} before '{label}'"),
                 self.peek_located(),
             ));
         }
@@ -7215,6 +7230,11 @@ impl Parser {
             ));
         } else if let Some(message) = self.statement_only_control_flow_error("for increment") {
             return Err(Self::error_at(message, self.peek_located()));
+        } else if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!("expected expression after for increment before '{label}'"),
+                self.peek_located(),
+            ));
         } else {
             return Err(Self::error_at(
                 format!("unexpected token in for increment: {:?}", self.peek()),

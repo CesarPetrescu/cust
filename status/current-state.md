@@ -4,6 +4,17 @@ Last updated: 2026-07-07
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-07 autonomous return/control keyword invalid-start diagnostic run. Ideation considered failing tests/builds (none on clean startup status), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed expression operand routes, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected keyword invalid-start diagnostics for return/control expressions because delimiter/`[`/`?` forms were contextual, but malformed starts such as `return int;`, `if (return)`, `while (int)`, `do ... while (struct)`, `for (...; return; ...)`, and `for (...; ...; struct)` still delegated to generic `expected expression` / `unexpected token in for increment` fallbacks. TDD RED first captured `expected expression, found Int`; GREEN added a shared keyword-start expression guard for return/control conditions and a matching for-increment guard while preserving existing delimiter, bracket/question, statement-only control-flow, and valid expression behavior.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_keyword_start_return_and_control_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found Int`; GREEN passed after keyword-start expression guards
+cargo test --test interpreter expressions_with_context -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-07 autonomous array-designator keyword invalid-start diagnostic run. Ideation considered failing tests/builds (none on clean startup status), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed integer-constant routes, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected bounded/unbounded array designator keyword invalid-start diagnostics because designator indexes already handled delimiter starts and `[`/`?`, but malformed starts such as `[int]`, `[return]`, and `[struct]` still delegated to generic integer-constant parsing. TDD RED first captured `expected array designator index, found Int`; GREEN reused the shared integer-constant invalid-start keyword label guard for both bounded and unbounded designator index parsers while preserving existing delimiter, comma-expression, bounds, and valid constant-expression behavior.
 
 Commands verified so far:

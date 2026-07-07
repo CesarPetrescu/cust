@@ -250,6 +250,8 @@ Prioritized backlog for autonomous implementation.
 - [x] Invalid-start enum constant values are targeted before generic integer-constant parsing. Acceptance covered by `enum BadStart { FIRST = [?] };` and `enum BadStart { FIRST = ? };` reporting `expected integer constant after enum constant '=' before '['/'?'` at the offending token instead of `expected integer constant after enum constant '=', found ...`, while valid enum initializer and missing-value diagnostics remain unchanged.
 - [x] Invalid-start expression statement diagnostics are targeted before generic statement fallback. Acceptance covered by block-local malformed statement starts such as `[;`, `?;`, and `,;` reporting `expected expression statement, found LBracket/Question/Comma` at the offending token instead of `unexpected token in statement: ...`, while preserving unmatched closing-delimiter diagnostics and normal empty/block statement parsing.
 
+- [x] Invalid-start return/control expression keyword diagnostics are targeted before generic expression parsing. Acceptance covered by `return int;`, `return struct;`, `if (return)`, `while (int)`, `do { } while (struct);`, `for (int i = 0; return; ...)`, and `for (...; ...; struct)` reporting `expected expression after <context> before '<keyword>'` at the offending keyword instead of generic `expected expression, found ...` or `unexpected token in for increment`, while preserving delimiter, bracket/question, and valid expression behavior.
+
 ## P4 — product quality
 
 - [x] CLI flag: `--tokens`

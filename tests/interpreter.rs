@@ -5803,6 +5803,46 @@ fn rejects_missing_switch_expressions_with_context() {
 }
 
 #[test]
+fn rejects_keyword_start_return_and_control_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) { return int; }",
+            "expected expression after return before 'int' at line 1, column 25",
+        ),
+        (
+            "int main(void) { return struct; }",
+            "expected expression after return before 'struct' at line 1, column 25",
+        ),
+        (
+            "int main(void) { if (return) { return 1; } return 0; }",
+            "expected expression after if before 'return' at line 1, column 22",
+        ),
+        (
+            "int main(void) { while (int) { return 1; } return 0; }",
+            "expected expression after while before 'int' at line 1, column 25",
+        ),
+        (
+            "int main(void) { do { } while (struct); }",
+            "expected expression after do-while before 'struct' at line 1, column 32",
+        ),
+        (
+            "int main(void) { for (int i = 0; return; i = i + 1) { return i; } return 0; }",
+            "expected expression after for condition before 'return' at line 1, column 34",
+        ),
+        (
+            "int main(void) { for (int i = 0; i < 3; struct) { return i; } return 0; }",
+            "expected expression after for increment before 'struct' at line 1, column 41",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_missing_control_flow_condition_expressions_with_context() {
     let cases = [
         (

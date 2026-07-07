@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-07 autonomous array-designator keyword invalid-start diagnostic run after clean startup inspection, focused RED/GREEN designator diagnostic coverage, full local Rust verification, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
+None. Last reviewed in the 2026-07-07 autonomous return/control keyword invalid-start diagnostic run after clean startup inspection, focused RED/GREEN expression-context diagnostic coverage, full local Rust verification, and required Docker verification passed. Docker Compose emitted the known non-fatal missing-buildx warning but exited 0 for both required Docker commands.
 
 ## Blocker template
 
