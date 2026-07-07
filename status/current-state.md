@@ -4,6 +4,19 @@ Last updated: 2026-07-07
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-07 autonomous integer-constant keyword invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled integer-constant-expression routes, malformed declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected enum constant and switch `case` label keyword invalid-start diagnostics because `[`/`?` were contextual, but malformed values such as `enum Bad { FIRST = int };`, `enum Bad { FIRST = return };`, `case int:`, and `case return:` still delegated to generic integer-constant parsing. TDD RED first captured generic `expected integer constant..., found Int`; GREEN added a shared integer-constant invalid-start keyword label guard reused by enum constants, switch case labels, and existing array-length diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter invalid_start -- --nocapture  # RED first: generic `found Int`; GREEN passed after integer-constant invalid-start guard reuse
+cargo test --test interpreter enum -- --nocapture
+cargo test --test interpreter switch -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-07 autonomous unary-operator invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled expression operand routes, malformed type-name/declaration starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected unary-operator invalid-start diagnostics because delimiter-only missing operands after prefix unary operators were contextual, but malformed starts such as `return ![;`, `return *?;`, and `return &return;` still delegated into generic expression parsing. TDD RED first captured `expected expression, found LBracket`; GREEN expanded the shared unary operand guard for invalid operand-start tokens and statement/type keywords while preserving valid unary operands such as `sizeof(...)` and `_Alignof(...)`.
 
 Commands verified so far:

@@ -4259,22 +4259,30 @@ fn rejects_missing_enum_constant_values_with_context() {
 
 #[test]
 fn rejects_invalid_start_enum_constant_values_with_context() {
-    let program = include_str!("fixtures/invalid/enum_invalid_start_value.c");
+    let cases = [
+        (
+            include_str!("fixtures/invalid/enum_invalid_start_value.c"),
+            "expected integer constant after enum constant '=' before '[' at line 2, column 29",
+        ),
+        (
+            include_str!("fixtures/invalid/enum_question_value.c"),
+            "expected integer constant after enum constant '=' before '?' at line 2, column 29",
+        ),
+        (
+            "int main(void) { enum BadStart { FIRST = int }; return FIRST; }",
+            "expected integer constant after enum constant '=' before 'int' at line 1, column 42",
+        ),
+        (
+            "int main(void) { enum BadStart { FIRST = return }; return FIRST; }",
+            "expected integer constant after enum constant '=' before 'return' at line 1, column 42",
+        ),
+    ];
 
-    let err = interpret(program).unwrap_err();
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
 
-    assert_eq!(
-        err.to_string(),
-        "expected integer constant after enum constant '=' before '[' at line 2, column 29"
-    );
-
-    let program = include_str!("fixtures/invalid/enum_question_value.c");
-    let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "expected integer constant after enum constant '=' before '?' at line 2, column 29"
-    );
+        assert_eq!(err.to_string(), expected);
+    }
 }
 
 #[test]
@@ -5682,6 +5690,14 @@ fn rejects_invalid_start_switch_case_values_with_context() {
         (
             "int main(void) { switch (1) { case ?: return 1; default: return 0; } }",
             "expected integer constant after switch case before '?' at line 1, column 36",
+        ),
+        (
+            "int main(void) { switch (1) { case int: return 1; default: return 0; } }",
+            "expected integer constant after switch case before 'int' at line 1, column 36",
+        ),
+        (
+            "int main(void) { switch (1) { case return: return 1; default: return 0; } }",
+            "expected integer constant after switch case before 'return' at line 1, column 36",
         ),
     ];
 

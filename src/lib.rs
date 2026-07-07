@@ -6166,6 +6166,13 @@ impl Parser {
                 &found,
             ));
         }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            let found = self.advance();
+            return Err(Self::error_at(
+                format!("expected integer constant after enum constant '=' before '{label}'"),
+                &found,
+            ));
+        }
         let (value, _) = self.parse_integer_constant_expr(
             local_constants,
             "expected integer constant after enum constant '='",
@@ -6721,7 +6728,7 @@ impl Parser {
         }
     }
 
-    fn array_length_invalid_start_label(&self) -> Option<&'static str> {
+    fn integer_constant_invalid_start_label(&self) -> Option<&'static str> {
         match self.peek() {
             Token::Int => Some("int"),
             Token::Char => Some("char"),
@@ -6812,7 +6819,7 @@ impl Parser {
                 &found,
             ));
         }
-        if let Some(label) = self.array_length_invalid_start_label() {
+        if let Some(label) = self.integer_constant_invalid_start_label() {
             let found = self.advance();
             return Err(Self::error_at(
                 format!("expected array length before '{label}'"),
@@ -7308,6 +7315,13 @@ impl Parser {
             let found = self.advance();
             return Err(Self::error_at(
                 "expected integer constant after switch case before '?'".to_string(),
+                &found,
+            ));
+        }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            let found = self.advance();
+            return Err(Self::error_at(
+                format!("expected integer constant after switch case before '{label}'"),
                 &found,
             ));
         }

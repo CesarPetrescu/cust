@@ -23,6 +23,7 @@ Prioritized backlog for autonomous implementation.
 - [x] Function-parameter invalid-start diagnostics: malformed parameter starts such as `int add([ int b)`, `int add(? int b)`, `int add(int a,[ int b)`, and `int add(int a,? int b)` now report contextual `expected function parameter...` messages instead of falling through to generic type parsing.
 - [x] Array-designator invalid-start diagnostics: malformed bounded and unbounded designator indexes such as `.values[[] = 1`, `.values[?] = 1`, `(int[]){[[] = 1}`, and `(int[]){[?] = 1}` now report contextual `expected array designator index before '['/'?'` messages instead of falling through to generic integer-constant parsing.
 - [x] Unary-operator invalid-start diagnostics: malformed operands after prefix unary operators such as `return ![;`, `return *?;`, and `return &return;` now report contextual `expected expression after unary operator '<op>'...` messages instead of falling through to generic expression parsing.
+- [x] Enum constant and switch `case` label keyword invalid-start diagnostics: malformed integer-constant routes such as `enum Bad { FIRST = int };`, `enum Bad { FIRST = return };`, `case int:`, and `case return:` now report contextual `expected integer constant after ... before '<keyword>'` messages instead of falling through to generic `expected integer constant..., found ...` diagnostics.
 - [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 
