@@ -3796,6 +3796,10 @@ impl Parser {
             | Token::Star
             | Token::Amp
             | Token::LParen => self.parse_expr_stmt_with_semi(true),
+            Token::Comma | Token::Colon | Token::LBracket | Token::Question => Err(Self::error_at(
+                format!("expected expression statement, found {:?}", self.peek()),
+                self.peek_located(),
+            )),
             Token::RParen => Err(Self::error_at(
                 "unmatched ')' in statement".to_string(),
                 self.peek_located(),

@@ -65,6 +65,36 @@ fn reports_source_context_for_unexpected_character() {
 }
 
 #[test]
+fn rejects_invalid_start_expression_statements_with_context() {
+    let program = "int main() {\n[;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected expression statement, found LBracket at line 2, column 1"
+    );
+
+    let program = "int main() {\n?;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected expression statement, found Question at line 2, column 1"
+    );
+
+    let program = "int main() {\n,;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected expression statement, found Comma at line 2, column 1"
+    );
+}
+
+#[test]
 fn reports_source_context_for_out_of_range_integer_literal() {
     let program = "int main() {\nreturn 999999999999999999999999999999;\n}\n";
 
