@@ -4,6 +4,17 @@ Last updated: 2026-07-07
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-07 autonomous switch case-label invalid-start diagnostic run. Ideation considered failing tests/builds (clean pulled tree and focused switch suite available), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled integer-constant-expression routes, additional type-query/compound-literal operand starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected switch `case` label invalid-start diagnostics because enum value and array-length routes had contextual invalid-start guards, but malformed case labels such as `case [:` and `case ?:` still delegated to generic integer-constant parsing. TDD RED first captured `expected integer constant after switch case, found LBracket`; GREEN added switch-case value guards so these forms report source-located `expected integer constant after switch case before '['/'?'` diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_invalid_start_switch_case_values_with_context -- --nocapture  # RED first: generic `expected integer constant after switch case, found LBracket`; GREEN passed after switch-case invalid-start guards
+cargo test --test interpreter switch -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-07 autonomous enum constant invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled integer-constant-expression routes, type-query/compound-literal operand starts, additional pointer-arithmetic negative coverage, and broader conformance fixture work. Selected enum constant value invalid-start diagnostics because missing/delimiter enum values were contextual, but malformed starts such as `enum Bad { FIRST = [?] };` and `enum Bad { FIRST = ? };` still delegated to generic integer-constant parsing. TDD RED first captured `expected integer constant after enum constant '=', found LBracket/Question`; GREEN added enum-value guards so these forms report source-located `expected integer constant after enum constant '=' before '['/'?'` diagnostics.
 
 Commands verified so far:

@@ -7242,6 +7242,20 @@ impl Parser {
     }
 
     fn parse_switch_case_value(&mut self) -> CustResult<(i64, LocatedToken)> {
+        if self.check(&Token::LBracket) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected integer constant after switch case before '['".to_string(),
+                &found,
+            ));
+        }
+        if self.check(&Token::Question) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "expected integer constant after switch case before '?'".to_string(),
+                &found,
+            ));
+        }
         let empty_constants = HashMap::new();
         self.parse_integer_constant_expr(
             &empty_constants,

@@ -5653,6 +5653,26 @@ fn rejects_missing_colon_after_switch_case_label() {
 }
 
 #[test]
+fn rejects_invalid_start_switch_case_values_with_context() {
+    let cases = [
+        (
+            "int main(void) { switch (1) { case [: return 1; default: return 0; } }",
+            "expected integer constant after switch case before '[' at line 1, column 36",
+        ),
+        (
+            "int main(void) { switch (1) { case ?: return 1; default: return 0; } }",
+            "expected integer constant after switch case before '?' at line 1, column 36",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_missing_switch_expressions_with_context() {
     let cases = [
         (
