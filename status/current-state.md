@@ -1,8 +1,18 @@
 # Cust Current State
 
-Last updated: 2026-07-07
+Last updated: 2026-07-08
 
 ## Latest autonomous verification
+
+All passed after the 2026-07-08 autonomous grouped-expression invalid-start diagnostic run. Ideation considered failing tests/builds (none on clean startup status), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed expression/list boundaries not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected malformed grouped-expression operands because delimiter-leading grouped expressions such as `()` and `(]` were contextual, but invalid operand starts such as `([)` and `(?)` still delegated to the generic primary-expression parser. TDD RED first captured `expected expression, found LBracket`; GREEN added `[` and `?` to the grouped-expression operand guard while preserving valid grouped expressions, casts, and existing missing-closing-paren diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_missing_grouped_expression_operands_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after grouped-expression guard expansion
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
 
 All passed after the 2026-07-07 autonomous `for` initializer invalid-start diagnostic run. Ideation considered failing tests/builds (none on clean startup status), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed expression/list boundaries not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected malformed `for` initializer starts because `for ([; ; )`, `for (?; ; )`, and `for (,; ; )` still reported the generic `unexpected token in for initializer: ...` fallback while adjacent condition/increment and statement-expression routes had contextual diagnostics. TDD RED first captured `unexpected token in for initializer: LBracket`; GREEN added a narrow `for` initializer guard for invalid expression-start tokens while preserving declaration initializers, assignment/expression initializers, statement-only control-flow diagnostics, and valid `for` loops.
 

@@ -8897,6 +8897,8 @@ impl Parser {
                     Token::Comma
                         | Token::RParen
                         | Token::RBracket
+                        | Token::LBracket
+                        | Token::Question
                         | Token::Semi
                         | Token::RBrace
                         | Token::Eof

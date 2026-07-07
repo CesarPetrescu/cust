@@ -4810,6 +4810,14 @@ fn rejects_missing_grouped_expression_operands_with_context() {
             "int main(void) {\n    return (];\n}\n",
             "expected grouped expression, found RBracket at line 2, column 13",
         ),
+        (
+            "int main(void) {\n    return ([);\n}\n",
+            "expected grouped expression, found LBracket at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return (?);\n}\n",
+            "expected grouped expression, found Question at line 2, column 13",
+        ),
     ];
 
     for (program, expected) in cases {
