@@ -5964,6 +5964,18 @@ fn rejects_missing_operands_after_unary_operators() {
             "int main(void) {\n    return &;\n}\n",
             "expected expression after unary operator '&', found Semi at line 2, column 13",
         ),
+        (
+            "int main(void) {\n    return ![;\n}\n",
+            "expected expression after unary operator '!', found LBracket at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return *?;\n}\n",
+            "expected expression after unary operator '*', found Question at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return &return;\n}\n",
+            "expected expression after unary operator '&', found Return at line 2, column 13",
+        ),
     ];
 
     for (program, expected) in cases {

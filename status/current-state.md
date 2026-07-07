@@ -4,6 +4,19 @@ Last updated: 2026-07-07
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-07 autonomous unary-operator invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled expression operand routes, malformed type-name/declaration starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected unary-operator invalid-start diagnostics because delimiter-only missing operands after prefix unary operators were contextual, but malformed starts such as `return ![;`, `return *?;`, and `return &return;` still delegated into generic expression parsing. TDD RED first captured `expected expression, found LBracket`; GREEN expanded the shared unary operand guard for invalid operand-start tokens and statement/type keywords while preserving valid unary operands such as `sizeof(...)` and `_Alignof(...)`.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_operands_after_unary_operators -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after unary invalid-start guard expansion
+cargo test --test interpreter unary -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-07 autonomous array-length keyword invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, less-traveled declaration/type-name routes, malformed array length starts beyond delimiter/`?`/nested-`[` coverage, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected keyword/statement-token array length diagnostics because malformed fixed array lengths such as `int values[int];`, `char text[char]`, aggregate fields with `[struct]`, typedef aliases with `[return]`, and type-name lengths like `sizeof(int[while])` still delegated to generic integer-constant parsing. TDD RED first captured `expected array length, found Int`; GREEN added a shared array-length invalid-start label guard while preserving valid integer-constant-expression starts such as `sizeof(...)` and `_Alignof(...)`.
 
 Commands verified so far:
