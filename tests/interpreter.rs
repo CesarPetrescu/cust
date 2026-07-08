@@ -92,6 +92,24 @@ fn rejects_invalid_start_expression_statements_with_context() {
         err.to_string(),
         "expected expression statement, found Comma at line 2, column 1"
     );
+
+    let program = "int main() {\n.field;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected expression statement, found Dot at line 2, column 1"
+    );
+
+    let program = "int main() {\n->field;\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected expression statement, found Arrow at line 2, column 1"
+    );
 }
 
 #[test]
@@ -6336,6 +6354,14 @@ fn rejects_missing_return_expressions_with_context() {
             "int main(void) {\n    return ?;\n}\n",
             "expected expression after return, found Question at line 2, column 12",
         ),
+        (
+            "int main(void) {\n    return .field;\n}\n",
+            "expected expression after return, found Dot at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    return ->field;\n}\n",
+            "expected expression after return, found Arrow at line 2, column 12",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6577,6 +6603,18 @@ fn rejects_misplaced_operator_rhs_operands_with_context() {
         (
             "int main(void) {\n    return 1, return;\n}\n",
             "expected expression after comma operator before 'return' at line 2, column 15",
+        ),
+        (
+            "int main(void) {\n    return 1 + .field;\n}\n",
+            "expected expression after binary operator '+', found Dot at line 2, column 16",
+        ),
+        (
+            "int main(void) {\n    int value = 1;\n    value = ->field;\n    return value;\n}\n",
+            "expected expression after assignment operator '=', found Arrow at line 3, column 13",
+        ),
+        (
+            "int main(void) {\n    return 1, .field;\n}\n",
+            "expected expression after comma operator, found Dot at line 2, column 15",
         ),
     ];
 

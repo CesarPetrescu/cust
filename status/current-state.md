@@ -4,6 +4,20 @@ Last updated: 2026-07-08
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-08 autonomous dot/arrow invalid-start expression diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, larger C-subset conformance fixtures, pointer-arithmetic negative coverage, and CLI/product polish. Selected dot/arrow expression-start diagnostics because malformed selector tokens in statement, return, comma, assignment, and binary RHS expression positions still fell through to generic statement/primary-expression parser errors while adjacent `[`/`?` and keyword-start routes were contextual. TDD RED first captured `unexpected token in statement: Dot`; GREEN added dot/arrow to the focused invalid-start guards while preserving valid selector use after postfix aggregate/pointer expressions.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_invalid_start_expression_statements_with_context -- --nocapture  # RED first: generic `unexpected token in statement: Dot`; GREEN passed after statement-start guard expansion
+cargo test --test interpreter rejects_missing_return_expressions_with_context -- --nocapture
+cargo test --test interpreter rejects_misplaced_operator_rhs_operands_with_context -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-08 autonomous typedef keyword invalid-start expression diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, larger C-subset conformance fixtures, pointer-arithmetic negative coverage, and CLI/product polish. Selected typedef-keyword expression-context diagnostics because grouped expressions and declaration initializers still delegated malformed starts such as `(typedef)` and `int value = typedef;` to generic expression parsing even though adjacent expression/list contexts had keyword-start guards. TDD RED first captured generic `expected expression, found Typedef`; GREEN reused the shared invalid-start keyword classifier in grouped-expression and declaration-initializer guards while preserving delimiter, punctuation, and valid initializer/grouped-expression behavior.
 
 Commands verified so far:

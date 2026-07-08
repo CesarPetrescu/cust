@@ -3805,7 +3805,12 @@ impl Parser {
             | Token::Star
             | Token::Amp
             | Token::LParen => self.parse_expr_stmt_with_semi(true),
-            Token::Comma | Token::Colon | Token::LBracket | Token::Question => Err(Self::error_at(
+            Token::Comma
+            | Token::Colon
+            | Token::Dot
+            | Token::Arrow
+            | Token::LBracket
+            | Token::Question => Err(Self::error_at(
                 format!("expected expression statement, found {:?}", self.peek()),
                 self.peek_located(),
             )),
@@ -7079,6 +7084,8 @@ impl Parser {
                 | Token::RBrace
                 | Token::LBracket
                 | Token::Question
+                | Token::Dot
+                | Token::Arrow
                 | Token::Eof
         ) {
             return Err(Self::error_at(
@@ -7437,6 +7444,8 @@ impl Parser {
                 self.peek(),
                 Token::LBracket
                     | Token::Question
+                    | Token::Dot
+                    | Token::Arrow
                     | Token::RParen
                     | Token::RBracket
                     | Token::Semi
@@ -7712,6 +7721,8 @@ impl Parser {
             self.peek(),
             Token::LBracket
                 | Token::Question
+                | Token::Dot
+                | Token::Arrow
                 | Token::Comma
                 | Token::Colon
                 | Token::RParen
@@ -7970,6 +7981,8 @@ impl Parser {
             self.peek(),
             Token::LBracket
                 | Token::Question
+                | Token::Dot
+                | Token::Arrow
                 | Token::Comma
                 | Token::Colon
                 | Token::RParen
