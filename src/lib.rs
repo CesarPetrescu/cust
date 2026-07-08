@@ -2018,6 +2018,15 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        match self.integer_constant_invalid_start_label() {
+            Some(label) if !self.is_type_name_start() => {
+                return Err(Self::error_at(
+                    format!("expected _Alignas argument before '{label}'"),
+                    self.peek_located(),
+                ));
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -3855,6 +3864,12 @@ impl Parser {
         ) {
             return Err(Self::error_at(
                 format!("expected _Static_assert condition, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!("expected _Static_assert condition before '{label}'"),
                 self.peek_located(),
             ));
         }

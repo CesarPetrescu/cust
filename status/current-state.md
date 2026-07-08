@@ -4,6 +4,20 @@ Last updated: 2026-07-08
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-08 autonomous `_Alignas` / `_Static_assert` keyword invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, declaration-specifier/assertion malformed starts not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected `_Alignas` and `_Static_assert` keyword invalid starts because delimiter and `[`/`?` forms were contextual, but `_Alignas(return) int value;` and `_Static_assert(return, "condition required");` still delegated to generic expression parsing. TDD RED first captured `expected expression, found Return`; GREEN added keyword-start guards while preserving valid `_Alignas(type-name)`, `_Alignas(expression)`, and `_Static_assert` conditions.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_alignas_arguments_with_context -- --nocapture  # RED first: generic `expected expression, found Return`; GREEN passed after _Alignas keyword guard
+cargo test --test interpreter rejects_missing_static_assert_arguments_with_context -- --nocapture  # RED first: generic `expected expression, found Return`; GREEN passed after _Static_assert keyword guard
+cargo test --test interpreter alignas -- --nocapture
+cargo test --test interpreter static_assert -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-08 autonomous `_Alignof` invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed type-query starts not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected malformed `_Alignof` type operands because empty/comma-leading `_Alignof()` / `_Alignof(,)` and qualifier-only `_Alignof(volatile)` were contextual, but invalid type-start tokens such as `_Alignof([)`, `_Alignof(?)`, and `_Alignof(return)` still fell through to generic `_Alignof` type parsing. TDD RED first captured `expected _Alignof type, found LBracket`; GREEN added a shared `_Alignof` type-start guard used by ordinary expression parsing and integer-constant `_Alignof` folding while preserving valid `_Alignof(type-name)` operands.
 
 Commands verified so far:

@@ -1178,6 +1178,17 @@ fn rejects_missing_alignas_arguments_with_context() {
             .contains("expected _Alignas argument, found Question at line 3, column 22"),
         "unexpected error: {err}"
     );
+
+    let keyword_argument = r#"
+        _Alignas(return) int value;
+        int main(void) { return 0; }
+    "#;
+    let err = interpret(keyword_argument).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("expected _Alignas argument before 'return' at line 2, column 18"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -1254,6 +1265,17 @@ fn rejects_missing_static_assert_arguments_with_context() {
     assert!(
         err.to_string()
             .contains("expected _Static_assert condition, found Question at line 2, column 24"),
+        "unexpected error: {err}"
+    );
+
+    let keyword_condition = r#"
+        _Static_assert(return, "condition required");
+        int main(void) { return 0; }
+    "#;
+    let err = interpret(keyword_condition).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("expected _Static_assert condition before 'return' at line 2, column 24"),
         "unexpected error: {err}"
     );
 }
