@@ -4,6 +4,20 @@ Last updated: 2026-07-08
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-08 autonomous typedef keyword invalid-start expression diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, larger C-subset conformance fixtures, pointer-arithmetic negative coverage, and CLI/product polish. Selected typedef-keyword expression-context diagnostics because grouped expressions and declaration initializers still delegated malformed starts such as `(typedef)` and `int value = typedef;` to generic expression parsing even though adjacent expression/list contexts had keyword-start guards. TDD RED first captured generic `expected expression, found Typedef`; GREEN reused the shared invalid-start keyword classifier in grouped-expression and declaration-initializer guards while preserving delimiter, punctuation, and valid initializer/grouped-expression behavior.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_grouped_expression_operands_with_context -- --nocapture  # RED first: generic `expected expression, found Typedef`; GREEN passed after grouped-expression keyword guard
+cargo test --test interpreter rejects_missing_declaration_initializer_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found Typedef`; GREEN passed after declaration-initializer keyword guard
+cargo test --test interpreter grouped -- --nocapture
+cargo test --test interpreter initializer -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-08 autonomous expression-list keyword invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, larger C-subset conformance fixtures, pointer-arithmetic negative coverage, and CLI/product polish. Selected expression-list keyword invalid starts because function-call arguments, array/string indexes, braced initializer elements, comma/assignment/binary RHS operands, and conditional branches still delegated statement/type keywords such as `return` and `int` to generic expression parsing. TDD RED first captured generic `expected expression, found Return/Int`; GREEN added contextual keyword-start guards while preserving delimiter/`[`/`?` diagnostics and valid expressions.
 
 Commands verified so far:

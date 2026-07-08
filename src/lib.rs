@@ -4819,6 +4819,12 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!("expected initializer expression after '=' in {context} before '{label}'"),
+                self.peek_located(),
+            ));
+        }
         Ok(())
     }
 
@@ -9042,6 +9048,12 @@ impl Parser {
                 ) {
                     return Err(Self::error_at(
                         format!("expected grouped expression, found {:?}", self.peek()),
+                        self.peek_located(),
+                    ));
+                }
+                if let Some(label) = self.integer_constant_invalid_start_label() {
+                    return Err(Self::error_at(
+                        format!("expected grouped expression before '{label}'"),
                         self.peek_located(),
                     ));
                 }

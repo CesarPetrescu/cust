@@ -4876,6 +4876,10 @@ fn rejects_missing_grouped_expression_operands_with_context() {
             "int main(void) {\n    return (?);\n}\n",
             "expected grouped expression, found Question at line 2, column 13",
         ),
+        (
+            "int main(void) {\n    return (typedef);\n}\n",
+            "expected grouped expression before 'typedef' at line 2, column 13",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6354,6 +6358,10 @@ fn rejects_missing_declaration_initializer_expressions_with_context() {
         (
             "int main(void) {\n    int value = [?];\n    return value;\n}\n",
             "expected initializer expression after '=' in variable declaration, found LBracket at line 2, column 17",
+        ),
+        (
+            "int main(void) {\n    int value = typedef;\n    return value;\n}\n",
+            "expected initializer expression after '=' in variable declaration before 'typedef' at line 2, column 17",
         ),
         (
             "int main(void) {\n    int value = 1;\n    int *slot = , fallback = 0;\n    return value;\n}\n",
