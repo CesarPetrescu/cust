@@ -4927,6 +4927,14 @@ fn rejects_misplaced_function_call_arguments_with_context() {
             "int add(int a, int b) { return a + b; }\nint main(void) {\n    return add(1, ?);\n}\n",
             "expected function call argument after ',', found Question at line 3, column 19",
         ),
+        (
+            "int take(int value) { return value; }\nint main(void) {\n    return take(return);\n}\n",
+            "expected function call argument before 'return' at line 3, column 17",
+        ),
+        (
+            "int add(int a, int b) { return a + b; }\nint main(void) {\n    return add(1, int);\n}\n",
+            "expected function call argument after ',' before 'int' at line 3, column 19",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6117,6 +6125,14 @@ fn rejects_missing_array_index_expressions_with_context() {
             "int main(void) {\n    int values[2] = {1, 2};\n    return values[};\n",
             "expected array index expression, found RBrace at line 3, column 19",
         ),
+        (
+            "int main(void) {\n    int values[2] = {1, 2};\n    return values[int];\n}\n",
+            "expected array index expression before 'int' at line 3, column 19",
+        ),
+        (
+            "int main(void) {\n    return \"hi\"[return];\n}\n",
+            "expected array index expression before 'return' at line 2, column 17",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6406,6 +6422,14 @@ fn rejects_missing_braced_initializer_elements_with_context() {
             "struct Point { int x; int y; };\nint main(void) {\n    struct Point points[2] = {, {1, 2}};\n    return 0;\n}\n",
             "expected initializer element in struct array 'points' initializer, found Comma at line 3, column 31",
         ),
+        (
+            "int main(void) {\n    int values[2] = {return};\n    return 0;\n}\n",
+            "expected initializer element in array 'values' initializer before 'return' at line 2, column 22",
+        ),
+        (
+            "struct Point { int x; int y; };\nint main(void) {\n    struct Point point = {return};\n    return 0;\n}\n",
+            "expected initializer element in struct 'Point' initializer before 'return' at line 3, column 27",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6499,6 +6523,14 @@ fn rejects_missing_conditional_operator_operands_with_context() {
             "int main(void) {\n    return 1 ? 2 : [;\n}\n",
             "expected expression after ':' in conditional operator, found LBracket at line 2, column 20",
         ),
+        (
+            "int main(void) {\n    return 1 ? return : 2;\n}\n",
+            "expected expression after '?' in conditional operator before 'return' at line 2, column 16",
+        ),
+        (
+            "int main(void) {\n    return 1 ? 2 : return;\n}\n",
+            "expected expression after ':' in conditional operator before 'return' at line 2, column 20",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6525,6 +6557,18 @@ fn rejects_misplaced_operator_rhs_operands_with_context() {
         (
             "int main(void) {\n    return 1, [;\n}\n",
             "expected expression after comma operator, found LBracket at line 2, column 15",
+        ),
+        (
+            "int main(void) {\n    return 1 + return;\n}\n",
+            "expected expression after binary operator '+' before 'return' at line 2, column 16",
+        ),
+        (
+            "int main(void) {\n    int value = 1;\n    value = return;\n    return value;\n}\n",
+            "expected expression after assignment operator '=' before 'return' at line 3, column 13",
+        ),
+        (
+            "int main(void) {\n    return 1, return;\n}\n",
+            "expected expression after comma operator before 'return' at line 2, column 15",
         ),
     ];
 

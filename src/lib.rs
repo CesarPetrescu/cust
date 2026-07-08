@@ -4841,6 +4841,12 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!("expected initializer element in {context} before '{label}'"),
+                self.peek_located(),
+            ));
+        }
         Ok(())
     }
 
@@ -4861,6 +4867,12 @@ impl Parser {
                     "expected initializer element in {context}, found {:?}",
                     self.peek()
                 ),
+                self.peek_located(),
+            ));
+        }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!("expected initializer element in {context} before '{label}'"),
                 self.peek_located(),
             ));
         }
@@ -7433,6 +7445,12 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            if let Some(label) = self.integer_constant_invalid_start_label() {
+                return Err(Self::error_at(
+                    format!("expected expression after comma operator before '{label}'"),
+                    self.peek_located(),
+                ));
+            }
             let rhs = self.parse_assignment_expr()?;
             expr = Expr::Comma(Box::new(expr), Box::new(rhs));
         }
@@ -7452,6 +7470,12 @@ impl Parser {
         ) {
             return Err(Self::error_at(
                 format!("expected array index expression, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!("expected array index expression before '{label}'"),
                 self.peek_located(),
             ));
         }
@@ -7699,6 +7723,15 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after assignment operator '{}' before '{label}'",
+                    Self::assignment_operator_label(&operator.kind),
+                ),
+                self.peek_located(),
+            ));
+        }
         Ok(())
     }
 
@@ -7761,6 +7794,14 @@ impl Parser {
                     "expected expression after '{}' in conditional operator, found {:?}",
                     marker,
                     self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after '{marker}' in conditional operator before '{label}'"
                 ),
                 self.peek_located(),
             ));
@@ -7936,6 +7977,15 @@ impl Parser {
                     "expected expression after binary operator '{}', found {:?}",
                     Self::binary_operator_label(&operator.kind),
                     self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after binary operator '{}' before '{label}'",
+                    Self::binary_operator_label(&operator.kind),
                 ),
                 self.peek_located(),
             ));
@@ -9042,6 +9092,12 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!("expected function call argument before '{label}'"),
+                self.peek_located(),
+            ));
+        }
 
         loop {
             args.push(self.parse_assignment_expr()?);
@@ -9063,6 +9119,12 @@ impl Parser {
                             "expected function call argument after ',', found {:?}",
                             self.peek()
                         ),
+                        self.peek_located(),
+                    ));
+                }
+                if let Some(label) = self.integer_constant_invalid_start_label() {
+                    return Err(Self::error_at(
+                        format!("expected function call argument after ',' before '{label}'"),
                         self.peek_located(),
                     ));
                 }

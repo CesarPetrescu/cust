@@ -4,6 +4,21 @@ Last updated: 2026-07-08
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-08 autonomous expression-list keyword invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, larger C-subset conformance fixtures, pointer-arithmetic negative coverage, and CLI/product polish. Selected expression-list keyword invalid starts because function-call arguments, array/string indexes, braced initializer elements, comma/assignment/binary RHS operands, and conditional branches still delegated statement/type keywords such as `return` and `int` to generic expression parsing. TDD RED first captured generic `expected expression, found Return/Int`; GREEN added contextual keyword-start guards while preserving delimiter/`[`/`?` diagnostics and valid expressions.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_misplaced_function_call_arguments_with_context -- --nocapture  # RED first: generic `expected expression, found Return`; GREEN passed after call-argument keyword guard
+cargo test --test interpreter rejects_missing_array_index_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found Int`; GREEN passed after index keyword guard
+cargo test --test interpreter rejects_missing_braced_initializer_elements_with_context -- --nocapture
+cargo test --test interpreter rejects_missing_conditional_operator_operands_with_context -- --nocapture
+cargo test --test interpreter rejects_misplaced_operator_rhs_operands_with_context -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-08 autonomous `_Alignas` / `_Static_assert` keyword invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, declaration-specifier/assertion malformed starts not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected `_Alignas` and `_Static_assert` keyword invalid starts because delimiter and `[`/`?` forms were contextual, but `_Alignas(return) int value;` and `_Static_assert(return, "condition required");` still delegated to generic expression parsing. TDD RED first captured `expected expression, found Return`; GREEN added keyword-start guards while preserving valid `_Alignas(type-name)`, `_Alignas(expression)`, and `_Static_assert` conditions.
 
 Commands verified so far:
