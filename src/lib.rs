@@ -4867,6 +4867,8 @@ impl Parser {
             Token::Comma
                 | Token::LBracket
                 | Token::Question
+                | Token::Dot
+                | Token::Arrow
                 | Token::Semi
                 | Token::RParen
                 | Token::RBracket
@@ -5434,7 +5436,7 @@ impl Parser {
             return self.parse_assignment_expr();
         }
         self.expect_opening_brace_after(context)?;
-        self.reject_missing_braced_initializer_element(&format!(
+        self.reject_invalid_braced_initializer_value(&format!(
             "braced scalar initializer for {context}"
         ))?;
         let expr = self.parse_assignment_expr()?;

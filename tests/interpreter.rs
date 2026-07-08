@@ -6541,6 +6541,18 @@ fn rejects_missing_braced_scalar_initializer_expressions_with_context() {
             "struct Point { int x; };\nint main(void) {\n    struct Point point = { .x = {,} };\n    return 0;\n}\n",
             "expected initializer element in braced scalar initializer for struct field 'x', found Comma at line 3, column 34",
         ),
+        (
+            "int main(void) {\n    int value = {[};\n    return value;\n}\n",
+            "expected initializer element in braced scalar initializer for variable 'value', found LBracket at line 2, column 18",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) {\n    struct Point point = { .x = {.bad} };\n    return 0;\n}\n",
+            "expected initializer element in braced scalar initializer for struct field 'x', found Dot at line 3, column 34",
+        ),
+        (
+            "int main(void) {\n    return (int){->field};\n}\n",
+            "expected initializer element in braced scalar initializer for scalar compound literal, found Arrow at line 2, column 18",
+        ),
     ];
 
     for (program, expected) in cases {

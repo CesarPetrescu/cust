@@ -1,8 +1,21 @@
 # Cust Current State
 
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 ## Latest autonomous verification
+
+All passed after the 2026-07-09 autonomous braced scalar initializer invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected braced scalar initializer invalid-start diagnostics because scalar braced initializer contexts (`int value = {...}`, aggregate scalar-field braced initializers, and scalar compound literals) still delegated malformed starts such as `{[}`, `{.bad}`, and `{->field}` to generic primary-expression parsing, unlike adjacent braced aggregate/array initializer value diagnostics. TDD RED first captured `expected expression, found LBracket`; GREEN routed scalar braced initializer operands through the contextual invalid-start initializer guard while preserving valid scalar braced initializer behavior.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_braced_scalar_initializer_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after scalar braced initializer guard reuse
+cargo test --test interpreter rejects_missing_scalar_compound_literal_initializers_with_context -- --nocapture
+cargo test --test interpreter initializer -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
 
 All passed after the 2026-07-08 autonomous integer-constant unary operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected integer-constant unary operand diagnostics because enum initializers, array lengths, and switch case labels use parser-folded integer constant expressions, and malformed unary constants such as `enum Bad { VALUE = + };`, `int values[-];`, and `case !:` still fell through to generic integer-constant errors after consuming the unary operator. TDD RED first captured `expected integer constant in integer constant expression`; GREEN added a narrow post-unary integer-constant operand guard while preserving supported unary `+`, `-`, `~`, and `!` integer-constant-expression operands.
 
