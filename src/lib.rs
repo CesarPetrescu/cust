@@ -6556,11 +6556,39 @@ impl Parser {
             }
         }
         self.expect_closing_paren_after("integer constant expression cast type")?;
+        self.reject_missing_integer_constant_cast_operand()?;
         let (value, _) = self.parse_integer_constant_unary(
             local_constants,
             "expected integer constant in integer constant expression",
         )?;
         Ok((value, opening))
+    }
+
+    fn reject_missing_integer_constant_cast_operand(&self) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::Semi
+                | Token::Colon
+                | Token::Comma
+                | Token::LBracket
+                | Token::Question
+                | Token::Dot
+                | Token::Arrow
+                | Token::Eof
+        ) || self.integer_constant_invalid_start_label().is_some()
+        {
+            return Err(Self::error_at(
+                format!(
+                    "expected integer constant after cast, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
     }
 
     fn infer_array_initializer_len(init: &[ArrayInitializer]) -> usize {

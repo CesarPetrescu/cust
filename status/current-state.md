@@ -4,6 +4,20 @@ Last updated: 2026-07-08
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-08 autonomous integer-constant cast operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected integer-constant cast operand diagnostics because enum initializers, array lengths, and switch case labels use parser-folded integer constant expressions, and malformed scalar casts such as `enum Bad { VALUE = (int) };`, `int values[(int)];`, and `case (int):` still fell through to generic integer-constant errors. TDD RED first captured `expected integer constant in integer constant expression`; GREEN added a narrow post-cast integer-constant operand guard while preserving supported scalar casts in integer-constant-expression contexts.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_integer_constant_cast_operands_with_context -- --nocapture  # RED first: generic integer-constant error; GREEN passed after integer-constant cast operand guard
+cargo test --test interpreter rejects_invalid_start_enum_constant_values_with_context -- --nocapture
+cargo test --test interpreter rejects_invalid_start_switch_case_values_with_context -- --nocapture
+cargo test --test interpreter rejects_non_constant_array_lengths_with_context -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-08 autonomous dot/arrow invalid-start expression diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, larger C-subset conformance fixtures, pointer-arithmetic negative coverage, and CLI/product polish. Selected dot/arrow expression-start diagnostics because malformed selector tokens in statement, return, comma, assignment, and binary RHS expression positions still fell through to generic statement/primary-expression parser errors while adjacent `[`/`?` and keyword-start routes were contextual. TDD RED first captured `unexpected token in statement: Dot`; GREEN added dot/arrow to the focused invalid-start guards while preserving valid selector use after postfix aggregate/pointer expressions.
 
 Commands verified so far:
