@@ -635,6 +635,18 @@ fn rejects_missing_cast_operands_with_context() {
             include_str!("fixtures/invalid/void_cast_missing_operand.c"),
             "expected expression after cast, found Semi at line 2, column 11",
         ),
+        (
+            "int main(void) {\n    return (int)[;\n}\n",
+            "expected expression after cast, found LBracket at line 2, column 17",
+        ),
+        (
+            "int main(void) {\n    return (char)?;\n}\n",
+            "expected expression after cast, found Question at line 2, column 18",
+        ),
+        (
+            "int main(void) {\n    return (int)return;\n}\n",
+            "expected expression after cast, found Return at line 2, column 17",
+        ),
     ];
 
     for (program, expected) in cases {

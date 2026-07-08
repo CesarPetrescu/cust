@@ -4,6 +4,16 @@ Last updated: 2026-07-08
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-08 autonomous cast-operand invalid-start diagnostic run. Ideation considered failing tests/builds (none on clean startup status), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed expression/list boundaries not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected malformed cast operands because delimiter-leading casts such as `(int);` were contextual, but invalid operand starts such as `(int)[`, `(char)?`, and `(int)return` still delegated to generic primary-expression parsing. TDD RED first captured `expected expression, found LBracket`; GREEN expanded `reject_missing_cast_operand()` to guard the same delimiter, invalid-start, and keyword tokens used by other expression operand diagnostics while preserving valid scalar, pointer, void, and compound-literal casts.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_missing_cast_operands_with_context -- --nocapture  # RED first: generic `expected expression, found LBracket`; GREEN passed after cast-operand guard expansion
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-08 autonomous grouped-expression invalid-start diagnostic run. Ideation considered failing tests/builds (none on clean startup status), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed expression/list boundaries not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected malformed grouped-expression operands because delimiter-leading grouped expressions such as `()` and `(]` were contextual, but invalid operand starts such as `([)` and `(?)` still delegated to the generic primary-expression parser. TDD RED first captured `expected expression, found LBracket`; GREEN added `[` and `?` to the grouped-expression operand guard while preserving valid grouped expressions, casts, and existing missing-closing-paren diagnostics.
 
 Commands verified so far:

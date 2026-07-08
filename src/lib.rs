@@ -8328,10 +8328,53 @@ impl Parser {
             self.peek(),
             Token::Comma
                 | Token::Colon
+                | Token::LBracket
+                | Token::Question
                 | Token::RParen
                 | Token::RBracket
                 | Token::Semi
                 | Token::RBrace
+                | Token::Int
+                | Token::Char
+                | Token::Bool
+                | Token::Float
+                | Token::Double
+                | Token::Complex
+                | Token::Imaginary
+                | Token::Signed
+                | Token::Unsigned
+                | Token::Long
+                | Token::Short
+                | Token::Const
+                | Token::Volatile
+                | Token::Restrict
+                | Token::Atomic
+                | Token::Static
+                | Token::Extern
+                | Token::ThreadLocal
+                | Token::Inline
+                | Token::Noreturn
+                | Token::Auto
+                | Token::Register
+                | Token::Void
+                | Token::Enum
+                | Token::Struct
+                | Token::Union
+                | Token::Typedef
+                | Token::Alignas
+                | Token::StaticAssert
+                | Token::Return
+                | Token::If
+                | Token::Else
+                | Token::While
+                | Token::Do
+                | Token::For
+                | Token::Switch
+                | Token::Case
+                | Token::Default
+                | Token::Break
+                | Token::Continue
+                | Token::Goto
                 | Token::Eof
         ) {
             return Err(Self::error_at(
