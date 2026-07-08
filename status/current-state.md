@@ -4,6 +4,19 @@ Last updated: 2026-07-08
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-08 autonomous `_Alignof` invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed type-query starts not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected malformed `_Alignof` type operands because empty/comma-leading `_Alignof()` / `_Alignof(,)` and qualifier-only `_Alignof(volatile)` were contextual, but invalid type-start tokens such as `_Alignof([)`, `_Alignof(?)`, and `_Alignof(return)` still fell through to generic `_Alignof` type parsing. TDD RED first captured `expected _Alignof type, found LBracket`; GREEN added a shared `_Alignof` type-start guard used by ordinary expression parsing and integer-constant `_Alignof` folding while preserving valid `_Alignof(type-name)` operands.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_sizeof_and_alignof_operands_with_context -- --nocapture  # RED first: generic `expected _Alignof type, found LBracket`; GREEN passed after _Alignof type-start guard
+cargo test --test interpreter alignof -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-08 autonomous `sizeof` invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed expression/type-query operands not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected malformed `sizeof` operands because delimiter and `[`/`?` starts were contextual, but keyword starts such as `sizeof return`, `sizeof int`, and `sizeof(return)` still delegated to generic expression parsing. TDD RED first captured `expected expression, found Return`; GREEN split the `sizeof` operand guard so parenthesized type names remain valid while unparenthesized type keywords and statement/control keywords report contextual `expected sizeof operand before '<token>'` diagnostics.
 
 Commands verified so far:

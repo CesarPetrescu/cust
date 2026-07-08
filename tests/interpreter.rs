@@ -1873,6 +1873,18 @@ fn rejects_missing_sizeof_and_alignof_operands_with_context() {
             "int main(void) {\n    return _Alignof(,);\n}\n",
             "expected _Alignof type, found Comma at line 2, column 21",
         ),
+        (
+            "int main(void) {\n    return _Alignof([);\n}\n",
+            "expected _Alignof type before '[' at line 2, column 21",
+        ),
+        (
+            "int main(void) {\n    return _Alignof(?);\n}\n",
+            "expected _Alignof type before '?' at line 2, column 21",
+        ),
+        (
+            "int main(void) {\n    return _Alignof(return);\n}\n",
+            "expected _Alignof type before 'return' at line 2, column 21",
+        ),
     ];
 
     for (program, expected) in cases {

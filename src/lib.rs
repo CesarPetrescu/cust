@@ -6684,13 +6684,7 @@ impl Parser {
     fn parse_integer_constant_alignof(&mut self) -> CustResult<(i64, LocatedToken)> {
         let operator = self.previous().clone();
         self.expect_opening_paren_after("_Alignof")?;
-        if !self.is_type_name_start() {
-            let found = self.peek_located().clone();
-            return Err(Self::error_at(
-                format!("expected _Alignof type, found {:?}", found.kind),
-                &found,
-            ));
-        }
+        self.reject_missing_alignof_type()?;
         let alignof_type = self.parse_sizeof_like_type_name("_Alignof")?;
         self.expect_closing_paren_after("_Alignof type")?;
         let value = alignof_type
@@ -8514,6 +8508,34 @@ impl Parser {
 
     fn parse_alignof(&mut self) -> CustResult<Expr> {
         self.expect_opening_paren_after("_Alignof")?;
+        self.reject_missing_alignof_type()?;
+        let alignof_type = self.parse_sizeof_like_type_name("_Alignof")?;
+        self.expect_closing_paren_after("_Alignof type")?;
+        Ok(Expr::AlignOfType(alignof_type))
+    }
+
+    fn reject_missing_alignof_type(&self) -> CustResult<()> {
+        if self.check(&Token::LBracket) {
+            return Err(Self::error_at(
+                "expected _Alignof type before '['".to_string(),
+                self.peek_located(),
+            ));
+        }
+        if self.check(&Token::Question) {
+            return Err(Self::error_at(
+                "expected _Alignof type before '?'".to_string(),
+                self.peek_located(),
+            ));
+        }
+        match self.integer_constant_invalid_start_label() {
+            Some(label) if !self.is_type_name_start() => {
+                return Err(Self::error_at(
+                    format!("expected _Alignof type before '{label}'"),
+                    self.peek_located(),
+                ));
+            }
+            _ => {}
+        }
         if !self.is_type_name_start() {
             let found = self.peek_located().clone();
             return Err(Self::error_at(
@@ -8521,9 +8543,7 @@ impl Parser {
                 &found,
             ));
         }
-        let alignof_type = self.parse_sizeof_like_type_name("_Alignof")?;
-        self.expect_closing_paren_after("_Alignof type")?;
-        Ok(Expr::AlignOfType(alignof_type))
+        Ok(())
     }
 
     fn is_type_name_start(&self) -> bool {
