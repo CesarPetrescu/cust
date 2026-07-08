@@ -4,6 +4,18 @@ Last updated: 2026-07-08
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-08 autonomous integer-constant unary operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected integer-constant unary operand diagnostics because enum initializers, array lengths, and switch case labels use parser-folded integer constant expressions, and malformed unary constants such as `enum Bad { VALUE = + };`, `int values[-];`, and `case !:` still fell through to generic integer-constant errors after consuming the unary operator. TDD RED first captured `expected integer constant in integer constant expression`; GREEN added a narrow post-unary integer-constant operand guard while preserving supported unary `+`, `-`, `~`, and `!` integer-constant-expression operands.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_integer_constant_unary_operands_with_context -- --nocapture  # RED first: generic integer-constant error; GREEN passed after integer-constant unary operand guard
+cargo test --test interpreter integer_constant -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-08 autonomous integer-constant cast operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected integer-constant cast operand diagnostics because enum initializers, array lengths, and switch case labels use parser-folded integer constant expressions, and malformed scalar casts such as `enum Bad { VALUE = (int) };`, `int values[(int)];`, and `case (int):` still fell through to generic integer-constant errors. TDD RED first captured `expected integer constant in integer constant expression`; GREEN added a narrow post-cast integer-constant operand guard while preserving supported scalar casts in integer-constant-expression contexts.
 
 Commands verified so far:

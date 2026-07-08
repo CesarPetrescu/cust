@@ -6507,6 +6507,7 @@ impl Parser {
             || self.matches(&Token::Bang)
         {
             let op_token = self.previous().clone();
+            self.reject_missing_integer_constant_unary_operand(&op_token)?;
             let (value, _) = self.parse_integer_constant_unary(
                 local_constants,
                 "expected integer constant in integer constant expression",
@@ -6583,6 +6584,37 @@ impl Parser {
             return Err(Self::error_at(
                 format!(
                     "expected integer constant after cast, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_missing_integer_constant_unary_operand(
+        &self,
+        operator: &LocatedToken,
+    ) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::Semi
+                | Token::Colon
+                | Token::Comma
+                | Token::LBracket
+                | Token::Question
+                | Token::Dot
+                | Token::Arrow
+                | Token::Eof
+        ) || self.integer_constant_invalid_start_label().is_some()
+        {
+            return Err(Self::error_at(
+                format!(
+                    "expected integer constant after unary operator '{}', found {:?}",
+                    Self::unary_operator_label(&operator.kind),
                     self.peek()
                 ),
                 self.peek_located(),

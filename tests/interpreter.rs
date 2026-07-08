@@ -4450,6 +4450,33 @@ fn rejects_missing_integer_constant_cast_operands_with_context() {
 }
 
 #[test]
+fn rejects_missing_integer_constant_unary_operands_with_context() {
+    let cases = [
+        (
+            "enum Bad { VALUE = + };\nint main(void) { return VALUE; }\n",
+            "expected integer constant after unary operator '+', found RBrace at line 1, column 22",
+        ),
+        (
+            "int main(void) {\n    int values[-];\n    return 0;\n}\n",
+            "expected integer constant after unary operator '-', found RBracket at line 2, column 17",
+        ),
+        (
+            "int main(void) {\n    switch (1) { case !: return 1; default: return 0; }\n}\n",
+            "expected integer constant after unary operator '!', found Colon at line 2, column 24",
+        ),
+        (
+            "enum Bad { VALUE = ~return };\nint main(void) { return VALUE; }\n",
+            "expected integer constant after unary operator '~', found Return at line 1, column 21",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_invalid_start_enum_constant_values_with_context() {
     let cases = [
         (
