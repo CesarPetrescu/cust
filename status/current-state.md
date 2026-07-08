@@ -4,6 +4,18 @@ Last updated: 2026-07-08
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-08 autonomous `sizeof` invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed expression/type-query operands not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected malformed `sizeof` operands because delimiter and `[`/`?` starts were contextual, but keyword starts such as `sizeof return`, `sizeof int`, and `sizeof(return)` still delegated to generic expression parsing. TDD RED first captured `expected expression, found Return`; GREEN split the `sizeof` operand guard so parenthesized type names remain valid while unparenthesized type keywords and statement/control keywords report contextual `expected sizeof operand before '<token>'` diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_sizeof_and_alignof_operands_with_context -- --nocapture  # RED first: generic `expected expression, found Return`; GREEN passed after sizeof keyword-start guard
+cargo test --test interpreter sizeof -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-08 autonomous cast-operand invalid-start diagnostic run. Ideation considered failing tests/builds (none on clean startup status), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, malformed expression/list boundaries not already covered, less-traveled declaration/type-name starts, pointer-arithmetic negative coverage, and broader conformance fixture work. Selected malformed cast operands because delimiter-leading casts such as `(int);` were contextual, but invalid operand starts such as `(int)[`, `(char)?`, and `(int)return` still delegated to generic primary-expression parsing. TDD RED first captured `expected expression, found LBracket`; GREEN expanded `reject_missing_cast_operand()` to guard the same delimiter, invalid-start, and keyword tokens used by other expression operand diagnostics while preserving valid scalar, pointer, void, and compound-literal casts.
 
 Commands verified so far:

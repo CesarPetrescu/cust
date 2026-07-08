@@ -1854,6 +1854,18 @@ fn rejects_missing_sizeof_and_alignof_operands_with_context() {
             "expected sizeof operand, found Semi at line 2, column 18",
         ),
         (
+            "int main(void) {\n    return sizeof return;\n}\n",
+            "expected sizeof operand before 'return' at line 2, column 19",
+        ),
+        (
+            "int main(void) {\n    return sizeof int;\n}\n",
+            "expected sizeof operand before 'int' at line 2, column 19",
+        ),
+        (
+            "int main(void) {\n    return sizeof(return);\n}\n",
+            "expected sizeof operand before 'return' at line 2, column 19",
+        ),
+        (
             "int main(void) {\n    return _Alignof();\n}\n",
             "expected _Alignof type, found RParen at line 2, column 21",
         ),
