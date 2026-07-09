@@ -4823,6 +4823,14 @@ fn rejects_missing_function_parameters_around_commas_with_context() {
             "int add(int a,? int b) { return a + b; }\nint main(void) { return add(1, 2); }\n",
             "expected function parameter after ',', found Question at line 1, column 15",
         ),
+        (
+            "int add(return int b) { return b; }\nint main(void) { return add(1); }\n",
+            "expected function parameter before 'return' at line 1, column 9",
+        ),
+        (
+            "int add(int a,return int b) { return a; }\nint main(void) { return add(1, 2); }\n",
+            "expected function parameter after ',' before 'return' at line 1, column 15",
+        ),
     ];
 
     for (program, expected) in cases {

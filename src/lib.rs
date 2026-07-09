@@ -3400,6 +3400,15 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        if let (Some(label), false) = (
+            self.integer_constant_invalid_start_label(),
+            self.is_type_name_start(),
+        ) {
+            return Err(Self::error_at(
+                format!("expected function parameter before '{label}'"),
+                self.peek_located(),
+            ));
+        }
 
         loop {
             if self.starts_ellipsis() {
@@ -3567,6 +3576,15 @@ impl Parser {
                             "expected function parameter after ',', found {:?}",
                             self.peek()
                         ),
+                        self.peek_located(),
+                    ));
+                }
+                if let (Some(label), false) = (
+                    self.integer_constant_invalid_start_label(),
+                    self.is_type_name_start(),
+                ) {
+                    return Err(Self::error_at(
+                        format!("expected function parameter after ',' before '{label}'"),
                         self.peek_located(),
                     ));
                 }
