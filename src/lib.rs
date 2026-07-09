@@ -8298,6 +8298,8 @@ impl Parser {
                 | Token::Colon
                 | Token::LBracket
                 | Token::Question
+                | Token::Dot
+                | Token::Arrow
                 | Token::RParen
                 | Token::RBracket
                 | Token::Semi
@@ -9278,6 +9280,8 @@ impl Parser {
                         | Token::RBracket
                         | Token::LBracket
                         | Token::Question
+                        | Token::Dot
+                        | Token::Arrow
                         | Token::Semi
                         | Token::RBrace
                         | Token::Eof

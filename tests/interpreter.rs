@@ -5124,6 +5124,14 @@ fn rejects_missing_grouped_expression_operands_with_context() {
             "int main(void) {\n    return (typedef);\n}\n",
             "expected grouped expression before 'typedef' at line 2, column 13",
         ),
+        (
+            "int main(void) {\n    return (.field);\n}\n",
+            "expected grouped expression, found Dot at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return (->field);\n}\n",
+            "expected grouped expression, found Arrow at line 2, column 13",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6470,6 +6478,14 @@ fn rejects_missing_operands_after_unary_operators() {
         (
             "int main(void) {\n    return &return;\n}\n",
             "expected expression after unary operator '&', found Return at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return !.field;\n}\n",
+            "expected expression after unary operator '!', found Dot at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return *->field;\n}\n",
+            "expected expression after unary operator '*', found Arrow at line 2, column 13",
         ),
     ];
 

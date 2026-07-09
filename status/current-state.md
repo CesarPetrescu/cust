@@ -4,6 +4,22 @@ Last updated: 2026-07-09
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-09 autonomous selector-token grouped/unary diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, fuzz/property testing, and CLI/product polish. Selected selector-token malformed grouped-expression and unary-operand boundaries because probing showed `(.field)`, `(->field)`, `!.field`, and `*->field` still fell through to generic `expected expression, found Dot/Arrow` diagnostics while adjacent return/operator/control/type-query/call/initializer routes were contextual. TDD RED first captured those generic fallbacks; GREEN added narrow Dot/Arrow guards in grouped-expression and unary-operator operand parsing while preserving valid postfix selector usage after real expressions.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_grouped_expression_operands_with_context -- --nocapture  # RED first: generic `expected expression, found Dot`; GREEN passed after grouped-expression selector guards
+cargo test --test interpreter rejects_missing_operands_after_unary_operators -- --nocapture  # RED first: generic `expected expression, found Dot`; GREEN passed after unary-operand selector guards
+cargo test --test interpreter grouped -- --nocapture
+cargo test --test interpreter unary -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+## Previous autonomous verification
+
 All passed after the 2026-07-09 autonomous selector-token function-call/initializer diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, and CLI/product polish. Selected selector-token malformed list/initializer boundaries because probing showed `f(.field)`, `f(1,->field)`, scalar array initializers like `{.field}` / `{->field}`, and aggregate initializers like `{->field = 1}` still fell through to generic `expected expression, found Dot/Arrow` diagnostics while adjacent return/operator/control/type-query routes were contextual. TDD RED first captured those generic fallbacks; GREEN added narrow function-call argument guards and braced-initializer selector-start guards that preserve valid struct `.field` designators.
 
 Commands verified so far:
