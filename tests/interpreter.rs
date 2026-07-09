@@ -725,6 +725,41 @@ fn rejects_missing_cast_types_after_qualifiers_with_context() {
 }
 
 #[test]
+fn rejects_qualifier_only_declaration_types_with_context() {
+    let cases = [
+        (
+            "const global;\nint main(void) { return 0; }\n",
+            "expected declaration type after type qualifier 'const', found Ident(\"global\") at line 1, column 7",
+        ),
+        (
+            "int main(void) {\n    volatile local;\n    return 0;\n}\n",
+            "expected declaration type after type qualifier 'volatile', found Ident(\"local\") at line 2, column 14",
+        ),
+        (
+            "int take(_Atomic value) { return 0; }\nint main(void) { return take(1); }\n",
+            "expected parameter type after type qualifier '_Atomic', found Ident(\"value\") at line 1, column 18",
+        ),
+        (
+            "struct Sample {\n    const field;\n};\nint main(void) { return 0; }\n",
+            "expected struct field type after type qualifier 'const', found Ident(\"field\") at line 2, column 11",
+        ),
+        (
+            "typedef const Alias;\nint main(void) { return 0; }\n",
+            "expected typedef alias type after type qualifier 'const', found Ident(\"Alias\") at line 1, column 15",
+        ),
+        (
+            "const make(void) { return 0; }\nint main(void) { return make(); }\n",
+            "expected declaration type after type qualifier 'const', found Ident(\"make\") at line 1, column 7",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_non_constant_array_lengths_with_context() {
     let program = include_str!("fixtures/invalid/array_length_non_constant_identifier.c");
 

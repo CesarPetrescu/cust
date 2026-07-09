@@ -2590,12 +2590,18 @@ impl Parser {
     }
 
     fn consume_type_qualifiers(&mut self) -> bool {
+        self.consume_type_qualifiers_with_last().0
+    }
+
+    fn consume_type_qualifiers_with_last(&mut self) -> (bool, Option<LocatedToken>) {
         let mut saw_const = false;
+        let mut last_qualifier = None;
         while matches!(
             self.peek(),
             Token::Const | Token::Volatile | Token::Restrict
         ) || self.bare_atomic_qualifier_at(self.pos)
         {
+            let qualifier = self.peek_located().clone();
             if self.matches(&Token::Const) {
                 saw_const = true;
             } else if self.matches(&Token::Restrict) {
@@ -2610,8 +2616,37 @@ impl Parser {
                 self.expect(Token::Volatile)
                     .expect("peek confirmed volatile token");
             }
+            last_qualifier = Some(qualifier);
         }
-        saw_const
+        (saw_const, last_qualifier)
+    }
+
+    fn declaration_type_context(context: &str) -> &str {
+        match context {
+            "struct type name" => "declaration type",
+            "typedef struct type name" => "typedef alias type",
+            "struct return type name" => "function return type",
+            _ => context,
+        }
+    }
+
+    fn reject_missing_type_after_qualifier(
+        &self,
+        context: &str,
+        qualifier: Option<&LocatedToken>,
+    ) -> CustResult<()> {
+        if let (Some(qualifier), false) = (qualifier, self.is_type_name_start()) {
+            return Err(Self::error_at(
+                format!(
+                    "expected {} after type qualifier '{}', found {:?}",
+                    Self::declaration_type_context(context),
+                    Self::type_qualifier_label(&qualifier.kind),
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
     }
 
     fn bare_atomic_qualifier_at(&self, index: usize) -> bool {
@@ -2644,7 +2679,8 @@ impl Parser {
 
     fn parse_const_qualified_decl_type(&mut self, context: &str) -> CustResult<(bool, DeclType)> {
         self.reject_leading_restrict_qualifier()?;
-        let leading_const = self.consume_type_qualifiers();
+        let (leading_const, last_qualifier) = self.consume_type_qualifiers_with_last();
+        self.reject_missing_type_after_qualifier(context, last_qualifier.as_ref())?;
         let alias_const = match self.peek() {
             Token::Ident(name) => self.type_alias_is_const(name),
             _ => false,
@@ -2731,7 +2767,7 @@ impl Parser {
             ));
         } else {
             let (leading_const, base_type) =
-                self.parse_const_qualified_decl_type("typedef struct type name")?;
+                self.parse_const_qualified_decl_type("typedef alias type")?;
             (
                 base_type,
                 "typedef alias name after type",
@@ -3283,7 +3319,7 @@ impl Parser {
             return Ok(ReturnType::Void);
         }
         let (leading_const, decl_type) =
-            self.parse_const_qualified_decl_type("struct return type name")?;
+            self.parse_const_qualified_decl_type("function return type")?;
         if self.matches(&Token::Star) {
             if matches!(decl_type, DeclType::Pointer { .. }) || self.check(&Token::Star) {
                 return Err(Self::error_at(
@@ -4214,7 +4250,7 @@ impl Parser {
         self.last_decl_had_initializer = false;
         self.consume_alignment_specifiers()?;
         let (leading_const, decl_type) =
-            self.parse_const_qualified_decl_type("struct type name")?;
+            self.parse_const_qualified_decl_type("declaration type")?;
         let has_explicit_star = self.matches(&Token::Star);
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
         if matches!(decl_type, DeclType::Pointer { .. }) && has_explicit_star {
@@ -5773,7 +5809,11 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let leading_const = self.consume_type_qualifiers();
+            let (leading_const, last_qualifier) = self.consume_type_qualifiers_with_last();
+            self.reject_missing_type_after_qualifier(
+                &format!("{keyword} field type"),
+                last_qualifier.as_ref(),
+            )?;
             let alias_const = match self.peek() {
                 Token::Ident(name) => self.type_alias_is_const(name),
                 _ => false,
