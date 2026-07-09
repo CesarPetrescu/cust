@@ -521,6 +521,26 @@ fn rejects_missing_atomic_type_arguments_with_context() {
             "struct Sample {\n    _Atomic() value;\n};\nint main(void) { return 0; }\n",
             "expected _Atomic type, found RParen at line 2, column 13",
         ),
+        (
+            "_Atomic([) global_value;\nint main(void) { return 0; }\n",
+            "expected _Atomic type before '[' at line 1, column 9",
+        ),
+        (
+            "int main(void) {\n    _Atomic(?) local_value;\n    return 0;\n}\n",
+            "expected _Atomic type before '?' at line 2, column 13",
+        ),
+        (
+            "int take(_Atomic(return) value) { return 0; }\nint main(void) { return take(1); }\n",
+            "expected _Atomic type before 'return' at line 1, column 18",
+        ),
+        (
+            "int main(void) {\n    return sizeof(_Atomic(.));\n}\n",
+            "expected _Atomic type, found Dot at line 2, column 27",
+        ),
+        (
+            "struct Sample {\n    _Atomic(->field) value;\n};\nint main(void) { return 0; }\n",
+            "expected _Atomic type, found Arrow at line 2, column 13",
+        ),
     ];
 
     for (program, expected) in cases {

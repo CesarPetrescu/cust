@@ -2295,12 +2295,35 @@ impl Parser {
             | Token::Short => self.parse_scalar_decl_type_specifiers(found),
             Token::Atomic => {
                 self.expect_opening_paren_after("_Atomic")?;
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "expected _Atomic type before '['".to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                if self.check(&Token::Question) {
+                    return Err(Self::error_at(
+                        "expected _Atomic type before '?'".to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                match self.integer_constant_invalid_start_label() {
+                    Some(label) if !self.is_type_name_start() => {
+                        return Err(Self::error_at(
+                            format!("expected _Atomic type before '{label}'"),
+                            self.peek_located(),
+                        ));
+                    }
+                    _ => {}
+                }
                 if matches!(
                     self.peek(),
                     Token::Comma
                         | Token::Colon
                         | Token::RParen
                         | Token::RBracket
+                        | Token::Dot
+                        | Token::Arrow
                         | Token::Semi
                         | Token::RBrace
                         | Token::Eof

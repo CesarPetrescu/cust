@@ -4,6 +4,19 @@ Last updated: 2026-07-09
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-09 autonomous `_Atomic(...)` type-argument invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected `_Atomic(type-name)` malformed argument diagnostics because empty/comma `_Atomic()` / `_Atomic(,)` forms were contextual, but invalid starts such as `_Atomic([)`, `_Atomic(?)`, `_Atomic(return)`, `_Atomic(.)`, and `_Atomic(->field)` still delegated to generic type parsing on less-traveled declaration, parameter, `sizeof`, cast, and aggregate-field routes. TDD RED first captured `expected type, found LBracket`; GREEN added narrow `_Atomic` argument invalid-start guards while preserving valid bare `_Atomic` qualifiers and `_Atomic(type-name)` specifier behavior.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_atomic_type_arguments_with_context -- --nocapture  # RED first: generic `expected type, found LBracket`; GREEN passed after _Atomic argument guards
+cargo test --test interpreter atomic -- --nocapture
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-09 autonomous selector-token type-query/assertion diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected malformed selector tokens in less-traveled operand routes because `_Alignas(.)`, `_Static_assert(., ...)`, `sizeof(.)`, and `(int).` (plus arrow variants) still delegated to generic expression parsing even though adjacent statement/return/operator expression-start routes already had contextual dot/arrow diagnostics. TDD RED first captured generic `expected expression, found Dot`; GREEN added dot/arrow to the route-local `_Alignas`, `_Static_assert`, cast-operand, and `sizeof` operand guards while preserving valid `_Alignas`, `_Static_assert`, cast, and `sizeof` behavior.
 
 Commands verified so far:
