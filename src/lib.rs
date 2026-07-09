@@ -7273,6 +7273,8 @@ impl Parser {
                 | Token::RBrace
                 | Token::LBracket
                 | Token::Question
+                | Token::Dot
+                | Token::Arrow
                 | Token::Eof
         ) {
             return Err(Self::error_at(
@@ -7399,7 +7401,7 @@ impl Parser {
             Some(Box::new(self.parse_expr_stmt_with_semi(true)?))
         } else if matches!(
             self.peek(),
-            Token::LBracket | Token::Question | Token::Comma
+            Token::LBracket | Token::Question | Token::Comma | Token::Dot | Token::Arrow
         ) {
             return Err(Self::error_at(
                 format!(
@@ -7433,7 +7435,10 @@ impl Parser {
             Some(Box::new(self.parse_assign_with_semi(false)?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(false)?))
-        } else if matches!(self.peek(), Token::LBracket | Token::Question) {
+        } else if matches!(
+            self.peek(),
+            Token::LBracket | Token::Question | Token::Dot | Token::Arrow
+        ) {
             return Err(Self::error_at(
                 format!(
                     "expected expression after for increment, found {:?}",
@@ -7941,7 +7946,10 @@ impl Parser {
         let cond = self.parse_logical_or()?;
         if self.matches(&Token::Question) {
             self.reject_missing_conditional_operand("?", |token| {
-                matches!(token, Token::LBracket | Token::Question | Token::Colon)
+                matches!(
+                    token,
+                    Token::LBracket | Token::Question | Token::Colon | Token::Dot | Token::Arrow
+                )
             })?;
             let then_expr = self.parse_expr()?;
             self.expect_colon_after("conditional then-expression")?;
@@ -7954,6 +7962,8 @@ impl Parser {
                         | Token::RBracket
                         | Token::Semi
                         | Token::RBrace
+                        | Token::Dot
+                        | Token::Arrow
                         | Token::Eof
                 )
             })?;

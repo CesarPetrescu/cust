@@ -4,6 +4,23 @@ Last updated: 2026-07-09
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-09 autonomous selector-token control/conditional diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, and product/CLI polish. Selected selector-token invalid starts in control/conditional expression boundaries because probing showed `for (.field; ; )`, `if (.field)`, `while (->field)`, `for (...; .field; ...)`, `for (...; ...; ->field)`, `return 1 ? .field : 2`, and `return 1 ? 2 : ->field` still fell through to generic `expected expression, found Dot/Arrow` or `unexpected token in for increment` diagnostics while adjacent return/operator/sizeof/cast routes were contextual. TDD RED first captured those generic fallbacks; GREEN added narrow Dot/Arrow guards to for-initializer, control-condition, for-increment, and conditional-operator operand parsing while preserving valid postfix selector usage after real expressions.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_invalid_start_for_initializer_expressions_with_context -- --nocapture  # RED first: generic `unexpected token in for initializer: Dot`; GREEN passed after selector-token guard
+cargo test --test interpreter rejects_missing_control_flow_condition_expressions_with_context -- --nocapture  # RED first: generic `expected expression, found Dot`; GREEN passed after control-condition guard
+cargo test --test interpreter rejects_misplaced_for_increment_expressions_with_context -- --nocapture  # RED first: generic `unexpected token in for increment: Dot`; GREEN passed after for-increment guard
+cargo test --test interpreter rejects_missing_conditional_operator_operands_with_context -- --nocapture  # RED first: generic `expected expression, found Dot`; GREEN passed after conditional-operand guard
+cargo test --test interpreter missing_ -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+## Previous autonomous verification
+
 All passed after the 2026-07-09 autonomous qualifier-only declaration-type diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected qualifier-only declaration contexts because `const global;`, `volatile local;`, `_Atomic value` parameters, aggregate fields, typedef aliases, and top-level `const make(...)`-shaped starts still fell through to route-specific generic type errors such as `expected struct type name` / `expected parameter type` instead of reporting the missing declaration type after the consumed qualifier. TDD RED first captured the generic `expected struct type name`; GREEN records the last consumed qualifier and rejects non-type starts with contextual `expected <context> after type qualifier '<qualifier>'...` diagnostics while preserving valid const/volatile/restrict/_Atomic qualified declarations and existing cast/sizeof/_Alignof qualifier diagnostics.
 
 Commands verified so far:

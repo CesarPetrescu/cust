@@ -416,6 +416,14 @@ fn rejects_invalid_start_for_initializer_expressions_with_context() {
             "int main(void) {\n    for (,; ; ) { }\n    return 0;\n}\n",
             "expected expression after for initializer, found Comma at line 2, column 10",
         ),
+        (
+            "int main(void) {\n    for (.field; ; ) { }\n    return 0;\n}\n",
+            "expected expression after for initializer, found Dot at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (->field; ; ) { }\n    return 0;\n}\n",
+            "expected expression after for initializer, found Arrow at line 2, column 10",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6175,12 +6183,20 @@ fn rejects_missing_control_flow_condition_expressions_with_context() {
             "expected expression after if, found LBracket at line 1, column 22",
         ),
         (
+            "int main(void) { if (.field) { return 1; } return 0; }",
+            "expected expression after if, found Dot at line 1, column 22",
+        ),
+        (
             "int main(void) { while (; }",
             "expected expression after while, found Semi at line 1, column 25",
         ),
         (
             "int main(void) { while (?) { return 1; } return 0; }",
             "expected expression after while, found Question at line 1, column 25",
+        ),
+        (
+            "int main(void) { while (->field) { return 1; } return 0; }",
+            "expected expression after while, found Arrow at line 1, column 25",
         ),
         (
             "int main(void) { do { } while (); }",
@@ -6197,6 +6213,10 @@ fn rejects_missing_control_flow_condition_expressions_with_context() {
         (
             "int main(void) { for (int i = 0; ?; i = i + 1) { return i; } return 0; }",
             "expected expression after for condition, found Question at line 1, column 34",
+        ),
+        (
+            "int main(void) { for (int i = 0; .field; i = i + 1) { return i; } return 0; }",
+            "expected expression after for condition, found Dot at line 1, column 34",
         ),
     ];
 
@@ -6217,6 +6237,14 @@ fn rejects_misplaced_for_increment_expressions_with_context() {
         (
             "int main(void) { for (int i = 0; i < 3; ?) { return i; } return 0; }",
             "expected expression after for increment, found Question at line 1, column 41",
+        ),
+        (
+            "int main(void) { for (int i = 0; i < 3; .field) { return i; } return 0; }",
+            "expected expression after for increment, found Dot at line 1, column 41",
+        ),
+        (
+            "int main(void) { for (int i = 0; i < 3; ->field) { return i; } return 0; }",
+            "expected expression after for increment, found Arrow at line 1, column 41",
         ),
     ];
 
@@ -6768,8 +6796,16 @@ fn rejects_missing_conditional_operator_operands_with_context() {
             "expected expression after '?' in conditional operator, found LBracket at line 2, column 16",
         ),
         (
+            "int main(void) {\n    return 1 ? .field : 2;\n}\n",
+            "expected expression after '?' in conditional operator, found Dot at line 2, column 16",
+        ),
+        (
             "int main(void) {\n    return 1 ? 2 : [;\n}\n",
             "expected expression after ':' in conditional operator, found LBracket at line 2, column 20",
+        ),
+        (
+            "int main(void) {\n    return 1 ? 2 : ->field;\n}\n",
+            "expected expression after ':' in conditional operator, found Arrow at line 2, column 20",
         ),
         (
             "int main(void) {\n    return 1 ? return : 2;\n}\n",
