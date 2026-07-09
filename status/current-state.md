@@ -4,6 +4,20 @@ Last updated: 2026-07-09
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-09 autonomous `_Alignof` selector-token invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected `_Alignof` selector-token malformed type operands because adjacent `_Alignas`, `_Static_assert`, `sizeof`, cast, and `_Atomic` routes already had contextual selector-token diagnostics, but `_Alignof(.)` and `_Alignof(->field)` still fell through to the generic non-type fallback. TDD RED first captured `expected _Alignof type, found Dot`; GREEN added narrow selector-token guards in `reject_missing_alignof_type()` while preserving valid `_Alignof(type-name)` operands and integer-constant `_Alignof` folding.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_sizeof_and_alignof_operands_with_context -- --nocapture  # RED first: generic `expected _Alignof type, found Dot`; GREEN passed after _Alignof selector-token guards
+cargo test --test interpreter alignof -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+## Previous autonomous verification
+
 All passed after the 2026-07-09 autonomous `_Atomic(...)` type-argument invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected `_Atomic(type-name)` malformed argument diagnostics because empty/comma `_Atomic()` / `_Atomic(,)` forms were contextual, but invalid starts such as `_Atomic([)`, `_Atomic(?)`, `_Atomic(return)`, `_Atomic(.)`, and `_Atomic(->field)` still delegated to generic type parsing on less-traveled declaration, parameter, `sizeof`, cast, and aggregate-field routes. TDD RED first captured `expected type, found LBracket`; GREEN added narrow `_Atomic` argument invalid-start guards while preserving valid bare `_Atomic` qualifiers and `_Atomic(type-name)` specifier behavior.
 
 Commands verified so far:

@@ -8704,6 +8704,18 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        if self.check(&Token::Dot) {
+            return Err(Self::error_at(
+                "expected _Alignof type before '.'".to_string(),
+                self.peek_located(),
+            ));
+        }
+        if self.check(&Token::Arrow) {
+            return Err(Self::error_at(
+                "expected _Alignof type before '->'".to_string(),
+                self.peek_located(),
+            ));
+        }
         match self.integer_constant_invalid_start_label() {
             Some(label) if !self.is_type_name_start() => {
                 return Err(Self::error_at(
