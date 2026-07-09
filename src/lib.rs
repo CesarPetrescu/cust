@@ -6827,10 +6827,15 @@ impl Parser {
     ) -> CustResult<(i64, LocatedToken)> {
         if self.matches(&Token::LParen) {
             let opening = self.previous().clone();
-            let (value, _) = self.parse_integer_constant_expr(
-                local_constants,
-                "expected integer constant in parenthesized integer constant expression",
-            )?;
+            let context = "expected integer constant in parenthesized integer constant expression";
+            if let Some(label) = self.parenthesized_integer_constant_invalid_start_label() {
+                let found = self.advance();
+                return Err(Self::error_at(
+                    format!("{context} before '{label}'"),
+                    &found,
+                ));
+            }
+            let (value, _) = self.parse_integer_constant_expr(local_constants, context)?;
             if self.check(&Token::Comma) {
                 let comma = self.peek_located().clone();
                 return Err(Self::error_at(
@@ -6864,6 +6869,22 @@ impl Parser {
                 format!("{context}, found {token:?}"),
                 &found,
             )),
+        }
+    }
+
+    fn parenthesized_integer_constant_invalid_start_label(&self) -> Option<&'static str> {
+        match self.peek() {
+            Token::RParen => Some(")"),
+            Token::Comma => Some(","),
+            Token::Colon => Some(":"),
+            Token::RBracket => Some("]"),
+            Token::RBrace => Some("}"),
+            Token::Semi => Some(";"),
+            Token::LBracket => Some("["),
+            Token::Question => Some("?"),
+            Token::Dot => Some("."),
+            Token::Arrow => Some("->"),
+            _ => self.integer_constant_invalid_start_label(),
         }
     }
 

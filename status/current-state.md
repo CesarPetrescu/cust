@@ -4,6 +4,20 @@ Last updated: 2026-07-09
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-09 autonomous parenthesized integer-constant operand diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected malformed parenthesized integer-constant expressions because enum initializers, array lengths, and switch case labels already had contextual cast/unary and invalid-start diagnostics, but forms such as `enum Bad { VALUE = () };`, `int values[(,)];`, `case (:`, `int values[(?)];`, and `(return)` still fell through to the generic `expected integer constant in parenthesized integer constant expression, found ...` message. TDD RED first captured the generic `found RParen`; GREEN added a narrow parenthesized integer-constant start guard while preserving valid parenthesized constants, comma-operator rejection after a parsed left operand, and existing cast/unary integer-constant diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_parenthesized_integer_constant_operands_with_context -- --nocapture  # RED first: generic `expected integer constant..., found RParen`; GREEN passed after parenthesized integer-constant guard
+cargo test --test interpreter integer_constant -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+## Previous autonomous verification
+
 All passed after the 2026-07-09 autonomous `_Alignof` selector-token invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance fixtures, negative pointer-arithmetic coverage, and CLI/product polish. Selected `_Alignof` selector-token malformed type operands because adjacent `_Alignas`, `_Static_assert`, `sizeof`, cast, and `_Atomic` routes already had contextual selector-token diagnostics, but `_Alignof(.)` and `_Alignof(->field)` still fell through to the generic non-type fallback. TDD RED first captured `expected _Alignof type, found Dot`; GREEN added narrow selector-token guards in `reject_missing_alignof_type()` while preserving valid `_Alignof(type-name)` operands and integer-constant `_Alignof` folding.
 
 Commands verified so far:
