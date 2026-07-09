@@ -6409,6 +6409,14 @@ fn rejects_missing_array_index_expressions_with_context() {
             "int main(void) {\n    return \"hi\"[return];\n}\n",
             "expected array index expression before 'return' at line 2, column 17",
         ),
+        (
+            "int main(void) {\n    int values[2] = {1, 2};\n    return values[.field];\n}\n",
+            "expected array index expression, found Dot at line 3, column 19",
+        ),
+        (
+            "int main(void) {\n    return \"hi\"[->field];\n}\n",
+            "expected array index expression, found Arrow at line 2, column 17",
+        ),
     ];
 
     for (program, expected) in cases {

@@ -7679,6 +7679,8 @@ impl Parser {
             self.peek(),
             Token::LBracket
                 | Token::Question
+                | Token::Dot
+                | Token::Arrow
                 | Token::RBracket
                 | Token::RParen
                 | Token::Semi
