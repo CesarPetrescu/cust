@@ -665,6 +665,14 @@ fn rejects_missing_cast_operands_with_context() {
             "int main(void) {\n    return (int)return;\n}\n",
             "expected expression after cast, found Return at line 2, column 17",
         ),
+        (
+            "int main(void) { return (int).; }",
+            "expected expression after cast, found Dot at line 1, column 30",
+        ),
+        (
+            "int main(void) { return (int)->field; }",
+            "expected expression after cast, found Arrow at line 1, column 30",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -1207,6 +1215,20 @@ fn rejects_missing_alignas_arguments_with_context() {
             .contains("expected _Alignas argument before 'return' at line 2, column 18"),
         "unexpected error: {err}"
     );
+
+    let selector_argument = "_Alignas(.) int value; int main(void) { return 0; }";
+    let err = interpret(selector_argument).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "expected _Alignas argument, found Dot at line 1, column 10"
+    );
+
+    let arrow_argument = "_Alignas(->field) int value; int main(void) { return 0; }";
+    let err = interpret(arrow_argument).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "expected _Alignas argument, found Arrow at line 1, column 10"
+    );
 }
 
 #[test]
@@ -1295,6 +1317,22 @@ fn rejects_missing_static_assert_arguments_with_context() {
         err.to_string()
             .contains("expected _Static_assert condition before 'return' at line 2, column 24"),
         "unexpected error: {err}"
+    );
+
+    let selector_condition =
+        "_Static_assert(., \"condition required\"); int main(void) { return 0; }";
+    let err = interpret(selector_condition).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "expected _Static_assert condition, found Dot at line 1, column 16"
+    );
+
+    let arrow_condition =
+        "_Static_assert(->field, \"condition required\"); int main(void) { return 0; }";
+    let err = interpret(arrow_condition).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "expected _Static_assert condition, found Arrow at line 1, column 16"
     );
 }
 
@@ -1904,6 +1942,14 @@ fn rejects_missing_sizeof_and_alignof_operands_with_context() {
         (
             "int main(void) {\n    return sizeof(return);\n}\n",
             "expected sizeof operand before 'return' at line 2, column 19",
+        ),
+        (
+            "int main(void) { return sizeof(.); }",
+            "expected sizeof operand, found Dot at line 1, column 32",
+        ),
+        (
+            "int main(void) { return sizeof(->field); }",
+            "expected sizeof operand, found Arrow at line 1, column 32",
         ),
         (
             "int main(void) {\n    return _Alignof();\n}\n",
