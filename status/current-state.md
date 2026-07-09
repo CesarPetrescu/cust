@@ -4,6 +4,22 @@ Last updated: 2026-07-09
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-09 autonomous selector-token function-call/initializer diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, and CLI/product polish. Selected selector-token malformed list/initializer boundaries because probing showed `f(.field)`, `f(1,->field)`, scalar array initializers like `{.field}` / `{->field}`, and aggregate initializers like `{->field = 1}` still fell through to generic `expected expression, found Dot/Arrow` diagnostics while adjacent return/operator/control/type-query routes were contextual. TDD RED first captured those generic fallbacks; GREEN added narrow function-call argument guards and braced-initializer selector-start guards that preserve valid struct `.field` designators.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_initial_function_call_arguments_with_context -- --nocapture  # RED first: generic `expected expression, found Dot`; GREEN passed after call-argument selector guards
+cargo test --test interpreter rejects_missing_braced_initializer_elements_with_context -- --nocapture  # RED first: generic `expected expression, found Dot`; GREEN passed after braced-initializer selector guards
+cargo test --test interpreter initializer -- --nocapture
+cargo test --test interpreter function_call -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+## Previous autonomous verification
+
 All passed after the 2026-07-09 autonomous selector-token control/conditional diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, and product/CLI polish. Selected selector-token invalid starts in control/conditional expression boundaries because probing showed `for (.field; ; )`, `if (.field)`, `while (->field)`, `for (...; .field; ...)`, `for (...; ...; ->field)`, `return 1 ? .field : 2`, and `return 1 ? 2 : ->field` still fell through to generic `expected expression, found Dot/Arrow` or `unexpected token in for increment` diagnostics while adjacent return/operator/sizeof/cast routes were contextual. TDD RED first captured those generic fallbacks; GREEN added narrow Dot/Arrow guards to for-initializer, control-condition, for-increment, and conditional-operator operand parsing while preserving valid postfix selector usage after real expressions.
 
 Commands verified so far:

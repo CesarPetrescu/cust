@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-09 autonomous selector-token control/conditional diagnostic run after clean startup inspection and focused RED/GREEN parser diagnostic coverage. Full local Rust verification and required Docker verification were run after status updates; Docker Compose may emit the known non-fatal missing-buildx warning when it exits 0.
+None. Last reviewed in the 2026-07-09 autonomous selector-token function-call/initializer diagnostic run after clean startup inspection and focused RED/GREEN parser diagnostic coverage. Full local Rust verification and required Docker verification were run after status updates; Docker Compose may emit the known non-fatal missing-buildx warning when it exits 0.
 
 ## Blocker template
 

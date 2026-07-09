@@ -4808,8 +4808,24 @@ fn rejects_missing_initial_function_call_arguments_with_context() {
             "expected function call argument, found RBracket at line 2, column 27",
         ),
         (
+            "int first(int value) { return value; }\nint main() { return first(.field); }\n",
+            "expected function call argument, found Dot at line 2, column 27",
+        ),
+        (
+            "int first(int value) { return value; }\nint main() { return first(->field); }\n",
+            "expected function call argument, found Arrow at line 2, column 27",
+        ),
+        (
             "int add(int left, int right) { return left + right; }\nint main() { return add(1,]); }\n",
             "expected function call argument after ',', found RBracket at line 2, column 27",
+        ),
+        (
+            "int add(int left, int right) { return left + right; }\nint main() { return add(1,.field); }\n",
+            "expected function call argument after ',', found Dot at line 2, column 27",
+        ),
+        (
+            "int add(int left, int right) { return left + right; }\nint main() { return add(1,->field); }\n",
+            "expected function call argument after ',', found Arrow at line 2, column 27",
         ),
     ];
 
@@ -6683,8 +6699,20 @@ fn rejects_missing_braced_initializer_elements_with_context() {
             "expected initializer element in array 'values' initializer, found Question at line 2, column 28",
         ),
         (
+            "int main(void) {\n    int values[2] = {.field};\n    return 0;\n}\n",
+            "expected initializer element in array 'values' initializer, found Dot at line 2, column 22",
+        ),
+        (
+            "int main(void) {\n    int values[2] = {->field};\n    return 0;\n}\n",
+            "expected initializer element in array 'values' initializer, found Arrow at line 2, column 22",
+        ),
+        (
             "struct Point { int x; int y; };\nint main(void) {\n    struct Point points[2] = {, {1, 2}};\n    return 0;\n}\n",
             "expected initializer element in struct array 'points' initializer, found Comma at line 3, column 31",
+        ),
+        (
+            "struct Point { int x; int y; };\nint main(void) {\n    struct Point point = {->field = 1};\n    return 0;\n}\n",
+            "expected initializer element in struct 'Point' initializer, found Arrow at line 3, column 27",
         ),
         (
             "int main(void) {\n    int values[2] = {return};\n    return 0;\n}\n",
