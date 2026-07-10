@@ -1618,6 +1618,13 @@ fn supports_c_style_reverse_subscript_expressions() {
 }
 
 #[test]
+fn supports_comma_expressions_in_subscript_indices() {
+    let program = include_str!("fixtures/valid/subscript_comma_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 31);
+}
+
+#[test]
 fn supports_pointer_ordering_within_same_array_storage() {
     let program = include_str!("fixtures/valid/pointer_ordering.c");
 

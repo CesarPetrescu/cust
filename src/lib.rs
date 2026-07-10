@@ -7721,6 +7721,33 @@ impl Parser {
     }
 
     fn parse_index_expr(&mut self) -> CustResult<Expr> {
+        self.reject_missing_index_expr("array index expression")?;
+        let mut expr = self.parse_logical_or()?;
+        while self.matches(&Token::Comma) {
+            if matches!(
+                self.peek(),
+                Token::RParen | Token::RBracket | Token::Semi | Token::RBrace | Token::Eof
+            ) {
+                return Err(Self::error_at(
+                    format!(
+                        "expected expression after comma operator, found {:?}",
+                        self.peek()
+                    ),
+                    self.peek_located(),
+                ));
+            }
+            if let Some(label) = self.integer_constant_invalid_start_label() {
+                return Err(Self::error_at(
+                    format!("expected expression after comma operator before '{label}'"),
+                    self.peek_located(),
+                ));
+            }
+            expr = Expr::Comma(Box::new(expr), Box::new(self.parse_assignment_expr()?));
+        }
+        Ok(expr)
+    }
+
+    fn reject_missing_index_expr(&self, context: &str) -> CustResult<()> {
         if matches!(
             self.peek(),
             Token::LBracket
@@ -7736,17 +7763,17 @@ impl Parser {
                 | Token::Eof
         ) {
             return Err(Self::error_at(
-                format!("expected array index expression, found {:?}", self.peek()),
+                format!("expected {context}, found {:?}", self.peek()),
                 self.peek_located(),
             ));
         }
         if let Some(label) = self.integer_constant_invalid_start_label() {
             return Err(Self::error_at(
-                format!("expected array index expression before '{label}'"),
+                format!("expected {context} before '{label}'"),
                 self.peek_located(),
             ));
         }
-        self.parse_logical_or()
+        Ok(())
     }
 
     fn parse_assignment_expr(&mut self) -> CustResult<Expr> {
