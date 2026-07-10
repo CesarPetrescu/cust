@@ -4935,6 +4935,7 @@ impl Parser {
         if matches!(
             self.peek(),
             Token::Comma
+                | Token::Colon
                 | Token::Question
                 | Token::Semi
                 | Token::RParen
@@ -4981,6 +4982,7 @@ impl Parser {
         if matches!(
             self.peek(),
             Token::Comma
+                | Token::Colon
                 | Token::LBracket
                 | Token::Question
                 | Token::Dot
@@ -7302,6 +7304,7 @@ impl Parser {
         if matches!(
             self.peek(),
             Token::Comma
+                | Token::Colon
                 | Token::RParen
                 | Token::RBracket
                 | Token::RBrace
@@ -7326,6 +7329,7 @@ impl Parser {
             self.peek(),
             Token::RParen
                 | Token::Semi
+                | Token::Colon
                 | Token::RBrace
                 | Token::LBracket
                 | Token::LBrace
@@ -7462,6 +7466,7 @@ impl Parser {
                 | Token::LBrace
                 | Token::Question
                 | Token::Comma
+                | Token::Colon
                 | Token::Dot
                 | Token::Arrow
         ) {
@@ -7499,7 +7504,12 @@ impl Parser {
             Some(Box::new(self.parse_expr_stmt_with_semi(false)?))
         } else if matches!(
             self.peek(),
-            Token::LBracket | Token::LBrace | Token::Question | Token::Dot | Token::Arrow
+            Token::LBracket
+                | Token::LBrace
+                | Token::Question
+                | Token::Colon
+                | Token::Dot
+                | Token::Arrow
         ) {
             return Err(Self::error_at(
                 format!(
@@ -7655,6 +7665,7 @@ impl Parser {
             self.peek(),
             Token::RParen
                 | Token::Semi
+                | Token::Colon
                 | Token::RBrace
                 | Token::LBracket
                 | Token::LBrace
@@ -7714,6 +7725,7 @@ impl Parser {
             self.peek(),
             Token::LBracket
                 | Token::LBrace
+                | Token::Colon
                 | Token::Question
                 | Token::Dot
                 | Token::Arrow
@@ -9330,6 +9342,7 @@ impl Parser {
                 if matches!(
                     self.peek(),
                     Token::Comma
+                        | Token::Colon
                         | Token::RParen
                         | Token::RBracket
                         | Token::LBracket
@@ -9386,6 +9399,7 @@ impl Parser {
         if matches!(
             self.peek(),
             Token::Comma
+                | Token::Colon
                 | Token::RBracket
                 | Token::LBracket
                 | Token::Question
@@ -9416,6 +9430,7 @@ impl Parser {
                     self.peek(),
                     Token::RParen
                         | Token::RBracket
+                        | Token::Colon
                         | Token::LBracket
                         | Token::Question
                         | Token::Dot

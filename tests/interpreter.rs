@@ -113,6 +113,49 @@ fn rejects_invalid_start_expression_statements_with_context() {
 }
 
 #[test]
+fn rejects_colon_invalid_starts_in_expression_boundaries_with_context() {
+    let cases = [
+        (
+            "int callee(int value) { return value; }\nint main(void) { return callee(:); }\n",
+            "expected function call argument, found Colon at line 2, column 32",
+        ),
+        (
+            "int callee(int left, int right) { return left + right; }\nint main(void) { return callee(1, :); }\n",
+            "expected function call argument after ',', found Colon at line 2, column 35",
+        ),
+        (
+            "int main(void) {\nint values[2] = {1, 2};\nreturn values[:];\n}\n",
+            "expected array index expression, found Colon at line 3, column 15",
+        ),
+        (
+            "int main(void) {\nint values[2] = {:};\nreturn values[0];\n}\n",
+            "expected initializer element in array 'values' initializer, found Colon at line 2, column 18",
+        ),
+        (
+            "int main(void) {\nreturn :;\n}\n",
+            "expected expression after return, found Colon at line 2, column 8",
+        ),
+        (
+            "int main(void) {\nif (:) return 1;\nreturn 0;\n}\n",
+            "expected expression after if, found Colon at line 2, column 5",
+        ),
+        (
+            "int main(void) {\nswitch (:) { default: return 0; }\n}\n",
+            "expected expression after switch, found Colon at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nreturn (:);\n}\n",
+            "expected grouped expression, found Colon at line 2, column 9",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_invalid_start_array_designator_indexes_with_keyword_context() {
     let program = "int main() {\nint values[2] = {[int] = 1};\nreturn values[0];\n}\n";
 

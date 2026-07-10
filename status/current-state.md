@@ -4,6 +4,22 @@ Last updated: 2026-07-10
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-10 autonomous colon-token parser-trust diagnostic run. Ideation considered failing tests/builds (clean startup inspection found no local changes and no active blockers), the remaining parser recovery continuation item in `status/todo.md`, broader conformance coverage, fuzz/property tests, CLI flags, README examples, release/docs polish, and newly probed malformed expression-boundary starts. Selected colon-token invalid-start parser diagnostics because probing showed several route-local expression boundaries (`callee(:)`, `callee(1, :)`, `values[:]`, `int values[2] = {:}`, `return :;`, `if (:)`, `switch (:)`, and `return (:);`) still fell through to generic `expected expression, found Colon` parsing even though neighboring delimiter, bracket, selector, brace, and keyword starts already had contextual diagnostics. TDD RED captured the generic function-call failure first; GREEN adds narrow `Token::Colon` guards at call-argument, array-index, braced-initializer, return/control/switch, for-clause, and grouped-expression boundaries while preserving label/case/default and valid conditional-operator colon handling.
+
+Commands verified:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test --test interpreter rejects_colon_invalid_starts_in_expression_boundaries_with_context -- --nocapture  # RED first for `callee(:)`: generic `expected expression, found Colon`; GREEN passed after colon boundary guards
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust
+```
+
+All required local and Docker verification passed. `docker compose run --rm cust` printed the sample result `10`.
+
 All passed after the 2026-07-10 autonomous top-level invalid-start parser-trust diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item in `status/todo.md`, remaining C-subset/conformance gaps (mostly complete), pointer negative diagnostics (complete), fuzz/property tests, CLI flags, README examples, and release/docs polish. Selected top-level declaration invalid-start diagnostics because probing showed malformed file-scope starts such as `{ int value; }`, `,`, `?`, `.field`, and `->field` still used the generic `unexpected token at top level: ...` fallback while neighboring unmatched delimiters and stray file-scope control flow already had contextual diagnostics. TDD RED captured the generic fallback first; GREEN adds a narrow top-level declaration-start guard while preserving existing unmatched `)`, `]`, `}`, stray control-flow, and valid declaration routing.
 
 Commands verified so far:
