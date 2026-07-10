@@ -1,8 +1,21 @@
 # Cust Current State
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 ## Latest autonomous verification
+
+All passed after the 2026-07-11 autonomous `_Alignas` / `_Static_assert` colon invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item, broader C-subset conformance coverage, fuzz/property tests, CLI flags, README/release polish, and a freshly probed narrow parser-trust gap: `_Alignas(:)` and `_Static_assert(:, "msg")` still fell through to generic `expected expression, found Colon` even though neighboring brace, selector, bracket, keyword, and delimiter starts already had contextual diagnostics. Selected this slice because it closes two declaration/assertion operand boundaries with a shared parser helper and low regression risk. TDD RED captured both generic colon failures first; GREEN routes both guards through `integer_constant_invalid_start_or_selector_label()` so colon reports `expected _Alignas argument before ':'` and `expected _Static_assert condition before ':'` while preserving valid `_Alignas(type-name/expression)` and `_Static_assert(condition, message)` parsing.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_alignas_arguments_with_context -- --nocapture  # RED first: generic `expected expression, found Colon`; GREEN passed after guard helper routing
+cargo test --test interpreter rejects_missing_static_assert_arguments_with_context -- --nocapture  # RED first: generic `expected expression, found Colon`; GREEN passed after guard helper routing
+cargo fmt --check
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
 
 All passed after the 2026-07-10 autonomous colon-token parameter/integer-constant diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item, broader conformance coverage, fuzz/property tests, CLI flags, README/release polish, and a concrete newly probed diagnostic slice: colon/selector/semicolon malformed function-parameter starts and colon starts in integer-constant boundaries still fell through to generic `expected type` / `expected ... found Colon` diagnostics. Selected this work because it closes route-local parser trust gaps without broad grammar changes. TDD RED captured `int add(; int b)` first with generic `expected type, found Semi`; GREEN extends parameter-list guards for semicolon/colon/selector starts and routes colon through shared integer-constant invalid-start labelling for array lengths, designator indexes, enum constants, and switch case labels.
 

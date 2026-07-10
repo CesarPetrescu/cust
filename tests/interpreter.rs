@@ -1406,6 +1406,13 @@ fn rejects_missing_alignas_arguments_with_context() {
         err.to_string(),
         "expected _Alignas argument, found LBrace at line 1, column 10"
     );
+
+    let colon_argument = "_Alignas(:) int value; int main(void) { return 0; }";
+    let err = interpret(colon_argument).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "expected _Alignas argument before ':' at line 1, column 10"
+    );
 }
 
 #[test]
@@ -1518,6 +1525,13 @@ fn rejects_missing_static_assert_arguments_with_context() {
     assert_eq!(
         err.to_string(),
         "expected _Static_assert condition, found LBrace at line 1, column 16"
+    );
+
+    let colon_condition = "_Static_assert(:, \"condition required\"); int main(void) { return 0; }";
+    let err = interpret(colon_condition).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "expected _Static_assert condition before ':' at line 1, column 16"
     );
 }
 
