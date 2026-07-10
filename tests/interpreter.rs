@@ -335,6 +335,37 @@ fn rejects_unmatched_top_level_delimiters_with_context() {
 }
 
 #[test]
+fn rejects_invalid_start_top_level_declarations_with_context() {
+    let cases = [
+        (
+            "{ int value; }\nint main(void) { return 0; }\n",
+            "expected top-level declaration, found LBrace at line 1, column 1",
+        ),
+        (
+            ",\nint main(void) { return 0; }\n",
+            "expected top-level declaration, found Comma at line 1, column 1",
+        ),
+        (
+            "?\nint main(void) { return 0; }\n",
+            "expected top-level declaration, found Question at line 1, column 1",
+        ),
+        (
+            ".field\nint main(void) { return 0; }\n",
+            "expected top-level declaration, found Dot at line 1, column 1",
+        ),
+        (
+            "->field\nint main(void) { return 0; }\n",
+            "expected top-level declaration, found Arrow at line 1, column 1",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_unhandled_control_flow_with_context() {
     let cases = [
         (

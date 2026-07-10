@@ -1951,6 +1951,15 @@ impl Parser {
                 }
             } else {
                 let found = self.peek_located().clone();
+                if matches!(
+                    found.kind,
+                    Token::LBrace | Token::Comma | Token::Question | Token::Dot | Token::Arrow
+                ) {
+                    return Err(Self::error_at(
+                        format!("expected top-level declaration, found {:?}", found.kind),
+                        &found,
+                    ));
+                }
                 return Err(Self::error_at(
                     format!("unexpected token at top level: {:?}", found.kind),
                     &found,

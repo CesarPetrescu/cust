@@ -4,6 +4,18 @@ Last updated: 2026-07-10
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-10 autonomous top-level invalid-start parser-trust diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item in `status/todo.md`, remaining C-subset/conformance gaps (mostly complete), pointer negative diagnostics (complete), fuzz/property tests, CLI flags, README examples, and release/docs polish. Selected top-level declaration invalid-start diagnostics because probing showed malformed file-scope starts such as `{ int value; }`, `,`, `?`, `.field`, and `->field` still used the generic `unexpected token at top level: ...` fallback while neighboring unmatched delimiters and stray file-scope control flow already had contextual diagnostics. TDD RED captured the generic fallback first; GREEN adds a narrow top-level declaration-start guard while preserving existing unmatched `)`, `]`, `}`, stray control-flow, and valid declaration routing.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_invalid_start_top_level_declarations_with_context -- --nocapture  # RED first for `{ int value; }`: generic `unexpected token at top level: LBrace`; GREEN passed after top-level guard
+cargo test --test interpreter top_level -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-10 autonomous brace-token `_Atomic`/parameter parser-trust diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, fuzz/property testing, CLI flags, README examples, and release/docs polish. Selected less-traveled declaration/type-name brace boundaries because probing showed `_Atomic({)` type arguments and leading `{` in function parameter lists still fell through to generic `expected type, found LBrace` diagnostics even after the prior expression/type/integer-constant brace sweep. TDD RED captured `_Atomic({)` at top level and in `sizeof(_Atomic({))`, plus `int add({ int b)`; GREEN adds narrow route-local `Token::LBrace` guards in `_Atomic(type-name)` parsing and initial function-parameter parsing while preserving statement-leading blocks, valid braced initializers, and already-contextual after-comma parameter diagnostics.
 
 Commands verified so far:
