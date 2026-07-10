@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-11): closed the latest parser-trust diagnostic slice for declaration/assertion colon invalid starts. `_Alignas(:)` and `_Static_assert(:, "msg")` now report contextual `before ':'` diagnostics with exact-output interpreter coverage; continue the P0 parser-recovery track only for newly discovered generic fallthroughs.
+Latest update (2026-07-11): closed the latest parser-trust diagnostic slice for `_Atomic(type-name)` colon/selector invalid starts. `_Atomic(:)`, `_Atomic(.)`, and `_Atomic(->field)` now report contextual `before ':'` / `before '.'` / `before '->'` diagnostics with exact-output interpreter coverage; continue the P0 parser-recovery track only for newly discovered generic fallthroughs.
 
 ## P0 — correctness and developer trust
 

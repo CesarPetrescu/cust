@@ -4,6 +4,19 @@ Last updated: 2026-07-11
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-11 autonomous `_Atomic(type-name)` selector/colon invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item, broader C-subset conformance coverage, fuzz/property tests, CLI flags, README/release polish, and a narrow newly probed type-name gap: `_Atomic(:)`, `_Atomic(.)`, and `_Atomic(->field)` still reported generic `expected _Atomic type, found ...` messages even though adjacent `_Alignof`, `_Alignas`, integer-constant, and expression-boundary routes use contextual `before '<token>'` diagnostics. Selected this slice because it completes the existing `_Atomic(type-name)` invalid-start guard without changing valid `_Atomic` qualifier/specifier behavior. TDD RED captured `_Atomic(:)` first with the generic `found Colon`; GREEN routes `_Atomic(type-name)` through `integer_constant_invalid_start_or_selector_label()` so colon/dot/arrow now report `expected _Atomic type before ':'`, `before '.'`, and `before '->'`.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_atomic_type_arguments_with_context -- --nocapture  # RED first: generic `expected _Atomic type, found Colon`; GREEN passed after selector/colon guard routing
+cargo test --test interpreter atomic -- --nocapture
+cargo fmt
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-11 autonomous `_Alignas` / `_Static_assert` colon invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item, broader C-subset conformance coverage, fuzz/property tests, CLI flags, README/release polish, and a freshly probed narrow parser-trust gap: `_Alignas(:)` and `_Static_assert(:, "msg")` still fell through to generic `expected expression, found Colon` even though neighboring brace, selector, bracket, keyword, and delimiter starts already had contextual diagnostics. Selected this slice because it closes two declaration/assertion operand boundaries with a shared parser helper and low regression risk. TDD RED captured both generic colon failures first; GREEN routes both guards through `integer_constant_invalid_start_or_selector_label()` so colon reports `expected _Alignas argument before ':'` and `expected _Static_assert condition before ':'` while preserving valid `_Alignas(type-name/expression)` and `_Static_assert(condition, message)` parsing.
 
 Commands verified so far:

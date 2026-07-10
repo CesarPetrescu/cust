@@ -633,12 +633,16 @@ fn rejects_missing_atomic_type_arguments_with_context() {
             "expected _Atomic type before 'return' at line 1, column 18",
         ),
         (
+            "int main(void) {\n    return sizeof(_Atomic(:));\n}\n",
+            "expected _Atomic type before ':' at line 2, column 27",
+        ),
+        (
             "int main(void) {\n    return sizeof(_Atomic(.));\n}\n",
-            "expected _Atomic type, found Dot at line 2, column 27",
+            "expected _Atomic type before '.' at line 2, column 27",
         ),
         (
             "struct Sample {\n    _Atomic(->field) value;\n};\nint main(void) { return 0; }\n",
-            "expected _Atomic type, found Arrow at line 2, column 13",
+            "expected _Atomic type before '->' at line 2, column 13",
         ),
     ];
 

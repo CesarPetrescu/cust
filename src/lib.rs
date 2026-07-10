@@ -2323,7 +2323,7 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
-                match self.integer_constant_invalid_start_label() {
+                match self.integer_constant_invalid_start_or_selector_label() {
                     Some(label) if !self.is_type_name_start() => {
                         return Err(Self::error_at(
                             format!("expected _Atomic type before '{label}'"),
@@ -2335,11 +2335,8 @@ impl Parser {
                 if matches!(
                     self.peek(),
                     Token::Comma
-                        | Token::Colon
                         | Token::RParen
                         | Token::RBracket
-                        | Token::Dot
-                        | Token::Arrow
                         | Token::Semi
                         | Token::RBrace
                         | Token::Eof
