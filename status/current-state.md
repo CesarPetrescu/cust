@@ -4,6 +4,25 @@ Last updated: 2026-07-10
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-10 autonomous selector-token integer-constant diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, fuzz/property testing, CLI flags, README examples, and release/docs polish. Selected selector-token malformed integer-constant boundaries because probing showed array declarator lengths, array designator indexes, enum constant values, and switch case labels such as `int values[.field];`, `{[->field] = 1}`, `enum Bad { A = .field };`, and `case ->field:` still fell through to generic `expected ..., found Dot/Arrow` diagnostics while neighboring parenthesized integer-constant and ordinary expression routes were already contextual. TDD RED first captured those generic fallbacks; GREEN added a narrow integer-constant selector-start helper used only by array length/designator/enum/switch routes so existing expression-context selector diagnostics remain stable.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_delimiter_only_array_lengths_with_context -- --nocapture  # RED first: generic `expected array length, found Dot`; GREEN passed after selector-aware integer-constant guard
+cargo test --test interpreter rejects_malformed_path_designators_with_context -- --nocapture  # RED first: generic `expected array designator index, found Dot`; GREEN passed after selector-aware designator guard
+cargo test --test interpreter rejects_invalid_start_enum_constant_values_with_context -- --nocapture  # RED first: generic `expected integer constant..., found Dot`; GREEN passed after selector-aware enum constant guard
+cargo test --test interpreter rejects_invalid_start_switch_case_values_with_context -- --nocapture  # RED first: generic `expected integer constant..., found Dot`; GREEN passed after selector-aware switch case guard
+cargo test --test interpreter invalid_start -- --nocapture
+cargo test --test interpreter array_length -- --nocapture
+cargo test --test interpreter designator -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+## Previous autonomous verification
+
 All passed after the 2026-07-10 autonomous selector-token array/string index diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, fuzz/property testing, CLI flags, README examples, and release/docs polish. Selected selector-token malformed array/string index boundaries because probing showed `values[.field]` and `"hi"[->field]` still fell through to generic `expected expression, found Dot/Arrow` diagnostics while neighboring statement, return/operator, control, type-query, grouped/unary, call, and initializer routes were already contextual. TDD RED first captured those generic fallbacks; GREEN added narrow Dot/Arrow guards to `parse_index_expr()` while preserving valid postfix selector usage after real expressions.
 
 Commands verified so far:

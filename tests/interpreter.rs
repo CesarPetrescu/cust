@@ -848,6 +848,14 @@ fn rejects_delimiter_only_array_lengths_with_context() {
             "int main(void) {\n    return sizeof(int[while]);\n}\n",
             "expected array length before 'while' at line 2, column 23",
         ),
+        (
+            "int main(void) {\n    int values[.field];\n    return 0;\n}\n",
+            "expected array length before '.' at line 2, column 16",
+        ),
+        (
+            "struct Packet { int values[->field]; };\nint main(void) { return 0; }\n",
+            "expected array length before '->' at line 1, column 28",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -3928,6 +3936,14 @@ fn rejects_malformed_path_designators_with_context() {
             "int main(void) {\n    int *values = (int[]){[?] = 1};\n    return 0;\n}\n",
             "expected array designator index before '?' at line 2, column 28",
         ),
+        (
+            "struct Packet { int values[2]; };\nint main(void) {\n    struct Packet packet = { .values[.field] = 1 };\n    return 0;\n}\n",
+            "expected array designator index before '.' at line 3, column 38",
+        ),
+        (
+            "int main(void) {\n    int *values = (int[]){[->field] = 1};\n    return 0;\n}\n",
+            "expected array designator index before '->' at line 2, column 28",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -4642,6 +4658,14 @@ fn rejects_invalid_start_enum_constant_values_with_context() {
         (
             "int main(void) { enum BadStart { FIRST = return }; return FIRST; }",
             "expected integer constant after enum constant '=' before 'return' at line 1, column 42",
+        ),
+        (
+            "int main(void) { enum BadStart { FIRST = .field }; return FIRST; }",
+            "expected integer constant after enum constant '=' before '.' at line 1, column 42",
+        ),
+        (
+            "int main(void) { enum BadStart { FIRST = ->field }; return FIRST; }",
+            "expected integer constant after enum constant '=' before '->' at line 1, column 42",
         ),
     ];
 
@@ -6117,6 +6141,14 @@ fn rejects_invalid_start_switch_case_values_with_context() {
         (
             "int main(void) { switch (1) { case return: return 1; default: return 0; } }",
             "expected integer constant after switch case before 'return' at line 1, column 36",
+        ),
+        (
+            "int main(void) { switch (1) { case .field: return 1; default: return 0; } }",
+            "expected integer constant after switch case before '.' at line 1, column 36",
+        ),
+        (
+            "int main(void) { switch (1) { case ->field: return 1; default: return 0; } }",
+            "expected integer constant after switch case before '->' at line 1, column 36",
         ),
     ];
 

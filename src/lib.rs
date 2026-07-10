@@ -5228,7 +5228,7 @@ impl Parser {
                 &found,
             ));
         }
-        if let Some(label) = self.integer_constant_invalid_start_label() {
+        if let Some(label) = self.integer_constant_invalid_start_or_selector_label() {
             let found = self.advance();
             return Err(Self::error_at(
                 format!("expected array designator index before '{label}'"),
@@ -5301,7 +5301,7 @@ impl Parser {
                 &found,
             ));
         }
-        if let Some(label) = self.integer_constant_invalid_start_label() {
+        if let Some(label) = self.integer_constant_invalid_start_or_selector_label() {
             let found = self.advance();
             return Err(Self::error_at(
                 format!("expected array designator index before '{label}'"),
@@ -6338,7 +6338,7 @@ impl Parser {
                 &found,
             ));
         }
-        if let Some(label) = self.integer_constant_invalid_start_label() {
+        if let Some(label) = self.integer_constant_invalid_start_or_selector_label() {
             let found = self.advance();
             return Err(Self::error_at(
                 format!("expected integer constant after enum constant '=' before '{label}'"),
@@ -7023,6 +7023,14 @@ impl Parser {
         }
     }
 
+    fn integer_constant_invalid_start_or_selector_label(&self) -> Option<&'static str> {
+        match self.peek() {
+            Token::Dot => Some("."),
+            Token::Arrow => Some("->"),
+            _ => self.integer_constant_invalid_start_label(),
+        }
+    }
+
     fn expect_array_len(&mut self) -> CustResult<usize> {
         if self.check(&Token::RBracket) {
             let found = self.advance();
@@ -7066,7 +7074,7 @@ impl Parser {
                 &found,
             ));
         }
-        if let Some(label) = self.integer_constant_invalid_start_label() {
+        if let Some(label) = self.integer_constant_invalid_start_or_selector_label() {
             let found = self.advance();
             return Err(Self::error_at(
                 format!("expected array length before '{label}'"),
@@ -7603,7 +7611,7 @@ impl Parser {
                 &found,
             ));
         }
-        if let Some(label) = self.integer_constant_invalid_start_label() {
+        if let Some(label) = self.integer_constant_invalid_start_or_selector_label() {
             let found = self.advance();
             return Err(Self::error_at(
                 format!("expected integer constant after switch case before '{label}'"),
