@@ -3443,9 +3443,23 @@ impl Parser {
                 &void_token,
             ));
         }
+        if self.starts_ellipsis() {
+            return Err(Self::error_at(
+                "variadic function parameters are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
         if matches!(
             self.peek(),
-            Token::Comma | Token::RBracket | Token::LBracket | Token::Question | Token::LBrace
+            Token::Comma
+                | Token::Semi
+                | Token::Colon
+                | Token::RBracket
+                | Token::LBracket
+                | Token::Question
+                | Token::LBrace
+                | Token::Dot
+                | Token::Arrow
         ) {
             return Err(Self::error_at(
                 format!("expected function parameter, found {:?}", self.peek()),
@@ -3611,6 +3625,12 @@ impl Parser {
             });
 
             if self.matches(&Token::Comma) {
+                if self.starts_ellipsis() {
+                    return Err(Self::error_at(
+                        "variadic function parameters are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 if matches!(
                     self.peek(),
                     Token::Comma
@@ -3619,8 +3639,11 @@ impl Parser {
                         | Token::LBracket
                         | Token::Question
                         | Token::Semi
+                        | Token::Colon
                         | Token::LBrace
                         | Token::RBrace
+                        | Token::Dot
+                        | Token::Arrow
                         | Token::Eof
                 ) {
                     return Err(Self::error_at(
@@ -7045,6 +7068,7 @@ impl Parser {
     fn integer_constant_invalid_start_or_selector_label(&self) -> Option<&'static str> {
         match self.peek() {
             Token::LBrace => Some("{"),
+            Token::Colon => Some(":"),
             Token::Dot => Some("."),
             Token::Arrow => Some("->"),
             _ => self.integer_constant_invalid_start_label(),

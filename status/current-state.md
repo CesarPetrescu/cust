@@ -4,6 +4,26 @@ Last updated: 2026-07-10
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-10 autonomous colon-token parameter/integer-constant diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item, broader conformance coverage, fuzz/property tests, CLI flags, README/release polish, and a concrete newly probed diagnostic slice: colon/selector/semicolon malformed function-parameter starts and colon starts in integer-constant boundaries still fell through to generic `expected type` / `expected ... found Colon` diagnostics. Selected this work because it closes route-local parser trust gaps without broad grammar changes. TDD RED captured `int add(; int b)` first with generic `expected type, found Semi`; GREEN extends parameter-list guards for semicolon/colon/selector starts and routes colon through shared integer-constant invalid-start labelling for array lengths, designator indexes, enum constants, and switch case labels.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_function_parameters_around_commas_with_context -- --nocapture  # RED first: generic `expected type, found Semi`; GREEN passed after parameter guard expansion
+cargo test --test interpreter rejects_invalid_start_array_designator_indexes_with_keyword_context -- --nocapture
+cargo test --test interpreter rejects_delimiter_only_array_lengths_with_context -- --nocapture
+cargo test --test interpreter rejects_invalid_start_enum_constant_values_with_context -- --nocapture
+cargo test --test interpreter rejects_invalid_start_switch_case_values_with_context -- --nocapture
+cargo test --test interpreter rejects_variadic_function_parameters_with_context -- --nocapture  # Regression guard after parameter Dot/Arrow starts were added; preserves `...` diagnostics
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+docker compose run --rm test
+docker compose run --rm cust  # printed 10 and exited 0
+```
+
 All passed after the 2026-07-10 autonomous subscript comma-expression run. Ideation considered failing tests/builds (clean startup inspection found no local changes and no active blockers), the standing parser-trust continuation item, broader conformance coverage, fuzz/property tests, CLI flags, README/release polish, and a concrete C-subset conformance gap discovered by probing: direct comma expressions inside subscript indices (`values[i++, 2]`) were rejected with `expected ']' after array index, found Comma` even though Cust already supports the comma operator generally and C subscript brackets take an expression. Selected this work because it is a compact behavior feature with interpreter and compiler-oracle coverage. TDD RED captured the rejected direct subscript comma first; GREEN extends `parse_index_expr()` to fold comma tails into `Expr::Comma` while preserving the existing first-operand parser path and legacy missing-bracket diagnostics such as `values[0 = 3;`.
 
 Commands verified:

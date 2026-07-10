@@ -189,6 +189,15 @@ int main(void) {
         err.to_string(),
         "expected array designator index before 'struct' at line 4, column 32"
     );
+
+    let program = "int main() {\nint values[2] = {[:] = 1};\nreturn values[0];\n}\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "expected array designator index before ':' at line 2, column 19"
+    );
 }
 
 #[test]
@@ -941,6 +950,10 @@ fn rejects_delimiter_only_array_lengths_with_context() {
         (
             "int main(void) {\n    int values[{1}];\n    return 0;\n}\n",
             "expected array length before '{' at line 2, column 16",
+        ),
+        (
+            "int main(void) {\n    int values[:];\n    return 0;\n}\n",
+            "expected array length before ':' at line 2, column 16",
         ),
     ];
 
@@ -4787,6 +4800,10 @@ fn rejects_invalid_start_enum_constant_values_with_context() {
             "int main(void) { enum BadStart { FIRST = {1} }; return FIRST; }",
             "expected integer constant after enum constant '=' before '{' at line 1, column 42",
         ),
+        (
+            "int main(void) { enum BadStart { FIRST = : }; return FIRST; }",
+            "expected integer constant after enum constant '=' before ':' at line 1, column 42",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -5023,6 +5040,22 @@ fn rejects_missing_function_parameters_around_commas_with_context() {
             "expected function parameter, found LBrace at line 1, column 9",
         ),
         (
+            "int add(; int b) { return b; }\nint main(void) { return add(1); }\n",
+            "expected function parameter, found Semi at line 1, column 9",
+        ),
+        (
+            "int add(: int b) { return b; }\nint main(void) { return add(1); }\n",
+            "expected function parameter, found Colon at line 1, column 9",
+        ),
+        (
+            "int add(. int b) { return b; }\nint main(void) { return add(1); }\n",
+            "expected function parameter, found Dot at line 1, column 9",
+        ),
+        (
+            "int add(-> int b) { return b; }\nint main(void) { return add(1); }\n",
+            "expected function parameter, found Arrow at line 1, column 9",
+        ),
+        (
             "int add(int a,[ int b) { return a + b; }\nint main(void) { return add(1, 2); }\n",
             "expected function parameter after ',', found LBracket at line 1, column 15",
         ),
@@ -5037,6 +5070,18 @@ fn rejects_missing_function_parameters_around_commas_with_context() {
         (
             "int add(int a,return int b) { return a; }\nint main(void) { return add(1, 2); }\n",
             "expected function parameter after ',' before 'return' at line 1, column 15",
+        ),
+        (
+            "int add(int a,: int b) { return a; }\nint main(void) { return add(1, 2); }\n",
+            "expected function parameter after ',', found Colon at line 1, column 15",
+        ),
+        (
+            "int add(int a,. int b) { return a; }\nint main(void) { return add(1, 2); }\n",
+            "expected function parameter after ',', found Dot at line 1, column 15",
+        ),
+        (
+            "int add(int a,-> int b) { return a; }\nint main(void) { return add(1, 2); }\n",
+            "expected function parameter after ',', found Arrow at line 1, column 15",
         ),
     ];
 
@@ -6281,6 +6326,10 @@ fn rejects_invalid_start_switch_case_values_with_context() {
         (
             "int main(void) { switch (1) { case {1}: return 1; default: return 0; } }",
             "expected integer constant after switch case before '{' at line 1, column 36",
+        ),
+        (
+            "int main(void) { switch (1) { case :: return 1; default: return 0; } }",
+            "expected integer constant after switch case before ':' at line 1, column 36",
         ),
     ];
 
