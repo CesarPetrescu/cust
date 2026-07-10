@@ -538,6 +538,14 @@ fn rejects_missing_atomic_type_arguments_with_context() {
             "expected _Atomic type before '?' at line 2, column 13",
         ),
         (
+            "_Atomic({) global_value;\nint main(void) { return 0; }\n",
+            "expected _Atomic type before '{' at line 1, column 9",
+        ),
+        (
+            "int main(void) {\n    return sizeof(_Atomic({));\n}\n",
+            "expected _Atomic type before '{' at line 2, column 27",
+        ),
+        (
             "int take(_Atomic(return) value) { return 0; }\nint main(void) { return take(1); }\n",
             "expected _Atomic type before 'return' at line 1, column 18",
         ),
@@ -4928,6 +4936,10 @@ fn rejects_missing_function_parameters_around_commas_with_context() {
         (
             "int add(? int b) { return b; }\nint main(void) { return add(1); }\n",
             "expected function parameter, found Question at line 1, column 9",
+        ),
+        (
+            "int add({ int b) { return b; }\nint main(void) { return add(1); }\n",
+            "expected function parameter, found LBrace at line 1, column 9",
         ),
         (
             "int add(int a,[ int b) { return a + b; }\nint main(void) { return add(1, 2); }\n",

@@ -2308,6 +2308,12 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
+                if self.check(&Token::LBrace) {
+                    return Err(Self::error_at(
+                        "expected _Atomic type before '{'".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 match self.integer_constant_invalid_start_label() {
                     Some(label) if !self.is_type_name_start() => {
                         return Err(Self::error_at(
@@ -3430,7 +3436,7 @@ impl Parser {
         }
         if matches!(
             self.peek(),
-            Token::Comma | Token::RBracket | Token::LBracket | Token::Question
+            Token::Comma | Token::RBracket | Token::LBracket | Token::Question | Token::LBrace
         ) {
             return Err(Self::error_at(
                 format!("expected function parameter, found {:?}", self.peek()),

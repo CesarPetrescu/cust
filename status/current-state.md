@@ -4,6 +4,18 @@ Last updated: 2026-07-10
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-10 autonomous brace-token `_Atomic`/parameter parser-trust diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, fuzz/property testing, CLI flags, README examples, and release/docs polish. Selected less-traveled declaration/type-name brace boundaries because probing showed `_Atomic({)` type arguments and leading `{` in function parameter lists still fell through to generic `expected type, found LBrace` diagnostics even after the prior expression/type/integer-constant brace sweep. TDD RED captured `_Atomic({)` at top level and in `sizeof(_Atomic({))`, plus `int add({ int b)`; GREEN adds narrow route-local `Token::LBrace` guards in `_Atomic(type-name)` parsing and initial function-parameter parsing while preserving statement-leading blocks, valid braced initializers, and already-contextual after-comma parameter diagnostics.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_atomic_type_arguments_with_context -- --nocapture  # RED first for `_Atomic({)`: generic `expected type, found LBrace`; GREEN passed after `_Atomic` guard
+cargo test --test interpreter rejects_missing_function_parameters_around_commas_with_context -- --nocapture  # RED first for `int add({ int b)`: generic `expected type, found LBrace`; GREEN passed after parameter-start guard
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
 All passed after the 2026-07-10 autonomous brace-token parser-trust diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, fuzz/property testing, CLI flags, README examples, and release/docs polish. Selected malformed `{` expression-start boundaries because probing and the exact-error suite showed several expression/type/integer-constant routes treated `Token::LBrace` inconsistently: some already reported contextual missing-expression diagnostics, while `_Alignas`, `_Static_assert`, `sizeof`, `_Alignof`, grouped expressions, array lengths, enum values, switch labels, control clauses, comma/assignment/binary/conditional operands, and array indexes could still fall through to generic expression/type/integer-constant parsing. TDD RED first captured the array-index brace fallback; GREEN added narrow route-local `LBrace` guards and coverage across the affected parser-trust boundaries while leaving statement-leading `{ ... }` block parsing and valid braced initializers unchanged.
 
 Commands verified so far:
