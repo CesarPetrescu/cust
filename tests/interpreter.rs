@@ -856,6 +856,10 @@ fn rejects_delimiter_only_array_lengths_with_context() {
             "struct Packet { int values[->field]; };\nint main(void) { return 0; }\n",
             "expected array length before '->' at line 1, column 28",
         ),
+        (
+            "int main(void) {\n    int values[{1}];\n    return 0;\n}\n",
+            "expected array length before '{' at line 2, column 16",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -1300,6 +1304,13 @@ fn rejects_missing_alignas_arguments_with_context() {
         err.to_string(),
         "expected _Alignas argument, found Arrow at line 1, column 10"
     );
+
+    let brace_argument = "_Alignas({1}) int value; int main(void) { return 0; }";
+    let err = interpret(brace_argument).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "expected _Alignas argument, found LBrace at line 1, column 10"
+    );
 }
 
 #[test]
@@ -1404,6 +1415,14 @@ fn rejects_missing_static_assert_arguments_with_context() {
     assert_eq!(
         err.to_string(),
         "expected _Static_assert condition, found Arrow at line 1, column 16"
+    );
+
+    let brace_condition =
+        "_Static_assert({1}, \"condition required\"); int main(void) { return 0; }";
+    let err = interpret(brace_condition).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "expected _Static_assert condition, found LBrace at line 1, column 16"
     );
 }
 
@@ -2023,6 +2042,10 @@ fn rejects_missing_sizeof_and_alignof_operands_with_context() {
             "expected sizeof operand, found Arrow at line 1, column 32",
         ),
         (
+            "int main(void) { return sizeof({1}); }",
+            "expected sizeof operand, found LBrace at line 1, column 32",
+        ),
+        (
             "int main(void) {\n    return _Alignof();\n}\n",
             "expected _Alignof type, found RParen at line 2, column 21",
         ),
@@ -2049,6 +2072,10 @@ fn rejects_missing_sizeof_and_alignof_operands_with_context() {
         (
             "int main(void) { return _Alignof(->field); }",
             "expected _Alignof type before '->' at line 1, column 34",
+        ),
+        (
+            "int main(void) { return _Alignof({1}); }",
+            "expected _Alignof type before '{' at line 1, column 34",
         ),
     ];
 
@@ -4667,6 +4694,10 @@ fn rejects_invalid_start_enum_constant_values_with_context() {
             "int main(void) { enum BadStart { FIRST = ->field }; return FIRST; }",
             "expected integer constant after enum constant '=' before '->' at line 1, column 42",
         ),
+        (
+            "int main(void) { enum BadStart { FIRST = {1} }; return FIRST; }",
+            "expected integer constant after enum constant '=' before '{' at line 1, column 42",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -5155,6 +5186,10 @@ fn rejects_missing_grouped_expression_operands_with_context() {
         (
             "int main(void) {\n    return (->field);\n}\n",
             "expected grouped expression, found Arrow at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return ({1});\n}\n",
+            "expected grouped expression, found LBrace at line 2, column 13",
         ),
     ];
 
@@ -6150,6 +6185,10 @@ fn rejects_invalid_start_switch_case_values_with_context() {
             "int main(void) { switch (1) { case ->field: return 1; default: return 0; } }",
             "expected integer constant after switch case before '->' at line 1, column 36",
         ),
+        (
+            "int main(void) { switch (1) { case {1}: return 1; default: return 0; } }",
+            "expected integer constant after switch case before '{' at line 1, column 36",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6177,6 +6216,10 @@ fn rejects_missing_switch_expressions_with_context() {
         (
             "int main(void) { switch ([) { default: return 1; } }",
             "expected expression after switch, found LBracket at line 1, column 26",
+        ),
+        (
+            "int main(void) { switch ({1}) { default: return 1; } }",
+            "expected expression after switch, found LBrace at line 1, column 26",
         ),
     ];
 
@@ -6239,6 +6282,10 @@ fn rejects_missing_control_flow_condition_expressions_with_context() {
             "expected expression after if, found LBracket at line 1, column 22",
         ),
         (
+            "int main(void) { if ({1}) { return 1; } return 0; }",
+            "expected expression after if, found LBrace at line 1, column 22",
+        ),
+        (
             "int main(void) { if (.field) { return 1; } return 0; }",
             "expected expression after if, found Dot at line 1, column 22",
         ),
@@ -6289,6 +6336,10 @@ fn rejects_misplaced_for_increment_expressions_with_context() {
         (
             "int main(void) { for (int i = 0; i < 3; [) { return i; } return 0; }",
             "expected expression after for increment, found LBracket at line 1, column 41",
+        ),
+        (
+            "int main(void) { for (int i = 0; i < 3; {1}) { return i; } return 0; }",
+            "expected expression after for increment, found LBrace at line 1, column 41",
         ),
         (
             "int main(void) { for (int i = 0; i < 3; ?) { return i; } return 0; }",
@@ -6398,6 +6449,10 @@ fn rejects_missing_rhs_after_comma_operator() {
             "int main(void) {\n    return 1,;\n}\n",
             "expected expression after comma operator, found Semi at line 2, column 14",
         ),
+        (
+            "int main(void) {\n    return 1,{2};\n}\n",
+            "expected expression after comma operator, found LBrace at line 2, column 14",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6446,6 +6501,10 @@ fn rejects_missing_array_index_expressions_with_context() {
             "expected array index expression, found Dot at line 3, column 19",
         ),
         (
+            "int main(void) {\n    int values[2] = {1, 2};\n    return values[{1}];\n}\n",
+            "expected array index expression, found LBrace at line 3, column 19",
+        ),
+        (
             "int main(void) {\n    return \"hi\"[->field];\n}\n",
             "expected array index expression, found Arrow at line 2, column 17",
         ),
@@ -6475,6 +6534,10 @@ fn rejects_missing_rhs_after_binary_operators() {
         (
             "int main(void) {\n    if (1 == }) { return 1; }\n    return 0;\n}\n",
             "expected expression after binary operator '==', found RBrace at line 2, column 14",
+        ),
+        (
+            "int main(void) {\n    return 1 + {2};\n}\n",
+            "expected expression after binary operator '+', found LBrace at line 2, column 16",
         ),
     ];
 
@@ -6526,6 +6589,10 @@ fn rejects_missing_operands_after_unary_operators() {
         (
             "int main(void) {\n    return *->field;\n}\n",
             "expected expression after unary operator '*', found Arrow at line 2, column 13",
+        ),
+        (
+            "int main(void) {\n    return !{1};\n}\n",
+            "expected expression after unary operator '!', found LBrace at line 2, column 13",
         ),
     ];
 
@@ -6625,6 +6692,10 @@ fn rejects_missing_rhs_after_assignment_operators() {
             "int main(void) {\n    int value = 1;\n    value <<= }\n",
             "expected expression after assignment operator '<<=', found RBrace at line 3, column 15",
         ),
+        (
+            "int main(void) {\n    int value = 1;\n    value = {2};\n    return value;\n}\n",
+            "expected expression after assignment operator '=', found LBrace at line 3, column 13",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -6663,6 +6734,10 @@ fn rejects_missing_return_expressions_with_context() {
         (
             "int main(void) {\n    return ->field;\n}\n",
             "expected expression after return, found Arrow at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    return {1};\n}\n",
+            "expected expression after return, found LBrace at line 2, column 12",
         ),
     ];
 
@@ -6884,12 +6959,20 @@ fn rejects_missing_conditional_operator_operands_with_context() {
             "expected expression after '?' in conditional operator, found Dot at line 2, column 16",
         ),
         (
+            "int main(void) {\n    return 1 ? {2} : 3;\n}\n",
+            "expected expression after '?' in conditional operator, found LBrace at line 2, column 16",
+        ),
+        (
             "int main(void) {\n    return 1 ? 2 : [;\n}\n",
             "expected expression after ':' in conditional operator, found LBracket at line 2, column 20",
         ),
         (
             "int main(void) {\n    return 1 ? 2 : ->field;\n}\n",
             "expected expression after ':' in conditional operator, found Arrow at line 2, column 20",
+        ),
+        (
+            "int main(void) {\n    return 1 ? 2 : {3};\n}\n",
+            "expected expression after ':' in conditional operator, found LBrace at line 2, column 20",
         ),
         (
             "int main(void) {\n    return 1 ? return : 2;\n}\n",

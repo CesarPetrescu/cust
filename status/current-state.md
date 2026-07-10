@@ -4,6 +4,34 @@ Last updated: 2026-07-10
 
 ## Latest autonomous verification
 
+All passed after the 2026-07-10 autonomous brace-token parser-trust diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, fuzz/property testing, CLI flags, README examples, and release/docs polish. Selected malformed `{` expression-start boundaries because probing and the exact-error suite showed several expression/type/integer-constant routes treated `Token::LBrace` inconsistently: some already reported contextual missing-expression diagnostics, while `_Alignas`, `_Static_assert`, `sizeof`, `_Alignof`, grouped expressions, array lengths, enum values, switch labels, control clauses, comma/assignment/binary/conditional operands, and array indexes could still fall through to generic expression/type/integer-constant parsing. TDD RED first captured the array-index brace fallback; GREEN added narrow route-local `LBrace` guards and coverage across the affected parser-trust boundaries while leaving statement-leading `{ ... }` block parsing and valid braced initializers unchanged.
+
+Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test
+cargo test --test interpreter rejects_missing_array_index_expressions_with_context -- --nocapture  # RED first for `values[{1}]`: generic `expected expression, found LBrace`; GREEN passed after route-local guards
+cargo test --test interpreter rejects_delimiter_only_array_lengths_with_context -- --nocapture
+cargo test --test interpreter rejects_missing_alignas_arguments_with_context -- --nocapture
+cargo test --test interpreter rejects_missing_static_assert_arguments_with_context -- --nocapture
+cargo test --test interpreter rejects_missing_sizeof_and_alignof_operands_with_context -- --nocapture
+cargo test --test interpreter rejects_invalid_start_enum_constant_values_with_context -- --nocapture
+cargo test --test interpreter rejects_missing_grouped_expression_operands_with_context -- --nocapture
+cargo test --test interpreter rejects_invalid_start_switch_case_values_with_context -- --nocapture
+cargo test --test interpreter rejects_missing_switch_expressions_with_context -- --nocapture
+cargo test --test interpreter rejects_missing_control_flow_condition_expressions_with_context -- --nocapture
+cargo test --test interpreter rejects_misplaced_for_increment_expressions_with_context -- --nocapture
+cargo test --test interpreter rejects_missing_rhs_after_comma_operator -- --nocapture
+cargo test --test interpreter rejects_missing_rhs_after_binary_operators -- --nocapture
+cargo test --test interpreter rejects_missing_rhs_after_assignment_operators -- --nocapture
+cargo test --test interpreter rejects_missing_return_expressions_with_context -- --nocapture
+cargo test --test interpreter rejects_missing_conditional_operator_operands_with_context -- --nocapture
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+## Previous autonomous verification
+
 All passed after the 2026-07-10 autonomous selector-token integer-constant diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the remaining parser-trust continuation item in `status/todo.md`, broader conformance coverage, pointer negative diagnostics, fuzz/property testing, CLI flags, README examples, and release/docs polish. Selected selector-token malformed integer-constant boundaries because probing showed array declarator lengths, array designator indexes, enum constant values, and switch case labels such as `int values[.field];`, `{[->field] = 1}`, `enum Bad { A = .field };`, and `case ->field:` still fell through to generic `expected ..., found Dot/Arrow` diagnostics while neighboring parenthesized integer-constant and ordinary expression routes were already contextual. TDD RED first captured those generic fallbacks; GREEN added a narrow integer-constant selector-start helper used only by array length/designator/enum/switch routes so existing expression-context selector diagnostics remain stable.
 
 Commands verified so far:

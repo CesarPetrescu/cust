@@ -2006,6 +2006,7 @@ impl Parser {
             self.peek(),
             Token::Comma
                 | Token::LBracket
+                | Token::LBrace
                 | Token::Question
                 | Token::Dot
                 | Token::Arrow
@@ -3939,6 +3940,7 @@ impl Parser {
             self.peek(),
             Token::Comma
                 | Token::LBracket
+                | Token::LBrace
                 | Token::Question
                 | Token::Dot
                 | Token::Arrow
@@ -7025,6 +7027,7 @@ impl Parser {
 
     fn integer_constant_invalid_start_or_selector_label(&self) -> Option<&'static str> {
         match self.peek() {
+            Token::LBrace => Some("{"),
             Token::Dot => Some("."),
             Token::Arrow => Some("->"),
             _ => self.integer_constant_invalid_start_label(),
@@ -7288,6 +7291,7 @@ impl Parser {
                 | Token::RBracket
                 | Token::RBrace
                 | Token::LBracket
+                | Token::LBrace
                 | Token::Question
                 | Token::Dot
                 | Token::Arrow
@@ -7309,6 +7313,7 @@ impl Parser {
                 | Token::Semi
                 | Token::RBrace
                 | Token::LBracket
+                | Token::LBrace
                 | Token::Question
                 | Token::Dot
                 | Token::Arrow
@@ -7438,7 +7443,12 @@ impl Parser {
             Some(Box::new(self.parse_expr_stmt_with_semi(true)?))
         } else if matches!(
             self.peek(),
-            Token::LBracket | Token::Question | Token::Comma | Token::Dot | Token::Arrow
+            Token::LBracket
+                | Token::LBrace
+                | Token::Question
+                | Token::Comma
+                | Token::Dot
+                | Token::Arrow
         ) {
             return Err(Self::error_at(
                 format!(
@@ -7474,7 +7484,7 @@ impl Parser {
             Some(Box::new(self.parse_expr_stmt_with_semi(false)?))
         } else if matches!(
             self.peek(),
-            Token::LBracket | Token::Question | Token::Dot | Token::Arrow
+            Token::LBracket | Token::LBrace | Token::Question | Token::Dot | Token::Arrow
         ) {
             return Err(Self::error_at(
                 format!(
@@ -7632,6 +7642,7 @@ impl Parser {
                 | Token::Semi
                 | Token::RBrace
                 | Token::LBracket
+                | Token::LBrace
                 | Token::Question
                 | Token::Eof
         ) {
@@ -7653,6 +7664,7 @@ impl Parser {
             if matches!(
                 self.peek(),
                 Token::LBracket
+                    | Token::LBrace
                     | Token::Question
                     | Token::Dot
                     | Token::Arrow
@@ -7686,6 +7698,7 @@ impl Parser {
         if matches!(
             self.peek(),
             Token::LBracket
+                | Token::LBrace
                 | Token::Question
                 | Token::Dot
                 | Token::Arrow
@@ -7932,6 +7945,7 @@ impl Parser {
         if matches!(
             self.peek(),
             Token::LBracket
+                | Token::LBrace
                 | Token::Question
                 | Token::Dot
                 | Token::Arrow
@@ -7987,7 +8001,12 @@ impl Parser {
             self.reject_missing_conditional_operand("?", |token| {
                 matches!(
                     token,
-                    Token::LBracket | Token::Question | Token::Colon | Token::Dot | Token::Arrow
+                    Token::LBracket
+                        | Token::LBrace
+                        | Token::Question
+                        | Token::Colon
+                        | Token::Dot
+                        | Token::Arrow
                 )
             })?;
             let then_expr = self.parse_expr()?;
@@ -7996,6 +8015,7 @@ impl Parser {
                 matches!(
                     token,
                     Token::LBracket
+                        | Token::LBrace
                         | Token::Question
                         | Token::RParen
                         | Token::RBracket
@@ -8197,6 +8217,7 @@ impl Parser {
         if matches!(
             self.peek(),
             Token::LBracket
+                | Token::LBrace
                 | Token::Question
                 | Token::Dot
                 | Token::Arrow
@@ -8307,6 +8328,7 @@ impl Parser {
             Token::Comma
                 | Token::Colon
                 | Token::LBracket
+                | Token::LBrace
                 | Token::Question
                 | Token::Dot
                 | Token::Arrow
@@ -8789,6 +8811,7 @@ impl Parser {
                 | Token::RParen
                 | Token::RBracket
                 | Token::LBracket
+                | Token::LBrace
                 | Token::Question
                 | Token::Dot
                 | Token::Arrow
@@ -8825,6 +8848,12 @@ impl Parser {
         if self.check(&Token::LBracket) {
             return Err(Self::error_at(
                 "expected _Alignof type before '['".to_string(),
+                self.peek_located(),
+            ));
+        }
+        if self.check(&Token::LBrace) {
+            return Err(Self::error_at(
+                "expected _Alignof type before '{'".to_string(),
                 self.peek_located(),
             ));
         }
@@ -9289,6 +9318,7 @@ impl Parser {
                         | Token::RParen
                         | Token::RBracket
                         | Token::LBracket
+                        | Token::LBrace
                         | Token::Question
                         | Token::Dot
                         | Token::Arrow
