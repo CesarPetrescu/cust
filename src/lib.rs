@@ -8557,6 +8557,12 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "pointer array casts are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 self.expect_closing_paren_after("cast type")?;
                 self.reject_missing_cast_operand()?;
                 return Ok(Expr::PointerCast {
@@ -8639,6 +8645,12 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "pointer array casts are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             self.expect_closing_paren_after("cast type")?;
             self.reject_missing_cast_operand()?;
             return Ok(Expr::PointerCast {
@@ -8684,6 +8696,12 @@ impl Parser {
                 pointee,
                 points_to_const,
             } => {
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "pointer array casts are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 self.expect_closing_paren_after("cast type")?;
                 self.reject_missing_cast_operand()?;
                 return Ok(Expr::PointerCast {

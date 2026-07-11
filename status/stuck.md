@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-11 qualified pointer type-name diagnostic run after clean startup inspection, a focused RED/GREEN loop, and native compiler-oracle confirmation that post-star-qualified one-level pointer type names are valid C while nested pointer type names remain outside Cust's safe subset. Full local Rust verification and both required Docker commands passed; no Docker buildx fallback warning was emitted this run.
+None. Last reviewed in the 2026-07-11 pointer-array cast diagnostic run after clean startup inspection, a focused RED/GREEN loop, full local Rust verification, and both required Docker commands. Unsupported pointer-array casts are now diagnosed at the array suffix; no Docker buildx fallback warning was emitted.
 
 ## Blocker template
 

@@ -632,6 +632,33 @@ fn rejects_qualified_pointer_to_pointer_type_names_with_context() {
 }
 
 #[test]
+fn rejects_pointer_array_cast_type_names_with_context() {
+    let cases = [
+        (
+            "int main(void) { return (int *[2])0; }\n",
+            "pointer array casts are not supported at line 1, column 31",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) { return (struct Point *[2])0; }\n",
+            "pointer array casts are not supported at line 2, column 40",
+        ),
+        (
+            "int main(void) { return (struct { int x; } *[2])0; }\n",
+            "pointer array casts are not supported at line 1, column 45",
+        ),
+        (
+            "typedef int *IntPtr;\nint main(void) { return (IntPtr[2])0; }\n",
+            "pointer array casts are not supported at line 2, column 32",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn supports_post_star_pointer_qualifiers_in_type_names() {
     assert_eq!(
         interpret("int main(void) { return sizeof(int * const); }\n").unwrap(),
