@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-11 abstract function type-name diagnostic run after clean startup inspection, a focused RED/GREEN loop, full local Rust verification, and both required Docker commands. Function type spellings in casts/`sizeof`/`_Alignof` are now diagnosed at their suffix; no Docker buildx fallback warning was emitted.
+None. Last reviewed in the 2026-07-12 function-array type-name diagnostic run after clean startup inspection, a focused RED/GREEN loop, full local Rust verification, and both required Docker commands. Function type spellings after parsed array suffixes in casts/`sizeof`/`_Alignof` are now diagnosed at their suffix; no Docker buildx fallback warning was emitted.
 
 ## Blocker template
 

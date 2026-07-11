@@ -717,6 +717,37 @@ fn rejects_function_type_cast_and_type_query_names_with_context() {
 }
 
 #[test]
+fn rejects_function_array_cast_and_type_query_names_with_context() {
+    let cases = [
+        (
+            "int main(void) { return (int[2](void))0; }\n",
+            "function casts are not supported at line 1, column 32",
+        ),
+        (
+            "int main(void) { return sizeof(int[2](void)); }\n",
+            "function sizeof types are not supported at line 1, column 38",
+        ),
+        (
+            "int main(void) { return _Alignof(int[2](void)); }\n",
+            "function _Alignof types are not supported at line 1, column 40",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) { return sizeof(struct Point[2](void)); }\n",
+            "function sizeof types are not supported at line 2, column 47",
+        ),
+        (
+            "typedef int Scores[2];\nint main(void) { return _Alignof(Scores(void)); }\n",
+            "function _Alignof types are not supported at line 2, column 40",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn supports_post_star_pointer_qualifiers_in_type_names() {
     assert_eq!(
         interpret("int main(void) { return sizeof(int * const); }\n").unwrap(),

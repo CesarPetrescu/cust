@@ -8579,6 +8579,7 @@ impl Parser {
                     Some(self.expect_array_len()?)
                 };
                 self.expect_closing_bracket_after("aggregate array compound literal type")?;
+                self.reject_function_type_suffix("function casts")?;
                 self.expect_closing_paren_after("cast type")?;
                 return Ok(Expr::AggregateArrayLiteral {
                     init: self.parse_aggregate_array_compound_initializer(&type_name, len)?,
@@ -8674,6 +8675,7 @@ impl Parser {
                         Some(self.expect_array_len()?)
                     };
                     self.expect_closing_bracket_after("aggregate array compound literal type")?;
+                    self.reject_function_type_suffix("function casts")?;
                     self.expect_closing_paren_after("cast type")?;
                     return Ok(Expr::AggregateArrayLiteral {
                         init: self.parse_aggregate_array_compound_initializer(&type_name, len)?,
@@ -8713,6 +8715,7 @@ impl Parser {
                 });
             }
             DeclType::Array(pointee, len) => {
+                self.reject_function_type_suffix("function casts")?;
                 self.expect_closing_paren_after("cast type")?;
                 if !self.check(&Token::LBrace) {
                     return Err(Self::error_at(
@@ -8744,6 +8747,7 @@ impl Parser {
                 Some(self.expect_array_len()?)
             };
             self.expect_closing_bracket_after("array compound literal type")?;
+            self.reject_function_type_suffix("function casts")?;
             self.expect_closing_paren_after("cast type")?;
             return Ok(Expr::ArrayLiteral {
                 elem_type: ty,
@@ -9143,6 +9147,7 @@ impl Parser {
                 return Ok(SizeOfType::Pointer);
             }
             if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
+                self.reject_function_type_suffix(&format!("function {operator} types"))?;
                 return Ok(SizeOfType::Array(PointeeType::Struct(type_name), len));
             }
             let struct_type = self.struct_types.get(&type_name).cloned().ok_or_else(|| {
@@ -9178,6 +9183,7 @@ impl Parser {
                     }
                     Ok(SizeOfType::Pointer)
                 } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
+                    self.reject_function_type_suffix(&format!("function {operator} types"))?;
                     Ok(SizeOfType::Array(PointeeType::Scalar(ty), len))
                 } else {
                     Ok(SizeOfType::Scalar(ty))
@@ -9200,6 +9206,7 @@ impl Parser {
                     }
                     Ok(SizeOfType::Pointer)
                 } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
+                    self.reject_function_type_suffix(&format!("function {operator} types"))?;
                     Ok(SizeOfType::Array(PointeeType::Struct(type_name), len))
                 } else {
                     Ok(SizeOfType::Struct(type_name))

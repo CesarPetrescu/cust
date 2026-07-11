@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 ## Latest autonomous verification
+
+All required verification passed after the 2026-07-12 function-array type-name diagnostic run. A fresh parser-trust probe found that unsupported function-array spellings such as `(int[2](void))0`, `sizeof(int[2](void))`, and `_Alignof(int[2](void))` parsed the array suffix but then fell through to generic closing-parenthesis diagnostics. TDD RED captured the generic cast error. GREEN applies the existing function-suffix guard immediately after parsed scalar and aggregate array type suffixes in casts and type queries, so errors are source-located at the function declarator `(`. Exact coverage includes scalar, named aggregate, and typedef-array paths; valid array compound literals remain unchanged.
+
+Verified commands: focused RED/GREEN `cargo test --test interpreter rejects_function_array_cast_and_type_query_names_with_context -- --nocapture`; focused direct-function and pointer-array type-query regressions; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test` (609 interpreter tests); `docker compose run --rm test`; and `docker compose run --rm cust` (printed `10`).
 
 All required verification passed after the 2026-07-11 function-type cast/type-query diagnostic run. A fresh parser-trust probe found that abstract function type spellings such as `(int(void))0`, `sizeof(int(void))`, and `_Alignof(int(void))` fell through to generic closing-parenthesis errors after parsing the base scalar type. TDD RED captured the generic cast diagnostic. GREEN adds a narrow suffix guard after supported type parsing so function type names report `function casts/sizeof/_Alignof types are not supported` at the function declarator `(`, while parenthesized pointer forms such as `(int (*)[3])0` retain their established diagnostics.
 
