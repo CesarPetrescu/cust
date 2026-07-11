@@ -8549,6 +8549,7 @@ impl Parser {
             && matches!(self.peek_next(), Token::LBrace)
         {
             let (type_name, _, _) = self.parse_aggregate_definition_body(false, true)?;
+            self.reject_function_type_suffix("function casts")?;
             if self.matches(&Token::Star) {
                 self.consume_type_qualifiers();
                 if self.check(&Token::Star) {
@@ -8615,6 +8616,7 @@ impl Parser {
         };
         let compound_literal_read_only = leading_const || alias_const;
         let decl_type = self.parse_decl_type("cast type")?;
+        self.reject_function_type_suffix("function casts")?;
         if let Some(token) = self.parenthesized_pointer_star_token_at_current() {
             return Err(Self::error_at(
                 "parenthesized pointer casts are not supported".to_string(),
@@ -9123,6 +9125,7 @@ impl Parser {
             (Token::Struct | Token::Union, Some(Token::LBrace))
         ) {
             let (type_name, _, _) = self.parse_aggregate_definition_body(false, true)?;
+            self.reject_function_type_suffix(&format!("function {operator} types"))?;
             if self.matches(&Token::Star) {
                 self.consume_type_qualifiers();
                 if self.check(&Token::Star) {
@@ -9149,6 +9152,7 @@ impl Parser {
         }
 
         let decl_type = self.parse_decl_type(&format!("{operator} struct type name"))?;
+        self.reject_function_type_suffix(&format!("function {operator} types"))?;
         if let Some(token) = self.parenthesized_pointer_star_token_at_current() {
             return Err(Self::error_at(
                 format!("parenthesized pointer {operator} types are not supported"),
@@ -9232,6 +9236,16 @@ impl Parser {
                 Ok(SizeOfType::Array(element_type, len))
             }
         }
+    }
+
+    fn reject_function_type_suffix(&self, description: &str) -> CustResult<()> {
+        if self.check(&Token::LParen) && !matches!(self.peek_next(), Token::Star) {
+            return Err(Self::error_at(
+                format!("{description} are not supported"),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
     }
 
     fn parse_sizeof_array_type_len(&mut self, operator: &str) -> CustResult<Option<usize>> {
