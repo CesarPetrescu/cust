@@ -5395,6 +5395,12 @@ impl Parser {
             let context = format!("{aggregate_keyword} '{type_name}' initializer");
             self.reject_missing_braced_initializer_element(&context)?;
             self.reject_invalid_braced_initializer_selector_element(&context, true)?;
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    format!("expected initializer element in {context}, found LBracket"),
+                    self.peek_located(),
+                ));
+            }
             if self.matches(&Token::Dot) {
                 let (field_index, field_name, value) =
                     self.parse_struct_designator_after_dot(type_name, &fields)?;

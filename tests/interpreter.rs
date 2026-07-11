@@ -2580,6 +2580,18 @@ fn rejects_missing_scalar_compound_literal_initializers_with_context() {
 }
 
 #[test]
+fn rejects_array_designator_starts_in_struct_compound_literal_initializers_with_context() {
+    let program =
+        "int main(void) { struct Point { int x; }; struct Point p = (struct Point){[}; return 0; }";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "expected initializer element in struct 'Point' initializer, found LBracket at line 1, column 75"
+    );
+}
+
+#[test]
 fn rejects_array_compound_literals_longer_than_declared_length() {
     let program = include_str!("fixtures/invalid/array_compound_literal_too_many_initializers.c");
 

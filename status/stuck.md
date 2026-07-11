@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-11 autonomous `sizeof` invalid-start diagnostic run after clean startup inspection and focused RED/GREEN parser-trust coverage. Full local Rust verification and required Docker verification were run after status updates; Docker Compose may emit the known non-fatal missing-buildx warning when it exits 0.
+None. Last reviewed in the 2026-07-11 aggregate-initializer invalid-start diagnostic run after clean startup inspection and focused RED/GREEN parser-trust coverage. Full local Rust verification and both required Docker commands passed; no Docker buildx fallback warning was emitted this run.
 
 ## Blocker template
 
