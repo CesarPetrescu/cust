@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-11): closed leading-`restrict` type-name correctness coverage. `sizeof(restrict int)`, `_Alignof(restrict int)`, and `(restrict int)0` now reject `restrict` at its source location rather than incorrectly treating it as a no-op qualifier on a scalar type. Cust continues to allow `restrict` only after a pointer declarator star; valid pointer-declarator coverage remains intact. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
+Latest update (2026-07-11): closed qualified pointer type-name diagnostic coverage. `sizeof(int * const *)`, `_Alignof(int * const *)`, and `(int * const *)0` now reject the unsupported second pointer level at its star token rather than falling through to generic closing-parenthesis errors after the valid post-star qualifier. One-level `const`/`volatile` pointer type names remain valid in casts and type queries. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
 
 ## P0 — correctness and developer trust
 

@@ -609,6 +609,45 @@ fn rejects_restrict_on_non_pointer_type_names_with_context() {
 }
 
 #[test]
+fn rejects_qualified_pointer_to_pointer_type_names_with_context() {
+    let cases = [
+        (
+            "int main(void) { return sizeof(int * const *); }\n",
+            "pointer-to-pointer sizeof types are not supported at line 1, column 44",
+        ),
+        (
+            "int main(void) { return _Alignof(int * const *); }\n",
+            "pointer-to-pointer _Alignof types are not supported at line 1, column 46",
+        ),
+        (
+            "int main(void) { return (int * const *)0 != 0; }\n",
+            "pointer-to-pointer casts are not supported at line 1, column 38",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn supports_post_star_pointer_qualifiers_in_type_names() {
+    assert_eq!(
+        interpret("int main(void) { return sizeof(int * const); }\n").unwrap(),
+        8
+    );
+    assert_eq!(
+        interpret("int main(void) { return _Alignof(int * volatile); }\n").unwrap(),
+        8
+    );
+    assert_eq!(
+        interpret("int main(void) { return (int * const)0 == 0; }\n").unwrap(),
+        1
+    );
+}
+
+#[test]
 fn rejects_missing_atomic_type_arguments_with_context() {
     let cases = [
         (

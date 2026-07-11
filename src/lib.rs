@@ -8551,6 +8551,12 @@ impl Parser {
             let (type_name, _, _) = self.parse_aggregate_definition_body(false, true)?;
             if self.matches(&Token::Star) {
                 self.consume_type_qualifiers();
+                if self.check(&Token::Star) {
+                    return Err(Self::error_at(
+                        "pointer-to-pointer casts are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 self.expect_closing_paren_after("cast type")?;
                 self.reject_missing_cast_operand()?;
                 return Ok(Expr::PointerCast {
@@ -8627,6 +8633,12 @@ impl Parser {
                 }
             };
             self.consume_type_qualifiers();
+            if self.check(&Token::Star) {
+                return Err(Self::error_at(
+                    "pointer-to-pointer casts are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             self.expect_closing_paren_after("cast type")?;
             self.reject_missing_cast_operand()?;
             return Ok(Expr::PointerCast {
@@ -9094,6 +9106,13 @@ impl Parser {
         ) {
             let (type_name, _, _) = self.parse_aggregate_definition_body(false, true)?;
             if self.matches(&Token::Star) {
+                self.consume_type_qualifiers();
+                if self.check(&Token::Star) {
+                    return Err(Self::error_at(
+                        format!("pointer-to-pointer {operator} types are not supported"),
+                        self.peek_located(),
+                    ));
+                }
                 return Ok(SizeOfType::Pointer);
             }
             if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
@@ -9116,6 +9135,13 @@ impl Parser {
         match decl_type {
             DeclType::Scalar(ty) => {
                 if self.matches(&Token::Star) {
+                    self.consume_type_qualifiers();
+                    if self.check(&Token::Star) {
+                        return Err(Self::error_at(
+                            format!("pointer-to-pointer {operator} types are not supported"),
+                            self.peek_located(),
+                        ));
+                    }
                     Ok(SizeOfType::Pointer)
                 } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
                     Ok(SizeOfType::Array(PointeeType::Scalar(ty), len))
@@ -9125,6 +9151,13 @@ impl Parser {
             }
             DeclType::Struct(type_name) => {
                 if self.matches(&Token::Star) {
+                    self.consume_type_qualifiers();
+                    if self.check(&Token::Star) {
+                        return Err(Self::error_at(
+                            format!("pointer-to-pointer {operator} types are not supported"),
+                            self.peek_located(),
+                        ));
+                    }
                     Ok(SizeOfType::Pointer)
                 } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
                     Ok(SizeOfType::Array(PointeeType::Struct(type_name), len))
