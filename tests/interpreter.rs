@@ -659,6 +659,41 @@ fn rejects_pointer_array_cast_type_names_with_context() {
 }
 
 #[test]
+fn rejects_pointer_array_sizeof_and_alignof_type_names_with_context() {
+    let cases = [
+        (
+            "int main(void) { return sizeof(int *[2]); }\n",
+            "pointer array sizeof types are not supported at line 1, column 37",
+        ),
+        (
+            "int main(void) { return _Alignof(int *[2]); }\n",
+            "pointer array _Alignof types are not supported at line 1, column 39",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) { return sizeof(struct Point *[2]); }\n",
+            "pointer array sizeof types are not supported at line 2, column 46",
+        ),
+        (
+            "int main(void) { return _Alignof(struct { int x; } *[2]); }\n",
+            "pointer array _Alignof types are not supported at line 1, column 53",
+        ),
+        (
+            "typedef int *IntPtr;\nint main(void) { return sizeof(IntPtr[2]); }\n",
+            "pointer array sizeof types are not supported at line 2, column 38",
+        ),
+        (
+            "typedef struct Point { int x; } *PointPtr;\nint main(void) { return _Alignof(PointPtr[2]); }\n",
+            "pointer array _Alignof types are not supported at line 2, column 42",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn supports_post_star_pointer_qualifiers_in_type_names() {
     assert_eq!(
         interpret("int main(void) { return sizeof(int * const); }\n").unwrap(),

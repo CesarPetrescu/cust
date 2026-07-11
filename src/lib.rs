@@ -9131,6 +9131,12 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        format!("pointer array {operator} types are not supported"),
+                        self.peek_located(),
+                    ));
+                }
                 return Ok(SizeOfType::Pointer);
             }
             if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
@@ -9160,6 +9166,12 @@ impl Parser {
                             self.peek_located(),
                         ));
                     }
+                    if self.check(&Token::LBracket) {
+                        return Err(Self::error_at(
+                            format!("pointer array {operator} types are not supported"),
+                            self.peek_located(),
+                        ));
+                    }
                     Ok(SizeOfType::Pointer)
                 } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
                     Ok(SizeOfType::Array(PointeeType::Scalar(ty), len))
@@ -9173,6 +9185,12 @@ impl Parser {
                     if self.check(&Token::Star) {
                         return Err(Self::error_at(
                             format!("pointer-to-pointer {operator} types are not supported"),
+                            self.peek_located(),
+                        ));
+                    }
+                    if self.check(&Token::LBracket) {
+                        return Err(Self::error_at(
+                            format!("pointer array {operator} types are not supported"),
                             self.peek_located(),
                         ));
                     }

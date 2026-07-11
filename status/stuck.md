@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-11 pointer-array cast diagnostic run after clean startup inspection, a focused RED/GREEN loop, full local Rust verification, and both required Docker commands. Unsupported pointer-array casts are now diagnosed at the array suffix; no Docker buildx fallback warning was emitted.
+None. Last reviewed in the 2026-07-11 pointer-array `sizeof`/`_Alignof` diagnostic run after clean startup inspection, a focused RED/GREEN loop, full local Rust verification, and both required Docker commands. Unsupported pointer-array type queries are now diagnosed at the array suffix; no Docker buildx fallback warning was emitted.
 
 ## Blocker template
 
