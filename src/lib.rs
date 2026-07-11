@@ -8528,6 +8528,7 @@ impl Parser {
 
     fn parse_cast(&mut self) -> CustResult<Expr> {
         self.expect(Token::LParen)?;
+        self.reject_leading_restrict_qualifier()?;
         let leading_qualifier = self.leading_type_qualifier_token();
         let leading_const = self.consume_type_qualifiers();
         match leading_qualifier.as_ref() {
@@ -9022,6 +9023,7 @@ impl Parser {
     }
 
     fn parse_sizeof_like_type_name(&mut self, operator: &str) -> CustResult<SizeOfType> {
+        self.reject_leading_restrict_qualifier()?;
         let first_qualifier = if matches!(
             self.peek(),
             Token::Const | Token::Volatile | Token::Restrict

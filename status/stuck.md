@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-11 array-range-designator diagnostic run after clean startup inspection and focused RED/GREEN parser-trust coverage. Full local Rust verification and both required Docker commands passed; no Docker buildx fallback warning was emitted this run.
+None. Last reviewed in the 2026-07-11 restrict type-name correctness run after clean startup inspection, a focused RED/GREEN loop, and native compiler-oracle confirmation that leading `restrict` on a scalar type is invalid. Full local Rust verification and both required Docker commands passed; no Docker buildx fallback warning was emitted this run.
 
 ## Blocker template
 

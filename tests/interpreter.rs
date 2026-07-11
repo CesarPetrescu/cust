@@ -586,6 +586,29 @@ fn rejects_restrict_on_non_pointer_declarations_with_context() {
 }
 
 #[test]
+fn rejects_restrict_on_non_pointer_type_names_with_context() {
+    let cases = [
+        (
+            "int main(void) { return sizeof(restrict int); }\n",
+            "restrict qualifiers are only supported on pointer declarators at line 1, column 32",
+        ),
+        (
+            "int main(void) { return _Alignof(restrict int); }\n",
+            "restrict qualifiers are only supported on pointer declarators at line 1, column 34",
+        ),
+        (
+            "int main(void) { return (restrict int)0; }\n",
+            "restrict qualifiers are only supported on pointer declarators at line 1, column 26",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_missing_atomic_type_arguments_with_context() {
     let cases = [
         (
