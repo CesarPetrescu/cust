@@ -8879,17 +8879,35 @@ impl Parser {
     }
 
     fn reject_missing_sizeof_operand(&self, allow_type_name_start: bool) -> CustResult<()> {
+        match self.peek() {
+            Token::LBracket => {
+                return Err(Self::error_at(
+                    "expected sizeof operand before '['".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            Token::Question => {
+                return Err(Self::error_at(
+                    "expected sizeof operand before '?'".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            _ => {}
+        }
+        match self.integer_constant_invalid_start_or_selector_label() {
+            Some(label) if !allow_type_name_start || !self.is_type_name_start() => {
+                return Err(Self::error_at(
+                    format!("expected sizeof operand before '{label}'"),
+                    self.peek_located(),
+                ));
+            }
+            _ => {}
+        }
         if matches!(
             self.peek(),
             Token::Comma
-                | Token::Colon
                 | Token::RParen
                 | Token::RBracket
-                | Token::LBracket
-                | Token::LBrace
-                | Token::Question
-                | Token::Dot
-                | Token::Arrow
                 | Token::Semi
                 | Token::RBrace
                 | Token::Eof
@@ -8898,15 +8916,6 @@ impl Parser {
                 format!("expected sizeof operand, found {:?}", self.peek()),
                 self.peek_located(),
             ));
-        }
-        match self.integer_constant_invalid_start_label() {
-            Some(label) if !allow_type_name_start || !self.is_type_name_start() => {
-                return Err(Self::error_at(
-                    format!("expected sizeof operand before '{label}'"),
-                    self.peek_located(),
-                ));
-            }
-            _ => {}
         }
         Ok(())
     }

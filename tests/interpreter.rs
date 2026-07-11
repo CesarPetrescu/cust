@@ -2123,11 +2123,11 @@ fn rejects_missing_sizeof_and_alignof_operands_with_context() {
     let cases = [
         (
             "int main(void) { sizeof([); return 0; }",
-            "expected sizeof operand, found LBracket at line 1, column 25",
+            "expected sizeof operand before '[' at line 1, column 25",
         ),
         (
             "int main(void) { sizeof(?); return 0; }",
-            "expected sizeof operand, found Question at line 1, column 25",
+            "expected sizeof operand before '?' at line 1, column 25",
         ),
         (
             "int main(void) {\n    return sizeof();\n}\n",
@@ -2154,16 +2154,20 @@ fn rejects_missing_sizeof_and_alignof_operands_with_context() {
             "expected sizeof operand before 'return' at line 2, column 19",
         ),
         (
+            "int main(void) { return sizeof(:); }",
+            "expected sizeof operand before ':' at line 1, column 32",
+        ),
+        (
             "int main(void) { return sizeof(.); }",
-            "expected sizeof operand, found Dot at line 1, column 32",
+            "expected sizeof operand before '.' at line 1, column 32",
         ),
         (
             "int main(void) { return sizeof(->field); }",
-            "expected sizeof operand, found Arrow at line 1, column 32",
+            "expected sizeof operand before '->' at line 1, column 32",
         ),
         (
             "int main(void) { return sizeof({1}); }",
-            "expected sizeof operand, found LBrace at line 1, column 32",
+            "expected sizeof operand before '{' at line 1, column 32",
         ),
         (
             "int main(void) {\n    return _Alignof();\n}\n",

@@ -4,9 +4,20 @@ Last updated: 2026-07-11
 
 ## Latest autonomous verification
 
-All passed after the 2026-07-11 autonomous `_Atomic(type-name)` selector/colon invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item, broader C-subset conformance coverage, fuzz/property tests, CLI flags, README/release polish, and a narrow newly probed type-name gap: `_Atomic(:)`, `_Atomic(.)`, and `_Atomic(->field)` still reported generic `expected _Atomic type, found ...` messages even though adjacent `_Alignof`, `_Alignas`, integer-constant, and expression-boundary routes use contextual `before '<token>'` diagnostics. Selected this slice because it completes the existing `_Atomic(type-name)` invalid-start guard without changing valid `_Atomic` qualifier/specifier behavior. TDD RED captured `_Atomic(:)` first with the generic `found Colon`; GREEN routes `_Atomic(type-name)` through `integer_constant_invalid_start_or_selector_label()` so colon/dot/arrow now report `expected _Atomic type before ':'`, `before '.'`, and `before '->'`.
+All passed after the 2026-07-11 autonomous `sizeof` invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item, broader C-subset conformance coverage, fuzz/property tests, CLI flags, README/release polish, and a narrow newly probed expression-boundary gap: `sizeof([)`, `sizeof(?)`, `sizeof(:)`, `sizeof(.)`, `sizeof(->field)`, and `sizeof({1})` were less contextual than adjacent `_Alignof`, `_Alignas`, `_Atomic(type-name)`, integer-constant, and expression-boundary routes. Selected this slice because it closes the existing `sizeof` missing-operand guard without changing valid `sizeof(type-name)` or `sizeof expression` semantics. TDD RED updated the exact-output test first and confirmed the previous generic `expected sizeof operand, found LBracket`; GREEN now reports `expected sizeof operand before '<token>'` for bracket/question/colon/selector/brace invalid starts while preserving delimiter-only missing-operand diagnostics.
 
 Commands verified so far:
+
+```bash
+git checkout main && git pull --ff-only
+cargo test  # clean pulled-tree baseline passed before selecting work
+cargo test --test interpreter rejects_missing_sizeof_and_alignof_operands_with_context -- --nocapture  # RED first: generic `expected sizeof operand, found LBracket`; GREEN passed after invalid-start guard routing
+# Full required gate was run after this status update; see final run report for exact pass/fail output.
+```
+
+All passed after the 2026-07-11 autonomous `_Atomic(type-name)` selector/colon invalid-start diagnostic run. Ideation considered failing tests/builds (`cargo test` passed on the clean pulled tree), active blockers (none), the standing parser-trust continuation item, broader C-subset conformance coverage, fuzz/property tests, CLI flags, README/release polish, and a narrow newly probed type-name gap: `_Atomic(:)`, `_Atomic(.)`, and `_Atomic(->field)` still reported generic `expected _Atomic type, found ...` messages even though adjacent `_Alignof`, `_Alignas`, integer-constant, and expression-boundary routes use contextual `before '<token>'` diagnostics. Selected this slice because it completes the existing `_Atomic(type-name)` invalid-start guard without changing valid `_Atomic` qualifier/specifier behavior. TDD RED captured `_Atomic(:)` first with the generic `found Colon`; GREEN routes `_Atomic(type-name)` through `integer_constant_invalid_start_or_selector_label()` so colon/dot/arrow now report `expected _Atomic type before ':'`, `before '.'`, and `before '->'`.
+
+Commands verified:
 
 ```bash
 git checkout main && git pull --ff-only
