@@ -3689,6 +3689,16 @@ impl Parser {
         )
     }
 
+    fn reject_array_range_designator(&self) -> CustResult<()> {
+        if self.starts_ellipsis() {
+            return Err(Self::error_at(
+                "array range designators are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
     fn void_pointer_star_token_at_current(&self) -> Option<&LocatedToken> {
         if matches!(self.peek(), Token::Void)
             && matches!(
@@ -5277,6 +5287,7 @@ impl Parser {
         let (value, first_token) =
             self.parse_integer_constant_expr(&HashMap::new(), "expected array designator index")?;
         let index = Self::array_designator_value_to_index(value, &first_token)?;
+        self.reject_array_range_designator()?;
         if self.check(&Token::Comma) {
             let comma = self.peek_located().clone();
             return Err(Self::error_at(
@@ -5350,6 +5361,7 @@ impl Parser {
         let (value, first_token) =
             self.parse_integer_constant_expr(&HashMap::new(), "expected array designator index")?;
         let index = Self::array_designator_value_to_index(value, &first_token)?;
+        self.reject_array_range_designator()?;
         if self.check(&Token::Comma) {
             let comma = self.peek_located().clone();
             return Err(Self::error_at(

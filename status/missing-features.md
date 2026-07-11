@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-11): closed aggregate-initializer invalid-start diagnostic coverage. An array-designator start in a struct/union compound-literal initializer (for example `(struct Point){[}`) now reports `expected initializer element in struct 'Point' initializer, found LBracket` rather than generic expression parsing; array designators remain supported only in array initializer contexts. Continue the P0 parser-recovery track only for newly discovered generic fallthroughs.
+Latest update (2026-07-11): closed unsupported array-range-designator diagnostic coverage. GNU-style `[first ... last] = value` designators now report `array range designators are not supported` at the first dot instead of the generic array-designator closing-bracket fallback, across declared arrays, unsized array compound literals, and scalar array-field path designators. Continue the P0 parser-recovery track only for newly discovered generic fallthroughs.
 
 ## P0 — correctness and developer trust
 

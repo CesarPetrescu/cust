@@ -2592,6 +2592,29 @@ fn rejects_array_designator_starts_in_struct_compound_literal_initializers_with_
 }
 
 #[test]
+fn rejects_range_array_designators_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    int values[3] = {[0 ... 2] = 1};\n    return 0;\n}\n",
+            "array range designators are not supported at line 2, column 25",
+        ),
+        (
+            "int main(void) {\n    int *values = (int[]){[0 ... 2] = 1};\n    return 0;\n}\n",
+            "array range designators are not supported at line 2, column 30",
+        ),
+        (
+            "struct Packet { int values[3]; };\nint main(void) {\n    struct Packet packet = {.values[0 ... 2] = 1};\n    return 0;\n}\n",
+            "array range designators are not supported at line 3, column 39",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_array_compound_literals_longer_than_declared_length() {
     let program = include_str!("fixtures/invalid/array_compound_literal_too_many_initializers.c");
 
