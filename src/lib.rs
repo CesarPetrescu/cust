@@ -8594,6 +8594,7 @@ impl Parser {
                 };
                 self.expect_closing_bracket_after("aggregate array compound literal type")?;
                 self.reject_multidimensional_array_cast_suffix()?;
+                self.reject_pointer_to_array_cast_suffix()?;
                 self.reject_function_type_suffix("function casts")?;
                 self.expect_closing_paren_after("cast type")?;
                 return Ok(Expr::AggregateArrayLiteral {
@@ -8692,6 +8693,7 @@ impl Parser {
                     };
                     self.expect_closing_bracket_after("aggregate array compound literal type")?;
                     self.reject_multidimensional_array_cast_suffix()?;
+                    self.reject_pointer_to_array_cast_suffix()?;
                     self.reject_function_type_suffix("function casts")?;
                     self.expect_closing_paren_after("cast type")?;
                     return Ok(Expr::AggregateArrayLiteral {
@@ -8734,6 +8736,7 @@ impl Parser {
             }
             DeclType::Array(pointee, len) => {
                 self.reject_multidimensional_array_cast_suffix()?;
+                self.reject_pointer_to_array_cast_suffix()?;
                 self.reject_function_type_suffix("function casts")?;
                 self.expect_closing_paren_after("cast type")?;
                 if !self.check(&Token::LBrace) {
@@ -8767,6 +8770,7 @@ impl Parser {
             };
             self.expect_closing_bracket_after("array compound literal type")?;
             self.reject_multidimensional_array_cast_suffix()?;
+            self.reject_pointer_to_array_cast_suffix()?;
             self.reject_function_type_suffix("function casts")?;
             self.expect_closing_paren_after("cast type")?;
             return Ok(Expr::ArrayLiteral {
@@ -8860,6 +8864,16 @@ impl Parser {
         if self.check(&Token::LBracket) {
             return Err(Self::error_at(
                 "multidimensional array casts are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_pointer_to_array_cast_suffix(&self) -> CustResult<()> {
+        if self.check(&Token::Star) {
+            return Err(Self::error_at(
+                "pointer-to-array casts are not supported".to_string(),
                 self.peek_located(),
             ));
         }
@@ -9298,6 +9312,12 @@ impl Parser {
         if self.check(&Token::LBracket) {
             return Err(Self::error_at(
                 format!("multidimensional {operator} array types are not supported"),
+                self.peek_located(),
+            ));
+        }
+        if self.check(&Token::Star) {
+            return Err(Self::error_at(
+                format!("pointer-to-array {operator} types are not supported"),
                 self.peek_located(),
             ));
         }

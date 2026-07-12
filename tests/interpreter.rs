@@ -803,6 +803,45 @@ fn rejects_multidimensional_array_cast_type_names_with_context() {
 }
 
 #[test]
+fn rejects_pointer_to_array_cast_and_type_query_names_with_context() {
+    let cases = [
+        (
+            "int main(void) { return (int[2]*)0 == 0; }\n",
+            "pointer-to-array casts are not supported at line 1, column 32",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) { return (struct Point[2]*)0 == 0; }\n",
+            "pointer-to-array casts are not supported at line 2, column 41",
+        ),
+        (
+            "int main(void) { return (struct { int x; }[2]*)0 == 0; }\n",
+            "pointer-to-array casts are not supported at line 1, column 46",
+        ),
+        (
+            "int main(void) { return sizeof(int[2]*); }\n",
+            "pointer-to-array sizeof types are not supported at line 1, column 38",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) { return _Alignof(struct Point[2]*); }\n",
+            "pointer-to-array _Alignof types are not supported at line 2, column 49",
+        ),
+        (
+            "int main(void) { return sizeof(struct { int x; }[2]*); }\n",
+            "pointer-to-array sizeof types are not supported at line 1, column 52",
+        ),
+        (
+            "typedef int Scores[2];\nint main(void) { return sizeof(Scores*); }\n",
+            "pointer-to-array sizeof types are not supported at line 2, column 38",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_multidimensional_array_designators_with_context() {
     let cases = [
         (
