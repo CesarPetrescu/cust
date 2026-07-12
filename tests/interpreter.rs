@@ -1622,6 +1622,68 @@ fn rejects_atomic_array_typedef_arguments_with_context() {
 }
 
 #[test]
+fn rejects_nested_and_qualified_atomic_types_with_context() {
+    let cases = [
+        (
+            "_Atomic(_Atomic(int)) value;\nint main(void) { return 0; }\n",
+            "nested _Atomic type specifiers are not supported at line 1, column 9",
+        ),
+        (
+            "_Atomic(const int) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 1, column 9",
+        ),
+        (
+            "int main(void) { return sizeof(_Atomic(_Atomic(int))); }\n",
+            "nested _Atomic type specifiers are not supported at line 1, column 40",
+        ),
+        (
+            "int main(void) { return _Alignof(_Atomic(const int)); }\n",
+            "qualified _Atomic types are not supported at line 1, column 42",
+        ),
+        (
+            "int main(void) { return ((_Atomic(_Atomic(int))){1}); }\n",
+            "nested _Atomic type specifiers are not supported at line 1, column 35",
+        ),
+        (
+            "int main(void) { return ((_Atomic(const int)){1}); }\n",
+            "qualified _Atomic types are not supported at line 1, column 35",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_postfix_qualified_atomic_types_with_context() {
+    let cases = [
+        (
+            "_Atomic(int const) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 1, column 13",
+        ),
+        (
+            "int main(void) { return sizeof(_Atomic(int volatile)); }\n",
+            "qualified _Atomic types are not supported at line 1, column 44",
+        ),
+        (
+            "int main(void) { return _Alignof(_Atomic(int * const)); }\n",
+            "qualified _Atomic types are not supported at line 1, column 48",
+        ),
+        (
+            "_Atomic(_Atomic int) value;\nint main(void) { return 0; }\n",
+            "nested _Atomic type specifiers are not supported at line 1, column 9",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_direct_atomic_array_types_with_context() {
     let cases = [
         (

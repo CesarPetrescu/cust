@@ -2348,16 +2348,47 @@ impl Parser {
                     ));
                 }
                 self.reject_leading_restrict_qualifier()?;
+                if self.check(&Token::Atomic) {
+                    return Err(Self::error_at(
+                        "nested _Atomic type specifiers are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                let atomic_leading_qualifier = self.leading_type_qualifier_token();
                 let atomic_leading_const = self.consume_type_qualifiers();
                 let atomic_type_token = self.peek_located().clone();
+                let atomic_nested_start = self.pos;
                 let (mut nested_const, mut decl_type) =
                     self.parse_decl_type_with_embedded_qualifiers("_Atomic type name")?;
+                let atomic_nested_qualifier = self.tokens[atomic_nested_start..self.pos]
+                    .iter()
+                    .find(|token| {
+                        matches!(
+                            token.kind,
+                            Token::Const | Token::Volatile | Token::Restrict | Token::Atomic
+                        )
+                    })
+                    .cloned();
                 nested_const |= atomic_leading_const;
                 if self.check(&Token::LBracket) {
                     return Err(Self::error_at(
                         "array _Atomic types are not supported".to_string(),
                         self.peek_located(),
                     ));
+                }
+                if !self.check(&Token::Star) {
+                    if let Some(qualifier) = atomic_leading_qualifier.or(atomic_nested_qualifier) {
+                        return Err(Self::error_at(
+                            "qualified _Atomic types are not supported".to_string(),
+                            &qualifier,
+                        ));
+                    }
+                    if nested_const {
+                        return Err(Self::error_at(
+                            "qualified _Atomic types are not supported".to_string(),
+                            &atomic_type_token,
+                        ));
+                    }
                 }
                 if self.matches(&Token::Star) {
                     let pointee = match decl_type {
@@ -2376,7 +2407,14 @@ impl Parser {
                             ));
                         }
                     };
+                    let pointer_qualifier = self.leading_type_qualifier_token();
                     saw_const |= self.consume_type_qualifiers();
+                    if let Some(qualifier) = pointer_qualifier {
+                        return Err(Self::error_at(
+                            "qualified _Atomic types are not supported".to_string(),
+                            &qualifier,
+                        ));
+                    }
                     if self.check(&Token::Star) {
                         return Err(Self::error_at(
                             "pointer-to-pointer _Atomic types are not supported".to_string(),

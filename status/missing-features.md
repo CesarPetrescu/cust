@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-12): direct C11 atomic array type syntax such as `_Atomic(int[2])` and `_Atomic(struct Point[2])` now reports `array _Atomic types are not supported` at the first `[` across declarations, `sizeof`, `_Alignof`, and compound-literal routing instead of falling through to a generic closing-parenthesis diagnostic. Continue the P0 correctness track with the newly confirmed accepted-invalid nested/qualified atomic forms: `_Atomic(_Atomic(int))` and `_Atomic(const int)` should be rejected at the inner `_Atomic`/qualifier while preserving supported `_Atomic(int *)` and bare `_Atomic` qualifier syntax.
+Latest update (2026-07-12): nested and directly qualified C11 atomic type arguments now report source-located diagnostics instead of being accepted. `_Atomic(_Atomic(int))` is rejected at the inner specifier; leading/postfix scalar qualifiers and post-star pointer-slot qualifiers are rejected at the qualifier; pointee-qualified `_Atomic(const int *)`, ordinary `_Atomic(int *)`, and bare `_Atomic` qualifier syntax remain supported. Continue the P0 correctness track by probing qualifier metadata carried through typedef aliases, especially volatile-qualified scalar and pointer aliases used as `_Atomic(Alias)` arguments.
 
 ## P0 — correctness and developer trust
 
@@ -51,6 +51,7 @@ Latest update (2026-07-12): direct C11 atomic array type syntax such as `_Atomic
 - [x] Pointer-to-array cast/type-query suffix diagnostics: unsupported direct forms such as `(int[2]*)0`, `(struct Point[2]*)0`, `sizeof(int[2]*)`, and `_Alignof(struct Point[2]*)` now report source-located `pointer-to-array casts/sizeof/_Alignof types are not supported` at `*`, matching array-typedef behavior instead of falling through to generic closing-parenthesis diagnostics.
 - [x] Void array/function cast/type-query suffix diagnostics: unsupported forms such as `(void(void))0`, `sizeof(void(void))`, `(void[2])0`, and `_Alignof(void[2])` now inspect the suffix after `void` and report source-located function-type or route-specific void-array diagnostics instead of generic cast delimiters or misleading bare-`void` errors, while preserving the dedicated void-pointer boundary.
 - [x] Atomic array-typedef argument diagnostics: invalid forms such as `_Atomic(Scores) value`, `sizeof(_Atomic(Scores))`, `_Alignof(_Atomic(Scores))`, and `((_Atomic(Scores)){...})` now report `array _Atomic types are not supported` at the array alias token instead of accepting the alias as an ordinary array.
+- [x] Nested/qualified atomic argument diagnostics: invalid `_Atomic(_Atomic(int))`, `_Atomic(const int)`, `_Atomic(int const)`, `_Atomic(int volatile)`, and `_Atomic(int * const)` forms report source-located nested/qualified diagnostics across declarations, `sizeof`, `_Alignof`, and compound-literal routing, while pointee-qualified atomic pointer arguments remain supported.
 - [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 
