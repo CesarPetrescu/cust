@@ -8623,6 +8623,13 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            self.reject_function_type_suffix("function casts")?;
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "void array casts are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             self.expect_closing_paren_after("cast type")?;
             self.reject_missing_cast_operand()?;
             return Ok(Expr::VoidCast(Box::new(self.parse_unary()?)));
@@ -9134,10 +9141,17 @@ impl Parser {
                     token,
                 ));
             }
-            let type_token = self.advance();
+            self.advance();
+            self.reject_function_type_suffix(&format!("function {operator} types"))?;
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    format!("void array {operator} types are not supported"),
+                    self.peek_located(),
+                ));
+            }
             return Err(Self::error_at(
                 format!("{operator}(void) is not supported"),
-                &type_token,
+                self.previous(),
             ));
         }
         if is_const_qualified

@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-12): closed pointer-to-array cast/type-query diagnostics. Direct scalar, named aggregate, and anonymous aggregate array type names followed by `*` now report source-located `pointer-to-array casts/sizeof/_Alignof types are not supported` diagnostics instead of generic closing-parenthesis errors, matching the existing array-typedef boundary. Multidimensional-array, function-array, pointer-array, and supported one-dimensional array compound-literal/type-query behavior remains unchanged. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
+Latest update (2026-07-12): closed void array/function cast and type-query suffix diagnostics. Unsupported `(void(void))0`, `sizeof(void(void))`, `_Alignof(void(void))`, and matching `void[N]` forms now report source-located function-type or void-array diagnostics at the suffix instead of generic closing-parenthesis errors or misleading bare-`void` type-query errors. `(void)expr`, bare `sizeof(void)` / `_Alignof(void)`, and void-pointer diagnostics remain unchanged. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
 
 ## P0 — correctness and developer trust
 
@@ -49,6 +49,7 @@ Latest update (2026-07-12): closed pointer-to-array cast/type-query diagnostics.
 - [x] Brace-token parser-trust invalid-start diagnostics: malformed expression/type/integer-constant operand starts such as `_Alignas({1})`, `_Static_assert({1}, "msg")`, `sizeof({1})`, `_Alignof({1})`, `({1})`, `int values[{1}]`, `enum Bad { A = {1} };`, `case {1}:`, `if ({1})`, `for (...; ...; {1})`, `return 1,{2};`, `value = {2};`, `return 1 + {2};`, `return 1 ? {2} : 3`, and `return 1 ? 2 : {3}` now report contextual route-local diagnostics instead of falling through to generic expression/type/integer-constant parsing, while statement blocks and valid braced initializers remain supported.
 - [x] Top-level invalid-start declaration diagnostics: malformed file-scope starts such as `{ int value; }`, `,`, `?`, `.field`, and `->field` now report source-located `expected top-level declaration, found ...` diagnostics instead of falling through to the generic `unexpected token at top level: ...` fallback, while unmatched closing delimiters and stray file-scope control-flow diagnostics remain unchanged.
 - [x] Pointer-to-array cast/type-query suffix diagnostics: unsupported direct forms such as `(int[2]*)0`, `(struct Point[2]*)0`, `sizeof(int[2]*)`, and `_Alignof(struct Point[2]*)` now report source-located `pointer-to-array casts/sizeof/_Alignof types are not supported` at `*`, matching array-typedef behavior instead of falling through to generic closing-parenthesis diagnostics.
+- [x] Void array/function cast/type-query suffix diagnostics: unsupported forms such as `(void(void))0`, `sizeof(void(void))`, `(void[2])0`, and `_Alignof(void[2])` now inspect the suffix after `void` and report source-located function-type or route-specific void-array diagnostics instead of generic cast delimiters or misleading bare-`void` errors, while preserving the dedicated void-pointer boundary.
 - [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 

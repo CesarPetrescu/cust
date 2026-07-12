@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-12 pointer-to-array cast/type-query diagnostic run after clean startup inspection, a focused RED/GREEN loop, full local Rust verification, and both required Docker commands. Direct array type names followed by `*` now receive targeted source-located diagnostics matching array typedef aliases; no Docker buildx fallback warning was emitted.
+None. Last reviewed in the 2026-07-12 void array/function type-name diagnostic run after clean startup inspection, deterministic suffix probing, a focused RED/GREEN loop, full local Rust verification, and both required Docker commands. Void suffix routes now distinguish pointers, functions, arrays, and bare void without generic or misleading fallthroughs.
 
 ## Blocker template
 
