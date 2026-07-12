@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-12 pointer-function type-name diagnostic run after clean startup inspection, a focused RED/GREEN loop, full local Rust verification, and both required Docker commands. Function type spellings after supported one-level pointer suffixes in casts/`sizeof`/`_Alignof` are now diagnosed at their suffix; no Docker buildx fallback warning was emitted.
+None. Last reviewed in the 2026-07-12 multidimensional-array cast diagnostic run after clean startup inspection, a focused RED/GREEN loop, full local Rust verification, and both required Docker commands. Unsupported second array suffixes in cast type names now receive a targeted source-located diagnostic; no Docker buildx fallback warning was emitted.
 
 ## Blocker template
 

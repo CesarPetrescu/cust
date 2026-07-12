@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-12): closed pointer-function type-name diagnostics. Abstract function spellings returning a one-level pointer—such as `(int *(void))0`, `sizeof(int *(void))`, and `_Alignof(IntPtr(void))`—now reject their function suffix at `(` with the established cast/type-query wording instead of falling through to generic closing-parenthesis errors. Direct scalar, named/anonymous aggregate, and pointer-typedef routes are covered; parenthesized-pointer and function-array boundaries remain unchanged. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
+Latest update (2026-07-12): closed multidimensional-array cast type-name diagnostics. Unsupported second array suffixes in cast/compound-literal type names—direct scalar, named/anonymous aggregate, and array-typedef routes—now report `multidimensional array casts are not supported` at the second `[` instead of a generic cast closing-parenthesis error. One-dimensional array compound literals and the existing multidimensional declaration/`sizeof`/`_Alignof` boundaries remain unchanged. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
 
 ## P0 — correctness and developer trust
 

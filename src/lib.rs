@@ -8580,6 +8580,7 @@ impl Parser {
                     Some(self.expect_array_len()?)
                 };
                 self.expect_closing_bracket_after("aggregate array compound literal type")?;
+                self.reject_multidimensional_array_cast_suffix()?;
                 self.reject_function_type_suffix("function casts")?;
                 self.expect_closing_paren_after("cast type")?;
                 return Ok(Expr::AggregateArrayLiteral {
@@ -8677,6 +8678,7 @@ impl Parser {
                         Some(self.expect_array_len()?)
                     };
                     self.expect_closing_bracket_after("aggregate array compound literal type")?;
+                    self.reject_multidimensional_array_cast_suffix()?;
                     self.reject_function_type_suffix("function casts")?;
                     self.expect_closing_paren_after("cast type")?;
                     return Ok(Expr::AggregateArrayLiteral {
@@ -8718,6 +8720,7 @@ impl Parser {
                 });
             }
             DeclType::Array(pointee, len) => {
+                self.reject_multidimensional_array_cast_suffix()?;
                 self.reject_function_type_suffix("function casts")?;
                 self.expect_closing_paren_after("cast type")?;
                 if !self.check(&Token::LBrace) {
@@ -8750,6 +8753,7 @@ impl Parser {
                 Some(self.expect_array_len()?)
             };
             self.expect_closing_bracket_after("array compound literal type")?;
+            self.reject_multidimensional_array_cast_suffix()?;
             self.reject_function_type_suffix("function casts")?;
             self.expect_closing_paren_after("cast type")?;
             return Ok(Expr::ArrayLiteral {
@@ -8833,6 +8837,16 @@ impl Parser {
         ) {
             return Err(Self::error_at(
                 format!("expected expression after cast, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_multidimensional_array_cast_suffix(&self) -> CustResult<()> {
+        if self.check(&Token::LBracket) {
+            return Err(Self::error_at(
+                "multidimensional array casts are not supported".to_string(),
                 self.peek_located(),
             ));
         }
