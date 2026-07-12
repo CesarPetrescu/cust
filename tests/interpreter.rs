@@ -1565,6 +1565,36 @@ fn supports_atomic_type_qualifiers() {
 }
 
 #[test]
+fn supports_atomic_pointer_type_specifiers() {
+    let program = include_str!("fixtures/valid/atomic_pointer_type_specifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 33);
+}
+
+#[test]
+fn rejects_unsupported_atomic_pointer_suffixes_with_context() {
+    let cases = [
+        (
+            "int main(void) { return sizeof(_Atomic(int **)); }\n",
+            "pointer-to-pointer _Atomic types are not supported at line 1, column 45",
+        ),
+        (
+            "int main(void) { return _Alignof(_Atomic(int *[2])); }\n",
+            "pointer array _Atomic types are not supported at line 1, column 47",
+        ),
+        (
+            "int main(void) { return sizeof(_Atomic(int(void))); }\n",
+            "function _Atomic types are not supported at line 1, column 43",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn supports_restrict_pointer_qualifiers() {
     let program = include_str!("fixtures/valid/restrict_pointer_qualifiers.c");
 

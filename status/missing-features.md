@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-12): closed void array/function cast and type-query suffix diagnostics. Unsupported `(void(void))0`, `sizeof(void(void))`, `_Alignof(void(void))`, and matching `void[N]` forms now report source-located function-type or void-array diagnostics at the suffix instead of generic closing-parenthesis errors or misleading bare-`void` type-query errors. `(void)expr`, bare `sizeof(void)` / `_Alignof(void)`, and void-pointer diagnostics remain unchanged. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
+Latest update (2026-07-12): added C11 `_Atomic(type-name)` parity for supported one-level scalar and aggregate pointer types. `_Atomic(int *)`, `_Atomic(const int *)`, and `_Atomic(struct T *)` now work in typedefs, declarations, parameters, pointer expressions, `sizeof`, and `_Alignof`, with pointee constness preserved. Unsupported pointer-to-pointer, pointer-array, and function suffixes inside `_Atomic(...)` now have exact source-located diagnostics. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches; the next concrete probe is invalid atomic array-alias arguments such as `_Atomic(ArrayAlias)`.
 
 ## P0 — correctness and developer trust
 

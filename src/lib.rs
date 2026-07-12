@@ -2347,10 +2347,51 @@ impl Parser {
                         &found,
                     ));
                 }
-                let (nested_const, decl_type) =
+                self.reject_leading_restrict_qualifier()?;
+                let atomic_leading_const = self.consume_type_qualifiers();
+                let (mut nested_const, mut decl_type) =
                     self.parse_decl_type_with_embedded_qualifiers("_Atomic type name")?;
+                nested_const |= atomic_leading_const;
+                if self.matches(&Token::Star) {
+                    let pointee = match decl_type {
+                        DeclType::Scalar(ty) => PointeeType::Scalar(ty),
+                        DeclType::Struct(type_name) => PointeeType::Struct(type_name),
+                        DeclType::Pointer { .. } => {
+                            return Err(Self::error_at(
+                                "pointer-to-pointer _Atomic types are not supported".to_string(),
+                                self.previous(),
+                            ));
+                        }
+                        DeclType::Array(_, _) => {
+                            return Err(Self::error_at(
+                                "pointer-to-array _Atomic types are not supported".to_string(),
+                                self.previous(),
+                            ));
+                        }
+                    };
+                    saw_const |= self.consume_type_qualifiers();
+                    if self.check(&Token::Star) {
+                        return Err(Self::error_at(
+                            "pointer-to-pointer _Atomic types are not supported".to_string(),
+                            self.peek_located(),
+                        ));
+                    }
+                    if self.check(&Token::LBracket) {
+                        return Err(Self::error_at(
+                            "pointer array _Atomic types are not supported".to_string(),
+                            self.peek_located(),
+                        ));
+                    }
+                    decl_type = DeclType::Pointer {
+                        pointee,
+                        points_to_const: nested_const,
+                    };
+                } else {
+                    saw_const |= nested_const;
+                }
+                self.reject_function_type_suffix("function _Atomic types")?;
                 self.expect_closing_paren_after("_Atomic type")?;
-                saw_const |= nested_const || self.consume_type_qualifiers();
+                saw_const |= self.consume_type_qualifiers();
                 Ok((saw_const, decl_type))
             }
             Token::Struct | Token::Union => {
