@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-12): closed multidimensional-array cast type-name diagnostics. Unsupported second array suffixes in cast/compound-literal type names—direct scalar, named/anonymous aggregate, and array-typedef routes—now report `multidimensional array casts are not supported` at the second `[` instead of a generic cast closing-parenthesis error. One-dimensional array compound literals and the existing multidimensional declaration/`sizeof`/`_Alignof` boundaries remain unchanged. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
+Latest update (2026-07-12): closed multidimensional-array designator diagnostics. Unsupported second designator suffixes across fixed/inferred scalar arrays, scalar-array compound literals, aggregate arrays, and aggregate-field designator paths now report `multidimensional array designators are not supported` at the second `[` instead of the generic `expected '=' after array designator` fallback. Supported one-dimensional designators, parser-folded index expressions, range-designator diagnostics, and bounds checks remain unchanged. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
 
 ## P0 — correctness and developer trust
 

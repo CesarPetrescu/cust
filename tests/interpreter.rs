@@ -803,6 +803,33 @@ fn rejects_multidimensional_array_cast_type_names_with_context() {
 }
 
 #[test]
+fn rejects_multidimensional_array_designators_with_context() {
+    let cases = [
+        (
+            "int main(void) { int values[2] = {[0][1] = 3}; return values[0]; }\n",
+            "multidimensional array designators are not supported at line 1, column 38",
+        ),
+        (
+            "int main(void) { return (int[2]){[0][1] = 3}[0]; }\n",
+            "multidimensional array designators are not supported at line 1, column 37",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) { struct Point points[2] = {[0][1] = {3}}; return 0; }\n",
+            "multidimensional array designators are not supported at line 2, column 47",
+        ),
+        (
+            "struct Packet { int values[2]; };\nint main(void) { struct Packet packet = {.values[0][1] = 3}; return 0; }\n",
+            "multidimensional array designators are not supported at line 2, column 52",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn supports_post_star_pointer_qualifiers_in_type_names() {
     assert_eq!(
         interpret("int main(void) { return sizeof(int * const); }\n").unwrap(),

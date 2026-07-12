@@ -5296,6 +5296,7 @@ impl Parser {
             ));
         }
         self.expect_closing_bracket_after("array designator")?;
+        self.reject_multidimensional_array_designator()?;
         Ok(index)
     }
 
@@ -5370,12 +5371,24 @@ impl Parser {
             ));
         }
         self.expect_closing_bracket_after("array designator")?;
+        self.reject_multidimensional_array_designator()?;
         if index >= len {
             return Err(CustError::new(format!(
                 "array designator index {index} out of bounds for {context}"
             )));
         }
         Ok(index)
+    }
+
+    fn reject_multidimensional_array_designator(&mut self) -> CustResult<()> {
+        if self.check(&Token::LBracket) {
+            let found = self.advance();
+            return Err(Self::error_at(
+                "multidimensional array designators are not supported".to_string(),
+                &found,
+            ));
+        }
+        Ok(())
     }
 
     fn array_designator_value_to_index(value: i64, token: &LocatedToken) -> CustResult<usize> {
