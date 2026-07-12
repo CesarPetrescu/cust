@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-12): added C11 `_Atomic(type-name)` parity for supported one-level scalar and aggregate pointer types. `_Atomic(int *)`, `_Atomic(const int *)`, and `_Atomic(struct T *)` now work in typedefs, declarations, parameters, pointer expressions, `sizeof`, and `_Alignof`, with pointee constness preserved. Unsupported pointer-to-pointer, pointer-array, and function suffixes inside `_Atomic(...)` now have exact source-located diagnostics. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches; the next concrete probe is invalid atomic array-alias arguments such as `_Atomic(ArrayAlias)`.
+Latest update (2026-07-12): invalid C11 atomic array-typedef arguments such as `typedef int Scores[2]; _Atomic(Scores) value;` now report `array _Atomic types are not supported` at the alias token across declarations, `sizeof`, `_Alignof`, and compound-literal routing instead of being accepted as ordinary arrays. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches; the next concrete probe is direct atomic array type syntax such as `_Atomic(int[2])`, which should receive the same targeted boundary diagnostic at the array suffix.
 
 ## P0 — correctness and developer trust
 
@@ -50,6 +50,7 @@ Latest update (2026-07-12): added C11 `_Atomic(type-name)` parity for supported 
 - [x] Top-level invalid-start declaration diagnostics: malformed file-scope starts such as `{ int value; }`, `,`, `?`, `.field`, and `->field` now report source-located `expected top-level declaration, found ...` diagnostics instead of falling through to the generic `unexpected token at top level: ...` fallback, while unmatched closing delimiters and stray file-scope control-flow diagnostics remain unchanged.
 - [x] Pointer-to-array cast/type-query suffix diagnostics: unsupported direct forms such as `(int[2]*)0`, `(struct Point[2]*)0`, `sizeof(int[2]*)`, and `_Alignof(struct Point[2]*)` now report source-located `pointer-to-array casts/sizeof/_Alignof types are not supported` at `*`, matching array-typedef behavior instead of falling through to generic closing-parenthesis diagnostics.
 - [x] Void array/function cast/type-query suffix diagnostics: unsupported forms such as `(void(void))0`, `sizeof(void(void))`, `(void[2])0`, and `_Alignof(void[2])` now inspect the suffix after `void` and report source-located function-type or route-specific void-array diagnostics instead of generic cast delimiters or misleading bare-`void` errors, while preserving the dedicated void-pointer boundary.
+- [x] Atomic array-typedef argument diagnostics: invalid forms such as `_Atomic(Scores) value`, `sizeof(_Atomic(Scores))`, `_Alignof(_Atomic(Scores))`, and `((_Atomic(Scores)){...})` now report `array _Atomic types are not supported` at the array alias token instead of accepting the alias as an ordinary array.
 - [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 

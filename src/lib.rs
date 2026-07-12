@@ -2349,6 +2349,7 @@ impl Parser {
                 }
                 self.reject_leading_restrict_qualifier()?;
                 let atomic_leading_const = self.consume_type_qualifiers();
+                let atomic_type_token = self.peek_located().clone();
                 let (mut nested_const, mut decl_type) =
                     self.parse_decl_type_with_embedded_qualifiers("_Atomic type name")?;
                 nested_const |= atomic_leading_const;
@@ -2387,6 +2388,12 @@ impl Parser {
                         points_to_const: nested_const,
                     };
                 } else {
+                    if matches!(decl_type, DeclType::Array(_, _)) {
+                        return Err(Self::error_at(
+                            "array _Atomic types are not supported".to_string(),
+                            &atomic_type_token,
+                        ));
+                    }
                     saw_const |= nested_const;
                 }
                 self.reject_function_type_suffix("function _Atomic types")?;

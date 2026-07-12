@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-12 atomic-pointer type-specifier run after clean startup inspection, native-C differential probing, focused RED/GREEN loops, full local Rust verification, and both required Docker commands. Supported `_Atomic(T *)` forms now reuse Cust's safe one-level pointer metadata and unsupported deeper/function/array suffixes are targeted.
+None. Last reviewed in the 2026-07-12 atomic array-typedef argument diagnostic run after clean startup inspection, native-C differential probing, focused RED/GREEN loops, full local Rust verification, and both required Docker commands. Invalid `_Atomic(ArrayAlias)` forms are now rejected at the alias token across declaration and type/expression routes.
 
 ## Blocker template
 

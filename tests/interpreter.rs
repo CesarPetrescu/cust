@@ -1595,6 +1595,33 @@ fn rejects_unsupported_atomic_pointer_suffixes_with_context() {
 }
 
 #[test]
+fn rejects_atomic_array_typedef_arguments_with_context() {
+    let cases = [
+        (
+            "typedef int Scores[2];\n_Atomic(Scores) value;\nint main(void) { return 0; }\n",
+            "array _Atomic types are not supported at line 2, column 9",
+        ),
+        (
+            "typedef int Scores[2];\nint main(void) { return sizeof(_Atomic(Scores)); }\n",
+            "array _Atomic types are not supported at line 2, column 40",
+        ),
+        (
+            "typedef int Scores[2];\nint main(void) { return _Alignof(_Atomic(Scores)); }\n",
+            "array _Atomic types are not supported at line 2, column 42",
+        ),
+        (
+            "typedef int Scores[2];\nint main(void) { return ((_Atomic(Scores)){1, 2})[0]; }\n",
+            "array _Atomic types are not supported at line 2, column 35",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn supports_restrict_pointer_qualifiers() {
     let program = include_str!("fixtures/valid/restrict_pointer_qualifiers.c");
 
