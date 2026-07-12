@@ -8564,6 +8564,7 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
+                self.reject_function_type_suffix("function casts")?;
                 self.expect_closing_paren_after("cast type")?;
                 self.reject_missing_cast_operand()?;
                 return Ok(Expr::PointerCast {
@@ -8654,6 +8655,7 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            self.reject_function_type_suffix("function casts")?;
             self.expect_closing_paren_after("cast type")?;
             self.reject_missing_cast_operand()?;
             return Ok(Expr::PointerCast {
@@ -8706,6 +8708,7 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
+                self.reject_function_type_suffix("function casts")?;
                 self.expect_closing_paren_after("cast type")?;
                 self.reject_missing_cast_operand()?;
                 return Ok(Expr::PointerCast {
@@ -9144,6 +9147,7 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
+                self.reject_function_type_suffix(&format!("function {operator} types"))?;
                 return Ok(SizeOfType::Pointer);
             }
             if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
@@ -9181,6 +9185,7 @@ impl Parser {
                             self.peek_located(),
                         ));
                     }
+                    self.reject_function_type_suffix(&format!("function {operator} types"))?;
                     Ok(SizeOfType::Pointer)
                 } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
                     self.reject_function_type_suffix(&format!("function {operator} types"))?;
@@ -9204,6 +9209,7 @@ impl Parser {
                             self.peek_located(),
                         ));
                     }
+                    self.reject_function_type_suffix(&format!("function {operator} types"))?;
                     Ok(SizeOfType::Pointer)
                 } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
                     self.reject_function_type_suffix(&format!("function {operator} types"))?;
@@ -9225,6 +9231,7 @@ impl Parser {
                         self.previous(),
                     ));
                 }
+                self.reject_function_type_suffix(&format!("function {operator} types"))?;
                 Ok(SizeOfType::Pointer)
             }
             DeclType::Array(element_type, len) => {

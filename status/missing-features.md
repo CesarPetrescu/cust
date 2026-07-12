@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-11): closed pointer-array `sizeof`/`_Alignof` type-name diagnostics. Direct scalar, named/anonymous aggregate, and pointer-typedef forms such as `sizeof(int *[2])` now reject the unsupported pointer-array suffix at `[` rather than falling through to generic closing-parenthesis errors. Ordinary array type queries, supported one-level pointer sizes, and pointer-to-pointer boundaries remain unchanged. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
+Latest update (2026-07-12): closed pointer-function type-name diagnostics. Abstract function spellings returning a one-level pointer—such as `(int *(void))0`, `sizeof(int *(void))`, and `_Alignof(IntPtr(void))`—now reject their function suffix at `(` with the established cast/type-query wording instead of falling through to generic closing-parenthesis errors. Direct scalar, named/anonymous aggregate, and pointer-typedef routes are covered; parenthesized-pointer and function-array boundaries remain unchanged. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches.
 
 ## P0 — correctness and developer trust
 

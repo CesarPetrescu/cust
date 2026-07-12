@@ -708,6 +708,34 @@ fn rejects_function_type_cast_and_type_query_names_with_context() {
             "int main(void) { return _Alignof(int(void)); }\n",
             "function _Alignof types are not supported at line 1, column 37",
         ),
+        (
+            "int main(void) { return (int *(void))0; }\n",
+            "function casts are not supported at line 1, column 31",
+        ),
+        (
+            "int main(void) { return sizeof(int *(void)); }\n",
+            "function sizeof types are not supported at line 1, column 37",
+        ),
+        (
+            "int main(void) { return _Alignof(int *(void)); }\n",
+            "function _Alignof types are not supported at line 1, column 39",
+        ),
+        (
+            "struct Point { int x; };\nint main(void) { return sizeof(struct Point *(void)); }\n",
+            "function sizeof types are not supported at line 2, column 46",
+        ),
+        (
+            "typedef int *IntPtr;\nint main(void) { return _Alignof(IntPtr(void)); }\n",
+            "function _Alignof types are not supported at line 2, column 40",
+        ),
+        (
+            "typedef int *IntPtr;\nint main(void) { return (IntPtr(void))0; }\n",
+            "function casts are not supported at line 2, column 32",
+        ),
+        (
+            "int main(void) { return (struct { int x; } *(void))0; }\n",
+            "function casts are not supported at line 1, column 45",
+        ),
     ];
 
     for (program, expected) in cases {
