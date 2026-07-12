@@ -1684,6 +1684,7 @@ struct Parser {
     enum_constant_scopes: Vec<HashMap<String, i64>>,
     type_alias_scopes: Vec<HashMap<String, TypeAlias>>,
     const_type_alias_scopes: Vec<HashSet<String>>,
+    qualified_type_alias_scopes: Vec<HashSet<String>>,
     next_static_local_id: usize,
     next_aggregate_type_id: usize,
     last_decl_had_initializer: bool,
@@ -1701,6 +1702,7 @@ impl Parser {
             enum_constant_scopes: vec![HashMap::new()],
             type_alias_scopes: vec![HashMap::new()],
             const_type_alias_scopes: vec![HashSet::new()],
+            qualified_type_alias_scopes: vec![HashSet::new()],
             next_static_local_id: 0,
             next_aggregate_type_id: 0,
             last_decl_had_initializer: false,
@@ -2210,10 +2212,29 @@ impl Parser {
     }
 
     fn type_alias_is_const(&self, name: &str) -> bool {
-        self.const_type_alias_scopes
+        self.type_alias_scopes
             .iter()
+            .zip(&self.const_type_alias_scopes)
             .rev()
-            .any(|scope| scope.contains(name))
+            .find_map(|(aliases, const_aliases)| {
+                aliases
+                    .contains_key(name)
+                    .then(|| const_aliases.contains(name))
+            })
+            .unwrap_or(false)
+    }
+
+    fn type_alias_is_qualified(&self, name: &str) -> bool {
+        self.type_alias_scopes
+            .iter()
+            .zip(&self.qualified_type_alias_scopes)
+            .rev()
+            .find_map(|(aliases, qualified_aliases)| {
+                aliases
+                    .contains_key(name)
+                    .then(|| qualified_aliases.contains(name))
+            })
+            .unwrap_or(false)
     }
 
     fn enum_type_is_declared(&self, name: &str) -> bool {
@@ -2357,9 +2378,18 @@ impl Parser {
                 let atomic_leading_qualifier = self.leading_type_qualifier_token();
                 let atomic_leading_const = self.consume_type_qualifiers();
                 let atomic_type_token = self.peek_located().clone();
+                let atomic_alias_is_qualified = match &atomic_type_token.kind {
+                    Token::Ident(name) => self.type_alias_is_qualified(name),
+                    _ => false,
+                };
+                let atomic_alias_is_const = match &atomic_type_token.kind {
+                    Token::Ident(name) => self.type_alias_is_const(name),
+                    _ => false,
+                };
                 let atomic_nested_start = self.pos;
                 let (mut nested_const, mut decl_type) =
                     self.parse_decl_type_with_embedded_qualifiers("_Atomic type name")?;
+                nested_const |= atomic_alias_is_const;
                 let atomic_nested_qualifier = self.tokens[atomic_nested_start..self.pos]
                     .iter()
                     .find(|token| {
@@ -2377,6 +2407,12 @@ impl Parser {
                     ));
                 }
                 if !self.check(&Token::Star) {
+                    if atomic_alias_is_qualified {
+                        return Err(Self::error_at(
+                            "qualified _Atomic types are not supported".to_string(),
+                            &atomic_type_token,
+                        ));
+                    }
                     if let Some(qualifier) = atomic_leading_qualifier.or(atomic_nested_qualifier) {
                         return Err(Self::error_at(
                             "qualified _Atomic types are not supported".to_string(),
@@ -2846,6 +2882,11 @@ impl Parser {
         self.expect(Token::Typedef)?;
         self.pending_inline_enum_constants = None;
         let mut enum_constants = None;
+        let base_start = self.pos;
+        let inherited_base_qualified = match self.peek() {
+            Token::Ident(name) => self.type_alias_is_qualified(name),
+            _ => false,
+        };
         let (base_type, alias_context, anonymous_aggregate, leading_const) = if self
             .starts_typedef_aggregate_definition()
         {
@@ -2880,11 +2921,29 @@ impl Parser {
                 leading_const,
             )
         };
+        let base_is_qualified = inherited_base_qualified
+            || self.tokens[base_start..self.pos].iter().any(|token| {
+                matches!(
+                    token.kind,
+                    Token::Const | Token::Volatile | Token::Restrict | Token::Atomic
+                )
+            });
 
         loop {
-            let (alias_name, alias, alias_is_const) =
-                self.parse_typedef_declarator(base_type.clone(), leading_const, alias_context)?;
-            self.register_typedef_alias(alias_name, alias, alias_is_const, anonymous_aggregate)?;
+            let (alias_name, alias, alias_is_const, alias_is_qualified) = self
+                .parse_typedef_declarator(
+                    base_type.clone(),
+                    leading_const,
+                    base_is_qualified,
+                    alias_context,
+                )?;
+            self.register_typedef_alias(
+                alias_name,
+                alias,
+                alias_is_const,
+                alias_is_qualified,
+                anonymous_aggregate,
+            )?;
             if !self.matches(&Token::Comma) {
                 break;
             }
@@ -2908,8 +2967,9 @@ impl Parser {
         &mut self,
         base_type: DeclType,
         leading_const: bool,
+        base_is_qualified: bool,
         alias_context: &str,
-    ) -> CustResult<(String, TypeAlias, bool)> {
+    ) -> CustResult<(String, TypeAlias, bool, bool)> {
         if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
             if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
                 return Err(Self::error_at(
@@ -2935,6 +2995,8 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        let post_star_qualified =
+            has_explicit_star && self.leading_type_qualifier_token().is_some();
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
         let alias_name = self.parse_declarator_name(alias_context)?;
         let mut alias = if has_explicit_star {
@@ -3009,7 +3071,12 @@ impl Parser {
                 self.peek_located(),
             ));
         }
-        Ok((alias_name, alias, alias_is_const))
+        let alias_is_qualified = if has_explicit_star {
+            post_star_qualified
+        } else {
+            base_is_qualified
+        };
+        Ok((alias_name, alias, alias_is_const, alias_is_qualified))
     }
 
     fn register_typedef_alias(
@@ -3017,6 +3084,7 @@ impl Parser {
         alias_name: String,
         alias: TypeAlias,
         alias_is_const: bool,
+        alias_is_qualified: bool,
         anonymous_aggregate: bool,
     ) -> CustResult<()> {
         let anonymous_type_name = match (anonymous_aggregate, &alias) {
@@ -3043,7 +3111,14 @@ impl Parser {
                 .const_type_alias_scopes
                 .last_mut()
                 .expect("parser always has a const typedef scope");
-            const_scope.insert(alias_name);
+            const_scope.insert(alias_name.clone());
+        }
+        if alias_is_qualified {
+            let qualified_scope = self
+                .qualified_type_alias_scopes
+                .last_mut()
+                .expect("parser always has a qualified typedef scope");
+            qualified_scope.insert(alias_name);
         }
         Ok(())
     }
@@ -3853,6 +3928,7 @@ impl Parser {
         self.expect_opening_brace_after(context)?;
         self.type_alias_scopes.push(HashMap::new());
         self.const_type_alias_scopes.push(HashSet::new());
+        self.qualified_type_alias_scopes.push(HashSet::new());
         self.enum_type_scopes.push(HashSet::new());
         self.enum_constant_scopes.push(HashMap::new());
         self.aggregate_type_scopes.push(HashMap::new());
@@ -3874,6 +3950,7 @@ impl Parser {
         self.aggregate_type_scopes.pop();
         self.enum_constant_scopes.pop();
         self.enum_type_scopes.pop();
+        self.qualified_type_alias_scopes.pop();
         self.const_type_alias_scopes.pop();
         self.type_alias_scopes.pop();
         result

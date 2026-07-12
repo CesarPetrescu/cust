@@ -1684,6 +1684,40 @@ fn rejects_postfix_qualified_atomic_types_with_context() {
 }
 
 #[test]
+fn rejects_qualified_atomic_typedef_arguments_with_context() {
+    let cases = [
+        (
+            "typedef const int ConstInt;\n_Atomic(ConstInt) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 2, column 9",
+        ),
+        (
+            "typedef volatile int VolatileInt;\nint main(void) { return sizeof(_Atomic(VolatileInt)); }\n",
+            "qualified _Atomic types are not supported at line 2, column 40",
+        ),
+        (
+            "typedef int * const ConstPtr;\nint main(void) { return _Alignof(_Atomic(ConstPtr)); }\n",
+            "qualified _Atomic types are not supported at line 2, column 42",
+        ),
+        (
+            "typedef int * volatile VolatilePtr;\nint main(void) { return ((_Atomic(VolatilePtr)){0}) == 0; }\n",
+            "qualified _Atomic types are not supported at line 2, column 35",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn supports_atomic_typedef_pointers_to_qualified_pointees() {
+    let program = include_str!("fixtures/valid/atomic_typedef_qualified_pointees.c");
+
+    assert_eq!(interpret(program).unwrap(), 22);
+}
+
+#[test]
 fn rejects_direct_atomic_array_types_with_context() {
     let cases = [
         (

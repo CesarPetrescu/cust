@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 ## Latest autonomous verification
+
+All required verification passed after the 2026-07-13 qualified atomic typedef-argument run. Local C11 differential probes confirmed that `_Atomic(Alias)` is invalid when `Alias` denotes a top-level `const`/`volatile` scalar or pointer slot, while aliases for pointers to qualified pointees remain valid. TDD RED captured Cust accepting all four invalid alias forms and a lexical-shadowing failure. GREEN adds scope-aware top-level-qualified typedef metadata, rejects invalid atomic arguments at the alias token across declarations, `sizeof`, `_Alignof`, and compound literals, preserves const pointee metadata for `_Atomic(ConstScalar *)`, and lets an inner unqualified alias shadow an outer qualified alias.
+
+Verified commands: clean baseline `cargo test`; local `cc -std=c11 -Wall -Wextra -Werror -fsyntax-only` differential matrix; focused RED/GREEN qualified-atomic typedef tests; atomic regression filter; `cargo test --test c_compat -- --nocapture`; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; and `docker compose run --rm cust`.
 
 All required verification passed after the 2026-07-12 nested/qualified atomic-type diagnostic run. Local C11 differential probes confirmed that `_Atomic(_Atomic(int))`, `_Atomic(const int)`, postfix-qualified scalar arguments, and atomic-qualified pointer arguments such as `_Atomic(int * const)` are invalid, while pointee-qualified `_Atomic(const int *)` remains valid. TDD RED captured accepted-invalid declaration, `sizeof`, `_Alignof`, and compound-literal routes. GREEN now rejects nested specifiers at the inner `_Atomic` token and qualified atomic arguments at the relevant qualifier token, while preserving bare `_Atomic`, atomic pointers, and pointee qualifiers.
 

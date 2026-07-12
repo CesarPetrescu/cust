@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-12): nested and directly qualified C11 atomic type arguments now report source-located diagnostics instead of being accepted. `_Atomic(_Atomic(int))` is rejected at the inner specifier; leading/postfix scalar qualifiers and post-star pointer-slot qualifiers are rejected at the qualifier; pointee-qualified `_Atomic(const int *)`, ordinary `_Atomic(int *)`, and bare `_Atomic` qualifier syntax remain supported. Continue the P0 correctness track by probing qualifier metadata carried through typedef aliases, especially volatile-qualified scalar and pointer aliases used as `_Atomic(Alias)` arguments.
+Latest update (2026-07-13): `_Atomic(Alias)` now rejects typedef aliases whose aliased type is top-level `const`/`volatile`, including qualified scalar aliases and qualified pointer-slot aliases, at the alias token across declaration and type-query/compound-literal routes. Scope-aware metadata preserves lexical alias shadowing and distinguishes a qualified pointer slot from an unqualified pointer to a qualified pointee. Continue P0 atomic conformance by probing qualifier propagation through alias chains, comma-separated typedef declarators, and aliases of `_Atomic(type-name)` itself.
 
 ## P0 — correctness and developer trust
 
