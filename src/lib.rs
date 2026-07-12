@@ -2353,6 +2353,12 @@ impl Parser {
                 let (mut nested_const, mut decl_type) =
                     self.parse_decl_type_with_embedded_qualifiers("_Atomic type name")?;
                 nested_const |= atomic_leading_const;
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "array _Atomic types are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 if self.matches(&Token::Star) {
                     let pointee = match decl_type {
                         DeclType::Scalar(ty) => PointeeType::Scalar(ty),

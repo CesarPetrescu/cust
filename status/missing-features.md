@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-12): invalid C11 atomic array-typedef arguments such as `typedef int Scores[2]; _Atomic(Scores) value;` now report `array _Atomic types are not supported` at the alias token across declarations, `sizeof`, `_Alignof`, and compound-literal routing instead of being accepted as ordinary arrays. Continue the P0 parser-recovery/correctness track only for newly discovered generic fallthroughs or C-subset mismatches; the next concrete probe is direct atomic array type syntax such as `_Atomic(int[2])`, which should receive the same targeted boundary diagnostic at the array suffix.
+Latest update (2026-07-12): direct C11 atomic array type syntax such as `_Atomic(int[2])` and `_Atomic(struct Point[2])` now reports `array _Atomic types are not supported` at the first `[` across declarations, `sizeof`, `_Alignof`, and compound-literal routing instead of falling through to a generic closing-parenthesis diagnostic. Continue the P0 correctness track with the newly confirmed accepted-invalid nested/qualified atomic forms: `_Atomic(_Atomic(int))` and `_Atomic(const int)` should be rejected at the inner `_Atomic`/qualifier while preserving supported `_Atomic(int *)` and bare `_Atomic` qualifier syntax.
 
 ## P0 — correctness and developer trust
 
