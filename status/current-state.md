@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 ## Latest autonomous verification
+
+All required verification passed after the 2026-07-14 derived-declarator conformance run for anonymous aggregate atomic value aliases. Cust already preserves the alias's unique anonymous aggregate identity when deriving one-level pointers and one-dimensional fixed arrays, including global objects, aggregate fields, named/unnamed parameters, compatible prototypes/definitions, pointer arithmetic, array-parameter decay, `sizeof`, and `_Alignof`. Exact regressions also confirm that pointer-to-pointer, pointer-array, and multidimensional-array declarators retain Cust's targeted one-level/fixed-array diagnostics. GCC and Clang both compile and execute the warning-free fixture with exit code 127. This was deliberate conformance coverage with no production-code change.
+
+Verified commands: clean baseline `cargo test`; focused `cargo test --test interpreter atomic_anonymous_aggregate_value -- --nocapture`; local GCC/Clang `-std=c11 -Wall -Wextra -Werror` fixture builds and execution; `cargo test --test c_compat -- --nocapture`; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust`; and `git diff --check`.
 
 All required verification passed after the 2026-07-13 anonymous-aggregate atomic-value typedef-alias conformance run. Cust already preserves one anonymous aggregate identity when `_Atomic(struct { ... })` or `_Atomic(union { ... })` is captured in a typedef alias, including comma-separated aliases, global/local objects, aggregate fields, named definitions paired with unnamed prototypes, same-alias value copies, `sizeof`, `_Alignof`, top-level atomic qualification for nested-atomic rejection, and lexical shadowing. GCC and Clang both compile and execute the warning-free fixture with exit code 11. This was deliberate conformance coverage with no production-code change.
 

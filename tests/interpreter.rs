@@ -1990,6 +1990,37 @@ fn supports_atomic_anonymous_aggregate_value_typedef_aliases() {
 }
 
 #[test]
+fn supports_derived_declarators_from_atomic_anonymous_aggregate_value_aliases() {
+    let program =
+        include_str!("fixtures/valid/atomic_anonymous_aggregate_value_alias_derived_declarators.c");
+
+    assert_eq!(interpret(program).unwrap(), 127);
+}
+
+#[test]
+fn rejects_unsupported_declarators_from_atomic_anonymous_aggregate_value_aliases() {
+    let cases = [
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\nAtomicAnonValue **cursor;\nint main(void) { return 0; }\n",
+            "pointer-to-pointer declarations are not supported at line 2, column 18",
+        ),
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\nAtomicAnonValue *cursors[2];\nint main(void) { return 0; }\n",
+            "pointer array declarations are not supported at line 2, column 25",
+        ),
+        (
+            "typedef _Atomic(union { int value; char tag; }) AtomicAnonUnion;\nAtomicAnonUnion values[2][2];\nint main(void) { return 0; }\n",
+            "multidimensional array declarations are not supported at line 2, column 26",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_atomic_wrapping_of_atomic_anonymous_aggregate_value_aliases() {
     let program = "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
                    _Atomic(AtomicAnonValue) nested;\n\
