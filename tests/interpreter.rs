@@ -1828,6 +1828,48 @@ fn supports_atomic_aggregate_alias_declaration_boundaries() {
 }
 
 #[test]
+fn rejects_qualified_and_atomic_enum_aliases_as_atomic_arguments() {
+    let cases = [
+        (
+            "enum State { READY = 1 };\ntypedef const enum State ConstState;\n_Atomic(ConstState) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 3, column 9",
+        ),
+        (
+            "enum State { READY = 1 };\ntypedef _Atomic(enum State) AtomicState;\n_Atomic(AtomicState) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 3, column 9",
+        ),
+        (
+            "enum State { READY = 1 };\ntypedef const enum State ConstState;\nstruct Box {\n    _Atomic(ConstState) value;\n};\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 4, column 13",
+        ),
+        (
+            "enum State { READY = 1 };\ntypedef const enum State ConstState;\nint take(_Atomic(ConstState) value);\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 3, column 18",
+        ),
+        (
+            "enum State { READY = 1 };\ntypedef const enum State ConstState;\nint main(void) { return sizeof(_Atomic(ConstState)); }\n",
+            "qualified _Atomic types are not supported at line 3, column 40",
+        ),
+        (
+            "enum State { READY = 1 };\ntypedef _Atomic(enum State) AtomicState;\nint main(void) { return _Alignof(_Atomic(AtomicState)); }\n",
+            "qualified _Atomic types are not supported at line 3, column 42",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn supports_direct_and_typedef_backed_atomic_enum_types() {
+    let program = include_str!("fixtures/valid/atomic_enum_types.c");
+
+    assert_eq!(interpret(program).unwrap(), 28);
+}
+
+#[test]
 fn rejects_direct_atomic_array_types_with_context() {
     let cases = [
         (

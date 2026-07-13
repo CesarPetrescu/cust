@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-13 aggregate atomic-alias field/return conformance run after clean startup inspection, local GCC/Clang C11 differential probing, focused tests, full local Rust verification, and both required Docker commands.
+None. Last reviewed in the 2026-07-13 direct/typedef-backed atomic enum conformance run after clean startup inspection, local GCC/Clang C11 differential probing, focused interpreter/compiler-oracle tests, full local Rust verification, and both required Docker commands.
 
 ## Blocker template
 
