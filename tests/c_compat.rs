@@ -49,6 +49,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/atomic_inline_enum_type_definitions.c",
     "tests/fixtures/compat/valid/atomic_inline_aggregate_type_definitions.c",
     "tests/fixtures/compat/valid/atomic_anonymous_aggregate_type_definitions.c",
+    "tests/fixtures/compat/valid/atomic_anonymous_aggregate_pointer_type_specifiers.c",
     "tests/fixtures/compat/valid/atomic_aggregate_alias_declarations.c",
     "tests/fixtures/compat/valid/restrict_pointer_qualifiers.c",
     "tests/fixtures/compat/valid/designated_initializers.c",

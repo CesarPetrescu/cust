@@ -2,10 +2,11 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-13): anonymous `struct`/`union` definitions inside `_Atomic(type-name)` now work across global/local objects, aggregate fields, parameters, `sizeof`, and `_Alignof`. Every spelling retains a unique anonymous aggregate identity, qualified/nested forms retain exact diagnostics, and warning-free GCC/Clang compiler-oracle coverage uses ABI-independent size/alignment relationships. The next atomic conformance boundary is anonymous aggregate pointer arguments inside `_Atomic(type-name)` plus their unsupported deeper-pointer/array/function suffix diagnostics.
+Latest update (2026-07-13): anonymous aggregate pointer arguments inside `_Atomic(type-name)` are now covered across declarations, aggregate fields, parameters, `sizeof`, and `_Alignof`. Unique anonymous pointee identities, const-pointee write protection, and exact second-star/pointer-array/function-suffix diagnostics are locked in; warning-free GCC/Clang compiler-oracle coverage uses ABI-independent pointer size/alignment relationships. The next atomic conformance boundary is typedef aliases of anonymous aggregate atomic pointer types, including alias reuse, declaration lists, signature compatibility, and lexical shadowing.
 
 ## P0 — correctness and developer trust
 
+- [x] Anonymous aggregate pointer arguments inside `_Atomic(type-name)` across declarations, aggregate fields, parameters, `sizeof`, and `_Alignof`, with unique pointee identities, const-pointee metadata, exact unsupported suffix diagnostics, and warning-free native-oracle coverage for compatible contexts.
 - [x] Anonymous aggregate definitions inside `_Atomic(type-name)` across objects, aggregate fields, parameters, `sizeof`, and `_Alignof`, with unique anonymous type identities, exact qualified/nested diagnostics, and warning-free compiler-oracle coverage for native-compatible contexts.
 - [x] Parser errors with source spans: line, column, token context
 - [x] Exact missing-RHS diagnostics for assignment operators: malformed scalar, dereference, array, struct-field, and expression-level assignments such as `value = ;`, `value += )`, and `value <<= }` report `expected expression after assignment operator '<op>', found ...` at the delimiter/terminator instead of a generic primary-expression diagnostic.

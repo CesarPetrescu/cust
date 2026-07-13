@@ -1967,6 +1967,62 @@ fn supports_atomic_anonymous_aggregate_type_definitions() {
 }
 
 #[test]
+fn supports_atomic_anonymous_aggregate_pointer_type_specifiers() {
+    let program =
+        include_str!("fixtures/valid/atomic_anonymous_aggregate_pointer_type_specifiers.c");
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn rejects_unsupported_atomic_anonymous_aggregate_pointer_suffixes_with_context() {
+    let cases = [
+        (
+            "int main(void) { return sizeof(_Atomic(struct { int value; } **)); }\n",
+            "pointer-to-pointer _Atomic types are not supported at line 1, column 63",
+        ),
+        (
+            "int main(void) { return _Alignof(_Atomic(const union { int value; char tag; } *[2])); }\n",
+            "pointer array _Atomic types are not supported at line 1, column 80",
+        ),
+        (
+            "int main(void) { return sizeof(_Atomic(struct { int value; } *(void))); }\n",
+            "function _Atomic types are not supported at line 1, column 63",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn keeps_atomic_anonymous_aggregate_pointer_pointee_identities_distinct() {
+    let program = "int inspect(_Atomic(struct { int value; } *) cursor);\n\
+                   int inspect(_Atomic(struct { int value; } *) cursor);\n\
+                   int main(void) { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "function prototype for 'inspect' conflicts with previous declaration"
+    );
+}
+
+#[test]
+fn rejects_writes_through_const_atomic_anonymous_aggregate_pointers() {
+    let program = "int main(void) {\n\
+                       _Atomic(const union { int value; char tag; } *) cursor = 0;\n\
+                       cursor->value = 1;\n\
+                       return 0;\n\
+                   }\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
+}
+
+#[test]
 fn rejects_qualified_and_nested_atomic_anonymous_aggregate_types_with_context() {
     let cases = [
         (
