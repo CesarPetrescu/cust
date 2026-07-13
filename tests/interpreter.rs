@@ -1960,6 +1960,43 @@ fn keeps_atomic_inline_aggregate_tags_lexically_scoped() {
 }
 
 #[test]
+fn supports_atomic_anonymous_aggregate_type_definitions() {
+    let program = include_str!("fixtures/valid/atomic_anonymous_aggregate_type_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn rejects_qualified_and_nested_atomic_anonymous_aggregate_types_with_context() {
+    let cases = [
+        (
+            "_Atomic(const struct { int value; }) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 1, column 9",
+        ),
+        (
+            "_Atomic(_Atomic(union { int value; char tag; })) value;\nint main(void) { return 0; }\n",
+            "nested _Atomic type specifiers are not supported at line 1, column 9",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn keeps_atomic_anonymous_aggregate_type_identities_distinct() {
+    let program = include_str!("fixtures/invalid/atomic_anonymous_aggregate_distinct_types.c");
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string().contains("cannot assign struct"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_direct_atomic_array_types_with_context() {
     let cases = [
         (

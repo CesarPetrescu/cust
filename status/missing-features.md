@@ -2,10 +2,11 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-13): inline named `struct`/`union` definitions inside `_Atomic(type-name)` now have global/local object, aggregate-field, parameter, `sizeof`, `_Alignof`, exact qualified/nested diagnostic, and lexical tag-scope coverage. GCC/Clang differential probes and Cust's focused tests confirm the existing recursive parser already preserves these routes, so no production change was required. Continue P0 atomic conformance with anonymous aggregate definitions inside `_Atomic(type-name)`: native GCC/Clang accept `_Atomic(struct { int value; })`, while Cust currently reports `expected _Atomic type name, found LBrace`.
+Latest update (2026-07-13): anonymous `struct`/`union` definitions inside `_Atomic(type-name)` now work across global/local objects, aggregate fields, parameters, `sizeof`, and `_Alignof`. Every spelling retains a unique anonymous aggregate identity, qualified/nested forms retain exact diagnostics, and warning-free GCC/Clang compiler-oracle coverage uses ABI-independent size/alignment relationships. The next atomic conformance boundary is anonymous aggregate pointer arguments inside `_Atomic(type-name)` plus their unsupported deeper-pointer/array/function suffix diagnostics.
 
 ## P0 — correctness and developer trust
 
+- [x] Anonymous aggregate definitions inside `_Atomic(type-name)` across objects, aggregate fields, parameters, `sizeof`, and `_Alignof`, with unique anonymous type identities, exact qualified/nested diagnostics, and warning-free compiler-oracle coverage for native-compatible contexts.
 - [x] Parser errors with source spans: line, column, token context
 - [x] Exact missing-RHS diagnostics for assignment operators: malformed scalar, dereference, array, struct-field, and expression-level assignments such as `value = ;`, `value += )`, and `value <<= }` report `expected expression after assignment operator '<op>', found ...` at the delimiter/terminator instead of a generic primary-expression diagnostic.
 - [x] Add token context snippets to lexer errors

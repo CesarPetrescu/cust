@@ -2488,15 +2488,22 @@ impl Parser {
                     AggregateKind::Struct
                 };
                 let keyword = kind.keyword();
-                if matches!(
-                    (
-                        self.peek(),
-                        self.tokens.get(self.pos + 1).map(|token| &token.kind)
-                    ),
-                    (Token::Ident(_), Some(Token::LBrace))
-                ) {
-                    let (internal_type_name, _, _) =
-                        self.parse_aggregate_definition_body_after_keyword(kind, false, false)?;
+                if self.check(&Token::LBrace)
+                    || matches!(
+                        (
+                            self.peek(),
+                            self.tokens.get(self.pos + 1).map(|token| &token.kind)
+                        ),
+                        (Token::Ident(_), Some(Token::LBrace))
+                    )
+                {
+                    let allow_anonymous = self.check(&Token::LBrace);
+                    let (internal_type_name, _, _) = self
+                        .parse_aggregate_definition_body_after_keyword(
+                            kind,
+                            false,
+                            allow_anonymous,
+                        )?;
                     saw_const |= self.consume_type_qualifiers();
                     return Ok((saw_const, DeclType::Struct(internal_type_name)));
                 }
