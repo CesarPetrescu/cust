@@ -1870,6 +1870,51 @@ fn supports_direct_and_typedef_backed_atomic_enum_types() {
 }
 
 #[test]
+fn supports_atomic_inline_enum_type_definitions() {
+    let program = include_str!("fixtures/valid/atomic_inline_enum_type_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 48);
+}
+
+#[test]
+fn rejects_qualified_and_nested_atomic_inline_enum_types_with_context() {
+    let cases = [
+        (
+            "_Atomic(const enum QualifiedInline { QUALIFIED = 1 }) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 1, column 9",
+        ),
+        (
+            "_Atomic(_Atomic(enum NestedInline { NESTED = 1 })) value;\nint main(void) { return 0; }\n",
+            "nested _Atomic type specifiers are not supported at line 1, column 9",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn keeps_atomic_inline_enum_constants_lexically_scoped() {
+    let cases = [
+        (
+            "int read(_Atomic(enum ParamAtomic { PARAM_ATOMIC = 6 }) value) {\n    return value + PARAM_ATOMIC;\n}\nint main(void) { return PARAM_ATOMIC; }\n",
+            "undefined variable 'PARAM_ATOMIC'",
+        ),
+        (
+            "int main(void) {\n    {\n        _Atomic(enum BlockAtomic { BLOCK_ATOMIC = 7 }) value = BLOCK_ATOMIC;\n    }\n    return BLOCK_ATOMIC;\n}\n",
+            "undefined variable 'BLOCK_ATOMIC'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_direct_atomic_array_types_with_context() {
     let cases = [
         (
