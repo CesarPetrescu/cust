@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-13): `_Atomic(Alias)` qualifier metadata is now covered through chained `const`/`volatile` scalar aliases, chained qualified pointer-slot aliases, comma-separated typedef declarators, aliases of `_Atomic(type-name)`, and nested lexical shadowing. Exact diagnostics and a warning-free native compiler-oracle fixture confirm that qualified pointer slots remain distinct from pointers to qualified pointees. Continue P0 atomic conformance by probing qualified aggregate aliases and atomic-qualified aliases in function parameter/prototype contexts.
+Latest update (2026-07-13): `_Atomic(Alias)` qualifier metadata is now covered for qualified aggregate aliases and aliases of atomic aggregate types in named/unnamed function parameter and prototype contexts. Exact alias-token diagnostics, nested lexical shadowing, unqualified pointer aliases to const aggregate pointees, pointer parameters to atomic aggregate aliases, and warning-free compiler-oracle behavior are locked in. Continue P0 atomic conformance by probing aggregate-field and function-return declaration contexts.
 
 ## P0 — correctness and developer trust
 
@@ -52,6 +52,7 @@ Latest update (2026-07-13): `_Atomic(Alias)` qualifier metadata is now covered t
 - [x] Void array/function cast/type-query suffix diagnostics: unsupported forms such as `(void(void))0`, `sizeof(void(void))`, `(void[2])0`, and `_Alignof(void[2])` now inspect the suffix after `void` and report source-located function-type or route-specific void-array diagnostics instead of generic cast delimiters or misleading bare-`void` errors, while preserving the dedicated void-pointer boundary.
 - [x] Atomic array-typedef argument diagnostics: invalid forms such as `_Atomic(Scores) value`, `sizeof(_Atomic(Scores))`, `_Alignof(_Atomic(Scores))`, and `((_Atomic(Scores)){...})` now report `array _Atomic types are not supported` at the array alias token instead of accepting the alias as an ordinary array.
 - [x] Nested/qualified atomic argument diagnostics: invalid `_Atomic(_Atomic(int))`, `_Atomic(const int)`, `_Atomic(int const)`, `_Atomic(int volatile)`, and `_Atomic(int * const)` forms report source-located nested/qualified diagnostics across declarations, `sizeof`, `_Alignof`, and compound-literal routing, while pointee-qualified atomic pointer arguments remain supported.
+- [x] Qualified aggregate atomic-alias function-signature conformance: aliases such as `typedef const struct Point ConstPoint` are rejected at the alias token inside `_Atomic(ConstPoint)` object, named-parameter, and unnamed-prototype declarations; aliases of `_Atomic(struct Point)` cannot be wrapped in a second atomic specifier; unqualified pointer aliases to const aggregate pointees, pointer parameters to atomic aggregate aliases, and inner unqualified aggregate alias shadowing remain supported with compiler-oracle coverage.
 - [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 

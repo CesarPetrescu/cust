@@ -1760,6 +1760,40 @@ fn supports_mixed_atomic_typedef_declarators_and_shadowing() {
 }
 
 #[test]
+fn rejects_qualified_aggregate_atomic_aliases_in_function_signatures() {
+    let cases = [
+        (
+            "struct Point { int x; };\ntypedef const struct Point ConstPoint;\n_Atomic(ConstPoint) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 3, column 9",
+        ),
+        (
+            "struct Point { int x; };\ntypedef const struct Point ConstPoint;\nint take(_Atomic(ConstPoint) value);\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 3, column 18",
+        ),
+        (
+            "struct Point { int x; };\ntypedef const struct Point ConstPoint;\nint take(_Atomic(ConstPoint));\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 3, column 18",
+        ),
+        (
+            "struct Point { int x; };\ntypedef _Atomic(struct Point) AtomicPoint;\nint take(_Atomic(AtomicPoint) value);\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 3, column 18",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn supports_atomic_aggregate_alias_signature_boundaries() {
+    let program = include_str!("fixtures/valid/atomic_aggregate_alias_signatures.c");
+
+    assert_eq!(interpret(program).unwrap(), 9);
+}
+
+#[test]
 fn rejects_direct_atomic_array_types_with_context() {
     let cases = [
         (
