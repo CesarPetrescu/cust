@@ -45,6 +45,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/extern_global_declarations.c",
     "tests/fixtures/compat/valid/volatile_type_qualifiers.c",
     "tests/fixtures/compat/valid/atomic_type_qualifiers.c",
+    "tests/fixtures/compat/valid/atomic_aggregate_alias_declarations.c",
     "tests/fixtures/compat/valid/restrict_pointer_qualifiers.c",
     "tests/fixtures/compat/valid/designated_initializers.c",
     "tests/fixtures/compat/valid/direct_enum_types.c",

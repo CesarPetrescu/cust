@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-13): `_Atomic(Alias)` qualifier metadata is now covered for qualified aggregate aliases and aliases of atomic aggregate types in named/unnamed function parameter and prototype contexts. Exact alias-token diagnostics, nested lexical shadowing, unqualified pointer aliases to const aggregate pointees, pointer parameters to atomic aggregate aliases, and warning-free compiler-oracle behavior are locked in. Continue P0 atomic conformance by probing aggregate-field and function-return declaration contexts.
+Latest update (2026-07-13): `_Atomic(Alias)` qualifier metadata is now covered for qualified aggregate aliases and aliases of atomic aggregate types across objects, function parameters/prototypes, aggregate fields, and function returns. Exact alias-token diagnostics and valid unqualified-pointer-to-qualified-pointee forms are locked in, with compiler-oracle fixtures limited to warning-free contexts where native `-Werror` permits them. Continue P0 atomic conformance by probing direct and typedef-backed enum atomic types.
 
 ## P0 — correctness and developer trust
 
@@ -53,6 +53,7 @@ Latest update (2026-07-13): `_Atomic(Alias)` qualifier metadata is now covered f
 - [x] Atomic array-typedef argument diagnostics: invalid forms such as `_Atomic(Scores) value`, `sizeof(_Atomic(Scores))`, `_Alignof(_Atomic(Scores))`, and `((_Atomic(Scores)){...})` now report `array _Atomic types are not supported` at the array alias token instead of accepting the alias as an ordinary array.
 - [x] Nested/qualified atomic argument diagnostics: invalid `_Atomic(_Atomic(int))`, `_Atomic(const int)`, `_Atomic(int const)`, `_Atomic(int volatile)`, and `_Atomic(int * const)` forms report source-located nested/qualified diagnostics across declarations, `sizeof`, `_Alignof`, and compound-literal routing, while pointee-qualified atomic pointer arguments remain supported.
 - [x] Qualified aggregate atomic-alias function-signature conformance: aliases such as `typedef const struct Point ConstPoint` are rejected at the alias token inside `_Atomic(ConstPoint)` object, named-parameter, and unnamed-prototype declarations; aliases of `_Atomic(struct Point)` cannot be wrapped in a second atomic specifier; unqualified pointer aliases to const aggregate pointees, pointer parameters to atomic aggregate aliases, and inner unqualified aggregate alias shadowing remain supported with compiler-oracle coverage.
+- [x] Qualified aggregate atomic-alias field/return conformance: `_Atomic(ConstPoint)` and `_Atomic(AtomicPoint)` reject qualified or already-atomic aggregate aliases at the alias token in aggregate fields and function return declarations/definitions, while `_Atomic(Point)`, `_Atomic(View)`, and pointers to atomic aggregate aliases remain supported. Warning-free compiler-oracle coverage uses aggregate-field size relationships; atomic-qualified return coverage remains interpreter-only because GCC reports `-Werror=ignored-qualifiers`.
 - [x] Initial test fixtures for valid and invalid programs
 - [x] Improve local Docker test automation for repeatable cron runs
 
