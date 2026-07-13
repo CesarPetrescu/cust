@@ -1975,6 +1975,54 @@ fn supports_atomic_anonymous_aggregate_pointer_type_specifiers() {
 }
 
 #[test]
+fn supports_atomic_anonymous_aggregate_pointer_typedef_aliases() {
+    let program =
+        include_str!("fixtures/valid/atomic_anonymous_aggregate_pointer_typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 12);
+}
+
+#[test]
+fn rejects_reassignment_of_const_atomic_anonymous_aggregate_pointer_alias_slots() {
+    let program = "typedef _Atomic(struct { int value; } *) AtomicAnonPtr;\n\
+                   typedef AtomicAnonPtr const FixedAtomicAnonPtr;\n\
+                   int main(void) {\n\
+                       FixedAtomicAnonPtr cursor = 0;\n\
+                       cursor = 0;\n\
+                       return 0;\n\
+                   }\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign to const variable 'cursor'");
+}
+
+#[test]
+fn rejects_writes_through_const_atomic_anonymous_aggregate_pointer_aliases() {
+    let program = "typedef _Atomic(const union { int value; char tag; } *) AtomicConstAnonPtr;\n\
+                   int main(void) {\n\
+                       AtomicConstAnonPtr cursor = 0;\n\
+                       cursor->value = 1;\n\
+                       return 0;\n\
+                   }\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
+}
+
+#[test]
+fn rejects_atomic_wrapping_of_atomic_anonymous_aggregate_pointer_aliases() {
+    let program = "typedef _Atomic(struct { int value; } *) AtomicAnonPtr;\n\
+                   _Atomic(AtomicAnonPtr) cursor;\n\
+                   int main(void) { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "qualified _Atomic types are not supported at line 2, column 9"
+    );
+}
+
+#[test]
 fn rejects_unsupported_atomic_anonymous_aggregate_pointer_suffixes_with_context() {
     let cases = [
         (

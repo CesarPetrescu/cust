@@ -2,10 +2,11 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-13): anonymous aggregate pointer arguments inside `_Atomic(type-name)` are now covered across declarations, aggregate fields, parameters, `sizeof`, and `_Alignof`. Unique anonymous pointee identities, const-pointee write protection, and exact second-star/pointer-array/function-suffix diagnostics are locked in; warning-free GCC/Clang compiler-oracle coverage uses ABI-independent pointer size/alignment relationships. The next atomic conformance boundary is typedef aliases of anonymous aggregate atomic pointer types, including alias reuse, declaration lists, signature compatibility, and lexical shadowing.
+Latest update (2026-07-13): typedef aliases of anonymous aggregate atomic pointer types are now covered across comma-separated alias declarations, global/local objects, named/unnamed parameters, compatible prototypes/definitions, `sizeof`, and `_Alignof`. Alias reuse preserves one anonymous pointee identity; const pointees, const pointer slots, top-level atomic qualification, and lexical shadowing remain distinct. Warning-free GCC/Clang compiler-oracle coverage returns the same exit code as Cust. The next atomic conformance boundary is typedef aliases of anonymous aggregate atomic value types.
 
 ## P0 — correctness and developer trust
 
+- [x] Typedef aliases of anonymous aggregate atomic pointer types, including comma-separated aliases, alias identity reuse, named/unnamed signature compatibility, object/type-query use, const-pointee and const-slot boundaries, double-atomic rejection, lexical shadowing, and warning-free native-oracle coverage.
 - [x] Anonymous aggregate pointer arguments inside `_Atomic(type-name)` across declarations, aggregate fields, parameters, `sizeof`, and `_Alignof`, with unique pointee identities, const-pointee metadata, exact unsupported suffix diagnostics, and warning-free native-oracle coverage for compatible contexts.
 - [x] Anonymous aggregate definitions inside `_Atomic(type-name)` across objects, aggregate fields, parameters, `sizeof`, and `_Alignof`, with unique anonymous type identities, exact qualified/nested diagnostics, and warning-free compiler-oracle coverage for native-compatible contexts.
 - [x] Parser errors with source spans: line, column, token context
