@@ -51,6 +51,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/atomic_anonymous_aggregate_type_definitions.c",
     "tests/fixtures/compat/valid/atomic_anonymous_aggregate_pointer_type_specifiers.c",
     "tests/fixtures/compat/valid/atomic_anonymous_aggregate_pointer_typedef_aliases.c",
+    "tests/fixtures/compat/valid/atomic_anonymous_aggregate_value_typedef_aliases.c",
     "tests/fixtures/compat/valid/atomic_aggregate_alias_declarations.c",
     "tests/fixtures/compat/valid/restrict_pointer_qualifiers.c",
     "tests/fixtures/compat/valid/designated_initializers.c",

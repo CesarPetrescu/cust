@@ -1983,6 +1983,26 @@ fn supports_atomic_anonymous_aggregate_pointer_typedef_aliases() {
 }
 
 #[test]
+fn supports_atomic_anonymous_aggregate_value_typedef_aliases() {
+    let program = include_str!("fixtures/valid/atomic_anonymous_aggregate_value_typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 11);
+}
+
+#[test]
+fn rejects_atomic_wrapping_of_atomic_anonymous_aggregate_value_aliases() {
+    let program = "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+                   _Atomic(AtomicAnonValue) nested;\n\
+                   int main(void) { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "qualified _Atomic types are not supported at line 2, column 9"
+    );
+}
+
+#[test]
 fn rejects_reassignment_of_const_atomic_anonymous_aggregate_pointer_alias_slots() {
     let program = "typedef _Atomic(struct { int value; } *) AtomicAnonPtr;\n\
                    typedef AtomicAnonPtr const FixedAtomicAnonPtr;\n\
