@@ -1915,6 +1915,51 @@ fn keeps_atomic_inline_enum_constants_lexically_scoped() {
 }
 
 #[test]
+fn supports_atomic_inline_aggregate_type_definitions() {
+    let program = include_str!("fixtures/valid/atomic_inline_aggregate_type_definitions.c");
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn rejects_qualified_and_nested_atomic_inline_aggregate_types_with_context() {
+    let cases = [
+        (
+            "_Atomic(const struct QualifiedInline { int value; }) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 1, column 9",
+        ),
+        (
+            "_Atomic(_Atomic(union NestedInline { int value; char tag; })) value;\nint main(void) { return 0; }\n",
+            "nested _Atomic type specifiers are not supported at line 1, column 9",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn keeps_atomic_inline_aggregate_tags_lexically_scoped() {
+    let cases = [
+        (
+            "int read(_Atomic(struct ParamAtomic { int value; }) value) {\n    return sizeof(value) == sizeof(struct ParamAtomic);\n}\nint main(void) { return sizeof(struct ParamAtomic); }\n",
+            "undefined struct type 'ParamAtomic'",
+        ),
+        (
+            "int main(void) {\n    {\n        _Atomic(union BlockAtomic { int value; char tag; }) value;\n    }\n    return sizeof(union BlockAtomic);\n}\n",
+            "undefined union type 'BlockAtomic'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_direct_atomic_array_types_with_context() {
     let cases = [
         (

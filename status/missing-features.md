@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-13): inline enum definitions inside `_Atomic(type-name)` are now covered across global/local objects, aggregate fields, function parameters, `sizeof`, and `_Alignof`. Generated enumerators retain initializer/function-body visibility and lexical scope, qualified/nested forms preserve exact token diagnostics, and warning-free compiler-oracle coverage uses ABI-independent relationships between equivalent atomic enum spellings. Continue P0 atomic conformance by probing inline named aggregate definitions inside `_Atomic(type-name)` and their tag-scope behavior.
+Latest update (2026-07-13): inline named `struct`/`union` definitions inside `_Atomic(type-name)` now have global/local object, aggregate-field, parameter, `sizeof`, `_Alignof`, exact qualified/nested diagnostic, and lexical tag-scope coverage. GCC/Clang differential probes and Cust's focused tests confirm the existing recursive parser already preserves these routes, so no production change was required. Continue P0 atomic conformance with anonymous aggregate definitions inside `_Atomic(type-name)`: native GCC/Clang accept `_Atomic(struct { int value; })`, while Cust currently reports `expected _Atomic type name, found LBrace`.
 
 ## P0 — correctness and developer trust
 
