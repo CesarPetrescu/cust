@@ -1718,6 +1718,48 @@ fn supports_atomic_typedef_pointers_to_qualified_pointees() {
 }
 
 #[test]
+fn rejects_chained_and_atomic_qualified_typedef_arguments_with_context() {
+    let cases = [
+        (
+            "typedef const int Base;\ntypedef Base Alias;\n_Atomic(Alias) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 3, column 9",
+        ),
+        (
+            "typedef volatile int Base;\ntypedef Base Alias;\nint main(void) { return sizeof(_Atomic(Alias)); }\n",
+            "qualified _Atomic types are not supported at line 3, column 40",
+        ),
+        (
+            "typedef int * const Slot;\ntypedef Slot Alias;\nint main(void) { return _Alignof(_Atomic(Alias)); }\n",
+            "qualified _Atomic types are not supported at line 3, column 42",
+        ),
+        (
+            "typedef const int Value, *View;\nint main(void) { return ((_Atomic(Value)){0}); }\n",
+            "qualified _Atomic types are not supported at line 2, column 35",
+        ),
+        (
+            "typedef _Atomic(int) AtomicInt;\n_Atomic(AtomicInt) value;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 2, column 9",
+        ),
+        (
+            "typedef _Atomic(int) AtomicInt;\ntypedef AtomicInt Alias;\nint main(void) { return sizeof(_Atomic(Alias)); }\n",
+            "qualified _Atomic types are not supported at line 3, column 40",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn supports_mixed_atomic_typedef_declarators_and_shadowing() {
+    let program = include_str!("fixtures/valid/atomic_typedef_chains.c");
+
+    assert_eq!(interpret(program).unwrap(), 19);
+}
+
+#[test]
 fn rejects_direct_atomic_array_types_with_context() {
     let cases = [
         (

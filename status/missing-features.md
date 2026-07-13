@@ -2,7 +2,7 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-13): `_Atomic(Alias)` now rejects typedef aliases whose aliased type is top-level `const`/`volatile`, including qualified scalar aliases and qualified pointer-slot aliases, at the alias token across declaration and type-query/compound-literal routes. Scope-aware metadata preserves lexical alias shadowing and distinguishes a qualified pointer slot from an unqualified pointer to a qualified pointee. Continue P0 atomic conformance by probing qualifier propagation through alias chains, comma-separated typedef declarators, and aliases of `_Atomic(type-name)` itself.
+Latest update (2026-07-13): `_Atomic(Alias)` qualifier metadata is now covered through chained `const`/`volatile` scalar aliases, chained qualified pointer-slot aliases, comma-separated typedef declarators, aliases of `_Atomic(type-name)`, and nested lexical shadowing. Exact diagnostics and a warning-free native compiler-oracle fixture confirm that qualified pointer slots remain distinct from pointers to qualified pointees. Continue P0 atomic conformance by probing qualified aggregate aliases and atomic-qualified aliases in function parameter/prototype contexts.
 
 ## P0 — correctness and developer trust
 
