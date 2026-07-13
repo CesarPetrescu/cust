@@ -4017,7 +4017,7 @@ Note: an attempted focused command with a substring that did not match any test 
 
 ## Repository
 
-- Path: `/root/hermes-workspace/cust`
+- Path: `/root/hermes/cust-autonomous-maintainer/workspace`
 - Remote: `git@github.com-cust:CesarPetrescu/cust.git`
 - Default branch: `main`
 - Current version: `v0.1`

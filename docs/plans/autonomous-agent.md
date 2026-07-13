@@ -4,7 +4,7 @@
 
 **Goal:** Run a safe autonomous coding loop that aggressively finishes concrete Cust roadmap items each run while keeping status files, tests, Docker verification, and Git history clean.
 
-**Architecture:** A Hermes cron job runs against `/root/hermes-workspace/cust`. Each run pulls first, reads `status/`, ideates candidate roadmap-completion work, thinks through impact/safety/testability, selects the highest-impact finishable work package, researches as needed, uses TDD for implementation, verifies locally and in Docker, updates status/backlog files, commits, pushes, and reports results. If blocked, it records the blocker and stops without pushing broken code.
+**Architecture:** A Hermes cron job runs against `/root/hermes/cust-autonomous-maintainer/workspace`. Each run pulls first, reads `status/`, ideates candidate roadmap-completion work, thinks through impact/safety/testability, selects the highest-impact finishable work package, researches as needed, uses TDD for implementation, verifies locally and in Docker, updates status/backlog files, commits, pushes, and reports results. If blocked, it records the blocker and stops without pushing broken code.
 
 **Tech Stack:** Rust, Cargo, Docker Compose, Git/GitHub SSH deploy key, Hermes cron, Hermes web/search + file + terminal toolsets.
 
@@ -38,7 +38,7 @@
 ### 1. Sync and inspect
 
 ```bash
-cd /root/hermes-workspace/cust
+cd /root/hermes/cust-autonomous-maintainer/workspace
 git checkout main
 git pull --ff-only
 git status --short
