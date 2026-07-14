@@ -2115,6 +2115,59 @@ fn supports_qualified_named_type_array_alias_parameters() {
 }
 
 #[test]
+fn supports_chained_qualified_array_alias_parameters() {
+    let program = include_str!("fixtures/valid/chained_qualified_array_alias_parameters.c");
+
+    assert_eq!(interpret(program).unwrap(), 127);
+}
+
+#[test]
+fn rejects_writes_through_chained_qualified_array_aliases() {
+    let cases = [
+        (
+            "typedef const int ConstInt;\n\
+             typedef ConstInt ConstInts[2], OtherInts[3];\n\
+             typedef ConstInts ChainedConstInts;\n\
+             int main(void) {\n\
+                 ChainedConstInts values = {1, 2};\n\
+                 values[0] = 7;\n\
+                 return 0;\n\
+             }\n",
+            "cannot modify read-only array 'values'",
+        ),
+        (
+            "struct Point { int x; int y; };\n\
+             typedef const struct Point ConstPoint;\n\
+             typedef ConstPoint ConstPoints[2], OtherPoints[3];\n\
+             typedef ConstPoints ChainedConstPoints;\n\
+             int main(void) {\n\
+                 ChainedConstPoints points = {{1, 2}, {3, 4}};\n\
+                 points[0].x = 7;\n\
+                 return 0;\n\
+             }\n",
+            "cannot assign to const variable 'points'",
+        ),
+        (
+            "enum State { IDLE = 1, READY = 2 };\n\
+             typedef const enum State ConstState;\n\
+             typedef ConstState ConstStates[2], OtherStates[3];\n\
+             typedef ConstStates ChainedConstStates;\n\
+             int main(void) {\n\
+                 ChainedConstStates states = {IDLE, READY};\n\
+                 states[0] = READY;\n\
+                 return 0;\n\
+             }\n",
+            "cannot modify read-only array 'states'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_writes_through_qualified_named_type_array_aliases() {
     let cases = [
         (
@@ -2155,6 +2208,47 @@ fn rejects_writes_through_qualified_named_type_array_aliases() {
     for (program, expected) in cases {
         let err = interpret(program).unwrap_err();
         assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_const_discard_from_chained_qualified_array_aliases() {
+    let cases = [
+        "typedef const int ConstInt;\n\
+         typedef ConstInt ConstInts[2], OtherInts[3];\n\
+         typedef ConstInts ChainedConstInts;\n\
+         int main(void) {\n\
+             ChainedConstInts values = {1, 2};\n\
+             int *mutable_view = values;\n\
+             return mutable_view == 0;\n\
+         }\n",
+        "struct Point { int x; int y; };\n\
+         typedef const struct Point ConstPoint;\n\
+         typedef ConstPoint ConstPoints[2], OtherPoints[3];\n\
+         typedef ConstPoints ChainedConstPoints;\n\
+         int take(struct Point *point) { return point == 0; }\n\
+         int main(void) {\n\
+             ChainedConstPoints points = {{1, 2}, {3, 4}};\n\
+             return take(points);\n\
+         }\n",
+        "enum State { IDLE = 1, READY = 2 };\n\
+         typedef const enum State ConstState;\n\
+         typedef ConstState ConstStates[2], OtherStates[3];\n\
+         typedef ConstStates ChainedConstStates;\n\
+         int main(void) {\n\
+             ChainedConstStates states = {IDLE, READY};\n\
+             enum State *mutable_view = states;\n\
+             return mutable_view == 0;\n\
+         }\n",
+    ];
+
+    for program in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cannot discard const qualifier from pointer target",
+            "program: {program}"
+        );
     }
 }
 
