@@ -3779,6 +3779,8 @@ impl Parser {
             let (is_const, points_to_const) = if matches!(kind, ParamKind::Pointer) {
                 if has_explicit_star {
                     (post_star_const, leading_const)
+                } else if matches!(decl_type, DeclType::Array(_, _)) {
+                    (false, leading_const)
                 } else if is_pointer {
                     (leading_const, Self::decl_type_points_to_const(&decl_type))
                 } else {

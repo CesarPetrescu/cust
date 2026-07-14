@@ -2021,6 +2021,93 @@ fn supports_atomic_anonymous_aggregate_qualified_value_aliases() {
 }
 
 #[test]
+fn supports_atomic_anonymous_aggregate_qualified_array_aliases() {
+    let program =
+        include_str!("fixtures/valid/atomic_anonymous_aggregate_qualified_array_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 255);
+}
+
+#[test]
+fn rejects_writes_through_atomic_anonymous_aggregate_qualified_array_aliases() {
+    let cases = [
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+             typedef const AtomicAnonValue ConstAtomicAnonValue;\n\
+             typedef ConstAtomicAnonValue ConstAtomicAnonArray[2];\n\
+             int main(void) {\n\
+                 ConstAtomicAnonArray values;\n\
+                 values[0].value = 7;\n\
+                 return 0;\n\
+             }\n",
+            "cannot assign to const variable 'values'",
+        ),
+        (
+            "typedef _Atomic(union { int value; char tag; }) AtomicAnonUnion;\n\
+             typedef const AtomicAnonUnion ConstAtomicAnonUnion;\n\
+             typedef ConstAtomicAnonUnion ConstAtomicAnonUnionArray[2];\n\
+             int main(void) {\n\
+                 ConstAtomicAnonUnionArray choices;\n\
+                 choices[1].tag = 'X';\n\
+                 return 0;\n\
+             }\n",
+            "cannot assign to const variable 'choices'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_const_discard_from_atomic_anonymous_aggregate_qualified_array_aliases() {
+    let cases = [
+        "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+         typedef const AtomicAnonValue ConstAtomicAnonValue;\n\
+         typedef ConstAtomicAnonValue ConstAtomicAnonArray[2];\n\
+         int main(void) {\n\
+             ConstAtomicAnonArray values;\n\
+             AtomicAnonValue *mutable_view = values;\n\
+             return mutable_view == 0;\n\
+         }\n",
+        "typedef _Atomic(union { int value; char tag; }) AtomicAnonUnion;\n\
+         typedef const AtomicAnonUnion ConstAtomicAnonUnion;\n\
+         typedef ConstAtomicAnonUnion ConstAtomicAnonUnionArray[2];\n\
+         int take(AtomicAnonUnion *value) { return value == 0; }\n\
+         int main(void) {\n\
+             ConstAtomicAnonUnionArray choices;\n\
+             return take(choices);\n\
+         }\n",
+    ];
+
+    for program in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cannot discard const qualifier from pointer target",
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn rejects_multidimensional_atomic_anonymous_aggregate_qualified_array_aliases() {
+    let program = "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+                   typedef const AtomicAnonValue ConstAtomicAnonValue;\n\
+                   typedef ConstAtomicAnonValue ConstAtomicAnonArray[2];\n\
+                   typedef ConstAtomicAnonArray Matrix[2];\n\
+                   int main(void) { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "multidimensional array typedef aliases are not supported at line 4, column 38"
+    );
+}
+
+#[test]
 fn rejects_writes_to_atomic_anonymous_aggregate_qualified_value_aliases() {
     let cases = [
         (
@@ -2460,7 +2547,7 @@ fn supports_function_specifiers() {
 fn supports_const_typedef_aliases() {
     let program = include_str!("fixtures/valid/const_typedef_aliases.c");
 
-    assert_eq!(interpret(program).unwrap(), 35);
+    assert_eq!(interpret(program).unwrap(), 48);
 }
 
 #[test]
