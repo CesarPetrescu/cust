@@ -2006,6 +2006,119 @@ fn supports_typedef_aliases_of_atomic_anonymous_aggregate_derived_declarators() 
 }
 
 #[test]
+fn supports_atomic_anonymous_aggregate_const_pointer_views() {
+    let program = include_str!("fixtures/valid/atomic_anonymous_aggregate_const_pointer_views.c");
+
+    assert_eq!(interpret(program).unwrap(), 255);
+}
+
+#[test]
+fn rejects_const_discard_from_atomic_anonymous_aggregate_const_pointer_views() {
+    let cases = [
+        "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+         typedef const AtomicAnonValue *ConstAtomicAnonView;\n\
+         int main(void) {\n\
+             AtomicAnonValue values[1];\n\
+             ConstAtomicAnonView view = values;\n\
+             AtomicAnonValue *mutable_view = view;\n\
+             return mutable_view == values;\n\
+         }\n",
+        "typedef _Atomic(union { int value; char tag; }) AtomicAnonUnion;\n\
+         typedef const AtomicAnonUnion *ConstAtomicAnonUnionView;\n\
+         int main(void) {\n\
+             AtomicAnonUnion values[1];\n\
+             AtomicAnonUnion *mutable_view = values;\n\
+             ConstAtomicAnonUnionView view = values;\n\
+             mutable_view = view;\n\
+             return mutable_view == values;\n\
+         }\n",
+        "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+         typedef const AtomicAnonValue *ConstAtomicAnonView;\n\
+         int read(AtomicAnonValue *value) { return value == 0; }\n\
+         int main(void) {\n\
+             AtomicAnonValue values[1];\n\
+             ConstAtomicAnonView view = values;\n\
+             return read(view);\n\
+         }\n",
+    ];
+
+    for program in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cannot discard const qualifier from pointer target",
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn rejects_writes_through_atomic_anonymous_aggregate_const_pointer_views() {
+    let cases = [
+        "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+         typedef const AtomicAnonValue *ConstAtomicAnonView;\n\
+         int main(void) {\n\
+             AtomicAnonValue values[1];\n\
+             ConstAtomicAnonView view = values;\n\
+             view->value = 7;\n\
+             return 0;\n\
+         }\n",
+        "typedef _Atomic(union { int value; char tag; }) AtomicAnonUnion;\n\
+         typedef const AtomicAnonUnion *ConstAtomicAnonUnionView;\n\
+         int main(void) {\n\
+             AtomicAnonUnion values[1];\n\
+             ConstAtomicAnonUnionView view = values;\n\
+             view->tag = 'X';\n\
+             return 0;\n\
+         }\n",
+    ];
+
+    for program in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cannot assign through pointer to const",
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn rejects_reassignment_of_atomic_anonymous_aggregate_const_pointer_view_slots() {
+    let program = "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+                   typedef const AtomicAnonValue *ConstAtomicAnonView;\n\
+                   typedef ConstAtomicAnonView const FixedConstAtomicAnonView;\n\
+                   int main(void) {\n\
+                       AtomicAnonValue values[2];\n\
+                       FixedConstAtomicAnonView view = values;\n\
+                       view = values + 1;\n\
+                       return 0;\n\
+                   }\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign to const variable 'view'");
+}
+
+#[test]
+fn rejects_deeper_atomic_anonymous_aggregate_const_pointer_view_declarators() {
+    let cases = [
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\ntypedef const AtomicAnonValue *ConstAtomicAnonView;\ntypedef ConstAtomicAnonView *Nested;\nint main(void) { return 0; }\n",
+            "pointer-to-pointer typedef aliases are not supported at line 3, column 29",
+        ),
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\ntypedef const AtomicAnonValue *ConstAtomicAnonView;\ntypedef ConstAtomicAnonView Views[2];\nint main(void) { return 0; }\n",
+            "pointer array typedef aliases are not supported at line 3, column 36",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_invalid_declarators_from_atomic_anonymous_aggregate_derived_aliases() {
     let cases = [
         (
