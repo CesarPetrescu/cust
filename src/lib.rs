@@ -15018,6 +15018,8 @@ impl Interpreter {
             Expr::AddressOfArray { name, index } => {
                 if let Some(Value::StructArray { .. }) = self.find_variable(name) {
                     self.find_struct_element_pointer(name, index)
+                } else if let Some(pointer) = self.indexed_struct_pointer(name, index)? {
+                    Ok(pointer)
                 } else if let Some(Value::Pointer { pointer, .. }) =
                     self.find_variable(name).cloned()
                 {

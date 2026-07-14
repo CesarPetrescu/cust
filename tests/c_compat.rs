@@ -90,6 +90,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/sizeof_embedded_aggregate_array_element_fields.c",
     "tests/fixtures/compat/valid/aggregate_pointer_arithmetic.c",
     "tests/fixtures/compat/valid/aggregate_pointer_indexing.c",
+    "tests/fixtures/compat/valid/aggregate_pointer_index_addresses.c",
     "tests/fixtures/compat/valid/aggregate_pointer_indexed_values.c",
     "tests/fixtures/compat/valid/aggregate_pointer_dereference.c",
     "tests/fixtures/compat/valid/aggregate_pointer_declaration_lists.c",

@@ -4830,6 +4830,35 @@ fn supports_pointer_indexing_for_struct_and_union_arrays() {
 }
 
 #[test]
+fn supports_addresses_of_aggregate_pointer_indexed_elements() {
+    let program = include_str!("fixtures/valid/aggregate_pointer_index_addresses.c");
+
+    assert_eq!(interpret(program).unwrap(), 205);
+}
+
+#[test]
+fn rejects_aggregate_pointer_index_addresses_that_discard_const() {
+    let program = include_str!("fixtures/invalid/aggregate_pointer_index_address_const_discard.c",);
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_out_of_bounds_aggregate_pointer_index_addresses() {
+    let program = include_str!("fixtures/invalid/aggregate_pointer_index_address_out_of_bounds.c",);
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "struct array pointer index 2 out of bounds for length 2"
+    );
+}
+
+#[test]
 fn supports_pointer_indexed_aggregate_values_as_copies() {
     let program = include_str!("fixtures/valid/aggregate_pointer_indexed_values.c");
 
