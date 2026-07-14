@@ -11237,6 +11237,10 @@ impl Interpreter {
                 Ok(None)
             }
             Expr::StringLiteral(_) => Ok(Some(PointeeType::Scalar(CType::Char))),
+            Expr::ArrayLiteral { elem_type, .. } => Ok(Some(PointeeType::Scalar(*elem_type))),
+            Expr::AggregateArrayLiteral { type_name, .. } => {
+                Ok(Some(PointeeType::Struct(type_name.clone())))
+            }
             Expr::PointerCast { pointee, .. } => Ok(Some(pointee.clone())),
             Expr::Call { name, .. } => match self
                 .functions

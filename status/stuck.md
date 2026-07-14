@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-14 chained qualified fixed-array-alias parameter conformance run after clean startup inspection, focused valid/exact-negative tests, warning-free GCC/Clang C11 execution, the full local Rust gate, and both required Docker commands.
+None. Last reviewed in the 2026-07-14 chained const-qualified array-typedef compound-literal run after clean startup inspection, focused RED/GREEN valid and exact-negative tests, warning-free GCC/Clang C11 execution, the full local Rust gate, and both required Docker commands.
 
 ## Blocker template
 

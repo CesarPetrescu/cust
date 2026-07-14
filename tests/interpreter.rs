@@ -3887,6 +3887,92 @@ fn supports_const_array_typedef_compound_literals_as_const_pointer_expressions()
 }
 
 #[test]
+fn supports_chained_const_array_typedef_compound_literals() {
+    let program = include_str!("fixtures/valid/chained_const_array_typedef_compound_literals.c");
+
+    assert_eq!(interpret(program).unwrap(), 127);
+}
+
+#[test]
+fn rejects_const_discard_from_chained_const_array_typedef_compound_literals() {
+    let cases = [
+        "typedef const int ConstInt;\n\
+         typedef ConstInt ConstInts[2];\n\
+         typedef ConstInts ChainedConstInts;\n\
+         int main(void) {\n\
+             int *values = (ChainedConstInts){1, 2};\n\
+             return values[0];\n\
+         }\n",
+        "struct Point { int x; int y; };\n\
+         typedef const struct Point ConstPoint;\n\
+         typedef ConstPoint ConstPoints[2];\n\
+         typedef ConstPoints ChainedConstPoints;\n\
+         int main(void) {\n\
+             struct Point *points = (ChainedConstPoints){{1, 2}, {3, 4}};\n\
+             return points[0].x;\n\
+         }\n",
+        "enum State { IDLE = 1, READY = 2 };\n\
+         typedef const enum State ConstState;\n\
+         typedef ConstState ConstStates[2];\n\
+         typedef ConstStates ChainedConstStates;\n\
+         int main(void) {\n\
+             enum State *states = (ChainedConstStates){IDLE, READY};\n\
+             return states[0];\n\
+         }\n",
+    ];
+
+    for program in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cannot discard const qualifier from pointer target",
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn rejects_writes_through_chained_const_array_typedef_compound_literals() {
+    let cases = [
+        "typedef const int ConstInt;\n\
+         typedef ConstInt ConstInts[2];\n\
+         typedef ConstInts ChainedConstInts;\n\
+         int main(void) {\n\
+             const int *values = (ChainedConstInts){1, 2};\n\
+             values[0] = 7;\n\
+             return values[0];\n\
+         }\n",
+        "struct Point { int x; int y; };\n\
+         typedef const struct Point ConstPoint;\n\
+         typedef ConstPoint ConstPoints[2];\n\
+         typedef ConstPoints ChainedConstPoints;\n\
+         int main(void) {\n\
+             const struct Point *points = (ChainedConstPoints){{1, 2}, {3, 4}};\n\
+             points[0].x = 7;\n\
+             return points[0].x;\n\
+         }\n",
+        "enum State { IDLE = 1, READY = 2 };\n\
+         typedef const enum State ConstState;\n\
+         typedef ConstState ConstStates[2];\n\
+         typedef ConstStates ChainedConstStates;\n\
+         int main(void) {\n\
+             const enum State *states = (ChainedConstStates){IDLE, READY};\n\
+             states[0] = READY;\n\
+             return states[0];\n\
+         }\n",
+    ];
+
+    for program in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cannot assign through pointer to const",
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
 fn rejects_const_array_typedef_compound_literal_const_discard() {
     let program = include_str!("fixtures/invalid/const_array_typedef_compound_literal_discard.c");
 
