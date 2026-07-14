@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-14 derived-declarator conformance run for anonymous aggregate atomic value aliases after clean startup inspection, baseline/focused/compiler-oracle tests, local GCC/Clang C11 verification, full local Rust verification, and both required Docker commands.
+None. Last reviewed in the 2026-07-14 derived typedef-alias conformance run for anonymous aggregate atomic value aliases after clean startup inspection, baseline/focused/compiler-oracle tests, local GCC/Clang C11 verification, full local Rust verification, and both required Docker commands.
 
 ## Blocker template
 

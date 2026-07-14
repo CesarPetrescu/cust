@@ -1998,6 +1998,53 @@ fn supports_derived_declarators_from_atomic_anonymous_aggregate_value_aliases() 
 }
 
 #[test]
+fn supports_typedef_aliases_of_atomic_anonymous_aggregate_derived_declarators() {
+    let program =
+        include_str!("fixtures/valid/atomic_anonymous_aggregate_derived_typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 255);
+}
+
+#[test]
+fn rejects_invalid_declarators_from_atomic_anonymous_aggregate_derived_aliases() {
+    let cases = [
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\ntypedef AtomicAnonValue *AtomicAnonPtr, AtomicAnonArray[2];\ntypedef AtomicAnonPtr *Nested;\nint main(void) { return 0; }\n",
+            "pointer-to-pointer typedef aliases are not supported at line 3, column 23",
+        ),
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\ntypedef AtomicAnonValue *AtomicAnonPtr, AtomicAnonArray[2];\ntypedef AtomicAnonPtr PointerArray[2];\nint main(void) { return 0; }\n",
+            "pointer array typedef aliases are not supported at line 3, column 37",
+        ),
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\ntypedef AtomicAnonValue *AtomicAnonPtr, AtomicAnonArray[2];\ntypedef AtomicAnonArray NestedArray[2];\nint main(void) { return 0; }\n",
+            "multidimensional array typedef aliases are not supported at line 3, column 38",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_reassignment_of_const_atomic_anonymous_aggregate_derived_pointer_alias_slots() {
+    let program = "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+                   typedef AtomicAnonValue *AtomicAnonPtr;\n\
+                   typedef AtomicAnonPtr const FixedAtomicAnonPtr;\n\
+                   int main(void) {\n\
+                       AtomicAnonValue values[2];\n\
+                       FixedAtomicAnonPtr cursor = values;\n\
+                       cursor = values + 1;\n\
+                       return 0;\n\
+                   }\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign to const variable 'cursor'");
+}
+
+#[test]
 fn rejects_unsupported_declarators_from_atomic_anonymous_aggregate_value_aliases() {
     let cases = [
         (
