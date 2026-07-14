@@ -2013,6 +2013,106 @@ fn supports_atomic_anonymous_aggregate_const_pointer_views() {
 }
 
 #[test]
+fn supports_atomic_anonymous_aggregate_qualified_value_aliases() {
+    let program =
+        include_str!("fixtures/valid/atomic_anonymous_aggregate_qualified_value_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 255);
+}
+
+#[test]
+fn rejects_writes_to_atomic_anonymous_aggregate_qualified_value_aliases() {
+    let cases = [
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+             typedef const AtomicAnonValue ConstAtomicAnonValue;\n\
+             int main(void) {\n\
+                 ConstAtomicAnonValue value = {0};\n\
+                 value.value = 7;\n\
+                 return 0;\n\
+             }\n",
+            "cannot assign to const variable 'value'",
+        ),
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+             typedef const AtomicAnonValue ConstAtomicAnonValue;\n\
+             int main(void) {\n\
+                 ConstAtomicAnonValue values[1];\n\
+                 values[0].value = 7;\n\
+                 return 0;\n\
+             }\n",
+            "cannot assign to const variable 'values'",
+        ),
+        (
+            "typedef _Atomic(union { int value; char tag; }) AtomicAnonUnion;\n\
+             typedef const AtomicAnonUnion ConstAtomicAnonUnion;\n\
+             int main(void) {\n\
+                 AtomicAnonUnion values[1];\n\
+                 ConstAtomicAnonUnion *view = values;\n\
+                 view->tag = 'X';\n\
+                 return 0;\n\
+             }\n",
+            "cannot assign through pointer to const",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_const_discard_from_atomic_anonymous_aggregate_qualified_value_aliases() {
+    let cases = [
+        "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
+         typedef const AtomicAnonValue ConstAtomicAnonValue;\n\
+         int main(void) {\n\
+             AtomicAnonValue values[1];\n\
+             ConstAtomicAnonValue *view = values;\n\
+             AtomicAnonValue *mutable_view = view;\n\
+             return mutable_view == values;\n\
+         }\n",
+        "typedef _Atomic(union { int value; char tag; }) AtomicAnonUnion;\n\
+         typedef const AtomicAnonUnion ConstAtomicAnonUnion;\n\
+         int take(AtomicAnonUnion *value) { return value == 0; }\n\
+         int main(void) {\n\
+             AtomicAnonUnion values[1];\n\
+             ConstAtomicAnonUnion *view = values;\n\
+             return take(view);\n\
+         }\n",
+    ];
+
+    for program in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cannot discard const qualifier from pointer target",
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn rejects_atomic_wrapping_of_qualified_atomic_anonymous_aggregate_value_aliases() {
+    let cases = [
+        (
+            "typedef _Atomic(struct { int value; }) AtomicAnonValue;\ntypedef const AtomicAnonValue ConstAtomicAnonValue;\n_Atomic(ConstAtomicAnonValue) nested;\nint main(void) { return 0; }\n",
+            "qualified _Atomic types are not supported at line 3, column 9",
+        ),
+        (
+            "typedef _Atomic(union { int value; char tag; }) AtomicAnonUnion;\ntypedef volatile AtomicAnonUnion VolatileAtomicAnonUnion;\nint main(void) { return sizeof(_Atomic(VolatileAtomicAnonUnion)); }\n",
+            "qualified _Atomic types are not supported at line 3, column 40",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_const_discard_from_atomic_anonymous_aggregate_const_pointer_views() {
     let cases = [
         "typedef _Atomic(struct { int value; }) AtomicAnonValue;\n\
