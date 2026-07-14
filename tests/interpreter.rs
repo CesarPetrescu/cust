@@ -2108,6 +2108,96 @@ fn rejects_multidimensional_atomic_anonymous_aggregate_qualified_array_aliases()
 }
 
 #[test]
+fn supports_qualified_named_type_array_alias_parameters() {
+    let program = include_str!("fixtures/valid/qualified_named_type_array_alias_parameters.c");
+
+    assert_eq!(interpret(program).unwrap(), 127);
+}
+
+#[test]
+fn rejects_writes_through_qualified_named_type_array_aliases() {
+    let cases = [
+        (
+            "struct Point { int x; int y; };\n\
+             typedef const struct Point ConstPoint;\n\
+             typedef ConstPoint ConstPoints[2];\n\
+             int main(void) {\n\
+                 ConstPoints points = {{1, 2}, {3, 4}};\n\
+                 points[0].x = 7;\n\
+                 return 0;\n\
+             }\n",
+            "cannot assign to const variable 'points'",
+        ),
+        (
+            "union Number { int value; char tag; };\n\
+             typedef const union Number ConstNumber;\n\
+             typedef ConstNumber ConstNumbers[2];\n\
+             int main(void) {\n\
+                 ConstNumbers numbers = {{1}, {2}};\n\
+                 numbers[1].tag = 'X';\n\
+                 return 0;\n\
+             }\n",
+            "cannot assign to const variable 'numbers'",
+        ),
+        (
+            "enum State { IDLE = 1, READY = 2 };\n\
+             typedef const enum State ConstState;\n\
+             typedef ConstState ConstStates[2];\n\
+             int main(void) {\n\
+                 ConstStates states = {IDLE, READY};\n\
+                 states[0] = READY;\n\
+                 return 0;\n\
+             }\n",
+            "cannot modify read-only array 'states'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_const_discard_from_qualified_named_type_array_aliases() {
+    let cases = [
+        "struct Point { int x; int y; };\n\
+         typedef const struct Point ConstPoint;\n\
+         typedef ConstPoint ConstPoints[2];\n\
+         int main(void) {\n\
+             ConstPoints points = {{1, 2}, {3, 4}};\n\
+             struct Point *mutable_view = points;\n\
+             return mutable_view == 0;\n\
+         }\n",
+        "union Number { int value; char tag; };\n\
+         typedef const union Number ConstNumber;\n\
+         typedef ConstNumber ConstNumbers[2];\n\
+         int take(union Number *number) { return number == 0; }\n\
+         int main(void) {\n\
+             ConstNumbers numbers = {{1}, {2}};\n\
+             return take(numbers);\n\
+         }\n",
+        "enum State { IDLE = 1, READY = 2 };\n\
+         typedef const enum State ConstState;\n\
+         typedef ConstState ConstStates[2];\n\
+         int main(void) {\n\
+             ConstStates states = {IDLE, READY};\n\
+             enum State *mutable_view = states;\n\
+             return mutable_view == 0;\n\
+         }\n",
+    ];
+
+    for program in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cannot discard const qualifier from pointer target",
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
 fn rejects_writes_to_atomic_anonymous_aggregate_qualified_value_aliases() {
     let cases = [
         (
