@@ -11282,18 +11282,62 @@ impl Interpreter {
         }
     }
 
+    fn struct_pointer_expr_field_metadata(
+        &self,
+        pointer: &Expr,
+        path: &[String],
+    ) -> CustResult<Option<(StructFieldType, bool, bool)>> {
+        let Some(PointeeType::Struct(mut current_type_name)) =
+            self.pointer_expr_pointee_type(pointer)?
+        else {
+            return Ok(None);
+        };
+        for (index, field_name) in path.iter().enumerate() {
+            let Some(struct_type) = self.struct_types.get(&current_type_name) else {
+                return Ok(None);
+            };
+            let Some(field) = struct_type
+                .fields
+                .iter()
+                .find(|field| field.name == *field_name)
+            else {
+                return Ok(None);
+            };
+            if index + 1 == path.len() {
+                return Ok(Some((
+                    field.ty.clone(),
+                    field.is_const,
+                    field.points_to_const,
+                )));
+            }
+            match &field.ty {
+                StructFieldType::Struct(nested_type) => {
+                    current_type_name = nested_type.clone();
+                }
+                _ => return Ok(None),
+            }
+        }
+        Ok(None)
+    }
+
     fn pointer_expr_points_to_const(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Var(name) => self.pointer_variable_points_to_const(name),
             Expr::AddressOf(name) => self.is_const_variable(name),
-            Expr::AddressOfStructField { name, fields }
-            | Expr::AddressOfStructArrayField { name, fields, .. } => self
+            Expr::AddressOfStructField { name, fields } => self
                 .find_variable_scope_id(name)
                 .and_then(|scope_id| {
                     self.struct_field_points_to_const(scope_id, name, None, fields)
                         .ok()
                 })
                 .unwrap_or(false),
+            Expr::AddressOfStructArrayField { name, fields, .. } => {
+                if self.struct_field_is_pointer(name, fields) {
+                    self.struct_pointer_field_points_to_const(name, fields)
+                } else {
+                    self.direct_struct_array_field_points_to_const(name, fields)
+                }
+            }
             Expr::AddressOfStructElementField { name, fields, .. }
             | Expr::AddressOfStructElementArrayField { name, fields, .. } => self
                 .find_variable_scope_id(name)
@@ -11334,15 +11378,23 @@ impl Interpreter {
             }
             Expr::StructPtrArrayGet {
                 pointer, fields, ..
-            }
-            | Expr::AddressOfStructPtrArrayField {
-                pointer, fields, ..
             } => {
                 self.pointer_expr_points_to_const(pointer)
                     || self
                         .const_aggregate_field_label_for_struct_pointer_expr(pointer, fields)
                         .is_some()
             }
+            Expr::AddressOfStructPtrArrayField {
+                pointer, fields, ..
+            } => match self.struct_pointer_expr_field_metadata(pointer, fields) {
+                Ok(Some((StructFieldType::Pointer(_), _, points_to_const))) => points_to_const,
+                Ok(Some((
+                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _),
+                    is_const,
+                    _,
+                ))) => self.pointer_expr_points_to_const(pointer) || is_const,
+                _ => false,
+            },
             Expr::AddressOfArray { name, .. } => match self.find_variable(name) {
                 Some(Value::Array(array)) => array.borrow().read_only,
                 Some(Value::Pointer {
@@ -12804,6 +12856,12 @@ impl Interpreter {
     ) -> CustResult<PointerValue> {
         let field_pointer = self.read_direct_struct_pointer_field(name, path)?;
         let index_value = self.eval(index)?;
+        if matches!(
+            self.direct_struct_pointer_field_type(name, path)?,
+            Some(PointeeType::Struct(_))
+        ) {
+            return self.offset_array_pointer(&field_pointer, index_value);
+        }
         let (array, source_name, index) =
             self.checked_pointer_value_index(&field_pointer, index_value)?;
         Ok(PointerValue::ArrayElement {
@@ -14465,6 +14523,12 @@ impl Interpreter {
     ) -> CustResult<PointerValue> {
         let field_pointer = self.read_struct_pointer_pointer_field(pointer, path)?;
         let index_value = self.eval(index)?;
+        if matches!(
+            self.struct_pointer_pointer_field_type(pointer, path)?,
+            Some(PointeeType::Struct(_))
+        ) {
+            return self.offset_array_pointer(&field_pointer, index_value);
+        }
         let (array, source_name, index) =
             self.checked_pointer_value_index(&field_pointer, index_value)?;
         Ok(PointerValue::ArrayElement {

@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 ## Latest autonomous verification
+
+All required verification passed after the 2026-07-15 non-variable aggregate-pointer indexed-element address run. Cust now accepts `&expr[i]` for aggregate pointers returned by calls, selected by conditional/comma expressions, and stored in direct or `->` pointer fields. Direct and arrow fields route named struct/union pointees through aggregate pointer offsets rather than scalar-only indexing, preserve mutation aliasing and bounds diagnostics, and distinguish const pointer slots/containing aggregate views from const pointees. Exact negative tests reject const discard from call/direct/arrow routes. Warning-free GCC and Clang C11 fixtures return 110 for expression forms and 20 for each field form, matching Cust.
+
+Verified commands: clean baseline `cargo test`; focused RED/GREEN direct/arrow field address and const-discard tests; focused `cargo test --test interpreter aggregate_pointer -- --nocapture`; local GCC/Clang `-std=c11 -Wall -Wextra -Werror` fixture builds/execution; `cargo test --test c_compat -- --nocapture`; recursion-depth regression; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust`; and `git diff --check`.
 
 All required verification passed after the 2026-07-14 aggregate-pointer indexed-element address run. Cust now accepts `&p[i]` for array-backed named struct and union pointers in declarations and direct function arguments. The resulting interpreter-owned pointers preserve aggregate pointee identity and const metadata, alias mutations to the original aggregate arrays, support ordinary pointer difference, and retain the existing aggregate-array bounds diagnostic. The evaluator now routes `Expr::AddressOfArray` through aggregate-pointer indexing before its scalar-array pointer path. Warning-free GCC and Clang C11 binaries return 205, matching Cust.
 

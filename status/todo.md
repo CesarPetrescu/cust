@@ -4,6 +4,10 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
+Latest completed correctness slice (2026-07-15): `&expr[i]` now works for aggregate pointers returned by calls, selected by conditional/comma expressions, and stored in direct or `->` pointer fields. Named struct/union targets preserve interpreter-owned identity, mutation aliasing, bounds checks, and pointee constness while const pointer slots and const containing-aggregate views do not incorrectly make mutable pointees const. GCC/Clang fixtures return 110 for expression forms and 20 for direct/arrow field forms, matching Cust.
+
+- [ ] Fix scalar additive-expression classification around pointer differences. Acceptance: `base + (right - left)`, multiplication/conditional/comma uses of pointer-difference scalar results, and equivalent nested scalar expressions stay on scalar evaluation rather than failing with `expected pointer expression`; preserve pointer arithmetic diagnostics and add warning-free compiler-oracle coverage.
+
 Latest completed correctness slice (2026-07-14): aggregate pointer indexing is now addressable. `&p[i]` over array-backed named struct and union pointers works in declarations and direct arguments, aliases writes to original storage, preserves pointee/const metadata, supports pointer difference, and reports the existing aggregate-array bounds error. GCC and Clang return 205 like Cust.
 
 Latest completed correctness slice (2026-07-14): chained const-qualified array typedef compound literals now preserve read-only metadata across `int`, `char`, named-struct, and enum arrays through an additional alias layer. Full-array and indexed-element `sizeof`, pointer/parameter flow, pointer arithmetic, exact const-discard/write diagnostics, and mutable inner-alias shadowing pass; metadata-only pointee inference now recognizes scalar and aggregate array literals. GCC and Clang return 127 like Cust.
