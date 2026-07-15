@@ -772,6 +772,431 @@ fn generated_hidden_scalar_array_literal_pointers_match_model_without_panics() {
     );
 }
 
+#[test]
+fn generated_hidden_aggregate_array_literal_pointers_match_model_without_panics() {
+    let mut state = 0xC057_A117_u64;
+    let mut value_cases = 0;
+    let mut bounds_cases = 0;
+    let mut difference_cases = 0;
+    let mut equality_cases = 0;
+    let mut ordering_cases = 0;
+
+    for root in hidden_aggregate_literal_roots() {
+        for case_index in 0..24 {
+            let expression = generate_hidden_aggregate_literal_pointer_expr(&mut state, root, 3);
+            let (operation, expected) = match expression.index {
+                Err(index) => {
+                    bounds_cases += 1;
+                    (
+                        "return 0;".to_string(),
+                        ExpectedInterpretation::OwnedError(format!(
+                            "struct array pointer index {index} out of bounds for length {HIDDEN_LITERAL_LEN}"
+                        )),
+                    )
+                }
+                Ok(index) => match next_u64(&mut state) % 4 {
+                    0 => {
+                        value_cases += 1;
+                        (
+                            "return result[0].value;".to_string(),
+                            ExpectedInterpretation::Value(root.value(index)),
+                        )
+                    }
+                    1 => {
+                        difference_cases += 1;
+                        (
+                            format!("return result - {};", root.name()),
+                            ExpectedInterpretation::Value(index),
+                        )
+                    }
+                    2 => {
+                        equality_cases += 1;
+                        (
+                            format!("return result == ({} + {index});", root.name()),
+                            ExpectedInterpretation::Value(1),
+                        )
+                    }
+                    _ => {
+                        ordering_cases += 1;
+                        let compared_index =
+                            (next_u64(&mut state) % HIDDEN_LITERAL_LEN as u64) as i64;
+                        (
+                            format!("return result >= ({} + {compared_index});", root.name()),
+                            ExpectedInterpretation::Value(i64::from(index >= compared_index)),
+                        )
+                    }
+                },
+            };
+            let source = hidden_aggregate_literal_pointer_program(
+                root.pointer_type(),
+                &expression.rendered,
+                &operation,
+            );
+
+            assert_interpretation(
+                &source,
+                expected,
+                &format!(
+                    "hidden aggregate literal case {case_index}, root {root:?}, expression {expression:?}"
+                ),
+            );
+        }
+
+        for other in [root.other_side(), root.other_storage()] {
+            for (operation, expected) in [
+                (
+                    format!("return result - {};", other.name()),
+                    ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+                ),
+                (
+                    format!("return result < {};", other.name()),
+                    ExpectedInterpretation::Error("cannot compare pointers to different arrays"),
+                ),
+                (
+                    format!("return result == {};", other.name()),
+                    ExpectedInterpretation::Value(0),
+                ),
+            ] {
+                let source = hidden_aggregate_literal_pointer_program(
+                    root.pointer_type(),
+                    root.name(),
+                    &operation,
+                );
+                assert_interpretation(
+                    &source,
+                    expected,
+                    &format!("hidden aggregate literal cross-root identity, root {root:?}"),
+                );
+            }
+        }
+    }
+
+    for kind in AggregateKind::ALL {
+        let const_root = HiddenAggregateLiteralRoot {
+            kind,
+            storage: HiddenAggregateLiteralStorage::ConstTypedef,
+            side: HiddenLiteralSide::Left,
+        };
+        let source = hidden_aggregate_literal_pointer_program(
+            kind.mutable_pointer_type(),
+            const_root.name(),
+            "return result->value;",
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("hidden const aggregate literal discard, kind {kind:?}"),
+        );
+
+        let source = hidden_aggregate_literal_pointer_program(
+            kind.const_pointer_type(),
+            const_root.name(),
+            "result->value = 1; return result->value;",
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("hidden const aggregate literal write, kind {kind:?}"),
+        );
+
+        let mutable_root = HiddenAggregateLiteralRoot {
+            kind,
+            storage: HiddenAggregateLiteralStorage::MutableCompound,
+            side: HiddenLiteralSide::Left,
+        };
+        let source = hidden_aggregate_literal_pointer_program(
+            kind.mutable_pointer_type(),
+            mutable_root.name(),
+            "result->value = 91; return result->value;",
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Value(91),
+            &format!("hidden mutable aggregate literal write, kind {kind:?}"),
+        );
+
+        let source = hidden_aggregate_literal_pointer_program(
+            kind.other().mutable_pointer_type(),
+            mutable_root.name(),
+            "return result->value;",
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                kind.other().pointee_label()
+            )),
+            &format!("hidden aggregate literal pointee type, kind {kind:?}"),
+        );
+    }
+
+    assert!(
+        value_cases >= 12,
+        "generated only {value_cases} value cases"
+    );
+    assert!(
+        bounds_cases >= 20,
+        "generated only {bounds_cases} bounds cases"
+    );
+    assert!(
+        difference_cases >= 12,
+        "generated only {difference_cases} difference cases"
+    );
+    assert!(
+        equality_cases >= 12,
+        "generated only {equality_cases} equality cases"
+    );
+    assert!(
+        ordering_cases >= 12,
+        "generated only {ordering_cases} ordering cases"
+    );
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HiddenAggregateLiteralStorage {
+    MutableCompound,
+    ConstTypedef,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HiddenAggregateLiteralRoot {
+    kind: AggregateKind,
+    storage: HiddenAggregateLiteralStorage,
+    side: HiddenLiteralSide,
+}
+
+impl HiddenAggregateLiteralRoot {
+    fn name(self) -> &'static str {
+        match (self.kind, self.storage, self.side) {
+            (
+                AggregateKind::Point,
+                HiddenAggregateLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Left,
+            ) => "mutable_point_left",
+            (
+                AggregateKind::Point,
+                HiddenAggregateLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Right,
+            ) => "mutable_point_right",
+            (
+                AggregateKind::Number,
+                HiddenAggregateLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Left,
+            ) => "mutable_number_left",
+            (
+                AggregateKind::Number,
+                HiddenAggregateLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Right,
+            ) => "mutable_number_right",
+            (
+                AggregateKind::Point,
+                HiddenAggregateLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Left,
+            ) => "const_point_left",
+            (
+                AggregateKind::Point,
+                HiddenAggregateLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Right,
+            ) => "const_point_right",
+            (
+                AggregateKind::Number,
+                HiddenAggregateLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Left,
+            ) => "const_number_left",
+            (
+                AggregateKind::Number,
+                HiddenAggregateLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Right,
+            ) => "const_number_right",
+        }
+    }
+
+    fn pointer_type(self) -> &'static str {
+        if self.storage == HiddenAggregateLiteralStorage::ConstTypedef {
+            self.kind.const_pointer_type()
+        } else {
+            self.kind.mutable_pointer_type()
+        }
+    }
+
+    fn other_side(self) -> Self {
+        Self {
+            side: match self.side {
+                HiddenLiteralSide::Left => HiddenLiteralSide::Right,
+                HiddenLiteralSide::Right => HiddenLiteralSide::Left,
+            },
+            ..self
+        }
+    }
+
+    fn other_storage(self) -> Self {
+        Self {
+            storage: match self.storage {
+                HiddenAggregateLiteralStorage::MutableCompound => {
+                    HiddenAggregateLiteralStorage::ConstTypedef
+                }
+                HiddenAggregateLiteralStorage::ConstTypedef => {
+                    HiddenAggregateLiteralStorage::MutableCompound
+                }
+            },
+            ..self
+        }
+    }
+
+    fn value(self, index: i64) -> i64 {
+        let base = match (self.kind, self.storage, self.side) {
+            (
+                AggregateKind::Point,
+                HiddenAggregateLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Left,
+            ) => 11,
+            (
+                AggregateKind::Point,
+                HiddenAggregateLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Right,
+            ) => 21,
+            (
+                AggregateKind::Number,
+                HiddenAggregateLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Left,
+            ) => 51,
+            (
+                AggregateKind::Number,
+                HiddenAggregateLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Right,
+            ) => 61,
+            (
+                AggregateKind::Point,
+                HiddenAggregateLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Left,
+            ) => 31,
+            (
+                AggregateKind::Point,
+                HiddenAggregateLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Right,
+            ) => 41,
+            (
+                AggregateKind::Number,
+                HiddenAggregateLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Left,
+            ) => 71,
+            (
+                AggregateKind::Number,
+                HiddenAggregateLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Right,
+            ) => 81,
+        };
+        base + index
+    }
+}
+
+fn hidden_aggregate_literal_roots() -> Vec<HiddenAggregateLiteralRoot> {
+    let mut roots = Vec::new();
+    for kind in AggregateKind::ALL {
+        for storage in [
+            HiddenAggregateLiteralStorage::MutableCompound,
+            HiddenAggregateLiteralStorage::ConstTypedef,
+        ] {
+            for side in [HiddenLiteralSide::Left, HiddenLiteralSide::Right] {
+                roots.push(HiddenAggregateLiteralRoot {
+                    kind,
+                    storage,
+                    side,
+                });
+            }
+        }
+    }
+    roots
+}
+
+#[derive(Debug)]
+struct HiddenAggregateLiteralPointerExpr {
+    rendered: String,
+    index: Result<i64, i64>,
+}
+
+fn generate_hidden_aggregate_literal_pointer_expr(
+    state: &mut u64,
+    root: HiddenAggregateLiteralRoot,
+    depth: usize,
+) -> HiddenAggregateLiteralPointerExpr {
+    let initial_index = (next_u64(state) % HIDDEN_LITERAL_LEN as u64) as i64;
+    let mut expression = HiddenAggregateLiteralPointerExpr {
+        rendered: format!("({} + {initial_index})", root.name()),
+        index: Ok(initial_index),
+    };
+
+    for _ in 0..depth {
+        let current = expression.rendered;
+        let current_index = expression.index;
+        let (rendered, index) = match next_u64(state) % 5 {
+            0 => {
+                let offset = (next_u64(state) % 7) as i64 - 3;
+                (
+                    format!("({current} + {offset})"),
+                    hidden_literal_offset(current_index, offset),
+                )
+            }
+            1 => {
+                let offset = (next_u64(state) % 7) as i64 - 3;
+                (
+                    format!("({offset} + {current})"),
+                    hidden_literal_offset(current_index, offset),
+                )
+            }
+            2 => {
+                let offset = (next_u64(state) % 7) as i64 - 3;
+                (
+                    format!("({current} - {offset})"),
+                    hidden_literal_offset(current_index, -offset),
+                )
+            }
+            3 => {
+                let condition = next_u64(state) & 1 == 0;
+                let alternate_index = (next_u64(state) % HIDDEN_LITERAL_LEN as u64) as i64;
+                let alternate = format!("({} + {alternate_index})", root.name());
+                if condition {
+                    (format!("(1 ? {current} : {alternate})"), current_index)
+                } else {
+                    (format!("(0 ? {alternate} : {current})"), current_index)
+                }
+            }
+            _ => (
+                format!("((({0} + 2) - ({0} + 1)), {current})", root.name()),
+                current_index,
+            ),
+        };
+        expression = HiddenAggregateLiteralPointerExpr { rendered, index };
+    }
+    expression
+}
+
+fn hidden_aggregate_literal_pointer_program(
+    result_type: &str,
+    expression: &str,
+    operation: &str,
+) -> String {
+    format!(
+        "struct Point {{ int value; }};\n\
+         union Number {{ int value; char tag; }};\n\
+         typedef const struct Point ConstPoints[4];\n\
+         typedef const union Number ConstNumbers[4];\n\
+         int main(void) {{\n\
+         struct Point *mutable_point_left = (struct Point[4]){{{{11}}, {{12}}, {{13}}, {{14}}}};\n\
+         struct Point *mutable_point_right = (struct Point[4]){{{{21}}, {{22}}, {{23}}, {{24}}}};\n\
+         union Number *mutable_number_left = (union Number[4]){{{{51}}, {{52}}, {{53}}, {{54}}}};\n\
+         union Number *mutable_number_right = (union Number[4]){{{{61}}, {{62}}, {{63}}, {{64}}}};\n\
+         const struct Point *const_point_left = (ConstPoints){{{{31}}, {{32}}, {{33}}, {{34}}}};\n\
+         const struct Point *const_point_right = (ConstPoints){{{{41}}, {{42}}, {{43}}, {{44}}}};\n\
+         const union Number *const_number_left = (ConstNumbers){{{{71}}, {{72}}, {{73}}, {{74}}}};\n\
+         const union Number *const_number_right = (ConstNumbers){{{{81}}, {{82}}, {{83}}, {{84}}}};\n\
+         {result_type} result = {expression};\n\
+         {operation}\n\
+         }}\n"
+    )
+}
+
 const HIDDEN_LITERAL_LEN: i64 = 4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

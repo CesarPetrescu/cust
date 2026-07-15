@@ -95,6 +95,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/direct_aggregate_pointer_field_index_address.c",
     "tests/fixtures/compat/valid/arrow_aggregate_pointer_field_index_address.c",
     "tests/fixtures/compat/valid/embedded_aggregate_array_pointer_model_routes.c",
+    "tests/fixtures/compat/valid/hidden_aggregate_array_literal_pointer_model_routes.c",
     "tests/fixtures/compat/valid/aggregate_pointer_indexed_values.c",
     "tests/fixtures/compat/valid/aggregate_pointer_dereference.c",
     "tests/fixtures/compat/valid/aggregate_pointer_declaration_lists.c",

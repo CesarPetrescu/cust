@@ -4692,6 +4692,14 @@ fn supports_hidden_scalar_array_literal_pointer_model_routes() {
 }
 
 #[test]
+fn supports_hidden_aggregate_array_literal_pointer_model_routes() {
+    let program =
+        include_str!("fixtures/valid/hidden_aggregate_array_literal_pointer_model_routes.c");
+
+    assert_eq!(interpret(program).unwrap(), 164);
+}
+
+#[test]
 fn supports_array_fields_on_aggregate_compound_literals() {
     let program = include_str!("fixtures/valid/aggregate_compound_literal_array_fields.c");
 
