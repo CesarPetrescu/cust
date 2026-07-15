@@ -1187,6 +1187,301 @@ fn generated_pointer_return_function_results_match_model_without_panics() {
     );
 }
 
+#[test]
+fn generated_pointer_parameter_forwarding_results_match_model_without_panics() {
+    let mut state = 0xC057_F04D_u64;
+    let mut value_cases = 0;
+    let mut bounds_cases = 0;
+    let mut difference_cases = 0;
+    let mut equality_cases = 0;
+    let mut ordering_cases = 0;
+    let mut indexed_address_cases = 0;
+    let mut nested_forwarding_cases = 0;
+
+    for kind in ReturnedPointeeKind::ALL {
+        for case_index in 0..48 {
+            let expression = generate_forwarded_pointer_expr(&mut state, kind, 3);
+            if expression.used_indexed_address {
+                indexed_address_cases += 1;
+            }
+            if expression.used_nested_forwarding {
+                nested_forwarding_cases += 1;
+            }
+            let (result_type, operation, expected) = match expression.pointer {
+                Err(index) => {
+                    bounds_cases += 1;
+                    (
+                        kind.const_pointer_type(),
+                        "return 0;".to_string(),
+                        ExpectedInterpretation::OwnedError(format!(
+                            "{} pointer index {index} out of bounds for length {RETURNED_ARRAY_LEN}",
+                            kind.bounds_prefix()
+                        )),
+                    )
+                }
+                Ok(pointer) => {
+                    let result_type = if pointer.points_to_const {
+                        kind.const_pointer_type()
+                    } else {
+                        kind.mutable_pointer_type()
+                    };
+                    let (operation, expected) = match next_u64(&mut state) % 4 {
+                        0 => {
+                            value_cases += 1;
+                            (
+                                kind.read_result(),
+                                ExpectedInterpretation::Value(pointer.value()),
+                            )
+                        }
+                        1 => {
+                            difference_cases += 1;
+                            (
+                                format!(
+                                    "return result - {};",
+                                    render_forwarded_call(
+                                        ForwardedModelPointer {
+                                            index: 0,
+                                            ..pointer
+                                        },
+                                        false,
+                                    )
+                                ),
+                                ExpectedInterpretation::Value(pointer.index),
+                            )
+                        }
+                        2 => {
+                            equality_cases += 1;
+                            (
+                                format!(
+                                    "return result == {};",
+                                    render_forwarded_call(pointer, true)
+                                ),
+                                ExpectedInterpretation::Value(1),
+                            )
+                        }
+                        _ => {
+                            ordering_cases += 1;
+                            let compared_index =
+                                (next_u64(&mut state) % RETURNED_ARRAY_LEN as u64) as i64;
+                            (
+                                format!(
+                                    "return result >= {};",
+                                    render_forwarded_call(
+                                        ForwardedModelPointer {
+                                            index: compared_index,
+                                            ..pointer
+                                        },
+                                        false,
+                                    )
+                                ),
+                                ExpectedInterpretation::Value(i64::from(
+                                    pointer.index >= compared_index,
+                                )),
+                            )
+                        }
+                    };
+                    (result_type, operation, expected)
+                }
+            };
+            let source = forwarded_pointer_program(result_type, &expression.rendered, &operation);
+
+            assert_interpretation(
+                &source,
+                expected,
+                &format!(
+                    "pointer forwarding case {case_index}, kind {kind:?}, expression {expression:?}"
+                ),
+            );
+        }
+
+        for storage_const in [false, true] {
+            let left = ForwardedModelPointer {
+                kind,
+                root: ReturnedRoot::Left,
+                index: 1,
+                storage_const,
+                points_to_const: storage_const,
+            };
+            let right = ForwardedModelPointer {
+                root: ReturnedRoot::Right,
+                ..left
+            };
+            for (operation, expected) in [
+                (
+                    format!("return result - {};", render_forwarded_call(right, true)),
+                    ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+                ),
+                (
+                    format!("return result < {};", render_forwarded_call(right, false)),
+                    ExpectedInterpretation::Error("cannot compare pointers to different arrays"),
+                ),
+                (
+                    format!("return result == {};", render_forwarded_call(right, true)),
+                    ExpectedInterpretation::Value(0),
+                ),
+            ] {
+                let source = forwarded_pointer_program(
+                    if left.points_to_const {
+                        kind.const_pointer_type()
+                    } else {
+                        kind.mutable_pointer_type()
+                    },
+                    &render_forwarded_call(left, false),
+                    &operation,
+                );
+                assert_interpretation(
+                    &source,
+                    expected,
+                    &format!(
+                        "pointer forwarding cross-root identity, kind {kind:?}, storage const {storage_const}"
+                    ),
+                );
+            }
+        }
+
+        let promoted = ForwardedModelPointer {
+            kind,
+            root: ReturnedRoot::Left,
+            index: 1,
+            storage_const: false,
+            points_to_const: true,
+        };
+        let source = forwarded_pointer_program(
+            kind.mutable_pointer_type(),
+            &render_forwarded_call(promoted, true),
+            &kind.read_result(),
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("pointer forwarding promoted const discard, kind {kind:?}"),
+        );
+
+        let source = forwarded_pointer_program(
+            kind.const_pointer_type(),
+            &render_forwarded_call(promoted, false),
+            kind.write_result(),
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("pointer forwarding promoted const write, kind {kind:?}"),
+        );
+
+        let const_storage = ForwardedModelPointer {
+            storage_const: true,
+            points_to_const: true,
+            ..promoted
+        };
+        let invalid_argument = format!(
+            "forward_{}({} + 1)",
+            kind.function_suffix(),
+            const_storage.storage_name()
+        );
+        let source = forwarded_pointer_program(
+            kind.mutable_pointer_type(),
+            &invalid_argument,
+            &kind.read_result(),
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("pointer forwarding parameter const discard, kind {kind:?}"),
+        );
+
+        let mutable = ForwardedModelPointer {
+            storage_const: false,
+            points_to_const: false,
+            ..promoted
+        };
+        let other = kind.other();
+        let invalid_argument = format!(
+            "forward_{}({} + 1)",
+            other.function_suffix(),
+            mutable.storage_name()
+        );
+        let source = forwarded_pointer_program(
+            other.mutable_pointer_type(),
+            &invalid_argument,
+            &other.read_result(),
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                other.pointee_label()
+            )),
+            &format!("pointer forwarding parameter pointee type, kind {kind:?}"),
+        );
+
+        assert_interpretation(
+            &forwarding_return_mismatch_program(kind, false),
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                other.pointee_label()
+            )),
+            &format!("pointer forwarding return pointee type, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &forwarding_return_mismatch_program(kind, true),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("pointer forwarding return const discard, kind {kind:?}"),
+        );
+    }
+
+    for (kind, expected) in [
+        (
+            ReturnedPointeeKind::Int,
+            "pointer to out-of-scope variable 'local_int'",
+        ),
+        (
+            ReturnedPointeeKind::Point,
+            "pointer to out-of-scope variable 'local_point'",
+        ),
+        (
+            ReturnedPointeeKind::Number,
+            "pointer to out-of-scope variable 'local_number'",
+        ),
+    ] {
+        assert_interpretation(
+            &dangling_forwarded_pointer_program(kind),
+            ExpectedInterpretation::Error(expected),
+            &format!("pointer forwarding out-of-scope diagnostic, kind {kind:?}"),
+        );
+    }
+
+    assert!(
+        value_cases >= 15,
+        "generated only {value_cases} value cases"
+    );
+    assert!(
+        bounds_cases >= 25,
+        "generated only {bounds_cases} bounds cases"
+    );
+    assert!(
+        difference_cases >= 15,
+        "generated only {difference_cases} difference cases"
+    );
+    assert!(
+        equality_cases >= 15,
+        "generated only {equality_cases} equality cases"
+    );
+    assert!(
+        ordering_cases >= 15,
+        "generated only {ordering_cases} ordering cases"
+    );
+    assert!(
+        indexed_address_cases >= 20,
+        "generated only {indexed_address_cases} indexed-address cases"
+    );
+    assert!(
+        nested_forwarding_cases >= 20,
+        "generated only {nested_forwarding_cases} nested-forwarding cases"
+    );
+}
+
 const RETURNED_ARRAY_LEN: i64 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1494,6 +1789,324 @@ fn dangling_returned_pointer_program(kind: ReturnedPointeeKind) -> String {
          union Number {{ int value; char tag; }};\n\
          {function_type} *dangling(void) {{ {declaration} return &{local_name}; }}\n\
          int main(void) {{ {function_type} *result = dangling(); {read} }}\n"
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ForwardedModelPointer {
+    kind: ReturnedPointeeKind,
+    root: ReturnedRoot,
+    index: i64,
+    storage_const: bool,
+    points_to_const: bool,
+}
+
+impl ForwardedModelPointer {
+    fn value(self) -> i64 {
+        self.root
+            .base_value(self.kind, self.storage_const)
+            .saturating_add(self.index)
+    }
+
+    fn storage_name(self) -> &'static str {
+        match (self.kind, self.storage_const, self.root) {
+            (ReturnedPointeeKind::Int, false, ReturnedRoot::Left) => "int_left",
+            (ReturnedPointeeKind::Int, false, ReturnedRoot::Right) => "int_right",
+            (ReturnedPointeeKind::Int, true, ReturnedRoot::Left) => "const_int_left",
+            (ReturnedPointeeKind::Int, true, ReturnedRoot::Right) => "const_int_right",
+            (ReturnedPointeeKind::Point, false, ReturnedRoot::Left) => "point_left",
+            (ReturnedPointeeKind::Point, false, ReturnedRoot::Right) => "point_right",
+            (ReturnedPointeeKind::Point, true, ReturnedRoot::Left) => "const_point_left",
+            (ReturnedPointeeKind::Point, true, ReturnedRoot::Right) => "const_point_right",
+            (ReturnedPointeeKind::Number, false, ReturnedRoot::Left) => "number_left",
+            (ReturnedPointeeKind::Number, false, ReturnedRoot::Right) => "number_right",
+            (ReturnedPointeeKind::Number, true, ReturnedRoot::Left) => "const_number_left",
+            (ReturnedPointeeKind::Number, true, ReturnedRoot::Right) => "const_number_right",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ForwardedPointerExpr {
+    rendered: String,
+    pointer: Result<ForwardedModelPointer, i64>,
+    declared_const: bool,
+    used_indexed_address: bool,
+    used_nested_forwarding: bool,
+}
+
+fn generate_forwarded_pointer_expr(
+    state: &mut u64,
+    kind: ReturnedPointeeKind,
+    depth: usize,
+) -> ForwardedPointerExpr {
+    let storage_const = next_u64(state) & 1 == 0;
+    let pointer = ForwardedModelPointer {
+        kind,
+        root: if next_u64(state) & 1 == 0 {
+            ReturnedRoot::Left
+        } else {
+            ReturnedRoot::Right
+        },
+        index: (next_u64(state) % RETURNED_ARRAY_LEN as u64) as i64,
+        storage_const,
+        points_to_const: storage_const || next_u64(state) & 1 == 0,
+    };
+    let mut expression = ForwardedPointerExpr {
+        rendered: render_forwarded_call(pointer, next_u64(state) & 1 == 0),
+        pointer: Ok(pointer),
+        declared_const: pointer.points_to_const,
+        used_indexed_address: false,
+        used_nested_forwarding: false,
+    };
+
+    for _ in 0..depth {
+        let current = expression.rendered;
+        let current_pointer = expression.pointer;
+        let current_const = expression.declared_const;
+        let used_indexed_address = expression.used_indexed_address;
+        let used_nested_forwarding = expression.used_nested_forwarding;
+        expression = match next_u64(state) % 7 {
+            0 => {
+                let offset = (next_u64(state) % 7) as i64 - 3;
+                ForwardedPointerExpr {
+                    rendered: format!("({current} + {offset})"),
+                    pointer: offset_forwarded_pointer(current_pointer, offset),
+                    declared_const: current_const,
+                    used_indexed_address,
+                    used_nested_forwarding,
+                }
+            }
+            1 => {
+                let offset = (next_u64(state) % 7) as i64 - 3;
+                ForwardedPointerExpr {
+                    rendered: format!("({offset} + {current})"),
+                    pointer: offset_forwarded_pointer(current_pointer, offset),
+                    declared_const: current_const,
+                    used_indexed_address,
+                    used_nested_forwarding,
+                }
+            }
+            2 => {
+                let offset = (next_u64(state) % 7) as i64 - 3;
+                ForwardedPointerExpr {
+                    rendered: format!("({current} - {offset})"),
+                    pointer: offset_forwarded_pointer(current_pointer, -offset),
+                    declared_const: current_const,
+                    used_indexed_address,
+                    used_nested_forwarding,
+                }
+            }
+            3 => {
+                let alternate_storage_const = next_u64(state) & 1 == 0;
+                let alternate = ForwardedModelPointer {
+                    kind,
+                    root: if next_u64(state) & 1 == 0 {
+                        ReturnedRoot::Left
+                    } else {
+                        ReturnedRoot::Right
+                    },
+                    index: (next_u64(state) % RETURNED_ARRAY_LEN as u64) as i64,
+                    storage_const: alternate_storage_const,
+                    points_to_const: alternate_storage_const || next_u64(state) & 1 == 0,
+                };
+                let alternate_rendered = render_forwarded_call(alternate, next_u64(state) & 1 == 0);
+                let condition = next_u64(state) & 1 == 0;
+                let merged_const = current_const || alternate.points_to_const;
+                let selected = if condition {
+                    current_pointer
+                } else {
+                    Ok(alternate)
+                }
+                .map(|mut pointer| {
+                    pointer.points_to_const = merged_const;
+                    pointer
+                });
+                ForwardedPointerExpr {
+                    rendered: format!(
+                        "({} ? {current} : {alternate_rendered})",
+                        i64::from(condition)
+                    ),
+                    pointer: selected,
+                    declared_const: merged_const,
+                    used_indexed_address,
+                    used_nested_forwarding,
+                }
+            }
+            4 => ForwardedPointerExpr {
+                rendered: format!("&({current})[0]"),
+                pointer: current_pointer,
+                declared_const: current_const,
+                used_indexed_address: true,
+                used_nested_forwarding,
+            },
+            5 => {
+                let base = current_pointer.ok().unwrap_or(pointer);
+                let left = render_forwarded_call(ForwardedModelPointer { index: 2, ..base }, false);
+                let right = render_forwarded_call(ForwardedModelPointer { index: 1, ..base }, true);
+                ForwardedPointerExpr {
+                    rendered: format!("(({left} - {right}), {current})"),
+                    pointer: current_pointer,
+                    declared_const: current_const,
+                    used_indexed_address,
+                    used_nested_forwarding,
+                }
+            }
+            _ => {
+                let target_const = current_const || next_u64(state) & 1 == 0;
+                let rendered = render_forwarding_wrapper(
+                    kind,
+                    target_const,
+                    next_u64(state) & 1 == 0,
+                    &current,
+                );
+                let pointer = current_pointer.map(|mut pointer| {
+                    pointer.points_to_const = target_const;
+                    pointer
+                });
+                ForwardedPointerExpr {
+                    rendered,
+                    pointer,
+                    declared_const: target_const,
+                    used_indexed_address,
+                    used_nested_forwarding: true,
+                }
+            }
+        };
+    }
+    expression
+}
+
+fn offset_forwarded_pointer(
+    pointer: Result<ForwardedModelPointer, i64>,
+    offset: i64,
+) -> Result<ForwardedModelPointer, i64> {
+    let mut pointer = pointer?;
+    pointer.index += offset;
+    if (0..RETURNED_ARRAY_LEN).contains(&pointer.index) {
+        Ok(pointer)
+    } else {
+        Err(pointer.index)
+    }
+}
+
+fn render_forwarded_call(pointer: ForwardedModelPointer, twice: bool) -> String {
+    debug_assert!(!pointer.storage_const || pointer.points_to_const);
+    format!(
+        "forward_{}{}{}({} + {})",
+        if pointer.points_to_const {
+            "const_"
+        } else {
+            ""
+        },
+        pointer.kind.function_suffix(),
+        if twice { "_twice" } else { "" },
+        pointer.storage_name(),
+        pointer.index
+    )
+}
+
+fn render_forwarding_wrapper(
+    kind: ReturnedPointeeKind,
+    points_to_const: bool,
+    twice: bool,
+    expression: &str,
+) -> String {
+    format!(
+        "forward_{}{}{}({expression})",
+        if points_to_const { "const_" } else { "" },
+        kind.function_suffix(),
+        if twice { "_twice" } else { "" },
+    )
+}
+
+const FORWARDING_PROGRAM_PRELUDE: &str = r#"
+struct Point { int value; };
+union Number { int value; char tag; };
+int int_left[6] = {11, 12, 13, 14, 15, 16};
+static int int_right[6] = {21, 22, 23, 24, 25, 26};
+const int const_int_left[6] = {31, 32, 33, 34, 35, 36};
+static const int const_int_right[6] = {41, 42, 43, 44, 45, 46};
+struct Point point_left[6] = {{51}, {52}, {53}, {54}, {55}, {56}};
+static struct Point point_right[6] = {{61}, {62}, {63}, {64}, {65}, {66}};
+const struct Point const_point_left[6] = {{71}, {72}, {73}, {74}, {75}, {76}};
+static const struct Point const_point_right[6] = {{81}, {82}, {83}, {84}, {85}, {86}};
+union Number number_left[6] = {{91}, {92}, {93}, {94}, {95}, {96}};
+static union Number number_right[6] = {{101}, {102}, {103}, {104}, {105}, {106}};
+const union Number const_number_left[6] = {{111}, {112}, {113}, {114}, {115}, {116}};
+static const union Number const_number_right[6] = {{121}, {122}, {123}, {124}, {125}, {126}};
+int *forward_int(int *value) { return value; }
+int *forward_int_twice(int *value) { return forward_int(value); }
+const int *forward_const_int(const int *value) { return value; }
+const int *forward_const_int_twice(const int *value) { return forward_const_int(value); }
+struct Point *forward_point(struct Point *value) { return value; }
+struct Point *forward_point_twice(struct Point *value) { return forward_point(value); }
+const struct Point *forward_const_point(const struct Point *value) { return value; }
+const struct Point *forward_const_point_twice(const struct Point *value) { return forward_const_point(value); }
+union Number *forward_number(union Number *value) { return value; }
+union Number *forward_number_twice(union Number *value) { return forward_number(value); }
+const union Number *forward_const_number(const union Number *value) { return value; }
+const union Number *forward_const_number_twice(const union Number *value) { return forward_const_number(value); }
+"#;
+
+fn forwarded_pointer_program(result_type: &str, expression: &str, operation: &str) -> String {
+    format!(
+        "{FORWARDING_PROGRAM_PRELUDE}\nint main(void) {{ {result_type} result = {expression}; {operation} }}\n"
+    )
+}
+
+fn forwarding_return_mismatch_program(kind: ReturnedPointeeKind, discards_const: bool) -> String {
+    let other = kind.other();
+    let (declaration, name) = match kind {
+        ReturnedPointeeKind::Int => ("int local_int = 7;", "local_int"),
+        ReturnedPointeeKind::Point => ("struct Point local_point = {7};", "local_point"),
+        ReturnedPointeeKind::Number => ("union Number local_number = {7};", "local_number"),
+    };
+    if discards_const {
+        format!(
+            "struct Point {{ int value; }};\n\
+             union Number {{ int value; char tag; }};\n\
+             const {ty} *forward_const({ty} const *value) {{ return value; }}\n\
+             {ty} *bad({ty} const *value) {{ return forward_const(value); }}\n\
+             int main(void) {{ {declaration} {ty} *result = bad(&{name}); return result == 0; }}\n",
+            ty = kind.mutable_pointer_type().trim_end_matches(" *"),
+        )
+    } else {
+        format!(
+            "struct Point {{ int value; }};\n\
+             union Number {{ int value; char tag; }};\n\
+             {ty} *forward_value({ty} *value) {{ return value; }}\n\
+             {other_ty} *bad({ty} *value) {{ return forward_value(value); }}\n\
+             int main(void) {{ {declaration} {other_ty} *result = bad(&{name}); return result == 0; }}\n",
+            ty = kind.mutable_pointer_type().trim_end_matches(" *"),
+            other_ty = other.mutable_pointer_type().trim_end_matches(" *"),
+        )
+    }
+}
+
+fn dangling_forwarded_pointer_program(kind: ReturnedPointeeKind) -> String {
+    let (declaration, ty, name, read) = match kind {
+        ReturnedPointeeKind::Int => ("int local_int = 7;", "int", "local_int", "return *result;"),
+        ReturnedPointeeKind::Point => (
+            "struct Point local_point = {7};",
+            "struct Point",
+            "local_point",
+            "return result->value;",
+        ),
+        ReturnedPointeeKind::Number => (
+            "union Number local_number = {7};",
+            "union Number",
+            "local_number",
+            "return result->value;",
+        ),
+    };
+    format!(
+        "struct Point {{ int value; }};\n\
+         union Number {{ int value; char tag; }};\n\
+         {ty} *forward_value({ty} *value) {{ return value; }}\n\
+         {ty} *forward_twice({ty} *value) {{ return forward_value(value); }}\n\
+         {ty} *dangling(void) {{ {declaration} return forward_twice(&{name}); }}\n\
+         int main(void) {{ {ty} *result = dangling(); {read} }}\n"
     )
 }
 
