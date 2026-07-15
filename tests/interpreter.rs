@@ -7942,6 +7942,24 @@ fn supports_array_backed_pointer_arithmetic_and_difference() {
 }
 
 #[test]
+fn treats_pointer_differences_as_scalars_in_larger_expressions() {
+    let program = include_str!("fixtures/valid/pointer_difference_scalar_expressions.c");
+
+    assert_eq!(interpret(program).unwrap(), 42);
+}
+
+#[test]
+fn preserves_different_array_diagnostics_in_nested_pointer_differences() {
+    let program = include_str!("fixtures/invalid/nested_pointer_difference_different_arrays.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot subtract pointers to different arrays"
+    );
+}
+
+#[test]
 fn supports_assignment_expressions_for_scalar_array_and_deref_lvalues() {
     let program = include_str!("fixtures/valid/assignment_expressions.c");
 

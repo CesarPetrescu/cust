@@ -15948,8 +15948,11 @@ impl Interpreter {
                 ..
             } => self.expr_is_pointer_value(then_expr) || self.expr_is_pointer_value(else_expr),
             Expr::Comma(_, right) => self.expr_is_pointer_value(right),
-            Expr::Binary(left, BinaryOp::Add | BinaryOp::Sub, right) => {
+            Expr::Binary(left, BinaryOp::Add, right) => {
                 self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right)
+            }
+            Expr::Binary(left, BinaryOp::Sub, right) => {
+                self.expr_is_pointer_value(left) && !self.expr_is_pointer_value(right)
             }
             _ => false,
         }
