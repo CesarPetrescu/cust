@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 ## Latest autonomous verification
+
+All required verification passed after the 2026-07-16 pointer-return function boundary model run. `tests/fuzz_safety.rs` now generates 144 fixed-seed scalar/named-struct/named-union pointer-return expressions plus cross-root, const, type, bounds, and out-of-scope checks. The independent model compares global/file-static storage identity, index/value, concrete pointee type, const metadata, exact cross-root/const-discard/write/type/bounds/out-of-scope diagnostics, and panic freedom through direct calls, arithmetic, indexing/address-of, difference, equality, ordering, conditional, and comma expressions. All twelve fuzz-safety tests complete in about 0.43 seconds locally. Existing Cust behavior matched, so this was deliberate property/conformance coverage with no production-code change. The warning-free GCC and Clang C11 fixture returns 114, matching Cust.
+
+Verified commands: clean baseline `cargo test`; focused pointer-return model test; all twelve fixed-seed `fuzz_safety` tests; focused pointer-return interpreter tests and recursion-depth regression; direct GCC/Clang `-std=c11 -Wall -Wextra -Werror` fixture builds/execution; `cargo test --test c_compat -- --nocapture`; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test` (697 interpreter tests and twelve fuzz-safety tests); `docker compose run --rm test`; `docker compose run --rm cust`; and `git diff --check`.
 
 All required verification passed after the 2026-07-15 hidden aggregate-array literal pointer-model run. `tests/fuzz_safety.rs` now generates 192 fixed-seed expression cases plus 56 cross-root, const, mutable-write, and concrete-type checks over mutable and const-typedef `struct`/`union` array compound literals. The independent model checks hidden storage identity, element index/value, concrete aggregate pointee type, const metadata, exact bounds/cross-root/const-discard/write/type diagnostics, and panic freedom through arithmetic, pointer difference, equality, ordering, conditional, comma, and indexed field-read expressions. All eleven fuzz-safety tests complete in about 0.80 seconds locally. Existing Cust behavior matched, so this was deliberate property/conformance coverage with no production-code change. The warning-free GCC and Clang C11 fixture returns 164, matching Cust.
 

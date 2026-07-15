@@ -5119,6 +5119,13 @@ fn supports_pointer_return_functions_and_prototypes() {
 }
 
 #[test]
+fn supports_pointer_return_function_model_routes() {
+    let program = include_str!("fixtures/valid/pointer_return_function_model_routes.c");
+
+    assert_eq!(interpret(program).unwrap(), 114);
+}
+
+#[test]
 fn supports_typedef_aggregate_definitions() {
     let program = include_str!("fixtures/valid/typedef_aggregate_definitions.c");
 
