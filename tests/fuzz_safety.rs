@@ -450,6 +450,601 @@ fn generated_embedded_aggregate_array_pointer_expressions_match_model_without_pa
     );
 }
 
+#[test]
+fn generated_scalar_array_field_pointer_expressions_match_model_without_panics() {
+    let mut state = 0xC057_5CA1_u64;
+    let mut value_cases = 0;
+    let mut bounds_cases = 0;
+    let mut cross_owner_cases = 0;
+    let mut const_discard_cases = 0;
+    let mut read_only_cases = 0;
+
+    for kind in ScalarFieldKind::ALL {
+        for container in EmbeddedContainerKind::ALL {
+            for route in EmbeddedPointerRoute::ALL {
+                for case_index in 0..12 {
+                    let expression = generate_scalar_field_pointer_expr(&mut state, kind, route, 3);
+                    let model = expression.evaluate();
+                    let (result_type, write, expected) = match model {
+                        Ok(_) if expression.points_to_const() => {
+                            const_discard_cases += 1;
+                            (
+                                kind.mutable_pointer_type(),
+                                None,
+                                ExpectedInterpretation::Error(
+                                    "cannot discard const qualifier from pointer target",
+                                ),
+                            )
+                        }
+                        Ok(pointer) => {
+                            value_cases += 1;
+                            (
+                                kind.mutable_pointer_type(),
+                                None,
+                                ExpectedInterpretation::Value(pointer.value()),
+                            )
+                        }
+                        Err(ScalarFieldModelError::Bounds(index)) => {
+                            bounds_cases += 1;
+                            (
+                                kind.const_pointer_type(),
+                                None,
+                                ExpectedInterpretation::OwnedError(format!(
+                                    "array pointer index {index} out of bounds for length {EMBEDDED_ARRAY_LEN}"
+                                )),
+                            )
+                        }
+                        Err(ScalarFieldModelError::CrossOwnerDifference) => {
+                            cross_owner_cases += 1;
+                            (
+                                kind.const_pointer_type(),
+                                None,
+                                ExpectedInterpretation::Error(
+                                    "cannot subtract pointers to different arrays",
+                                ),
+                            )
+                        }
+                    };
+                    let source = scalar_field_pointer_program(
+                        kind,
+                        container,
+                        result_type,
+                        &expression.render(container),
+                        write,
+                    );
+
+                    assert_interpretation(
+                        &source,
+                        expected,
+                        &format!(
+                            "scalar field case {case_index}, kind {kind:?}, container {container:?}, route {route:?}, model {expression:?}"
+                        ),
+                    );
+                }
+
+                let const_expression = ScalarFieldPointerExpr::Base(ScalarFieldPointerBase {
+                    kind,
+                    root: EmbeddedRoot::Left,
+                    index: 1,
+                    points_to_const: true,
+                    route,
+                    literal_id: 0,
+                });
+                let source = scalar_field_pointer_program(
+                    kind,
+                    container,
+                    kind.const_pointer_type(),
+                    &const_expression.render(container),
+                    Some("*result = 1;"),
+                );
+                assert_interpretation(
+                    &source,
+                    ExpectedInterpretation::Error("cannot assign through pointer to const"),
+                    &format!(
+                        "scalar field read-only case, kind {kind:?}, container {container:?}, route {route:?}"
+                    ),
+                );
+                read_only_cases += 1;
+
+                let expression = ScalarFieldPointerExpr::Base(ScalarFieldPointerBase {
+                    kind,
+                    root: EmbeddedRoot::Left,
+                    index: 1,
+                    points_to_const: false,
+                    route,
+                    literal_id: 0,
+                });
+                let source = scalar_field_pointer_program(
+                    kind,
+                    container,
+                    kind.other().mutable_pointer_type(),
+                    &expression.render(container),
+                    None,
+                );
+                assert_interpretation(
+                    &source,
+                    ExpectedInterpretation::OwnedError(format!(
+                        "cannot convert pointer to {} to pointer to {}",
+                        kind.pointee_label(),
+                        kind.other().pointee_label()
+                    )),
+                    &format!(
+                        "scalar field type case, kind {kind:?}, container {container:?}, route {route:?}"
+                    ),
+                );
+            }
+        }
+    }
+
+    assert!(
+        value_cases >= 70,
+        "generated only {value_cases} value cases"
+    );
+    assert!(
+        bounds_cases >= 60,
+        "generated only {bounds_cases} bounds cases"
+    );
+    assert!(
+        cross_owner_cases >= 30,
+        "generated only {cross_owner_cases} cross-owner cases"
+    );
+    assert!(
+        const_discard_cases >= 100,
+        "generated only {const_discard_cases} const-discard cases"
+    );
+    assert_eq!(read_only_cases, 64);
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ScalarFieldKind {
+    Int,
+    Char,
+}
+
+impl ScalarFieldKind {
+    const ALL: [Self; 2] = [Self::Int, Self::Char];
+
+    fn type_name(self) -> &'static str {
+        match self {
+            Self::Int => "int",
+            Self::Char => "char",
+        }
+    }
+
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Int => "Int",
+            Self::Char => "Char",
+        }
+    }
+
+    fn mutable_pointer_type(self) -> &'static str {
+        match self {
+            Self::Int => "int *",
+            Self::Char => "char *",
+        }
+    }
+
+    fn const_pointer_type(self) -> &'static str {
+        match self {
+            Self::Int => "const int *",
+            Self::Char => "const char *",
+        }
+    }
+
+    fn pointee_label(self) -> &'static str {
+        self.type_name()
+    }
+
+    fn other(self) -> Self {
+        match self {
+            Self::Int => Self::Char,
+            Self::Char => Self::Int,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ScalarFieldModelPointer {
+    kind: ScalarFieldKind,
+    storage: EmbeddedStorage,
+    index: i64,
+}
+
+impl ScalarFieldModelPointer {
+    fn value(self) -> i64 {
+        self.storage.root.base_value()
+            + self.index
+            + if self.storage.points_to_const { 10 } else { 0 }
+            + if self.storage.nested { 20 } else { 0 }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ScalarFieldPointerBase {
+    kind: ScalarFieldKind,
+    root: EmbeddedRoot,
+    index: i64,
+    points_to_const: bool,
+    route: EmbeddedPointerRoute,
+    literal_id: u64,
+}
+
+impl ScalarFieldPointerBase {
+    fn evaluate(self) -> Result<ScalarFieldModelPointer, ScalarFieldModelError> {
+        scalar_field_pointer_at(
+            self.kind,
+            EmbeddedStorage {
+                root: self.root,
+                points_to_const: self.points_to_const,
+                nested: self.route.is_nested(),
+                literal_id: self.route.is_literal().then_some(self.literal_id),
+            },
+            self.index,
+        )
+    }
+
+    fn render(self, container: EmbeddedContainerKind) -> String {
+        let prefix = if self.points_to_const { "const_" } else { "" };
+        let root = self.root.name();
+        let base = match self.route {
+            EmbeddedPointerRoute::DirectDecay | EmbeddedPointerRoute::DirectAddress => {
+                format!("{prefix}{root}.items")
+            }
+            EmbeddedPointerRoute::ArrowDecay | EmbeddedPointerRoute::ArrowAddress => {
+                format!("{prefix}{root}_view->items")
+            }
+            EmbeddedPointerRoute::NestedDecay | EmbeddedPointerRoute::NestedAddress => {
+                format!("{prefix}{root}_nested.holder.items")
+            }
+            EmbeddedPointerRoute::LiteralDecay | EmbeddedPointerRoute::LiteralAddress => {
+                let holder_type =
+                    scalar_field_holder_type(self.kind, container, self.points_to_const);
+                let initializer = scalar_field_initializer(self.root, self.points_to_const, false);
+                format!("(({holder_type}){initializer}).items")
+            }
+        };
+        if matches!(
+            self.route,
+            EmbeddedPointerRoute::DirectAddress
+                | EmbeddedPointerRoute::ArrowAddress
+                | EmbeddedPointerRoute::NestedAddress
+                | EmbeddedPointerRoute::LiteralAddress
+        ) {
+            format!("&{base}[{}]", self.index)
+        } else {
+            format!("({base} + {})", self.index)
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ScalarFieldModelError {
+    Bounds(i64),
+    CrossOwnerDifference,
+}
+
+#[derive(Clone, Debug)]
+enum ScalarFieldPointerExpr {
+    Base(ScalarFieldPointerBase),
+    Add(Box<Self>, Box<ScalarFieldScalarExpr>),
+    ReverseAdd(Box<ScalarFieldScalarExpr>, Box<Self>),
+    Subtract(Box<Self>, Box<ScalarFieldScalarExpr>),
+    Conditional(bool, Box<Self>, Box<Self>),
+    Comma(Box<ScalarFieldScalarExpr>, Box<Self>),
+}
+
+impl ScalarFieldPointerExpr {
+    fn evaluate(&self) -> Result<ScalarFieldModelPointer, ScalarFieldModelError> {
+        match self {
+            Self::Base(base) => base.evaluate(),
+            Self::Add(pointer, offset) => {
+                let pointer = pointer.evaluate()?;
+                scalar_field_pointer_at(
+                    pointer.kind,
+                    pointer.storage,
+                    pointer.index + offset.evaluate()?,
+                )
+            }
+            Self::ReverseAdd(offset, pointer) => {
+                let offset = offset.evaluate()?;
+                let pointer = pointer.evaluate()?;
+                scalar_field_pointer_at(pointer.kind, pointer.storage, pointer.index + offset)
+            }
+            Self::Subtract(pointer, offset) => {
+                let pointer = pointer.evaluate()?;
+                scalar_field_pointer_at(
+                    pointer.kind,
+                    pointer.storage,
+                    pointer.index - offset.evaluate()?,
+                )
+            }
+            Self::Conditional(condition, when_true, when_false) => {
+                if *condition {
+                    when_true.evaluate()
+                } else {
+                    when_false.evaluate()
+                }
+            }
+            Self::Comma(ignored, pointer) => {
+                ignored.evaluate()?;
+                pointer.evaluate()
+            }
+        }
+    }
+
+    fn points_to_const(&self) -> bool {
+        match self {
+            Self::Base(base) => base.points_to_const,
+            Self::Add(pointer, _)
+            | Self::ReverseAdd(_, pointer)
+            | Self::Subtract(pointer, _)
+            | Self::Comma(_, pointer) => pointer.points_to_const(),
+            Self::Conditional(_, when_true, when_false) => {
+                when_true.points_to_const() || when_false.points_to_const()
+            }
+        }
+    }
+
+    fn render(&self, container: EmbeddedContainerKind) -> String {
+        match self {
+            Self::Base(base) => base.render(container),
+            Self::Add(pointer, offset) => format!(
+                "({} + {})",
+                pointer.render(container),
+                offset.render(container)
+            ),
+            Self::ReverseAdd(offset, pointer) => format!(
+                "({} + {})",
+                offset.render(container),
+                pointer.render(container)
+            ),
+            Self::Subtract(pointer, offset) => format!(
+                "({} - {})",
+                pointer.render(container),
+                offset.render(container)
+            ),
+            Self::Conditional(condition, when_true, when_false) => format!(
+                "({} ? {} : {})",
+                i64::from(*condition),
+                when_true.render(container),
+                when_false.render(container)
+            ),
+            Self::Comma(ignored, pointer) => format!(
+                "({}, {})",
+                ignored.render(container),
+                pointer.render(container)
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ScalarFieldScalarExpr {
+    Literal(i64),
+    PointerDifference(Box<ScalarFieldPointerExpr>, Box<ScalarFieldPointerExpr>),
+}
+
+impl ScalarFieldScalarExpr {
+    fn evaluate(&self) -> Result<i64, ScalarFieldModelError> {
+        match self {
+            Self::Literal(value) => Ok(*value),
+            Self::PointerDifference(left, right) => {
+                let left = left.evaluate()?;
+                let right = right.evaluate()?;
+                if left.kind != right.kind || left.storage != right.storage {
+                    return Err(ScalarFieldModelError::CrossOwnerDifference);
+                }
+                Ok(left.index - right.index)
+            }
+        }
+    }
+
+    fn render(&self, container: EmbeddedContainerKind) -> String {
+        match self {
+            Self::Literal(value) => value.to_string(),
+            Self::PointerDifference(left, right) => {
+                format!("({} - {})", left.render(container), right.render(container))
+            }
+        }
+    }
+}
+
+fn scalar_field_pointer_at(
+    kind: ScalarFieldKind,
+    storage: EmbeddedStorage,
+    index: i64,
+) -> Result<ScalarFieldModelPointer, ScalarFieldModelError> {
+    if !(0..EMBEDDED_ARRAY_LEN).contains(&index) {
+        return Err(ScalarFieldModelError::Bounds(index));
+    }
+    Ok(ScalarFieldModelPointer {
+        kind,
+        storage,
+        index,
+    })
+}
+
+fn generate_scalar_field_pointer_expr(
+    state: &mut u64,
+    kind: ScalarFieldKind,
+    required_route: EmbeddedPointerRoute,
+    depth: usize,
+) -> ScalarFieldPointerExpr {
+    let mut expression = random_scalar_field_pointer_base(state, kind, required_route);
+    for _ in 0..depth {
+        expression = match next_u64(state) % 5 {
+            0 => ScalarFieldPointerExpr::Add(
+                Box::new(expression),
+                Box::new(generate_scalar_field_scalar_expr(state, kind)),
+            ),
+            1 => ScalarFieldPointerExpr::ReverseAdd(
+                Box::new(generate_scalar_field_scalar_expr(state, kind)),
+                Box::new(expression),
+            ),
+            2 => ScalarFieldPointerExpr::Subtract(
+                Box::new(expression),
+                Box::new(generate_scalar_field_scalar_expr(state, kind)),
+            ),
+            3 => {
+                let condition = next_u64(state) & 1 == 0;
+                let other_route = EmbeddedPointerRoute::ALL
+                    [(next_u64(state) as usize) % EmbeddedPointerRoute::ALL.len()];
+                let other = random_scalar_field_pointer_base(state, kind, other_route);
+                if next_u64(state) & 1 == 0 {
+                    ScalarFieldPointerExpr::Conditional(
+                        condition,
+                        Box::new(expression),
+                        Box::new(other),
+                    )
+                } else {
+                    ScalarFieldPointerExpr::Conditional(
+                        condition,
+                        Box::new(other),
+                        Box::new(expression),
+                    )
+                }
+            }
+            _ => ScalarFieldPointerExpr::Comma(
+                Box::new(generate_scalar_field_scalar_expr(state, kind)),
+                Box::new(expression),
+            ),
+        };
+    }
+    expression
+}
+
+fn random_scalar_field_pointer_base(
+    state: &mut u64,
+    kind: ScalarFieldKind,
+    route: EmbeddedPointerRoute,
+) -> ScalarFieldPointerExpr {
+    ScalarFieldPointerExpr::Base(ScalarFieldPointerBase {
+        kind,
+        root: if next_u64(state) & 1 == 0 {
+            EmbeddedRoot::Left
+        } else {
+            EmbeddedRoot::Right
+        },
+        index: (next_u64(state) % EMBEDDED_ARRAY_LEN as u64) as i64,
+        points_to_const: next_u64(state) & 1 == 0,
+        route,
+        literal_id: next_u64(state),
+    })
+}
+
+fn generate_scalar_field_scalar_expr(
+    state: &mut u64,
+    kind: ScalarFieldKind,
+) -> ScalarFieldScalarExpr {
+    if next_u64(state) % 3 != 0 {
+        return ScalarFieldScalarExpr::Literal((next_u64(state) % 7) as i64 - 3);
+    }
+    let left_route = EmbeddedPointerRoute::STABLE
+        [(next_u64(state) as usize) % EmbeddedPointerRoute::STABLE.len()];
+    let right_route = EmbeddedPointerRoute::STABLE
+        [(next_u64(state) as usize) % EmbeddedPointerRoute::STABLE.len()];
+    ScalarFieldScalarExpr::PointerDifference(
+        Box::new(random_scalar_field_pointer_base(state, kind, left_route)),
+        Box::new(random_scalar_field_pointer_base(state, kind, right_route)),
+    )
+}
+
+fn scalar_field_holder_type(
+    kind: ScalarFieldKind,
+    container: EmbeddedContainerKind,
+    points_to_const: bool,
+) -> String {
+    let qualifier = if points_to_const { "const " } else { "" };
+    if container.is_anonymous() {
+        format!(
+            "{} {{ {qualifier}{} items[{}]; }}",
+            container.keyword(),
+            kind.type_name(),
+            EMBEDDED_ARRAY_LEN
+        )
+    } else {
+        format!(
+            "{} {}{}Holder",
+            container.keyword(),
+            if points_to_const { "Const" } else { "" },
+            kind.prefix()
+        )
+    }
+}
+
+fn scalar_field_initializer(root: EmbeddedRoot, points_to_const: bool, nested: bool) -> String {
+    let base =
+        root.base_value() + if points_to_const { 10 } else { 0 } + if nested { 20 } else { 0 };
+    let values = format!("{{{base}, {}, {}, {}}}", base + 1, base + 2, base + 3);
+    if nested {
+        format!("{{{{{values}}}}}")
+    } else {
+        format!("{{{values}}}")
+    }
+}
+
+fn scalar_field_pointer_program(
+    kind: ScalarFieldKind,
+    container: EmbeddedContainerKind,
+    result_type: &str,
+    expression: &str,
+    write: Option<&str>,
+) -> String {
+    let element = kind.type_name();
+    let keyword = container.keyword();
+    let prefix = kind.prefix();
+    let mutable_init_left = scalar_field_initializer(EmbeddedRoot::Left, false, false);
+    let mutable_init_right = scalar_field_initializer(EmbeddedRoot::Right, false, false);
+    let const_init_left = scalar_field_initializer(EmbeddedRoot::Left, true, false);
+    let const_init_right = scalar_field_initializer(EmbeddedRoot::Right, true, false);
+    let nested_init_left = scalar_field_initializer(EmbeddedRoot::Left, false, true);
+    let nested_init_right = scalar_field_initializer(EmbeddedRoot::Right, false, true);
+    let const_nested_init_left = scalar_field_initializer(EmbeddedRoot::Left, true, true);
+    let const_nested_init_right = scalar_field_initializer(EmbeddedRoot::Right, true, true);
+
+    let (definitions, declarations) = if container.is_anonymous() {
+        (
+            format!(
+                "struct {prefix}Outer {{ {keyword} {{ {element} items[4]; }} holder; }};\n\
+                 struct Const{prefix}Outer {{ {keyword} {{ const {element} items[4]; }} holder; }};"
+            ),
+            format!(
+                "{keyword} {{ {element} items[4]; }} left = {mutable_init_left}, *left_view = &left, right = {mutable_init_right}, *right_view = &right;\n\
+                 {keyword} {{ const {element} items[4]; }} const_left = {const_init_left}, *const_left_view = &const_left, const_right = {const_init_right}, *const_right_view = &const_right;\n\
+                 struct {prefix}Outer left_nested = {nested_init_left}, right_nested = {nested_init_right};\n\
+                 struct Const{prefix}Outer const_left_nested = {const_nested_init_left}, const_right_nested = {const_nested_init_right};"
+            ),
+        )
+    } else {
+        (
+            format!(
+                "{keyword} {prefix}Holder {{ {element} items[4]; }};\n\
+                 {keyword} Const{prefix}Holder {{ const {element} items[4]; }};\n\
+                 struct {prefix}Outer {{ {keyword} {prefix}Holder holder; }};\n\
+                 struct Const{prefix}Outer {{ {keyword} Const{prefix}Holder holder; }};"
+            ),
+            format!(
+                "{keyword} {prefix}Holder left = {mutable_init_left}, *left_view = &left, right = {mutable_init_right}, *right_view = &right;\n\
+                 {keyword} Const{prefix}Holder const_left = {const_init_left}, *const_left_view = &const_left, const_right = {const_init_right}, *const_right_view = &const_right;\n\
+                 struct {prefix}Outer left_nested = {nested_init_left}, right_nested = {nested_init_right};\n\
+                 struct Const{prefix}Outer const_left_nested = {const_nested_init_left}, const_right_nested = {const_nested_init_right};"
+            ),
+        )
+    };
+    let write = write.unwrap_or("");
+
+    format!(
+        "{definitions}\n\
+         int main(void) {{\n\
+         {declarations}\n\
+         {result_type} result = {expression};\n\
+         {write}\n\
+         return *result;\n\
+         }}\n"
+    )
+}
+
 const EMBEDDED_ARRAY_LEN: i64 = 4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
