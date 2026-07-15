@@ -9,6 +9,8 @@ int main(void) {
     int selected = 6 + (1 ? right - left : 2);
     int comma = 4 + (marker += 1, right - left);
     int truth = (right - left) ? 5 : 0;
+    int *reverse = (right - left) + (values + 1);
+    int *wrapped_zero = (values + 1) + (0 ? 2 : (marker += 1, 0));
 
-    return direct + scaled + selected + comma + marker + truth;
+    return direct + scaled + selected + comma + marker + truth + *reverse + *wrapped_zero;
 }

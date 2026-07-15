@@ -4,11 +4,13 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
-Latest completed correctness slice (2026-07-15): pointee constness for pointer addition/subtraction now follows the pointer-valued result base. Scalar pointer differences made from const pointers no longer contaminate mutable bases, genuinely const bases remain const, cross-array diagnostics remain exact, and warning-free GCC/Clang fixtures return 9 like Cust.
+Latest completed correctness/tooling slice (2026-07-15): fixed-seed model-based scalar pointer-expression coverage now compares values, const metadata, cross-array diagnostics, and panic freedom against an independent model. Generated RED cases exposed speculative pointer probing that treated scalar wrappers ending in zero as pointers and masked earlier cross-array errors; pointer arithmetic now uses static result-shape classification, including addressable literals and pointer-field assignment results. GCC and Clang return 50 like Cust.
 
 - [x] Fix const-pointee metadata propagation through scalar pointer-difference offsets. `int *cursor = values + (const_right - const_left)` and pointer-minus-difference variants now preserve the mutable base's pointee qualification; genuinely const bases remain const, exact cross-array diagnostics are unchanged, and warning-free GCC/Clang fixtures match Cust at exit 9.
 
-- [ ] Add deterministic model-based pointer-expression property coverage. Acceptance: generate fixed-seed bounded expression trees over pointer-plus/minus-scalar, pointer differences, conditional/comma wrappers, and mutable/const bases; compare Cust values and exact const/cross-array diagnostics to a small test-side model; assert no panics; and keep runtime suitable for every local/Docker `cargo test` gate.
+- [x] Add deterministic model-based pointer-expression property coverage. Fixed-seed bounded scalar-array expression trees now cover pointer-plus/minus-scalar, reverse addition, pointer differences, conditional/comma wrappers, and mutable/const bases; the test-side model checks values and exact const/cross-array diagnostics under `catch_unwind`, with all four `fuzz_safety` tests finishing in about 0.04 seconds locally.
+
+- [ ] Extend model-based pointer-expression property coverage to named aggregate pointers and pointer-valued aggregate fields. Acceptance: generate fixed-seed bounded struct/union-array roots plus direct, arrow, and aggregate-compound-literal pointer-field routes through arithmetic/conditional/comma wrappers; compare selected storage/index/type/const results and exact bounds/type/const diagnostics to an independent model; and retain fast local/Docker execution.
 
 Latest completed correctness slice (2026-07-15): pointer-pointer subtraction now stays scalar inside larger additive, multiplicative, conditional, comma, and truthiness expressions. Same-array differences compose normally, cross-array differences retain the exact diagnostic, pointer-plus/minus-scalar remains pointer-valued, and warning-free GCC/Clang fixtures return 42 like Cust.
 

@@ -15505,20 +15505,12 @@ impl Interpreter {
         op: BinaryOp,
         right: &Expr,
     ) -> CustResult<PointerValue> {
-        if let Expr::Number(offset) = right {
-            let pointer = self.eval_pointer(left)?;
-            return match op {
-                BinaryOp::Add => self.offset_array_pointer(&pointer, *offset),
-                BinaryOp::Sub => self.offset_array_pointer(&pointer, -*offset),
-                _ => unreachable!("only pointer add/sub reach pointer arithmetic"),
-            };
-        }
-        if let (BinaryOp::Add, Expr::Number(offset)) = (op, left) {
-            let pointer = self.eval_pointer(right)?;
-            return self.offset_array_pointer(&pointer, *offset);
-        }
-        match (self.eval_pointer(left), self.eval_pointer(right)) {
-            (Ok(pointer), Err(_)) => {
+        let left_is_pointer = self.expr_is_pointer_value(left);
+        let right_is_pointer = self.expr_is_pointer_value(right);
+
+        match (left_is_pointer, right_is_pointer) {
+            (true, false) => {
+                let pointer = self.eval_pointer(left)?;
                 let offset = self.eval(right)?;
                 match op {
                     BinaryOp::Add => self.offset_array_pointer(&pointer, offset),
@@ -15526,12 +15518,13 @@ impl Interpreter {
                     _ => unreachable!("only pointer add/sub reach pointer arithmetic"),
                 }
             }
-            (Err(_), Ok(pointer)) if op == BinaryOp::Add => {
+            (false, true) if op == BinaryOp::Add => {
                 let offset = self.eval(left)?;
+                let pointer = self.eval_pointer(right)?;
                 self.offset_array_pointer(&pointer, offset)
             }
-            (Ok(_), Ok(_)) if op == BinaryOp::Add => Err(CustError::new("cannot add two pointers")),
-            (Ok(_), Ok(_)) | (Err(_), Ok(_)) | (Err(_), Err(_)) => {
+            (true, true) if op == BinaryOp::Add => Err(CustError::new("cannot add two pointers")),
+            (true, true) | (false, true) | (false, false) => {
                 Err(CustError::new("expected pointer expression"))
             }
         }
@@ -15915,6 +15908,8 @@ impl Interpreter {
             | Expr::AddressOfStructElementArrayField { .. }
             | Expr::AddressOfStructPtrField { .. }
             | Expr::AddressOfStructPtrArrayField { .. }
+            | Expr::AddressOfScalarLiteral { .. }
+            | Expr::AddressOfAggregateLiteral { .. }
             | Expr::AddressOfAggregateField { .. }
             | Expr::StringLiteral(_)
             | Expr::ArrayLiteral { .. }
@@ -15943,7 +15938,24 @@ impl Interpreter {
                     _
                 )))
             ),
-            Expr::StructSet { name, fields, .. } => self.struct_field_is_pointer(name, fields),
+            Expr::AggregateFieldSet {
+                aggregate, fields, ..
+            }
+            | Expr::AggregateFieldCompoundSet {
+                aggregate, fields, ..
+            } => matches!(
+                self.aggregate_literal_field_metadata(aggregate, fields),
+                Ok(Some((StructFieldType::Pointer(_), _, _)))
+            ),
+            Expr::StructSet { name, fields, .. } | Expr::StructCompoundSet { name, fields, .. } => {
+                self.struct_field_is_pointer(name, fields)
+            }
+            Expr::StructPtrSet {
+                pointer, fields, ..
+            }
+            | Expr::StructPtrCompoundSet {
+                pointer, fields, ..
+            } => self.struct_pointer_field_decays_to_pointer(pointer, fields),
             Expr::Increment { target, .. } => self.expr_is_pointer_value(target),
             Expr::Call { name, .. } => matches!(
                 self.functions

@@ -7945,7 +7945,7 @@ fn supports_array_backed_pointer_arithmetic_and_difference() {
 fn treats_pointer_differences_as_scalars_in_larger_expressions() {
     let program = include_str!("fixtures/valid/pointer_difference_scalar_expressions.c");
 
-    assert_eq!(interpret(program).unwrap(), 42);
+    assert_eq!(interpret(program).unwrap(), 50);
 }
 
 #[test]
@@ -7974,6 +7974,38 @@ fn pointer_difference_const_metadata_rejects_genuinely_const_base() {
     assert_eq!(
         err.to_string(),
         "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn supports_pointer_difference_offsets_before_pointer_operands() {
+    let program = r#"
+int main(void) {
+    int values[8] = {11, 12, 13, 14, 15, 16, 17, 18};
+    int *result = ((values + 5) - (values + 2)) + (values + 1);
+    return *result;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 15);
+}
+
+#[test]
+fn preserves_cross_array_errors_in_discarded_pointer_comma_operands() {
+    let program = r#"
+int main(void) {
+    int left[4];
+    int right[4];
+    const int *result = (((left + 1) - (right + 1)), left + 1)
+        + ((left + 2) - (left + 1));
+    return *result;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot subtract pointers to different arrays"
     );
 }
 
