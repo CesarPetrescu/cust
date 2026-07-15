@@ -595,6 +595,457 @@ fn generated_scalar_array_field_pointer_expressions_match_model_without_panics()
     assert_eq!(read_only_cases, 64);
 }
 
+#[test]
+fn generated_hidden_scalar_array_literal_pointers_match_model_without_panics() {
+    let mut state = 0xC057_117E_u64;
+    let mut value_cases = 0;
+    let mut bounds_cases = 0;
+    let mut difference_cases = 0;
+    let mut equality_cases = 0;
+    let mut ordering_cases = 0;
+
+    for root in hidden_literal_roots() {
+        for case_index in 0..24 {
+            let expression = generate_hidden_literal_pointer_expr(&mut state, root, 3);
+            let (operation, expected) = match expression.index {
+                Err(index) => {
+                    bounds_cases += 1;
+                    (
+                        "return 0;".to_string(),
+                        ExpectedInterpretation::OwnedError(format!(
+                            "array pointer index {index} out of bounds for length {HIDDEN_LITERAL_LEN}"
+                        )),
+                    )
+                }
+                Ok(index) => match next_u64(&mut state) % 4 {
+                    0 => {
+                        value_cases += 1;
+                        (
+                            "return *result;".to_string(),
+                            ExpectedInterpretation::Value(root.value(index)),
+                        )
+                    }
+                    1 => {
+                        difference_cases += 1;
+                        (
+                            format!("return result - {};", root.name()),
+                            ExpectedInterpretation::Value(index),
+                        )
+                    }
+                    2 => {
+                        equality_cases += 1;
+                        (
+                            format!("return result == ({} + {index});", root.name()),
+                            ExpectedInterpretation::Value(1),
+                        )
+                    }
+                    _ => {
+                        ordering_cases += 1;
+                        let compared_index =
+                            (next_u64(&mut state) % HIDDEN_LITERAL_LEN as u64) as i64;
+                        (
+                            format!("return result >= ({} + {compared_index});", root.name()),
+                            ExpectedInterpretation::Value(i64::from(index >= compared_index)),
+                        )
+                    }
+                },
+            };
+            let source = hidden_literal_pointer_program(
+                root.pointer_type(),
+                &expression.rendered,
+                &operation,
+            );
+
+            assert_interpretation(
+                &source,
+                expected,
+                &format!(
+                    "hidden literal case {case_index}, root {root:?}, expression {expression:?}"
+                ),
+            );
+        }
+
+        let other = root.other();
+        for (operation, expected) in [
+            (
+                format!("return result - {};", other.name()),
+                ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            ),
+            (
+                format!("return result < {};", other.name()),
+                ExpectedInterpretation::Error("cannot compare pointers to different arrays"),
+            ),
+            (
+                format!("return result == {};", other.name()),
+                ExpectedInterpretation::Value(0),
+            ),
+        ] {
+            let source =
+                hidden_literal_pointer_program(root.pointer_type(), root.name(), &operation);
+            assert_interpretation(
+                &source,
+                expected,
+                &format!("hidden literal cross-root identity, root {root:?}"),
+            );
+        }
+    }
+
+    for kind in ScalarFieldKind::ALL {
+        let const_root = HiddenLiteralRoot {
+            kind,
+            storage: HiddenLiteralStorage::ConstTypedef,
+            side: HiddenLiteralSide::Left,
+        };
+        let source = hidden_literal_pointer_program(
+            kind.mutable_pointer_type(),
+            const_root.name(),
+            "return *result;",
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("hidden const literal discard, kind {kind:?}"),
+        );
+
+        let source = hidden_literal_pointer_program(
+            kind.const_pointer_type(),
+            const_root.name(),
+            "*result = 1; return *result;",
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("hidden const literal write, kind {kind:?}"),
+        );
+
+        let mutable_root = HiddenLiteralRoot {
+            kind,
+            storage: HiddenLiteralStorage::MutableCompound,
+            side: HiddenLiteralSide::Left,
+        };
+        let source = hidden_literal_pointer_program(
+            kind.other().mutable_pointer_type(),
+            mutable_root.name(),
+            "return *result;",
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                kind.other().pointee_label()
+            )),
+            &format!("hidden literal pointee type, kind {kind:?}"),
+        );
+    }
+
+    let source = hidden_literal_pointer_program(
+        "char *",
+        "string_left + 1",
+        "*result = 'z'; return *result;",
+    );
+    assert_interpretation(
+        &source,
+        ExpectedInterpretation::Error("cannot modify read-only array through pointer"),
+        "hidden string literal write",
+    );
+
+    assert!(
+        value_cases >= 15,
+        "generated only {value_cases} value cases"
+    );
+    assert!(
+        bounds_cases >= 25,
+        "generated only {bounds_cases} bounds cases"
+    );
+    assert!(
+        difference_cases >= 15,
+        "generated only {difference_cases} difference cases"
+    );
+    assert!(
+        equality_cases >= 15,
+        "generated only {equality_cases} equality cases"
+    );
+    assert!(
+        ordering_cases >= 15,
+        "generated only {ordering_cases} ordering cases"
+    );
+}
+
+const HIDDEN_LITERAL_LEN: i64 = 4;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HiddenLiteralStorage {
+    MutableCompound,
+    ConstTypedef,
+    String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HiddenLiteralSide {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HiddenLiteralRoot {
+    kind: ScalarFieldKind,
+    storage: HiddenLiteralStorage,
+    side: HiddenLiteralSide,
+}
+
+impl HiddenLiteralRoot {
+    fn name(self) -> &'static str {
+        match (self.kind, self.storage, self.side) {
+            (
+                ScalarFieldKind::Int,
+                HiddenLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Left,
+            ) => "mutable_int_left",
+            (
+                ScalarFieldKind::Int,
+                HiddenLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Right,
+            ) => "mutable_int_right",
+            (
+                ScalarFieldKind::Char,
+                HiddenLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Left,
+            ) => "mutable_char_left",
+            (
+                ScalarFieldKind::Char,
+                HiddenLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Right,
+            ) => "mutable_char_right",
+            (ScalarFieldKind::Int, HiddenLiteralStorage::ConstTypedef, HiddenLiteralSide::Left) => {
+                "const_int_left"
+            }
+            (
+                ScalarFieldKind::Int,
+                HiddenLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Right,
+            ) => "const_int_right",
+            (
+                ScalarFieldKind::Char,
+                HiddenLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Left,
+            ) => "const_char_left",
+            (
+                ScalarFieldKind::Char,
+                HiddenLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Right,
+            ) => "const_char_right",
+            (ScalarFieldKind::Char, HiddenLiteralStorage::String, HiddenLiteralSide::Left) => {
+                "string_left"
+            }
+            (ScalarFieldKind::Char, HiddenLiteralStorage::String, HiddenLiteralSide::Right) => {
+                "string_right"
+            }
+            (ScalarFieldKind::Int, HiddenLiteralStorage::String, _) => {
+                unreachable!("string roots always have char elements")
+            }
+        }
+    }
+
+    fn pointer_type(self) -> &'static str {
+        if self.storage == HiddenLiteralStorage::ConstTypedef {
+            self.kind.const_pointer_type()
+        } else {
+            self.kind.mutable_pointer_type()
+        }
+    }
+
+    fn other(self) -> Self {
+        Self {
+            side: match self.side {
+                HiddenLiteralSide::Left => HiddenLiteralSide::Right,
+                HiddenLiteralSide::Right => HiddenLiteralSide::Left,
+            },
+            ..self
+        }
+    }
+
+    fn value(self, index: i64) -> i64 {
+        let base = match (self.kind, self.storage, self.side) {
+            (
+                ScalarFieldKind::Int,
+                HiddenLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Left,
+            ) => 11,
+            (
+                ScalarFieldKind::Int,
+                HiddenLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Right,
+            ) => 21,
+            (
+                ScalarFieldKind::Char,
+                HiddenLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Left,
+            ) => 51,
+            (
+                ScalarFieldKind::Char,
+                HiddenLiteralStorage::MutableCompound,
+                HiddenLiteralSide::Right,
+            ) => 61,
+            (ScalarFieldKind::Int, HiddenLiteralStorage::ConstTypedef, HiddenLiteralSide::Left) => {
+                31
+            }
+            (
+                ScalarFieldKind::Int,
+                HiddenLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Right,
+            ) => 41,
+            (
+                ScalarFieldKind::Char,
+                HiddenLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Left,
+            ) => 71,
+            (
+                ScalarFieldKind::Char,
+                HiddenLiteralStorage::ConstTypedef,
+                HiddenLiteralSide::Right,
+            ) => 81,
+            (ScalarFieldKind::Char, HiddenLiteralStorage::String, HiddenLiteralSide::Left) => {
+                [97, 98, 99, 0][index as usize]
+            }
+            (ScalarFieldKind::Char, HiddenLiteralStorage::String, HiddenLiteralSide::Right) => {
+                [120, 121, 122, 0][index as usize]
+            }
+            (ScalarFieldKind::Int, HiddenLiteralStorage::String, _) => {
+                unreachable!("string roots always have char elements")
+            }
+        };
+        if self.storage == HiddenLiteralStorage::String {
+            base
+        } else {
+            base + index
+        }
+    }
+}
+
+fn hidden_literal_roots() -> Vec<HiddenLiteralRoot> {
+    let mut roots = Vec::new();
+    for kind in ScalarFieldKind::ALL {
+        for storage in [
+            HiddenLiteralStorage::MutableCompound,
+            HiddenLiteralStorage::ConstTypedef,
+        ] {
+            for side in [HiddenLiteralSide::Left, HiddenLiteralSide::Right] {
+                roots.push(HiddenLiteralRoot {
+                    kind,
+                    storage,
+                    side,
+                });
+            }
+        }
+    }
+    for side in [HiddenLiteralSide::Left, HiddenLiteralSide::Right] {
+        roots.push(HiddenLiteralRoot {
+            kind: ScalarFieldKind::Char,
+            storage: HiddenLiteralStorage::String,
+            side,
+        });
+    }
+    roots
+}
+
+#[derive(Debug)]
+struct HiddenLiteralPointerExpr {
+    rendered: String,
+    index: Result<i64, i64>,
+}
+
+fn generate_hidden_literal_pointer_expr(
+    state: &mut u64,
+    root: HiddenLiteralRoot,
+    depth: usize,
+) -> HiddenLiteralPointerExpr {
+    let initial_index = (next_u64(state) % HIDDEN_LITERAL_LEN as u64) as i64;
+    let mut expression = HiddenLiteralPointerExpr {
+        rendered: format!("({} + {initial_index})", root.name()),
+        index: Ok(initial_index),
+    };
+
+    for _ in 0..depth {
+        let current = expression.rendered;
+        let current_index = expression.index;
+        let (rendered, index) = match next_u64(state) % 5 {
+            0 => {
+                let offset = (next_u64(state) % 7) as i64 - 3;
+                (
+                    format!("({current} + {offset})"),
+                    hidden_literal_offset(current_index, offset),
+                )
+            }
+            1 => {
+                let offset = (next_u64(state) % 7) as i64 - 3;
+                (
+                    format!("({offset} + {current})"),
+                    hidden_literal_offset(current_index, offset),
+                )
+            }
+            2 => {
+                let offset = (next_u64(state) % 7) as i64 - 3;
+                (
+                    format!("({current} - {offset})"),
+                    hidden_literal_offset(current_index, -offset),
+                )
+            }
+            3 => {
+                let condition = next_u64(state) & 1 == 0;
+                let alternate_index = (next_u64(state) % HIDDEN_LITERAL_LEN as u64) as i64;
+                let alternate = format!("({} + {alternate_index})", root.name());
+                if condition {
+                    (format!("(1 ? {current} : {alternate})"), current_index)
+                } else {
+                    (format!("(0 ? {alternate} : {current})"), current_index)
+                }
+            }
+            _ => (
+                format!("((({0} + 2) - ({0} + 1)), {current})", root.name()),
+                current_index,
+            ),
+        };
+        expression = HiddenLiteralPointerExpr { rendered, index };
+    }
+    expression
+}
+
+fn hidden_literal_offset(current: Result<i64, i64>, offset: i64) -> Result<i64, i64> {
+    match current {
+        Err(index) => Err(index),
+        Ok(index) => {
+            let next = index + offset;
+            if (0..HIDDEN_LITERAL_LEN).contains(&next) {
+                Ok(next)
+            } else {
+                Err(next)
+            }
+        }
+    }
+}
+
+fn hidden_literal_pointer_program(result_type: &str, expression: &str, operation: &str) -> String {
+    format!(
+        "typedef const int ConstInts[4];\n\
+         typedef const char ConstChars[4];\n\
+         int main(void) {{\n\
+         int *mutable_int_left = (int[4]){{11, 12, 13, 14}};\n\
+         int *mutable_int_right = (int[4]){{21, 22, 23, 24}};\n\
+         char *mutable_char_left = (char[4]){{51, 52, 53, 54}};\n\
+         char *mutable_char_right = (char[4]){{61, 62, 63, 64}};\n\
+         const int *const_int_left = (ConstInts){{31, 32, 33, 34}};\n\
+         const int *const_int_right = (ConstInts){{41, 42, 43, 44}};\n\
+         const char *const_char_left = (ConstChars){{71, 72, 73, 74}};\n\
+         const char *const_char_right = (ConstChars){{81, 82, 83, 84}};\n\
+         char *string_left = \"abc\";\n\
+         char *string_right = \"xyz\";\n\
+         {result_type} result = {expression};\n\
+         {operation}\n\
+         }}\n"
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ScalarFieldKind {
     Int,

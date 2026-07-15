@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-15 scalar array-field pointer-model run after clean startup inspection, fixed-seed generated model verification, warning-free GCC/Clang C11 execution, the full local Rust gate, and both required Docker commands.
+None. Last reviewed in the 2026-07-15 hidden scalar-array literal pointer-model run after clean startup inspection, fixed-seed generated model verification, warning-free GCC/Clang C11 execution, the full local Rust gate, and both required Docker commands.
 
 ## Blocker template
 
