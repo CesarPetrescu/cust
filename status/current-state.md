@@ -4,6 +4,10 @@ Last updated: 2026-07-15
 
 ## Latest autonomous verification
 
+All required verification passed after the 2026-07-15 pointer-difference const-metadata run. Pointer addition and subtraction now derive pointee constness only from the operand that supplies the pointer-valued result. Mutable bases combined with scalar differences formed from const pointers remain mutable, genuinely const bases remain const, and cross-array subtraction keeps its exact diagnostic. The warning-free GCC and Clang C11 fixture returns 9, matching Cust.
+
+Verified commands: clean baseline `cargo test`; focused RED/GREEN `cargo test --test interpreter pointer_difference_const_metadata -- --nocapture`; focused pointer-difference, pointer-arithmetic, and const-pointer regressions; direct GCC/Clang `-std=c11 -Wall -Wextra -Werror` fixture builds/execution; `cargo test --test c_compat -- --nocapture`; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust`; and `git diff --check`.
+
 All required verification passed after the 2026-07-15 pointer-difference scalar-classification run. Pointer-pointer subtraction now remains scalar when nested in larger additive, multiplicative, conditional, comma, and truthiness expressions instead of being recursively misclassified as pointer-valued and failing with `expected pointer expression`. Pointer-plus/minus-scalar expressions remain pointer-valued, pointer addition retains its existing diagnostics, and nested subtraction across different arrays still reports `cannot subtract pointers to different arrays`. The warning-free GCC and Clang C11 fixture returns 42, matching Cust.
 
 Verified commands: clean baseline `cargo test`; focused RED/GREEN `cargo test --test interpreter pointer_differences -- --nocapture`; focused pointer-arithmetic regressions; local GCC/Clang `-std=c11 -Wall -Wextra -Werror` fixture builds/execution; `cargo test --test c_compat -- --nocapture`; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust`; and `git diff --check`.

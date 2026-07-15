@@ -7960,6 +7960,24 @@ fn preserves_different_array_diagnostics_in_nested_pointer_differences() {
 }
 
 #[test]
+fn pointer_difference_const_metadata_follows_pointer_valued_base() {
+    let program = include_str!("fixtures/valid/pointer_difference_const_metadata.c");
+
+    assert_eq!(interpret(program).unwrap(), 9);
+}
+
+#[test]
+fn pointer_difference_const_metadata_rejects_genuinely_const_base() {
+    let program = include_str!("fixtures/invalid/pointer_difference_const_metadata_discard.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
 fn supports_assignment_expressions_for_scalar_array_and_deref_lvalues() {
     let program = include_str!("fixtures/valid/assignment_expressions.c");
 

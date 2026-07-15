@@ -11418,8 +11418,17 @@ impl Interpreter {
                 self.pointer_expr_points_to_const(then_expr)
                     || self.pointer_expr_points_to_const(else_expr)
             }
-            Expr::Binary(left, BinaryOp::Add | BinaryOp::Sub, right) => {
-                self.pointer_expr_points_to_const(left) || self.pointer_expr_points_to_const(right)
+            Expr::Binary(left, BinaryOp::Add, right) => {
+                if self.expr_is_pointer_value(left) {
+                    self.pointer_expr_points_to_const(left)
+                } else {
+                    self.pointer_expr_points_to_const(right)
+                }
+            }
+            Expr::Binary(left, BinaryOp::Sub, right) => {
+                self.expr_is_pointer_value(left)
+                    && !self.expr_is_pointer_value(right)
+                    && self.pointer_expr_points_to_const(left)
             }
             Expr::Assign { name, value } => {
                 self.pointer_variable_points_to_const(name)

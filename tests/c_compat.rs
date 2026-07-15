@@ -165,6 +165,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/pointer_array_elements.c",
     "tests/fixtures/compat/valid/pointer_arithmetic.c",
     "tests/fixtures/compat/valid/pointer_difference_scalar_expressions.c",
+    "tests/fixtures/compat/valid/pointer_difference_const_metadata.c",
     "tests/fixtures/compat/valid/pointer_parameters_and_arrays.c",
     "tests/fixtures/compat/valid/pointer_ordering.c",
     "tests/fixtures/compat/valid/pointer_return_functions.c",

@@ -4,11 +4,15 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
+Latest completed correctness slice (2026-07-15): pointee constness for pointer addition/subtraction now follows the pointer-valued result base. Scalar pointer differences made from const pointers no longer contaminate mutable bases, genuinely const bases remain const, cross-array diagnostics remain exact, and warning-free GCC/Clang fixtures return 9 like Cust.
+
+- [x] Fix const-pointee metadata propagation through scalar pointer-difference offsets. `int *cursor = values + (const_right - const_left)` and pointer-minus-difference variants now preserve the mutable base's pointee qualification; genuinely const bases remain const, exact cross-array diagnostics are unchanged, and warning-free GCC/Clang fixtures match Cust at exit 9.
+
+- [ ] Add deterministic model-based pointer-expression property coverage. Acceptance: generate fixed-seed bounded expression trees over pointer-plus/minus-scalar, pointer differences, conditional/comma wrappers, and mutable/const bases; compare Cust values and exact const/cross-array diagnostics to a small test-side model; assert no panics; and keep runtime suitable for every local/Docker `cargo test` gate.
+
 Latest completed correctness slice (2026-07-15): pointer-pointer subtraction now stays scalar inside larger additive, multiplicative, conditional, comma, and truthiness expressions. Same-array differences compose normally, cross-array differences retain the exact diagnostic, pointer-plus/minus-scalar remains pointer-valued, and warning-free GCC/Clang fixtures return 42 like Cust.
 
 - [x] Fix scalar additive-expression classification around pointer differences. `base + (right - left)`, multiplication/conditional/comma uses, and pointer-difference truthiness now stay on scalar evaluation; same-array/different-array diagnostics and pointer-valued arithmetic routes remain intact with compiler-oracle coverage.
-
-- [ ] Fix const-pointee metadata propagation through scalar pointer-difference offsets. Acceptance: `int *cursor = values + (const_right - const_left)` and pointer-minus-difference variants preserve the mutable base's pointee type instead of inheriting constness from pointers consumed by the scalar difference; genuinely const bases remain const, exact cross-array diagnostics remain unchanged, and warning-free GCC/Clang fixtures match Cust. Confirmed probe: Cust currently reports `cannot discard const qualifier from pointer target` while GCC/Clang return 9.
 
 Latest completed correctness slice (2026-07-15): `&expr[i]` now works for aggregate pointers returned by calls, selected by conditional/comma expressions, and stored in direct or `->` pointer fields.
 
