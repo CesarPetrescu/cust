@@ -336,6 +336,625 @@ fn generated_aggregate_pointer_const_and_type_diagnostics_match_model_without_pa
     );
 }
 
+#[test]
+fn generated_embedded_aggregate_array_pointer_expressions_match_model_without_panics() {
+    let mut state = 0xC057_E661_u64;
+    let mut value_cases = 0;
+    let mut bounds_cases = 0;
+    let mut cross_owner_cases = 0;
+    let mut const_cases = 0;
+
+    for kind in AggregateKind::ALL {
+        for container in EmbeddedContainerKind::ALL {
+            for route in EmbeddedPointerRoute::ALL {
+                for case_index in 0..12 {
+                    let expression = generate_embedded_pointer_expr(&mut state, kind, route, 3);
+                    let model = expression.evaluate();
+                    let (result_type, expected) = match model {
+                        Ok(pointer) if expression.points_to_const() => {
+                            const_cases += 1;
+                            (
+                                kind.mutable_pointer_type(),
+                                ExpectedInterpretation::Error(
+                                    "cannot discard const qualifier from pointer target",
+                                ),
+                            )
+                        }
+                        Ok(pointer) => {
+                            value_cases += 1;
+                            (
+                                kind.mutable_pointer_type(),
+                                ExpectedInterpretation::Value(pointer.value()),
+                            )
+                        }
+                        Err(EmbeddedModelError::Bounds { index, field }) => {
+                            bounds_cases += 1;
+                            (
+                                kind.const_pointer_type(),
+                                ExpectedInterpretation::OwnedError(format!(
+                                    "struct array{} pointer index {index} out of bounds for length {EMBEDDED_ARRAY_LEN}",
+                                    if field { " field" } else { "" }
+                                )),
+                            )
+                        }
+                        Err(EmbeddedModelError::CrossOwnerDifference) => {
+                            cross_owner_cases += 1;
+                            (
+                                kind.const_pointer_type(),
+                                ExpectedInterpretation::Error(
+                                    "cannot subtract pointers to different arrays",
+                                ),
+                            )
+                        }
+                    };
+                    let source = embedded_pointer_program(
+                        kind,
+                        container,
+                        result_type,
+                        &expression.render(container),
+                    );
+
+                    assert_interpretation(
+                        &source,
+                        expected,
+                        &format!(
+                            "embedded case {case_index}, kind {kind:?}, container {container:?}, route {route:?}, model {expression:?}"
+                        ),
+                    );
+                }
+
+                let expression = EmbeddedPointerExpr::Base(EmbeddedPointerBase {
+                    kind,
+                    root: EmbeddedRoot::Left,
+                    index: 1,
+                    points_to_const: false,
+                    route,
+                    literal_id: 0,
+                });
+                let source = embedded_pointer_program(
+                    kind,
+                    container,
+                    kind.other().mutable_pointer_type(),
+                    &expression.render(container),
+                );
+                assert_interpretation(
+                    &source,
+                    ExpectedInterpretation::OwnedError(format!(
+                        "cannot convert pointer to {} to pointer to {}",
+                        kind.pointee_label(),
+                        kind.other().pointee_label()
+                    )),
+                    &format!(
+                        "embedded type case, kind {kind:?}, container {container:?}, route {route:?}"
+                    ),
+                );
+            }
+        }
+    }
+
+    assert!(
+        value_cases >= 70,
+        "generated only {value_cases} value cases"
+    );
+    assert!(
+        bounds_cases >= 60,
+        "generated only {bounds_cases} bounds cases"
+    );
+    assert!(
+        cross_owner_cases >= 30,
+        "generated only {cross_owner_cases} cross-owner cases"
+    );
+    assert!(
+        const_cases >= 100,
+        "generated only {const_cases} const cases"
+    );
+}
+
+const EMBEDDED_ARRAY_LEN: i64 = 4;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EmbeddedContainerKind {
+    NamedStruct,
+    NamedUnion,
+    AnonymousStruct,
+    AnonymousUnion,
+}
+
+impl EmbeddedContainerKind {
+    const ALL: [Self; 4] = [
+        Self::NamedStruct,
+        Self::NamedUnion,
+        Self::AnonymousStruct,
+        Self::AnonymousUnion,
+    ];
+
+    fn keyword(self) -> &'static str {
+        match self {
+            Self::NamedStruct | Self::AnonymousStruct => "struct",
+            Self::NamedUnion | Self::AnonymousUnion => "union",
+        }
+    }
+
+    fn is_anonymous(self) -> bool {
+        matches!(self, Self::AnonymousStruct | Self::AnonymousUnion)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EmbeddedRoot {
+    Left,
+    Right,
+}
+
+impl EmbeddedRoot {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+
+    fn base_value(self) -> i64 {
+        match self {
+            Self::Left => 11,
+            Self::Right => 71,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EmbeddedPointerRoute {
+    DirectDecay,
+    DirectAddress,
+    ArrowDecay,
+    ArrowAddress,
+    NestedDecay,
+    NestedAddress,
+    LiteralDecay,
+    LiteralAddress,
+}
+
+impl EmbeddedPointerRoute {
+    const ALL: [Self; 8] = [
+        Self::DirectDecay,
+        Self::DirectAddress,
+        Self::ArrowDecay,
+        Self::ArrowAddress,
+        Self::NestedDecay,
+        Self::NestedAddress,
+        Self::LiteralDecay,
+        Self::LiteralAddress,
+    ];
+    const STABLE: [Self; 6] = [
+        Self::DirectDecay,
+        Self::DirectAddress,
+        Self::ArrowDecay,
+        Self::ArrowAddress,
+        Self::NestedDecay,
+        Self::NestedAddress,
+    ];
+
+    fn is_nested(self) -> bool {
+        matches!(self, Self::NestedDecay | Self::NestedAddress)
+    }
+
+    fn is_literal(self) -> bool {
+        matches!(self, Self::LiteralDecay | Self::LiteralAddress)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EmbeddedStorage {
+    root: EmbeddedRoot,
+    points_to_const: bool,
+    nested: bool,
+    literal_id: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EmbeddedModelPointer {
+    kind: AggregateKind,
+    storage: EmbeddedStorage,
+    index: i64,
+}
+
+impl EmbeddedModelPointer {
+    fn value(self) -> i64 {
+        self.storage.root.base_value()
+            + self.index
+            + if self.storage.points_to_const { 10 } else { 0 }
+            + if self.storage.nested { 20 } else { 0 }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EmbeddedPointerBase {
+    kind: AggregateKind,
+    root: EmbeddedRoot,
+    index: i64,
+    points_to_const: bool,
+    route: EmbeddedPointerRoute,
+    literal_id: u64,
+}
+
+impl EmbeddedPointerBase {
+    fn evaluate(self) -> Result<EmbeddedModelPointer, EmbeddedModelError> {
+        embedded_pointer_at(
+            self.kind,
+            EmbeddedStorage {
+                root: self.root,
+                points_to_const: self.points_to_const,
+                nested: self.route.is_nested(),
+                literal_id: self.route.is_literal().then_some(self.literal_id),
+            },
+            self.index,
+        )
+    }
+
+    fn render(self, container: EmbeddedContainerKind) -> String {
+        let prefix = if self.points_to_const { "const_" } else { "" };
+        let root = self.root.name();
+        let base = match self.route {
+            EmbeddedPointerRoute::DirectDecay | EmbeddedPointerRoute::DirectAddress => {
+                format!("{prefix}{root}.items")
+            }
+            EmbeddedPointerRoute::ArrowDecay | EmbeddedPointerRoute::ArrowAddress => {
+                format!("{prefix}{root}_view->items")
+            }
+            EmbeddedPointerRoute::NestedDecay | EmbeddedPointerRoute::NestedAddress => {
+                format!("{prefix}{root}_nested.holder.items")
+            }
+            EmbeddedPointerRoute::LiteralDecay | EmbeddedPointerRoute::LiteralAddress => {
+                let holder_type = embedded_holder_type(self.kind, container, self.points_to_const);
+                let initializer = embedded_initializer(self.root, self.points_to_const, false);
+                format!("(({holder_type}){initializer}).items")
+            }
+        };
+        if matches!(
+            self.route,
+            EmbeddedPointerRoute::DirectAddress
+                | EmbeddedPointerRoute::ArrowAddress
+                | EmbeddedPointerRoute::NestedAddress
+                | EmbeddedPointerRoute::LiteralAddress
+        ) {
+            format!("&{base}[{}]", self.index)
+        } else {
+            format!("({base} + {})", self.index)
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EmbeddedModelError {
+    Bounds { index: i64, field: bool },
+    CrossOwnerDifference,
+}
+
+#[derive(Clone, Debug)]
+enum EmbeddedPointerExpr {
+    Base(EmbeddedPointerBase),
+    Add(Box<Self>, Box<EmbeddedScalarExpr>),
+    ReverseAdd(Box<EmbeddedScalarExpr>, Box<Self>),
+    Subtract(Box<Self>, Box<EmbeddedScalarExpr>),
+    Conditional(bool, Box<Self>, Box<Self>),
+    Comma(Box<EmbeddedScalarExpr>, Box<Self>),
+}
+
+impl EmbeddedPointerExpr {
+    fn evaluate(&self) -> Result<EmbeddedModelPointer, EmbeddedModelError> {
+        match self {
+            Self::Base(base) => base.evaluate(),
+            Self::Add(pointer, offset) => {
+                let pointer = pointer.evaluate()?;
+                embedded_pointer_at(
+                    pointer.kind,
+                    pointer.storage,
+                    pointer.index + offset.evaluate()?,
+                )
+            }
+            Self::ReverseAdd(offset, pointer) => {
+                let offset = offset.evaluate()?;
+                let pointer = pointer.evaluate()?;
+                embedded_pointer_at(pointer.kind, pointer.storage, pointer.index + offset)
+            }
+            Self::Subtract(pointer, offset) => {
+                let pointer = pointer.evaluate()?;
+                embedded_pointer_at(
+                    pointer.kind,
+                    pointer.storage,
+                    pointer.index - offset.evaluate()?,
+                )
+            }
+            Self::Conditional(condition, when_true, when_false) => {
+                if *condition {
+                    when_true.evaluate()
+                } else {
+                    when_false.evaluate()
+                }
+            }
+            Self::Comma(ignored, pointer) => {
+                ignored.evaluate()?;
+                pointer.evaluate()
+            }
+        }
+    }
+
+    fn points_to_const(&self) -> bool {
+        match self {
+            Self::Base(base) => base.points_to_const,
+            Self::Add(pointer, _)
+            | Self::ReverseAdd(_, pointer)
+            | Self::Subtract(pointer, _)
+            | Self::Comma(_, pointer) => pointer.points_to_const(),
+            Self::Conditional(_, when_true, when_false) => {
+                when_true.points_to_const() || when_false.points_to_const()
+            }
+        }
+    }
+
+    fn render(&self, container: EmbeddedContainerKind) -> String {
+        match self {
+            Self::Base(base) => base.render(container),
+            Self::Add(pointer, offset) => format!(
+                "({} + {})",
+                pointer.render(container),
+                offset.render(container)
+            ),
+            Self::ReverseAdd(offset, pointer) => format!(
+                "({} + {})",
+                offset.render(container),
+                pointer.render(container)
+            ),
+            Self::Subtract(pointer, offset) => format!(
+                "({} - {})",
+                pointer.render(container),
+                offset.render(container)
+            ),
+            Self::Conditional(condition, when_true, when_false) => format!(
+                "({} ? {} : {})",
+                i64::from(*condition),
+                when_true.render(container),
+                when_false.render(container)
+            ),
+            Self::Comma(ignored, pointer) => format!(
+                "({}, {})",
+                ignored.render(container),
+                pointer.render(container)
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum EmbeddedScalarExpr {
+    Literal(i64),
+    PointerDifference(Box<EmbeddedPointerExpr>, Box<EmbeddedPointerExpr>),
+}
+
+impl EmbeddedScalarExpr {
+    fn evaluate(&self) -> Result<i64, EmbeddedModelError> {
+        match self {
+            Self::Literal(value) => Ok(*value),
+            Self::PointerDifference(left, right) => {
+                let left = left.evaluate()?;
+                let right = right.evaluate()?;
+                if left.kind != right.kind || left.storage != right.storage {
+                    return Err(EmbeddedModelError::CrossOwnerDifference);
+                }
+                Ok(left.index - right.index)
+            }
+        }
+    }
+
+    fn render(&self, container: EmbeddedContainerKind) -> String {
+        match self {
+            Self::Literal(value) => value.to_string(),
+            Self::PointerDifference(left, right) => {
+                format!("({} - {})", left.render(container), right.render(container))
+            }
+        }
+    }
+}
+
+fn embedded_pointer_at(
+    kind: AggregateKind,
+    storage: EmbeddedStorage,
+    index: i64,
+) -> Result<EmbeddedModelPointer, EmbeddedModelError> {
+    if !(0..EMBEDDED_ARRAY_LEN).contains(&index) {
+        return Err(EmbeddedModelError::Bounds {
+            index,
+            field: storage.literal_id.is_none(),
+        });
+    }
+    Ok(EmbeddedModelPointer {
+        kind,
+        storage,
+        index,
+    })
+}
+
+fn generate_embedded_pointer_expr(
+    state: &mut u64,
+    kind: AggregateKind,
+    required_route: EmbeddedPointerRoute,
+    depth: usize,
+) -> EmbeddedPointerExpr {
+    let mut expression = random_embedded_pointer_base(state, kind, required_route);
+    for _ in 0..depth {
+        expression = match next_u64(state) % 5 {
+            0 => EmbeddedPointerExpr::Add(
+                Box::new(expression),
+                Box::new(generate_embedded_scalar_expr(state, kind)),
+            ),
+            1 => EmbeddedPointerExpr::ReverseAdd(
+                Box::new(generate_embedded_scalar_expr(state, kind)),
+                Box::new(expression),
+            ),
+            2 => EmbeddedPointerExpr::Subtract(
+                Box::new(expression),
+                Box::new(generate_embedded_scalar_expr(state, kind)),
+            ),
+            3 => {
+                let condition = next_u64(state) & 1 == 0;
+                let other_route = EmbeddedPointerRoute::ALL
+                    [(next_u64(state) as usize) % EmbeddedPointerRoute::ALL.len()];
+                let other = random_embedded_pointer_base(state, kind, other_route);
+                if next_u64(state) & 1 == 0 {
+                    EmbeddedPointerExpr::Conditional(
+                        condition,
+                        Box::new(expression),
+                        Box::new(other),
+                    )
+                } else {
+                    EmbeddedPointerExpr::Conditional(
+                        condition,
+                        Box::new(other),
+                        Box::new(expression),
+                    )
+                }
+            }
+            _ => EmbeddedPointerExpr::Comma(
+                Box::new(generate_embedded_scalar_expr(state, kind)),
+                Box::new(expression),
+            ),
+        };
+    }
+    expression
+}
+
+fn random_embedded_pointer_base(
+    state: &mut u64,
+    kind: AggregateKind,
+    route: EmbeddedPointerRoute,
+) -> EmbeddedPointerExpr {
+    EmbeddedPointerExpr::Base(EmbeddedPointerBase {
+        kind,
+        root: if next_u64(state) & 1 == 0 {
+            EmbeddedRoot::Left
+        } else {
+            EmbeddedRoot::Right
+        },
+        index: (next_u64(state) % EMBEDDED_ARRAY_LEN as u64) as i64,
+        points_to_const: next_u64(state) & 1 == 0,
+        route,
+        literal_id: next_u64(state),
+    })
+}
+
+fn generate_embedded_scalar_expr(state: &mut u64, kind: AggregateKind) -> EmbeddedScalarExpr {
+    if next_u64(state) % 3 != 0 {
+        return EmbeddedScalarExpr::Literal((next_u64(state) % 7) as i64 - 3);
+    }
+    let left_route = EmbeddedPointerRoute::STABLE
+        [(next_u64(state) as usize) % EmbeddedPointerRoute::STABLE.len()];
+    let right_route = EmbeddedPointerRoute::STABLE
+        [(next_u64(state) as usize) % EmbeddedPointerRoute::STABLE.len()];
+    EmbeddedScalarExpr::PointerDifference(
+        Box::new(random_embedded_pointer_base(state, kind, left_route)),
+        Box::new(random_embedded_pointer_base(state, kind, right_route)),
+    )
+}
+
+fn embedded_holder_type(
+    kind: AggregateKind,
+    container: EmbeddedContainerKind,
+    points_to_const: bool,
+) -> String {
+    let element = kind.mutable_pointer_type().trim_end_matches(" *");
+    let qualifier = if points_to_const { "const " } else { "" };
+    if container.is_anonymous() {
+        format!(
+            "{} {{ {qualifier}{element} items[{}]; }}",
+            container.keyword(),
+            EMBEDDED_ARRAY_LEN
+        )
+    } else {
+        format!(
+            "{} {}{}Holder",
+            container.keyword(),
+            if points_to_const { "Const" } else { "" },
+            kind.prefix()
+        )
+    }
+}
+
+fn embedded_initializer(root: EmbeddedRoot, points_to_const: bool, nested: bool) -> String {
+    let base =
+        root.base_value() + if points_to_const { 10 } else { 0 } + if nested { 20 } else { 0 };
+    let values = format!(
+        "{{{{{base}}}, {{{}}}, {{{}}}, {{{}}}}}",
+        base + 1,
+        base + 2,
+        base + 3
+    );
+    if nested {
+        format!("{{{{{values}}}}}")
+    } else {
+        format!("{{{values}}}")
+    }
+}
+
+fn embedded_pointer_program(
+    kind: AggregateKind,
+    container: EmbeddedContainerKind,
+    result_type: &str,
+    expression: &str,
+) -> String {
+    let element = kind.mutable_pointer_type().trim_end_matches(" *");
+    let keyword = container.keyword();
+    let prefix = kind.prefix();
+    let mutable_init_left = embedded_initializer(EmbeddedRoot::Left, false, false);
+    let mutable_init_right = embedded_initializer(EmbeddedRoot::Right, false, false);
+    let const_init_left = embedded_initializer(EmbeddedRoot::Left, true, false);
+    let const_init_right = embedded_initializer(EmbeddedRoot::Right, true, false);
+    let nested_init_left = embedded_initializer(EmbeddedRoot::Left, false, true);
+    let nested_init_right = embedded_initializer(EmbeddedRoot::Right, false, true);
+    let const_nested_init_left = embedded_initializer(EmbeddedRoot::Left, true, true);
+    let const_nested_init_right = embedded_initializer(EmbeddedRoot::Right, true, true);
+
+    let (definitions, declarations) = if container.is_anonymous() {
+        (
+            format!(
+                "struct {prefix}Outer {{ {keyword} {{ {element} items[4]; }} holder; }};\n\
+                 struct Const{prefix}Outer {{ {keyword} {{ const {element} items[4]; }} holder; }};"
+            ),
+            format!(
+                "{keyword} {{ {element} items[4]; }} left = {mutable_init_left}, *left_view = &left, right = {mutable_init_right}, *right_view = &right;\n\
+                 {keyword} {{ const {element} items[4]; }} const_left = {const_init_left}, *const_left_view = &const_left, const_right = {const_init_right}, *const_right_view = &const_right;\n\
+                 struct {prefix}Outer left_nested = {nested_init_left}, right_nested = {nested_init_right};\n\
+                 struct Const{prefix}Outer const_left_nested = {const_nested_init_left}, const_right_nested = {const_nested_init_right};"
+            ),
+        )
+    } else {
+        (
+            format!(
+                "{keyword} {prefix}Holder {{ {element} items[4]; }};\n\
+                 {keyword} Const{prefix}Holder {{ const {element} items[4]; }};\n\
+                 struct {prefix}Outer {{ {keyword} {prefix}Holder holder; }};\n\
+                 struct Const{prefix}Outer {{ {keyword} Const{prefix}Holder holder; }};"
+            ),
+            format!(
+                "{keyword} {prefix}Holder left = {mutable_init_left}, *left_view = &left, right = {mutable_init_right}, *right_view = &right;\n\
+                 {keyword} Const{prefix}Holder const_left = {const_init_left}, *const_left_view = &const_left, const_right = {const_init_right}, *const_right_view = &const_right;\n\
+                 struct {prefix}Outer left_nested = {nested_init_left}, right_nested = {nested_init_right};\n\
+                 struct Const{prefix}Outer const_left_nested = {const_nested_init_left}, const_right_nested = {const_nested_init_right};"
+            ),
+        )
+    };
+
+    format!(
+        "struct Point {{ int value; }};\n\
+         union Number {{ int value; char tag; }};\n\
+         {definitions}\n\
+         int main(void) {{\n\
+         {declarations}\n\
+         {result_type} result = {expression};\n\
+         return result->value;\n\
+         }}\n"
+    )
+}
+
 const AGGREGATE_ARRAY_LEN: i64 = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
