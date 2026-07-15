@@ -11118,18 +11118,22 @@ impl Interpreter {
                     None => Ok(None),
                 }
             }
-            Expr::AggregateFieldGet { aggregate, fields } => {
-                match self.aggregate_literal_field_metadata(aggregate, fields)? {
-                    Some((StructFieldType::Pointer(ty), _, _)) => Ok(Some(ty)),
-                    Some((StructFieldType::Array(elem_type, _), _, _)) => {
-                        Ok(Some(PointeeType::Scalar(elem_type)))
-                    }
-                    Some((StructFieldType::StructArray(type_name, _), _, _)) => {
-                        Ok(Some(PointeeType::Struct(type_name)))
-                    }
-                    _ => Ok(None),
-                }
+            Expr::AggregateFieldGet { aggregate, fields }
+            | Expr::AggregateFieldSet {
+                aggregate, fields, ..
             }
+            | Expr::AggregateFieldCompoundSet {
+                aggregate, fields, ..
+            } => match self.aggregate_literal_field_metadata(aggregate, fields)? {
+                Some((StructFieldType::Pointer(ty), _, _)) => Ok(Some(ty)),
+                Some((StructFieldType::Array(elem_type, _), _, _)) => {
+                    Ok(Some(PointeeType::Scalar(elem_type)))
+                }
+                Some((StructFieldType::StructArray(type_name, _), _, _)) => {
+                    Ok(Some(PointeeType::Struct(type_name)))
+                }
+                _ => Ok(None),
+            },
             Expr::AddressOfArray { name, .. } => match self.find_variable(name) {
                 Some(Value::Array(array)) => {
                     Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
@@ -11140,7 +11144,8 @@ impl Interpreter {
             Expr::AddressOfStructField { name, fields }
             | Expr::AddressOfStructArrayField { name, fields, .. }
             | Expr::StructGet { name, fields }
-            | Expr::StructSet { name, fields, .. } => match self.find_variable(name) {
+            | Expr::StructSet { name, fields, .. }
+            | Expr::StructCompoundSet { name, fields, .. } => match self.find_variable(name) {
                 Some(Value::Struct {
                     type_name,
                     fields: field_map,
@@ -11190,6 +11195,12 @@ impl Interpreter {
                 }
             }
             Expr::StructPtrGet { pointer, fields }
+            | Expr::StructPtrSet {
+                pointer, fields, ..
+            }
+            | Expr::StructPtrCompoundSet {
+                pointer, fields, ..
+            }
             | Expr::AddressOfStructPtrField { pointer, fields }
             | Expr::AddressOfStructPtrArrayField {
                 pointer, fields, ..
@@ -11360,6 +11371,27 @@ impl Interpreter {
                     StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
                 })
                 .unwrap_or(false),
+            Expr::AggregateFieldSet {
+                aggregate,
+                fields,
+                value,
+            } => self
+                .aggregate_literal_field_metadata(aggregate, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_))
+                        && (points_to_const || self.pointer_expr_points_to_const(value))
+                }),
+            Expr::AggregateFieldCompoundSet {
+                aggregate, fields, ..
+            } => self
+                .aggregate_literal_field_metadata(aggregate, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_)) && points_to_const
+                }),
             Expr::AddressOfAggregateField { aggregate, fields } => self
                 .aggregate_literal_field_metadata(aggregate, fields)
                 .ok()
@@ -11373,8 +11405,24 @@ impl Interpreter {
             Expr::StructElementGet { name, fields, .. } => {
                 self.struct_array_element_field_points_to_const(name, fields)
             }
-            Expr::StructPtrGet { pointer, .. } | Expr::AddressOfStructPtrField { pointer, .. } => {
+            Expr::StructPtrGet { pointer, fields } => {
+                match self.struct_pointer_expr_field_metadata(pointer, fields) {
+                    Ok(Some((StructFieldType::Pointer(_), _, points_to_const))) => points_to_const,
+                    Ok(Some((
+                        StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _),
+                        is_const,
+                        _,
+                    ))) => self.pointer_expr_points_to_const(pointer) || is_const,
+                    _ => false,
+                }
+            }
+            Expr::AddressOfStructPtrField { pointer, fields } => {
                 self.pointer_expr_points_to_const(pointer)
+                    || self
+                        .struct_pointer_expr_field_metadata(pointer, fields)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|(_, is_const, _)| is_const)
             }
             Expr::StructPtrArrayGet {
                 pointer, fields, ..
@@ -11452,6 +11500,30 @@ impl Interpreter {
                 self.struct_pointer_field_points_to_const(name, fields)
                     || self.pointer_expr_points_to_const(value)
             }
+            Expr::StructCompoundSet { name, fields, .. } => {
+                self.struct_pointer_field_points_to_const(name, fields)
+            }
+            Expr::StructPtrSet {
+                pointer,
+                fields,
+                value,
+            } => self
+                .struct_pointer_expr_field_metadata(pointer, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_))
+                        && (points_to_const || self.pointer_expr_points_to_const(value))
+                }),
+            Expr::StructPtrCompoundSet {
+                pointer, fields, ..
+            } => self
+                .struct_pointer_expr_field_metadata(pointer, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_)) && points_to_const
+                }),
             Expr::CompoundAssign { name, .. } => self.pointer_variable_points_to_const(name),
             Expr::Increment { target, .. } => match target.as_ref() {
                 Expr::Var(name) => self.pointer_variable_points_to_const(name),

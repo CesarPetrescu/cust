@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-15 deterministic pointer-expression model run after clean startup inspection, generated and minimized RED/GREEN regressions, warning-free GCC/Clang C11 execution, the full local Rust gate, and both required Docker commands.
+None. Last reviewed in the 2026-07-15 aggregate-pointer expression model run after clean startup inspection, generated RED/GREEN metadata regressions, warning-free GCC/Clang C11 execution, the full local Rust gate, and both required Docker commands.
 
 ## Blocker template
 

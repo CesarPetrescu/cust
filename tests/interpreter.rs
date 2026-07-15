@@ -4663,6 +4663,14 @@ fn supports_pointer_field_lvalues_on_aggregate_compound_literals() {
 }
 
 #[test]
+fn supports_aggregate_pointer_field_assignment_result_metadata() {
+    let program =
+        include_str!("fixtures/valid/aggregate_pointer_field_assignment_result_metadata.c");
+
+    assert_eq!(interpret(program).unwrap(), 12);
+}
+
+#[test]
 fn supports_array_fields_on_aggregate_compound_literals() {
     let program = include_str!("fixtures/valid/aggregate_compound_literal_array_fields.c");
 
