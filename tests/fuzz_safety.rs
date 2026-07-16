@@ -1544,6 +1544,102 @@ fn generated_pointer_parameter_mutations_match_model_without_panics() {
     );
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ParameterAliasPattern {
+    SameElement,
+    SameRootDistinct,
+    CrossRoot,
+}
+
+#[test]
+fn generated_two_pointer_parameter_alias_mutations_match_model_without_panics() {
+    let mut state = 0xC057_A11A_51A5_u64;
+    let mut same_element_cases = 0;
+    let mut same_root_distinct_cases = 0;
+    let mut cross_root_cases = 0;
+    let mut left_first_cases = 0;
+    let mut right_first_cases = 0;
+
+    for kind in ReturnedPointeeKind::ALL {
+        for case_index in 0..30 {
+            let first_root = if (next_u64(&mut state) >> 32) & 1 == 0 {
+                left_first_cases += 1;
+                ReturnedRoot::Left
+            } else {
+                right_first_cases += 1;
+                ReturnedRoot::Right
+            };
+            let first_index = (next_u64(&mut state) % RETURNED_ARRAY_LEN as u64) as i64;
+            let pattern = match case_index % 3 {
+                0 => {
+                    same_element_cases += 1;
+                    ParameterAliasPattern::SameElement
+                }
+                1 => {
+                    same_root_distinct_cases += 1;
+                    ParameterAliasPattern::SameRootDistinct
+                }
+                _ => {
+                    cross_root_cases += 1;
+                    ParameterAliasPattern::CrossRoot
+                }
+            };
+            let (second_root, second_index) = match pattern {
+                ParameterAliasPattern::SameElement => (first_root, first_index),
+                ParameterAliasPattern::SameRootDistinct => (
+                    first_root,
+                    (first_index + 1 + (next_u64(&mut state) % 5) as i64) % RETURNED_ARRAY_LEN,
+                ),
+                ParameterAliasPattern::CrossRoot => (
+                    match first_root {
+                        ReturnedRoot::Left => ReturnedRoot::Right,
+                        ReturnedRoot::Right => ReturnedRoot::Left,
+                    },
+                    (next_u64(&mut state) % RETURNED_ARRAY_LEN as u64) as i64,
+                ),
+            };
+            let first = ForwardedModelPointer {
+                kind,
+                root: first_root,
+                index: first_index,
+                storage_const: false,
+                points_to_const: false,
+            };
+            let second = ForwardedModelPointer {
+                root: second_root,
+                index: second_index,
+                ..first
+            };
+            let replacement = 130 + (next_u64(&mut state) % 80) as i64;
+            let delta = 1 + (next_u64(&mut state) % 9) as i64;
+            let expected =
+                two_pointer_parameter_alias_mutation_expected(first, second, replacement, delta);
+            let source =
+                two_pointer_parameter_alias_mutation_program(first, second, replacement, delta);
+
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "two-parameter alias mutation case {case_index}, kind {kind:?}, pattern {pattern:?}, first {first:?}, second {second:?}, replacement {replacement}, delta {delta}"
+                ),
+            );
+        }
+    }
+
+    assert_eq!(same_element_cases, 30);
+    assert_eq!(same_root_distinct_cases, 30);
+    assert_eq!(cross_root_cases, 30);
+    assert!(
+        left_first_cases >= 30,
+        "generated only {left_first_cases} left-first cases"
+    );
+    assert!(
+        right_first_cases >= 30,
+        "generated only {right_first_cases} right-first cases"
+    );
+}
+
 #[test]
 fn pointer_parameter_mutation_diagnostics_match_model_without_panics() {
     for kind in ReturnedPointeeKind::ALL {
@@ -2197,6 +2293,105 @@ fn pointer_parameter_mutation_program(
          }}\n",
         storage = pointer.storage_name(),
         index = pointer.index,
+    )
+}
+
+fn two_pointer_parameter_alias_mutation_expected(
+    first: ForwardedModelPointer,
+    second: ForwardedModelPointer,
+    replacement: i64,
+    delta: i64,
+) -> i64 {
+    debug_assert_eq!(first.kind, second.kind);
+    debug_assert!(!first.storage_const && !second.storage_const);
+    let mut left = std::array::from_fn::<_, { RETURNED_ARRAY_LEN as usize }, _>(|index| {
+        ReturnedRoot::Left.base_value(first.kind, false) + index as i64
+    });
+    let mut right = std::array::from_fn::<_, { RETURNED_ARRAY_LEN as usize }, _>(|index| {
+        ReturnedRoot::Right.base_value(first.kind, false) + index as i64
+    });
+
+    match first.root {
+        ReturnedRoot::Left => left[first.index as usize] = replacement,
+        ReturnedRoot::Right => right[first.index as usize] = replacement,
+    }
+    match second.root {
+        ReturnedRoot::Left => left[second.index as usize] += delta,
+        ReturnedRoot::Right => right[second.index as usize] += delta,
+    }
+
+    left.into_iter()
+        .chain(right)
+        .enumerate()
+        .map(|(index, value)| value * (index as i64 + 1))
+        .sum::<i64>()
+        + first.index * 17
+        + second.index * 19
+        + 2
+}
+
+fn two_pointer_parameter_alias_mutation_program(
+    first: ForwardedModelPointer,
+    second: ForwardedModelPointer,
+    replacement: i64,
+    delta: i64,
+) -> String {
+    debug_assert_eq!(first.kind, second.kind);
+    let suffix = first.kind.function_suffix();
+    let pointer_type = first.kind.mutable_pointer_type();
+    let left_storage = ForwardedModelPointer {
+        root: ReturnedRoot::Left,
+        index: 0,
+        ..first
+    }
+    .storage_name();
+    let right_storage = ForwardedModelPointer {
+        root: ReturnedRoot::Right,
+        index: 0,
+        ..first
+    }
+    .storage_name();
+    let (first_write, second_update, element_value): (&str, &str, fn(&str, i64) -> String) =
+        match first.kind {
+            ReturnedPointeeKind::Int => (
+                "*first = replacement;",
+                "*second += delta;",
+                |storage: &str, index| format!("{storage}[{index}]"),
+            ),
+            ReturnedPointeeKind::Point | ReturnedPointeeKind::Number => (
+                "first->value = replacement;",
+                "second->value += delta;",
+                |storage: &str, index| format!("{storage}[{index}].value"),
+            ),
+        };
+    let storage_checksum = [left_storage, right_storage]
+        .into_iter()
+        .flat_map(|storage| (0..RETURNED_ARRAY_LEN).map(move |index| element_value(storage, index)))
+        .enumerate()
+        .map(|(index, element)| format!("{element} * {}", index + 1))
+        .collect::<Vec<_>>()
+        .join(" + ");
+
+    format!(
+        "{FORWARDING_PROGRAM_PRELUDE}\n\
+         int mutate_pair_{suffix}({pointer_type}first, {pointer_type}second, int replacement, int delta) {{\n\
+             {first_write}\n\
+             {second_update}\n\
+             first = {right_storage} + 5;\n\
+             second = {left_storage} + 4;\n\
+             return (first == {right_storage} + 5) + (second == {left_storage} + 4);\n\
+         }}\n\
+         int main(void) {{\n\
+             {pointer_type}first = {first_storage} + {first_index};\n\
+             {pointer_type}second = {second_storage} + {second_index};\n\
+             int checks = mutate_pair_{suffix}(first, second, {replacement}, {delta});\n\
+             return {storage_checksum} + (first - {first_storage}) * 17 +\n\
+                    (second - {second_storage}) * 19 + checks;\n\
+         }}\n",
+        first_storage = first.storage_name(),
+        first_index = first.index,
+        second_storage = second.storage_name(),
+        second_index = second.index,
     )
 }
 

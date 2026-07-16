@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-16 pointer-parameter mutation model run after clean startup inspection, fixed-seed generated mutation/diagnostic verification, warning-free GCC/Clang C11 execution, the full local Rust gate, and both required Docker commands.
+None. Last reviewed in the 2026-07-16 two-parameter pointer-alias mutation model run after clean startup inspection, 90 fixed-seed generated alias cases, exact mutation-diagnostic regressions, warning-free GCC/Clang C11 execution, the full local Rust gate, and both required Docker commands.
 
 ## Blocker template
 
