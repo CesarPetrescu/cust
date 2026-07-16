@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-16 field-backed mixed-qualification pointer-parameter model run after clean startup inspection, 96 fixed-seed generated writer/const-reader cases, exact const-containing-object/type/bounds diagnostic regressions, warning-free GCC/Clang C11 execution, the full local Rust gate, and both required Docker commands.
+None. Last reviewed in the 2026-07-16 field-backed pointer-return/forwarding model run after clean startup inspection, 128 fixed-seed generated pointer expressions, exact cross-field/root/const/type/bounds diagnostic regressions, warning-free GCC/Clang C11 execution, focused Rust verification, and pre-gate formatting/clippy checks. The full local and Docker gates passed before commit.
 
 ## Blocker template
 

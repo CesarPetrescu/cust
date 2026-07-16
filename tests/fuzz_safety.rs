@@ -1846,6 +1846,213 @@ fn generated_field_backed_mixed_qualification_parameter_aliases_match_model_with
 }
 
 #[test]
+fn generated_field_backed_pointer_return_and_forwarding_results_match_model_without_panics() {
+    let mut state = 0xC057_F13D_F04D_u64;
+    let mut direct_argument_cases = 0;
+    let mut arrow_argument_cases = 0;
+    let mut mutable_result_cases = 0;
+    let mut const_result_cases = 0;
+    let mut one_hop_cases = 0;
+    let mut two_hop_cases = 0;
+    let mut arithmetic_cases = 0;
+    let mut conditional_cases = 0;
+    let mut comma_cases = 0;
+    let mut indexed_address_cases = 0;
+
+    for kind in FieldBackedPointeeKind::ALL {
+        for case_index in 0..32 {
+            let expression = generate_field_backed_forwarded_expr(
+                &mut state,
+                kind,
+                case_index,
+                &mut direct_argument_cases,
+                &mut arrow_argument_cases,
+            );
+            if expression.pointer.points_to_const {
+                const_result_cases += 1;
+            } else {
+                mutable_result_cases += 1;
+            }
+            if expression.used_two_hop {
+                two_hop_cases += 1;
+            } else {
+                one_hop_cases += 1;
+            }
+            arithmetic_cases += usize::from(expression.used_arithmetic);
+            conditional_cases += usize::from(expression.used_conditional);
+            comma_cases += usize::from(expression.used_comma);
+            indexed_address_cases += usize::from(expression.used_indexed_address);
+
+            let pointer = expression.pointer;
+            let result_type = if pointer.points_to_const {
+                kind.const_pointer_type()
+            } else {
+                kind.mutable_pointer_type()
+            };
+            let (operation, expected) = match case_index % 4 {
+                0 => (format!("return {};", kind.read("result")), pointer.value()),
+                1 => (
+                    format!("return result - {};", pointer.storage.field_storage()),
+                    pointer.storage.index,
+                ),
+                2 => {
+                    let same_storage = FieldBackedModelPointer {
+                        route: pointer.storage.route.other(),
+                        ..pointer.storage
+                    };
+                    (
+                        format!(
+                            "return result == {};",
+                            render_field_backed_forward_call(
+                                FieldBackedQualifiedPointer {
+                                    storage: same_storage,
+                                    ..pointer
+                                },
+                                case_index & 1 == 0,
+                            )
+                        ),
+                        1,
+                    )
+                }
+                _ => {
+                    let compared_index = (next_u64(&mut state) % EMBEDDED_ARRAY_LEN as u64) as i64;
+                    let compared = FieldBackedQualifiedPointer {
+                        storage: FieldBackedModelPointer {
+                            index: compared_index,
+                            ..pointer.storage
+                        },
+                        ..pointer
+                    };
+                    (
+                        format!(
+                            "return result >= {};",
+                            render_field_backed_forward_call(compared, case_index & 1 == 0)
+                        ),
+                        i64::from(pointer.storage.index >= compared_index),
+                    )
+                }
+            };
+            let source = field_backed_forwarding_program(
+                kind,
+                &result_type,
+                &expression.rendered,
+                &operation,
+            );
+
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "field-backed forwarding case {case_index}, kind {kind:?}, expression {expression:?}"
+                ),
+            );
+        }
+
+        let left_primary = FieldBackedQualifiedPointer {
+            storage: FieldBackedModelPointer {
+                kind,
+                owner: FieldBackedOwner::Left,
+                field: FieldBackedField::Primary,
+                index: 1,
+                route: FieldBackedRoute::Direct,
+            },
+            points_to_const: false,
+        };
+        let left_secondary = FieldBackedQualifiedPointer {
+            storage: FieldBackedModelPointer {
+                field: FieldBackedField::Secondary,
+                route: FieldBackedRoute::Arrow,
+                ..left_primary.storage
+            },
+            ..left_primary
+        };
+        let right_primary = FieldBackedQualifiedPointer {
+            storage: FieldBackedModelPointer {
+                owner: FieldBackedOwner::Right,
+                route: FieldBackedRoute::Arrow,
+                ..left_primary.storage
+            },
+            ..left_primary
+        };
+        for (other, operator, expected) in [
+            (
+                left_secondary,
+                "-",
+                ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            ),
+            (
+                right_primary,
+                "<",
+                ExpectedInterpretation::Error("cannot compare pointers to different arrays"),
+            ),
+            (left_secondary, "==", ExpectedInterpretation::Value(0)),
+        ] {
+            let operation = format!(
+                "return result {operator} {};",
+                render_field_backed_forward_call(other, true)
+            );
+            let source = field_backed_forwarding_program(
+                kind,
+                &kind.mutable_pointer_type(),
+                &render_field_backed_forward_call(left_primary, false),
+                &operation,
+            );
+            assert_interpretation(
+                &source,
+                expected,
+                &format!(
+                    "field-backed forwarding cross-field/root diagnostic, kind {kind:?}, operator {operator}"
+                ),
+            );
+        }
+
+        assert_interpretation(
+            &field_backed_forwarding_bounds_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "{} pointer index 5 out of bounds for length {EMBEDDED_ARRAY_LEN}",
+                kind.bounds_prefix()
+            )),
+            &format!("field-backed forwarding bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &field_backed_forwarding_const_discard_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("field-backed forwarding const discard, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &field_backed_forwarding_const_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("field-backed forwarding const write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &field_backed_forwarding_const_container_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("field-backed forwarding const container, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &field_backed_forwarding_type_mismatch_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                kind.other().pointee_label()
+            )),
+            &format!("field-backed forwarding pointee type, kind {kind:?}"),
+        );
+    }
+
+    assert!(direct_argument_cases >= 50);
+    assert!(arrow_argument_cases >= 50);
+    assert!(mutable_result_cases >= 50);
+    assert!(const_result_cases >= 50);
+    assert!(one_hop_cases >= 50);
+    assert!(two_hop_cases >= 50);
+    assert!(arithmetic_cases >= 40);
+    assert!(conditional_cases >= 40);
+    assert!(comma_cases >= 40);
+    assert!(indexed_address_cases >= 40);
+}
+
+#[test]
 fn pointer_parameter_mutation_diagnostics_match_model_without_panics() {
     for kind in ReturnedPointeeKind::ALL {
         assert_interpretation(
@@ -2868,6 +3075,15 @@ enum FieldBackedRoute {
     Arrow,
 }
 
+impl FieldBackedRoute {
+    fn other(self) -> Self {
+        match self {
+            Self::Direct => Self::Arrow,
+            Self::Arrow => Self::Direct,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FieldBackedModelPointer {
     kind: FieldBackedPointeeKind,
@@ -2890,6 +3106,158 @@ impl FieldBackedModelPointer {
             FieldBackedRoute::Arrow => format!("({owner}_view->{field} + {})", self.index),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FieldBackedQualifiedPointer {
+    storage: FieldBackedModelPointer,
+    points_to_const: bool,
+}
+
+impl FieldBackedQualifiedPointer {
+    fn value(self) -> i64 {
+        self.storage.kind.base_value()
+            + self.storage.owner.offset()
+            + self.storage.field.offset()
+            + self.storage.index
+    }
+}
+
+#[derive(Debug)]
+struct FieldBackedForwardedExpr {
+    rendered: String,
+    pointer: FieldBackedQualifiedPointer,
+    used_two_hop: bool,
+    used_arithmetic: bool,
+    used_conditional: bool,
+    used_comma: bool,
+    used_indexed_address: bool,
+}
+
+fn random_field_backed_storage(
+    state: &mut u64,
+    kind: FieldBackedPointeeKind,
+    direct_cases: &mut usize,
+    arrow_cases: &mut usize,
+) -> FieldBackedModelPointer {
+    let route = if next_u64(state) & 1 == 0 {
+        *direct_cases += 1;
+        FieldBackedRoute::Direct
+    } else {
+        *arrow_cases += 1;
+        FieldBackedRoute::Arrow
+    };
+    FieldBackedModelPointer {
+        kind,
+        owner: if next_u64(state) & 1 == 0 {
+            FieldBackedOwner::Left
+        } else {
+            FieldBackedOwner::Right
+        },
+        field: if next_u64(state) & 1 == 0 {
+            FieldBackedField::Primary
+        } else {
+            FieldBackedField::Secondary
+        },
+        index: (next_u64(state) % EMBEDDED_ARRAY_LEN as u64) as i64,
+        route,
+    }
+}
+
+fn generate_field_backed_forwarded_expr(
+    state: &mut u64,
+    kind: FieldBackedPointeeKind,
+    case_index: usize,
+    direct_cases: &mut usize,
+    arrow_cases: &mut usize,
+) -> FieldBackedForwardedExpr {
+    let mut pointer = FieldBackedQualifiedPointer {
+        storage: random_field_backed_storage(state, kind, direct_cases, arrow_cases),
+        points_to_const: (case_index / 2) & 1 == 0,
+    };
+    let used_two_hop = case_index & 1 == 0;
+    let mut rendered = render_field_backed_forward_call(pointer, used_two_hop);
+    let mut used_arithmetic = false;
+    let mut used_conditional = false;
+    let mut used_comma = false;
+    let mut used_indexed_address = false;
+
+    for step in 0..2 {
+        match (case_index + step) % 4 {
+            0 => {
+                let offset = if pointer.storage.index == 0 { 1 } else { -1 };
+                rendered = format!("({rendered} + {offset})");
+                pointer.storage.index += offset;
+                used_arithmetic = true;
+            }
+            1 => {
+                let alternate = FieldBackedQualifiedPointer {
+                    storage: random_field_backed_storage(state, kind, direct_cases, arrow_cases),
+                    points_to_const: pointer.points_to_const,
+                };
+                let condition = next_u64(state) & 1 == 0;
+                let alternate_rendered = render_field_backed_forward_call(alternate, !used_two_hop);
+                let mut selected = if condition { pointer } else { alternate };
+                selected.points_to_const = pointer.points_to_const || alternate.points_to_const;
+                rendered = format!(
+                    "({} ? {rendered} : {alternate_rendered})",
+                    i64::from(condition)
+                );
+                pointer = selected;
+                used_conditional = true;
+            }
+            2 => {
+                let left = FieldBackedQualifiedPointer {
+                    storage: FieldBackedModelPointer {
+                        index: 2,
+                        ..pointer.storage
+                    },
+                    ..pointer
+                };
+                let right = FieldBackedQualifiedPointer {
+                    storage: FieldBackedModelPointer {
+                        index: 1,
+                        ..pointer.storage
+                    },
+                    ..pointer
+                };
+                rendered = format!(
+                    "(({} - {}), {rendered})",
+                    render_field_backed_forward_call(left, false),
+                    render_field_backed_forward_call(right, true)
+                );
+                used_comma = true;
+            }
+            _ => {
+                rendered = format!("&({rendered})[0]");
+                used_indexed_address = true;
+            }
+        }
+    }
+
+    FieldBackedForwardedExpr {
+        rendered,
+        pointer,
+        used_two_hop,
+        used_arithmetic,
+        used_conditional,
+        used_comma,
+        used_indexed_address,
+    }
+}
+
+fn render_field_backed_forward_call(pointer: FieldBackedQualifiedPointer, twice: bool) -> String {
+    format!(
+        "forward_{}field_{}{}({})",
+        if pointer.points_to_const {
+            "const_"
+        } else {
+            ""
+        },
+        pointer.storage.kind.suffix(),
+        if twice { "_twice" } else { "" },
+        pointer.storage.render(),
+    )
 }
 
 fn field_backed_initializer(kind: FieldBackedPointeeKind, owner: FieldBackedOwner) -> String {
@@ -3091,6 +3459,92 @@ fn field_backed_type_mismatch_program(kind: FieldBackedPointeeKind) -> String {
          }}\n",
         definitions = field_backed_definitions(kind),
         holder = kind.holder_name(),
+    )
+}
+
+fn field_backed_forwarding_prelude(kind: FieldBackedPointeeKind) -> String {
+    let left_initializer = field_backed_initializer(kind, FieldBackedOwner::Left);
+    let right_initializer = field_backed_initializer(kind, FieldBackedOwner::Right);
+    let mutable_type = kind.mutable_pointer_type();
+    let const_type = kind.const_pointer_type();
+    format!(
+        "{definitions}\n\
+         struct {holder} left = {left_initializer};\n\
+         static struct {holder} right = {right_initializer};\n\
+         {mutable_type}forward_field_{suffix}({mutable_type}value) {{ return value; }}\n\
+         {mutable_type}forward_field_{suffix}_twice({mutable_type}value) {{ return forward_field_{suffix}(value); }}\n\
+         {const_type}forward_const_field_{suffix}({const_type}value) {{ return value; }}\n\
+         {const_type}forward_const_field_{suffix}_twice({const_type}value) {{ return forward_const_field_{suffix}(value); }}",
+        definitions = field_backed_definitions(kind),
+        holder = kind.holder_name(),
+        suffix = kind.suffix(),
+    )
+}
+
+fn field_backed_forwarding_program(
+    kind: FieldBackedPointeeKind,
+    result_type: &str,
+    expression: &str,
+    operation: &str,
+) -> String {
+    format!(
+        "{prelude}\n\
+         int main(void) {{\n\
+             struct {holder} *left_view = &left;\n\
+             struct {holder} *right_view = &right;\n\
+             {result_type}result = {expression};\n\
+             {operation}\n\
+         }}\n",
+        prelude = field_backed_forwarding_prelude(kind),
+        holder = kind.holder_name(),
+    )
+}
+
+fn field_backed_forwarding_bounds_program(kind: FieldBackedPointeeKind) -> String {
+    let expression = format!("forward_field_{}(left_view->primary + 5)", kind.suffix());
+    field_backed_forwarding_program(kind, &kind.mutable_pointer_type(), &expression, "return 0;")
+}
+
+fn field_backed_forwarding_const_discard_program(kind: FieldBackedPointeeKind) -> String {
+    let expression = format!(
+        "forward_const_field_{}_twice(left.primary + 1)",
+        kind.suffix()
+    );
+    field_backed_forwarding_program(kind, &kind.mutable_pointer_type(), &expression, "return 0;")
+}
+
+fn field_backed_forwarding_const_write_program(kind: FieldBackedPointeeKind) -> String {
+    let expression = format!(
+        "forward_const_field_{}(right_view->secondary + 2)",
+        kind.suffix()
+    );
+    let operation = format!("{} return 0;", kind.write("result", "1"));
+    field_backed_forwarding_program(kind, &kind.const_pointer_type(), &expression, &operation)
+}
+
+fn field_backed_forwarding_const_container_program(kind: FieldBackedPointeeKind) -> String {
+    let initializer = field_backed_initializer(kind, FieldBackedOwner::Left);
+    format!(
+        "{prelude}\n\
+         int main(void) {{\n\
+             const struct {holder} locked = {initializer};\n\
+             {mutable_type}result = forward_field_{suffix}(locked.primary + 1);\n\
+             return result == 0;\n\
+         }}\n",
+        prelude = field_backed_forwarding_prelude(kind),
+        holder = kind.holder_name(),
+        mutable_type = kind.mutable_pointer_type(),
+        suffix = kind.suffix(),
+    )
+}
+
+fn field_backed_forwarding_type_mismatch_program(kind: FieldBackedPointeeKind) -> String {
+    let expression = format!("forward_field_{}(left.primary + 1)", kind.suffix());
+    field_backed_forwarding_program(
+        kind,
+        &kind.other().mutable_pointer_type(),
+        &expression,
+        "return result == 0;",
     )
 }
 
