@@ -5133,6 +5133,13 @@ fn supports_pointer_parameter_forwarding_model_routes() {
 }
 
 #[test]
+fn supports_pointer_parameter_mutation_model_routes() {
+    let program = include_str!("fixtures/valid/pointer_parameter_mutation_model_routes.c");
+
+    assert_eq!(interpret(program).unwrap(), 35);
+}
+
+#[test]
 fn supports_typedef_aggregate_definitions() {
     let program = include_str!("fixtures/valid/typedef_aggregate_definitions.c");
 

@@ -1482,6 +1482,96 @@ fn generated_pointer_parameter_forwarding_results_match_model_without_panics() {
     );
 }
 
+#[test]
+fn generated_pointer_parameter_mutations_match_model_without_panics() {
+    let mut state = 0xC057_5E7A_u64;
+    let mut left_root_cases = 0;
+    let mut right_root_cases = 0;
+    let mut one_hop_cases = 0;
+    let mut two_hop_cases = 0;
+
+    for kind in ReturnedPointeeKind::ALL {
+        for case_index in 0..40 {
+            let root = if (next_u64(&mut state) >> 32) & 1 == 0 {
+                left_root_cases += 1;
+                ReturnedRoot::Left
+            } else {
+                right_root_cases += 1;
+                ReturnedRoot::Right
+            };
+            let pointer = ForwardedModelPointer {
+                kind,
+                root,
+                index: (next_u64(&mut state) % RETURNED_ARRAY_LEN as u64) as i64,
+                storage_const: false,
+                points_to_const: false,
+            };
+            let replacement = 130 + (next_u64(&mut state) % 80) as i64;
+            let twice = (next_u64(&mut state) >> 32) & 1 == 0;
+            if twice {
+                two_hop_cases += 1;
+            } else {
+                one_hop_cases += 1;
+            }
+            let expected = replacement + pointer.index + if twice { 2 } else { 1 };
+            let source = pointer_parameter_mutation_program(pointer, replacement, twice);
+
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "parameter mutation case {case_index}, kind {kind:?}, pointer {pointer:?}, replacement {replacement}, twice {twice}"
+                ),
+            );
+        }
+    }
+
+    assert!(
+        left_root_cases >= 40,
+        "generated only {left_root_cases} left-root cases"
+    );
+    assert!(
+        right_root_cases >= 40,
+        "generated only {right_root_cases} right-root cases"
+    );
+    assert!(
+        one_hop_cases >= 40,
+        "generated only {one_hop_cases} one-hop cases"
+    );
+    assert!(
+        two_hop_cases >= 40,
+        "generated only {two_hop_cases} two-hop cases"
+    );
+}
+
+#[test]
+fn pointer_parameter_mutation_diagnostics_match_model_without_panics() {
+    for kind in ReturnedPointeeKind::ALL {
+        assert_interpretation(
+            &pointer_parameter_const_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("const pointer parameter write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &pointer_parameter_mutation_bounds_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "{} pointer index 7 out of bounds for length {RETURNED_ARRAY_LEN}",
+                kind.bounds_prefix()
+            )),
+            &format!("pointer parameter mutation bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &pointer_parameter_mutation_type_mismatch_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                kind.other().pointee_label()
+            )),
+            &format!("pointer parameter mutation type mismatch, kind {kind:?}"),
+        );
+    }
+}
+
 const RETURNED_ARRAY_LEN: i64 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2052,6 +2142,124 @@ const union Number *forward_const_number_twice(const union Number *value) { retu
 fn forwarded_pointer_program(result_type: &str, expression: &str, operation: &str) -> String {
     format!(
         "{FORWARDING_PROGRAM_PRELUDE}\nint main(void) {{ {result_type} result = {expression}; {operation} }}\n"
+    )
+}
+
+fn pointer_parameter_mutation_program(
+    pointer: ForwardedModelPointer,
+    replacement: i64,
+    twice: bool,
+) -> String {
+    let suffix = pointer.kind.function_suffix();
+    let pointer_type = pointer.kind.mutable_pointer_type();
+    let left_storage = ForwardedModelPointer {
+        root: ReturnedRoot::Left,
+        index: 0,
+        ..pointer
+    }
+    .storage_name();
+    let right_storage = ForwardedModelPointer {
+        root: ReturnedRoot::Right,
+        index: 0,
+        ..pointer
+    }
+    .storage_name();
+    let write = match pointer.kind {
+        ReturnedPointeeKind::Int => "*value = replacement;",
+        ReturnedPointeeKind::Point | ReturnedPointeeKind::Number => "value->value = replacement;",
+    };
+    let read = match pointer.kind {
+        ReturnedPointeeKind::Int => "*result",
+        ReturnedPointeeKind::Point | ReturnedPointeeKind::Number => "result->value",
+    };
+    let helper = if twice {
+        format!("mutate_{suffix}_twice")
+    } else {
+        format!("mutate_{suffix}")
+    };
+
+    format!(
+        "{FORWARDING_PROGRAM_PRELUDE}\n\
+         int mutate_{suffix}({pointer_type}value, int replacement) {{\n\
+             {write}\n\
+             value = {right_storage} + 5;\n\
+             return value == {right_storage} + 5;\n\
+         }}\n\
+         int mutate_{suffix}_twice({pointer_type}value, int replacement) {{\n\
+             int checks = mutate_{suffix}(value, replacement);\n\
+             value = {left_storage} + 5;\n\
+             return checks + (value == {left_storage} + 5);\n\
+         }}\n\
+         int main(void) {{\n\
+             {pointer_type}result = {storage} + {index};\n\
+             int checks = {helper}(result, {replacement});\n\
+             return {read} + (result - {storage}) + checks;\n\
+         }}\n",
+        storage = pointer.storage_name(),
+        index = pointer.index,
+    )
+}
+
+fn pointer_parameter_const_write_program(kind: ReturnedPointeeKind) -> String {
+    let pointer_type = kind.const_pointer_type();
+    let storage = ForwardedModelPointer {
+        kind,
+        root: ReturnedRoot::Left,
+        index: 0,
+        storage_const: true,
+        points_to_const: true,
+    }
+    .storage_name();
+    let write = match kind {
+        ReturnedPointeeKind::Int => "*value = 1;",
+        ReturnedPointeeKind::Point | ReturnedPointeeKind::Number => "value->value = 1;",
+    };
+
+    format!(
+        "{FORWARDING_PROGRAM_PRELUDE}\n\
+         void mutate_const({pointer_type}value) {{ {write} }}\n\
+         int main(void) {{ mutate_const({storage} + 1); return 0; }}\n"
+    )
+}
+
+fn pointer_parameter_mutation_bounds_program(kind: ReturnedPointeeKind) -> String {
+    let pointer_type = kind.mutable_pointer_type();
+    let storage = ForwardedModelPointer {
+        kind,
+        root: ReturnedRoot::Left,
+        index: 0,
+        storage_const: false,
+        points_to_const: false,
+    }
+    .storage_name();
+    let write = match kind {
+        ReturnedPointeeKind::Int => "value[2] = 1;",
+        ReturnedPointeeKind::Point | ReturnedPointeeKind::Number => "value[2].value = 1;",
+    };
+
+    format!(
+        "{FORWARDING_PROGRAM_PRELUDE}\n\
+         void mutate_out_of_bounds({pointer_type}value) {{ {write} }}\n\
+         int main(void) {{ mutate_out_of_bounds({storage} + 5); return 0; }}\n"
+    )
+}
+
+fn pointer_parameter_mutation_type_mismatch_program(kind: ReturnedPointeeKind) -> String {
+    let pointer_type = kind.mutable_pointer_type();
+    let other_type = kind.other().mutable_pointer_type();
+    let storage = ForwardedModelPointer {
+        kind,
+        root: ReturnedRoot::Left,
+        index: 0,
+        storage_const: false,
+        points_to_const: false,
+    }
+    .storage_name();
+
+    format!(
+        "{FORWARDING_PROGRAM_PRELUDE}\n\
+         int accepts_other({other_type}value) {{ return value == 0; }}\n\
+         int main(void) {{ {pointer_type}result = {storage} + 1; return accepts_other(result); }}\n"
     )
 }
 
