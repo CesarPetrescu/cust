@@ -2400,6 +2400,167 @@ fn generated_nested_anonymous_field_backed_returned_pointer_alias_mutations_matc
     assert_eq!(two_hop_calls, 144);
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LiteralFieldAliasPattern {
+    SameElement,
+    SameRootDistinctElement,
+    DifferentFieldRoot,
+    DifferentLiteralRoot,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LiteralPointerWrapper {
+    Arithmetic,
+    IndexedAddress,
+    Conditional,
+    Comma,
+}
+
+#[test]
+fn generated_aggregate_compound_literal_field_pointer_alias_mutations_match_model_without_panics() {
+    let mut state = 0xC057_117E_A11A_u64;
+    let mut pattern_counts = [0; 4];
+    let mut wrapper_counts = [0; 4];
+    let mut one_hop_calls = 0;
+    let mut two_hop_calls = 0;
+
+    for kind in FieldBackedPointeeKind::ALL {
+        for case_index in 0..24 {
+            let writer = FieldBackedModelPointer {
+                kind,
+                owner: if next_u64(&mut state) & 1 == 0 {
+                    FieldBackedOwner::Left
+                } else {
+                    FieldBackedOwner::Right
+                },
+                field: if next_u64(&mut state) & 1 == 0 {
+                    FieldBackedField::Primary
+                } else {
+                    FieldBackedField::Secondary
+                },
+                index: (next_u64(&mut state) % EMBEDDED_ARRAY_LEN as u64) as i64,
+                route: FieldBackedRoute::Direct,
+            };
+            let pattern = match case_index % 4 {
+                0 => LiteralFieldAliasPattern::SameElement,
+                1 => LiteralFieldAliasPattern::SameRootDistinctElement,
+                2 => LiteralFieldAliasPattern::DifferentFieldRoot,
+                _ => LiteralFieldAliasPattern::DifferentLiteralRoot,
+            };
+            pattern_counts[case_index % 4] += 1;
+            let (second_owner, second_field, second_index) = match pattern {
+                LiteralFieldAliasPattern::SameElement => (writer.owner, writer.field, writer.index),
+                LiteralFieldAliasPattern::SameRootDistinctElement => (
+                    writer.owner,
+                    writer.field,
+                    (writer.index + 1 + (next_u64(&mut state) % 3) as i64) % EMBEDDED_ARRAY_LEN,
+                ),
+                LiteralFieldAliasPattern::DifferentFieldRoot => {
+                    (writer.owner, writer.field.other(), writer.index)
+                }
+                LiteralFieldAliasPattern::DifferentLiteralRoot => {
+                    (writer.owner.other(), writer.field, writer.index)
+                }
+            };
+            let second_writer = FieldBackedModelPointer {
+                owner: second_owner,
+                field: second_field,
+                index: second_index,
+                ..writer
+            };
+            let reader = if case_index & 4 == 0 {
+                writer
+            } else {
+                second_writer
+            };
+            let wrappers = [
+                literal_pointer_wrapper(case_index),
+                literal_pointer_wrapper(case_index + 1),
+                literal_pointer_wrapper(case_index + 2),
+            ];
+            for wrapper in wrappers {
+                wrapper_counts[literal_pointer_wrapper_index(wrapper)] += 1;
+            }
+            let twice = [
+                case_index & 1 == 0,
+                case_index & 2 == 0,
+                case_index & 4 == 0,
+            ];
+            one_hop_calls += twice.iter().filter(|value| !**value).count();
+            two_hop_calls += twice.iter().filter(|value| **value).count();
+            let replacement = 90 + (next_u64(&mut state) % 30) as i64;
+            let delta = 1 + (next_u64(&mut state) % 9) as i64;
+            let expected = literal_field_alias_mutation_expected(
+                writer,
+                second_writer,
+                reader,
+                replacement,
+                delta,
+            );
+            let source = literal_field_alias_mutation_program(
+                writer,
+                second_writer,
+                reader,
+                replacement,
+                delta,
+                wrappers,
+                twice,
+            );
+
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "aggregate-literal field alias mutation case {case_index}, kind {kind:?}, pattern {pattern:?}, writer {writer:?}, second_writer {second_writer:?}, reader {reader:?}"
+                ),
+            );
+        }
+
+        assert_interpretation(
+            &literal_field_const_discard_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("aggregate-literal const field discard, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &literal_address_const_discard_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("aggregate-literal address const discard, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &literal_field_const_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("aggregate-literal const field write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &literal_field_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("aggregate-literal field cross-root identity, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &literal_field_bounds_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "{} pointer index 5 out of bounds for length {EMBEDDED_ARRAY_LEN}",
+                literal_field_bounds_prefix(kind)
+            )),
+            &format!("aggregate-literal field bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &literal_field_type_mismatch_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                kind.other().pointee_label()
+            )),
+            &format!("aggregate-literal field pointee type, kind {kind:?}"),
+        );
+    }
+
+    assert_eq!(pattern_counts, [24, 24, 24, 24]);
+    assert_eq!(wrapper_counts, [72, 72, 72, 72]);
+    assert_eq!(one_hop_calls, 144);
+    assert_eq!(two_hop_calls, 144);
+}
+
 #[test]
 fn pointer_parameter_mutation_diagnostics_match_model_without_panics() {
     for kind in ReturnedPointeeKind::ALL {
@@ -4501,6 +4662,361 @@ fn extended_field_backed_type_mismatch_program(kind: FieldBackedPointeeKind) -> 
             other_type = kind.other().mutable_pointer_type(),
             suffix = kind.suffix(),
             expression = pointer.render(),
+        ),
+    )
+}
+
+fn literal_pointer_wrapper(case_index: usize) -> LiteralPointerWrapper {
+    match case_index % 4 {
+        0 => LiteralPointerWrapper::Arithmetic,
+        1 => LiteralPointerWrapper::IndexedAddress,
+        2 => LiteralPointerWrapper::Conditional,
+        _ => LiteralPointerWrapper::Comma,
+    }
+}
+
+fn literal_pointer_wrapper_index(wrapper: LiteralPointerWrapper) -> usize {
+    match wrapper {
+        LiteralPointerWrapper::Arithmetic => 0,
+        LiteralPointerWrapper::IndexedAddress => 1,
+        LiteralPointerWrapper::Conditional => 2,
+        LiteralPointerWrapper::Comma => 3,
+    }
+}
+
+fn literal_field_root_name(pointer: FieldBackedModelPointer) -> String {
+    format!("literal_{}_{}", pointer.owner.name(), pointer.field.name())
+}
+
+fn render_literal_field_forward_call(
+    pointer: FieldBackedModelPointer,
+    points_to_const: bool,
+    twice: bool,
+    wrapper: LiteralPointerWrapper,
+) -> String {
+    let root = literal_field_root_name(pointer);
+    let suffix = pointer.kind.suffix();
+    let function = format!(
+        "forward_{}literal_{suffix}{}",
+        if points_to_const { "const_" } else { "" },
+        if twice { "_twice" } else { "" },
+    );
+    let alternate_owner = pointer.owner.other().name();
+    let alternate = format!("literal_{alternate_owner}_{}", pointer.field.name());
+    match wrapper {
+        LiteralPointerWrapper::Arithmetic => {
+            format!("({function}({root}) + {})", pointer.index)
+        }
+        LiteralPointerWrapper::IndexedAddress => {
+            format!("&{function}({root})[{}]", pointer.index)
+        }
+        LiteralPointerWrapper::Conditional => format!(
+            "(1 ? {function}({root} + {index}) : {function}({alternate}))",
+            index = pointer.index,
+        ),
+        LiteralPointerWrapper::Comma => {
+            format!("(marker += 0, {function}({root} + {}))", pointer.index)
+        }
+    }
+}
+
+fn literal_field_initializer(
+    kind: FieldBackedPointeeKind,
+    owner: FieldBackedOwner,
+    selected_field: FieldBackedField,
+) -> String {
+    let field_values = |field: FieldBackedField| {
+        let base = kind.base_value() + owner.offset() + field.offset();
+        let first = if field == selected_field {
+            format!("(marker += 1, {base})")
+        } else {
+            base.to_string()
+        };
+        if matches!(
+            kind,
+            FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char
+        ) {
+            format!("{{{first}, {}, {}, {}}}", base + 1, base + 2, base + 3)
+        } else {
+            format!(
+                "{{{{{first}}}, {{{}}}, {{{}}}, {{{}}}}}",
+                base + 1,
+                base + 2,
+                base + 3
+            )
+        }
+    };
+    format!(
+        "{{.primary = {}, .secondary = {}}}",
+        field_values(FieldBackedField::Primary),
+        field_values(FieldBackedField::Secondary)
+    )
+}
+
+fn literal_field_declarations(kind: FieldBackedPointeeKind) -> String {
+    let mut declarations = Vec::new();
+    for owner in FieldBackedOwner::ALL {
+        for field in FieldBackedField::ALL {
+            let root = literal_field_root_name(FieldBackedModelPointer {
+                kind,
+                owner,
+                field,
+                index: 0,
+                route: FieldBackedRoute::Direct,
+            });
+            let initializer = literal_field_initializer(kind, owner, field);
+            declarations.push(format!(
+                "{ty}{root} = ((struct {holder}){initializer}).{field_name};",
+                ty = kind.mutable_pointer_type(),
+                holder = kind.holder_name(),
+                field_name = field.name(),
+            ));
+        }
+    }
+    declarations.join("\n")
+}
+
+fn literal_field_prelude(kind: FieldBackedPointeeKind) -> String {
+    let mutable_type = kind.mutable_pointer_type();
+    let const_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    format!(
+        "{definitions}\n\
+         {mutable_type}forward_literal_{suffix}({mutable_type}value) {{ return value; }}\n\
+         {mutable_type}forward_literal_{suffix}_twice({mutable_type}value) {{ return forward_literal_{suffix}(value); }}\n\
+         {const_type}forward_const_literal_{suffix}({const_type}value) {{ return value; }}\n\
+         {const_type}forward_const_literal_{suffix}_twice({const_type}value) {{ return forward_const_literal_{suffix}(value); }}",
+        definitions = field_backed_definitions(kind),
+    )
+}
+
+fn literal_field_alias_mutation_expected(
+    writer: FieldBackedModelPointer,
+    second_writer: FieldBackedModelPointer,
+    reader: FieldBackedModelPointer,
+    replacement: i64,
+    delta: i64,
+) -> i64 {
+    let mut cells = Vec::new();
+    for owner in FieldBackedOwner::ALL {
+        for field in FieldBackedField::ALL {
+            for index in 0..EMBEDDED_ARRAY_LEN {
+                cells.push((
+                    owner,
+                    field,
+                    index,
+                    writer.kind.base_value() + owner.offset() + field.offset() + index,
+                ));
+            }
+        }
+    }
+    let matches = |cell: &(FieldBackedOwner, FieldBackedField, i64, i64),
+                   pointer: FieldBackedModelPointer| {
+        cell.0 == pointer.owner && cell.1 == pointer.field && cell.2 == pointer.index
+    };
+    cells
+        .iter_mut()
+        .find(|cell| matches(cell, writer))
+        .expect("literal writer cell must exist")
+        .3 = replacement;
+    let observed_after_first = cells
+        .iter()
+        .find(|cell| matches(cell, reader))
+        .expect("literal reader cell must exist")
+        .3;
+    cells
+        .iter_mut()
+        .find(|cell| matches(cell, second_writer))
+        .expect("literal second writer cell must exist")
+        .3 += delta;
+    let observed_after_second = cells
+        .iter()
+        .find(|cell| matches(cell, reader))
+        .expect("literal reader cell must exist")
+        .3;
+
+    cells
+        .into_iter()
+        .enumerate()
+        .map(|(index, (_, _, _, value))| value * (index as i64 + 1))
+        .sum::<i64>()
+        + writer.index * 17
+        + second_writer.index * 19
+        + reader.index * 23
+        + observed_after_first
+        + observed_after_second
+        + 7
+}
+
+#[allow(clippy::too_many_arguments)]
+fn literal_field_alias_mutation_program(
+    writer: FieldBackedModelPointer,
+    second_writer: FieldBackedModelPointer,
+    reader: FieldBackedModelPointer,
+    replacement: i64,
+    delta: i64,
+    wrappers: [LiteralPointerWrapper; 3],
+    twice: [bool; 3],
+) -> String {
+    let kind = writer.kind;
+    let mutable_type = kind.mutable_pointer_type();
+    let const_type = kind.const_pointer_type();
+    let write_first = kind.write("writer", "replacement");
+    let read = kind.read("reader");
+    let update_second = match kind {
+        FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => {
+            "*second_writer += delta;".to_string()
+        }
+        FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => {
+            "second_writer->value += delta;".to_string()
+        }
+    };
+    let mut elements = Vec::new();
+    for owner in FieldBackedOwner::ALL {
+        for field in FieldBackedField::ALL {
+            let root = literal_field_root_name(FieldBackedModelPointer {
+                kind,
+                owner,
+                field,
+                index: 0,
+                route: FieldBackedRoute::Direct,
+            });
+            for index in 0..EMBEDDED_ARRAY_LEN {
+                elements.push(field_backed_element(kind, &root, index));
+            }
+        }
+    }
+    let checksum = elements
+        .into_iter()
+        .enumerate()
+        .map(|(index, element)| format!("{element} * {}", index + 1))
+        .collect::<Vec<_>>()
+        .join(" + ");
+
+    format!(
+        "{prelude}\n\
+         int mutate_literal_{suffix}({mutable_type}writer, {mutable_type}second_writer,\n\
+                                     {const_type}reader, int replacement, int delta) {{\n\
+             {write_first}\n\
+             int observed_after_first = {read};\n\
+             {update_second}\n\
+             int observed_after_second = {read};\n\
+             writer = second_writer;\n\
+             reader = writer;\n\
+             second_writer = 0;\n\
+             return observed_after_first + observed_after_second +\n\
+                    (writer == reader) + (second_writer == 0) + (reader == writer);\n\
+         }}\n\
+         int main(void) {{\n\
+             int marker = 0;\n\
+             {declarations}\n\
+             {mutable_type}writer = {writer_expression};\n\
+             {mutable_type}second_writer = {second_writer_expression};\n\
+             {const_type}reader = {reader_expression};\n\
+             int observations = mutate_literal_{suffix}(writer, second_writer, reader,\n\
+                                                         {replacement}, {delta});\n\
+             return {checksum} +\n\
+                    (writer - {writer_root}) * 17 +\n\
+                    (second_writer - {second_writer_root}) * 19 +\n\
+                    (reader - {reader_root}) * 23 + observations +\n\
+                    (writer == {writer_root} + {writer_index}) +\n\
+                    (second_writer == {second_writer_root} + {second_writer_index}) +\n\
+                    (reader == {reader_root} + {reader_index}) + (marker == 4);\n\
+         }}\n",
+        prelude = literal_field_prelude(kind),
+        suffix = kind.suffix(),
+        declarations = literal_field_declarations(kind),
+        writer_expression = render_literal_field_forward_call(writer, false, twice[0], wrappers[0]),
+        second_writer_expression =
+            render_literal_field_forward_call(second_writer, false, twice[1], wrappers[1]),
+        reader_expression = render_literal_field_forward_call(reader, true, twice[2], wrappers[2]),
+        writer_root = literal_field_root_name(writer),
+        second_writer_root = literal_field_root_name(second_writer),
+        reader_root = literal_field_root_name(reader),
+        writer_index = writer.index,
+        second_writer_index = second_writer.index,
+        reader_index = reader.index,
+    )
+}
+
+fn literal_field_diagnostic_program(kind: FieldBackedPointeeKind, operation: &str) -> String {
+    format!(
+        "{prelude}\n\
+         int main(void) {{\n\
+             int marker = 0;\n\
+             {declarations}\n\
+             {operation}\n\
+         }}\n",
+        prelude = literal_field_prelude(kind),
+        declarations = literal_field_declarations(kind),
+    )
+}
+
+fn literal_field_const_discard_program(kind: FieldBackedPointeeKind) -> String {
+    let initializer = field_backed_initializer(kind, FieldBackedOwner::Left);
+    literal_field_diagnostic_program(
+        kind,
+        &format!(
+            "{mutable_type}result = ((const struct {holder}){initializer}).primary; return result == 0;",
+            mutable_type = kind.mutable_pointer_type(),
+            holder = kind.holder_name(),
+        ),
+    )
+}
+
+fn literal_field_const_write_program(kind: FieldBackedPointeeKind) -> String {
+    let initializer = field_backed_initializer(kind, FieldBackedOwner::Left);
+    let write = kind.write("result", "1");
+    literal_field_diagnostic_program(
+        kind,
+        &format!(
+            "{const_type}result = ((const struct {holder}){initializer}).primary; {write} return 0;",
+            const_type = kind.const_pointer_type(),
+            holder = kind.holder_name(),
+        ),
+    )
+}
+
+fn literal_address_const_discard_program(kind: FieldBackedPointeeKind) -> String {
+    let initializer = field_backed_initializer(kind, FieldBackedOwner::Left);
+    literal_field_diagnostic_program(
+        kind,
+        &format!(
+            "struct {holder} *result = &(const struct {holder}){initializer}; return result == 0;",
+            holder = kind.holder_name(),
+        ),
+    )
+}
+
+fn literal_field_cross_root_program(kind: FieldBackedPointeeKind) -> String {
+    literal_field_diagnostic_program(kind, "return literal_left_primary - literal_right_primary;")
+}
+
+fn literal_field_bounds_prefix(kind: FieldBackedPointeeKind) -> &'static str {
+    match kind {
+        FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => "array",
+        FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => "struct array",
+    }
+}
+
+fn literal_field_bounds_program(kind: FieldBackedPointeeKind) -> String {
+    literal_field_diagnostic_program(
+        kind,
+        &format!(
+            "{ty}result = forward_literal_{suffix}(literal_left_primary + 5); return result == 0;",
+            ty = kind.mutable_pointer_type(),
+            suffix = kind.suffix(),
+        ),
+    )
+}
+
+fn literal_field_type_mismatch_program(kind: FieldBackedPointeeKind) -> String {
+    literal_field_diagnostic_program(
+        kind,
+        &format!(
+            "{other_type}result = forward_literal_{suffix}(literal_left_primary + 1); return result == 0;",
+            other_type = kind.other().mutable_pointer_type(),
+            suffix = kind.suffix(),
         ),
     )
 }

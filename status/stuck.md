@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-16 nested/anonymous field-backed returned-pointer alias-mutation model run after clean startup inspection, 96 fixed-seed generated two-writer/const-reader cases, exact const-container/cross-path/bounds/type diagnostic regressions, warning-free GCC/Clang C11 execution, focused Rust verification, and the full required local and Docker gates.
+None. Last reviewed in the 2026-07-16 aggregate-compound-literal field-pointer alias-mutation model run after clean startup inspection, 96 fixed-seed generated two-writer/const-reader cases, a RED/GREEN top-level const-metadata fix, exact const-literal/cross-root/bounds/type diagnostics, warning-free GCC/Clang C11 execution, focused Rust verification, and the full required local and Docker gates.
 
 ## Blocker template
 

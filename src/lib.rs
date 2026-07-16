@@ -375,10 +375,12 @@ enum Expr {
     AggregateLiteral {
         type_name: String,
         init: Vec<StructInitializer>,
+        read_only: bool,
     },
     AddressOfAggregateLiteral {
         type_name: String,
         init: Vec<StructInitializer>,
+        read_only: bool,
     },
     AddressOfAggregateField {
         aggregate: Box<Expr>,
@@ -8792,6 +8794,7 @@ impl Parser {
             return Ok(Expr::AggregateLiteral {
                 init: self.parse_struct_initializer(&type_name)?,
                 type_name,
+                read_only: leading_const,
             });
         }
         if self.matches(&Token::Void) {
@@ -8898,6 +8901,7 @@ impl Parser {
                 return Ok(Expr::AggregateLiteral {
                     init: self.parse_struct_initializer(&type_name)?,
                     type_name,
+                    read_only: compound_literal_read_only,
                 });
             }
             DeclType::Pointer {
@@ -9125,9 +9129,15 @@ impl Parser {
                 Ok(Expr::AddressOfStructPtrField { pointer, fields })
             }
             Expr::ScalarLiteral { ty, init } => Ok(Expr::AddressOfScalarLiteral { ty, init }),
-            Expr::AggregateLiteral { type_name, init } => {
-                Ok(Expr::AddressOfAggregateLiteral { type_name, init })
-            }
+            Expr::AggregateLiteral {
+                type_name,
+                init,
+                read_only,
+            } => Ok(Expr::AddressOfAggregateLiteral {
+                type_name,
+                init,
+                read_only,
+            }),
             Expr::AggregateFieldGet { aggregate, fields } => {
                 Ok(Expr::AddressOfAggregateField { aggregate, fields })
             }
@@ -11045,7 +11055,12 @@ impl Interpreter {
         aggregate: &Expr,
         path: &[String],
     ) -> CustResult<Option<(StructFieldType, bool, bool)>> {
-        let Expr::AggregateLiteral { type_name, .. } = aggregate else {
+        let Expr::AggregateLiteral {
+            type_name,
+            read_only,
+            ..
+        } = aggregate
+        else {
             return Ok(None);
         };
         let mut current_type_name = type_name;
@@ -11065,7 +11080,7 @@ impl Interpreter {
             if index + 1 == path.len() {
                 return Ok(Some((
                     field.ty.clone(),
-                    field.is_const,
+                    field.is_const || *read_only,
                     field.points_to_const,
                 )));
             }
@@ -11402,6 +11417,7 @@ impl Interpreter {
                     StructFieldType::Scalar(_) | StructFieldType::Struct(_) => is_const,
                 })
                 .unwrap_or(false),
+            Expr::AddressOfAggregateLiteral { read_only, .. } => *read_only,
             Expr::StructElementGet { name, fields, .. } => {
                 self.struct_array_element_field_points_to_const(name, fields)
             }
@@ -12151,7 +12167,10 @@ impl Interpreter {
         aggregate: &Expr,
         fields: &[String],
     ) -> CustResult<PointerValue> {
-        let Expr::AggregateLiteral { type_name, init } = aggregate else {
+        let Expr::AggregateLiteral {
+            type_name, init, ..
+        } = aggregate
+        else {
             return Err(CustError::new(
                 "invalid address-of target for aggregate expression field",
             ));
@@ -15226,9 +15245,9 @@ impl Interpreter {
             Expr::AddressOfScalarLiteral { ty, init } => {
                 self.make_scalar_compound_literal_pointer(*ty, init)
             }
-            Expr::AddressOfAggregateLiteral { type_name, init } => {
-                self.make_aggregate_compound_literal_pointer(type_name, init)
-            }
+            Expr::AddressOfAggregateLiteral {
+                type_name, init, ..
+            } => self.make_aggregate_compound_literal_pointer(type_name, init),
             Expr::AddressOfAggregateField { aggregate, fields } => {
                 self.make_aggregate_compound_literal_field_pointer(aggregate, fields)
             }
@@ -17716,7 +17735,9 @@ impl Interpreter {
             Expr::DerefSet { pointer, value } => {
                 self.eval_struct_pointer_assignment_expr(pointer, value)
             }
-            Expr::AggregateLiteral { type_name, init } => Ok(ReturnValue::Struct {
+            Expr::AggregateLiteral {
+                type_name, init, ..
+            } => Ok(ReturnValue::Struct {
                 type_name: type_name.clone(),
                 fields: self.make_struct_fields(type_name, init)?,
             }),
