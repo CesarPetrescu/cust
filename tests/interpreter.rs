@@ -5155,6 +5155,15 @@ fn supports_pointer_parameter_mixed_qualification_alias_model_routes() {
 }
 
 #[test]
+fn supports_field_backed_mixed_qualification_parameter_alias_model_routes() {
+    let program = include_str!(
+        "fixtures/valid/field_backed_mixed_qualification_parameter_alias_model_routes.c",
+    );
+
+    assert_eq!(interpret(program).unwrap(), 28);
+}
+
+#[test]
 fn supports_typedef_aggregate_definitions() {
     let program = include_str!("fixtures/valid/typedef_aggregate_definitions.c");
 

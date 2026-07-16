@@ -1727,6 +1727,124 @@ fn generated_mixed_qualification_pointer_parameter_aliases_match_model_without_p
     );
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FieldAliasPattern {
+    SameElement,
+    SameFieldDistinctElement,
+    DifferentField,
+    DifferentOwner,
+}
+
+#[test]
+fn generated_field_backed_mixed_qualification_parameter_aliases_match_model_without_panics() {
+    let mut state = 0xC057_F13D_A11A_u64;
+    let mut pattern_counts = [0; 4];
+    let mut direct_writer_cases = 0;
+    let mut arrow_writer_cases = 0;
+    let mut direct_reader_cases = 0;
+    let mut arrow_reader_cases = 0;
+
+    for kind in FieldBackedPointeeKind::ALL {
+        for case_index in 0..24 {
+            let writer = FieldBackedModelPointer {
+                kind,
+                owner: if next_u64(&mut state) & 1 == 0 {
+                    FieldBackedOwner::Left
+                } else {
+                    FieldBackedOwner::Right
+                },
+                field: if next_u64(&mut state) & 1 == 0 {
+                    FieldBackedField::Primary
+                } else {
+                    FieldBackedField::Secondary
+                },
+                index: (next_u64(&mut state) % EMBEDDED_ARRAY_LEN as u64) as i64,
+                route: if next_u64(&mut state) & 1 == 0 {
+                    direct_writer_cases += 1;
+                    FieldBackedRoute::Direct
+                } else {
+                    arrow_writer_cases += 1;
+                    FieldBackedRoute::Arrow
+                },
+            };
+            let pattern = match case_index % 4 {
+                0 => FieldAliasPattern::SameElement,
+                1 => FieldAliasPattern::SameFieldDistinctElement,
+                2 => FieldAliasPattern::DifferentField,
+                _ => FieldAliasPattern::DifferentOwner,
+            };
+            pattern_counts[case_index % 4] += 1;
+            let (reader_owner, reader_field, reader_index) = match pattern {
+                FieldAliasPattern::SameElement => (writer.owner, writer.field, writer.index),
+                FieldAliasPattern::SameFieldDistinctElement => (
+                    writer.owner,
+                    writer.field,
+                    (writer.index + 1 + (next_u64(&mut state) % 3) as i64) % EMBEDDED_ARRAY_LEN,
+                ),
+                FieldAliasPattern::DifferentField => {
+                    (writer.owner, writer.field.other(), writer.index)
+                }
+                FieldAliasPattern::DifferentOwner => {
+                    (writer.owner.other(), writer.field, writer.index)
+                }
+            };
+            let reader = FieldBackedModelPointer {
+                owner: reader_owner,
+                field: reader_field,
+                index: reader_index,
+                route: if next_u64(&mut state) & 1 == 0 {
+                    direct_reader_cases += 1;
+                    FieldBackedRoute::Direct
+                } else {
+                    arrow_reader_cases += 1;
+                    FieldBackedRoute::Arrow
+                },
+                ..writer
+            };
+            let replacement = 90 + (next_u64(&mut state) % 30) as i64;
+            let expected = field_backed_mixed_qualification_expected(writer, reader, replacement);
+            let source = field_backed_mixed_qualification_program(writer, reader, replacement);
+
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "field-backed mixed-qualification case {case_index}, kind {kind:?}, pattern {pattern:?}, writer {writer:?}, reader {reader:?}, replacement {replacement}"
+                ),
+            );
+        }
+
+        assert_interpretation(
+            &field_backed_const_containing_object_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("field-backed const containing object, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &field_backed_bounds_program(kind, FieldBackedRoute::Arrow),
+            ExpectedInterpretation::OwnedError(format!(
+                "{} pointer index 5 out of bounds for length {EMBEDDED_ARRAY_LEN}",
+                kind.bounds_prefix()
+            )),
+            &format!("field-backed parameter bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &field_backed_type_mismatch_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                kind.other().pointee_label()
+            )),
+            &format!("field-backed parameter pointee type, kind {kind:?}"),
+        );
+    }
+
+    assert_eq!(pattern_counts, [24, 24, 24, 24]);
+    assert!(direct_writer_cases >= 30);
+    assert!(arrow_writer_cases >= 30);
+    assert!(direct_reader_cases >= 30);
+    assert!(arrow_reader_cases >= 30);
+}
+
 #[test]
 fn pointer_parameter_mutation_diagnostics_match_model_without_panics() {
     for kind in ReturnedPointeeKind::ALL {
@@ -2584,6 +2702,395 @@ fn mixed_qualification_alias_program(
         writer_index = writer.index,
         reader_storage = reader.storage_name(),
         reader_index = reader.index,
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FieldBackedPointeeKind {
+    Int,
+    Char,
+    Point,
+    Number,
+}
+
+impl FieldBackedPointeeKind {
+    const ALL: [Self; 4] = [Self::Int, Self::Char, Self::Point, Self::Number];
+
+    fn suffix(self) -> &'static str {
+        match self {
+            Self::Int => "int",
+            Self::Char => "char",
+            Self::Point => "point",
+            Self::Number => "number",
+        }
+    }
+
+    fn field_type(self) -> &'static str {
+        match self {
+            Self::Int => "int",
+            Self::Char => "char",
+            Self::Point => "struct Point",
+            Self::Number => "union Number",
+        }
+    }
+
+    fn mutable_pointer_type(self) -> String {
+        format!("{} *", self.field_type())
+    }
+
+    fn const_pointer_type(self) -> String {
+        format!("const {} *", self.field_type())
+    }
+
+    fn holder_name(self) -> &'static str {
+        match self {
+            Self::Int => "IntFieldHolder",
+            Self::Char => "CharFieldHolder",
+            Self::Point => "PointFieldHolder",
+            Self::Number => "NumberFieldHolder",
+        }
+    }
+
+    fn pointee_label(self) -> &'static str {
+        match self {
+            Self::Int => "int",
+            Self::Char => "char",
+            Self::Point => "struct 'Point'",
+            Self::Number => "union 'Number'",
+        }
+    }
+
+    fn bounds_prefix(self) -> &'static str {
+        match self {
+            Self::Int | Self::Char => "array",
+            Self::Point | Self::Number => "struct array field",
+        }
+    }
+
+    fn other(self) -> Self {
+        match self {
+            Self::Int => Self::Char,
+            Self::Char => Self::Point,
+            Self::Point => Self::Number,
+            Self::Number => Self::Int,
+        }
+    }
+
+    fn base_value(self) -> i64 {
+        match self {
+            Self::Int => 10,
+            Self::Char => 30,
+            Self::Point => 50,
+            Self::Number => 70,
+        }
+    }
+
+    fn read(self, expression: &str) -> String {
+        match self {
+            Self::Int | Self::Char => format!("*{expression}"),
+            Self::Point | Self::Number => format!("{expression}->value"),
+        }
+    }
+
+    fn write(self, expression: &str, value: &str) -> String {
+        match self {
+            Self::Int | Self::Char => format!("*{expression} = {value};"),
+            Self::Point | Self::Number => format!("{expression}->value = {value};"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FieldBackedOwner {
+    Left,
+    Right,
+}
+
+impl FieldBackedOwner {
+    const ALL: [Self; 2] = [Self::Left, Self::Right];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+
+    fn offset(self) -> i64 {
+        match self {
+            Self::Left => 0,
+            Self::Right => 10,
+        }
+    }
+
+    fn other(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FieldBackedField {
+    Primary,
+    Secondary,
+}
+
+impl FieldBackedField {
+    const ALL: [Self; 2] = [Self::Primary, Self::Secondary];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Secondary => "secondary",
+        }
+    }
+
+    fn offset(self) -> i64 {
+        match self {
+            Self::Primary => 0,
+            Self::Secondary => 5,
+        }
+    }
+
+    fn other(self) -> Self {
+        match self {
+            Self::Primary => Self::Secondary,
+            Self::Secondary => Self::Primary,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FieldBackedRoute {
+    Direct,
+    Arrow,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FieldBackedModelPointer {
+    kind: FieldBackedPointeeKind,
+    owner: FieldBackedOwner,
+    field: FieldBackedField,
+    index: i64,
+    route: FieldBackedRoute,
+}
+
+impl FieldBackedModelPointer {
+    fn field_storage(self) -> String {
+        format!("{}.{}", self.owner.name(), self.field.name())
+    }
+
+    fn render(self) -> String {
+        let owner = self.owner.name();
+        let field = self.field.name();
+        match self.route {
+            FieldBackedRoute::Direct => format!("({owner}.{field} + {})", self.index),
+            FieldBackedRoute::Arrow => format!("({owner}_view->{field} + {})", self.index),
+        }
+    }
+}
+
+fn field_backed_initializer(kind: FieldBackedPointeeKind, owner: FieldBackedOwner) -> String {
+    let field_values = |field: FieldBackedField| {
+        let base = kind.base_value() + owner.offset() + field.offset();
+        if matches!(
+            kind,
+            FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char
+        ) {
+            format!("{{{base}, {}, {}, {}}}", base + 1, base + 2, base + 3)
+        } else {
+            format!(
+                "{{{{{base}}}, {{{}}}, {{{}}}, {{{}}}}}",
+                base + 1,
+                base + 2,
+                base + 3
+            )
+        }
+    };
+    format!(
+        "{{.primary = {}, .secondary = {}}}",
+        field_values(FieldBackedField::Primary),
+        field_values(FieldBackedField::Secondary)
+    )
+}
+
+fn field_backed_definitions(kind: FieldBackedPointeeKind) -> String {
+    format!(
+        "struct Point {{ int value; }};\n\
+         union Number {{ int value; char tag; }};\n\
+         struct {holder} {{ {field_type} primary[4]; {field_type} secondary[4]; }};",
+        holder = kind.holder_name(),
+        field_type = kind.field_type(),
+    )
+}
+
+fn field_backed_element(kind: FieldBackedPointeeKind, storage: &str, index: i64) -> String {
+    let expression = format!("{storage}[{index}]");
+    match kind {
+        FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => expression,
+        FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => {
+            format!("{expression}.value")
+        }
+    }
+}
+
+fn field_backed_mixed_qualification_expected(
+    writer: FieldBackedModelPointer,
+    reader: FieldBackedModelPointer,
+    replacement: i64,
+) -> i64 {
+    debug_assert_eq!(writer.kind, reader.kind);
+    let mut cells = Vec::new();
+    for owner in FieldBackedOwner::ALL {
+        for field in FieldBackedField::ALL {
+            for index in 0..EMBEDDED_ARRAY_LEN {
+                cells.push((
+                    owner,
+                    field,
+                    index,
+                    writer.kind.base_value() + owner.offset() + field.offset() + index,
+                ));
+            }
+        }
+    }
+    let writer_cell = cells
+        .iter_mut()
+        .find(|(owner, field, index, _)| {
+            *owner == writer.owner && *field == writer.field && *index == writer.index
+        })
+        .expect("writer cell must exist");
+    writer_cell.3 = replacement;
+    let observed = cells
+        .iter()
+        .find(|(owner, field, index, _)| {
+            *owner == reader.owner && *field == reader.field && *index == reader.index
+        })
+        .expect("reader cell must exist")
+        .3;
+
+    cells
+        .into_iter()
+        .enumerate()
+        .map(|(index, (_, _, _, value))| value * (index as i64 + 1))
+        .sum::<i64>()
+        + writer.index * 17
+        + reader.index * 19
+        + observed
+        + 2
+}
+
+fn field_backed_mixed_qualification_program(
+    writer: FieldBackedModelPointer,
+    reader: FieldBackedModelPointer,
+    replacement: i64,
+) -> String {
+    debug_assert_eq!(writer.kind, reader.kind);
+    let kind = writer.kind;
+    let left_initializer = field_backed_initializer(kind, FieldBackedOwner::Left);
+    let right_initializer = field_backed_initializer(kind, FieldBackedOwner::Right);
+    let mut elements = Vec::new();
+    for owner in FieldBackedOwner::ALL {
+        for field in FieldBackedField::ALL {
+            let storage = format!("{}.{}", owner.name(), field.name());
+            for index in 0..EMBEDDED_ARRAY_LEN {
+                elements.push(field_backed_element(kind, &storage, index));
+            }
+        }
+    }
+    let checksum = elements
+        .into_iter()
+        .enumerate()
+        .map(|(index, element)| format!("{element} * {}", index + 1))
+        .collect::<Vec<_>>()
+        .join(" + ");
+    let write = kind.write("writer", "replacement");
+    let read = kind.read("reader");
+    let writer_type = kind.mutable_pointer_type();
+    let reader_type = kind.const_pointer_type();
+
+    format!(
+        "{definitions}\n\
+         struct {holder} left = {left_initializer};\n\
+         static struct {holder} right = {right_initializer};\n\
+         int observe_field_{suffix}({writer_type}writer, {reader_type}reader, int replacement) {{\n\
+             {write}\n\
+             int observed = {read};\n\
+             writer = right.secondary + 3;\n\
+             reader = left.primary + 2;\n\
+             return observed + (writer == right.secondary + 3) +\n\
+                    (reader == left.primary + 2);\n\
+         }}\n\
+         int main(void) {{\n\
+             struct {holder} *left_view = &left;\n\
+             struct {holder} *right_view = &right;\n\
+             {writer_type}writer = {writer_expression};\n\
+             {reader_type}reader = {reader_expression};\n\
+             int checks = observe_field_{suffix}(writer, reader, {replacement});\n\
+             return {checksum} + (writer - {writer_storage}) * 17 +\n\
+                    (reader - {reader_storage}) * 19 + checks;\n\
+         }}\n",
+        definitions = field_backed_definitions(kind),
+        holder = kind.holder_name(),
+        suffix = kind.suffix(),
+        writer_expression = writer.render(),
+        reader_expression = reader.render(),
+        writer_storage = writer.field_storage(),
+        reader_storage = reader.field_storage(),
+    )
+}
+
+fn field_backed_const_containing_object_program(kind: FieldBackedPointeeKind) -> String {
+    let initializer = field_backed_initializer(kind, FieldBackedOwner::Left);
+    let writer_type = kind.mutable_pointer_type();
+    let reader_type = kind.const_pointer_type();
+    format!(
+        "{definitions}\n\
+         int observe({writer_type}writer, {reader_type}reader) {{ return (writer == 0) + (reader == 0); }}\n\
+         int main(void) {{\n\
+             const struct {holder} locked = {initializer};\n\
+             return observe(locked.primary, locked.primary);\n\
+         }}\n",
+        definitions = field_backed_definitions(kind),
+        holder = kind.holder_name(),
+    )
+}
+
+fn field_backed_bounds_program(kind: FieldBackedPointeeKind, route: FieldBackedRoute) -> String {
+    let initializer = field_backed_initializer(kind, FieldBackedOwner::Left);
+    let pointer_type = kind.mutable_pointer_type();
+    let expression = match route {
+        FieldBackedRoute::Direct => "left.primary + 5",
+        FieldBackedRoute::Arrow => "left_view->primary + 5",
+    };
+    let write = kind.write("value", "1");
+    format!(
+        "{definitions}\n\
+         void mutate({pointer_type}value) {{ {write} }}\n\
+         int main(void) {{\n\
+             struct {holder} left = {initializer};\n\
+             struct {holder} *left_view = &left;\n\
+             mutate({expression});\n\
+             return 0;\n\
+         }}\n",
+        definitions = field_backed_definitions(kind),
+        holder = kind.holder_name(),
+    )
+}
+
+fn field_backed_type_mismatch_program(kind: FieldBackedPointeeKind) -> String {
+    let initializer = field_backed_initializer(kind, FieldBackedOwner::Left);
+    let other_type = kind.other().mutable_pointer_type();
+    format!(
+        "{definitions}\n\
+         int accept_other({other_type}value) {{ return value == 0; }}\n\
+         int main(void) {{\n\
+             struct {holder} left = {initializer};\n\
+             return accept_other(left.primary);\n\
+         }}\n",
+        definitions = field_backed_definitions(kind),
+        holder = kind.holder_name(),
     )
 }
 
