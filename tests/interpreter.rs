@@ -5172,6 +5172,14 @@ fn supports_field_backed_pointer_return_forwarding_model_routes() {
 }
 
 #[test]
+fn supports_field_backed_pointer_return_alias_mutation_model_routes() {
+    let program =
+        include_str!("fixtures/valid/field_backed_pointer_return_alias_mutation_model_routes.c",);
+
+    assert_eq!(interpret(program).unwrap(), 36);
+}
+
+#[test]
 fn supports_typedef_aggregate_definitions() {
     let program = include_str!("fixtures/valid/typedef_aggregate_definitions.c");
 

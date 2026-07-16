@@ -2053,6 +2053,167 @@ fn generated_field_backed_pointer_return_and_forwarding_results_match_model_with
 }
 
 #[test]
+fn generated_field_backed_returned_pointer_alias_mutations_match_model_without_panics() {
+    let mut state = 0xC057_F13D_5A11_u64;
+    let mut pattern_counts = [0; 4];
+    let mut reader_aliases_writer_cases = 0;
+    let mut reader_aliases_second_writer_cases = 0;
+    let mut one_hop_calls = 0;
+    let mut two_hop_calls = 0;
+    let mut direct_arguments = 0;
+    let mut arrow_arguments = 0;
+
+    for kind in FieldBackedPointeeKind::ALL {
+        for case_index in 0..24 {
+            let writer = FieldBackedModelPointer {
+                kind,
+                owner: if next_u64(&mut state) & 1 == 0 {
+                    FieldBackedOwner::Left
+                } else {
+                    FieldBackedOwner::Right
+                },
+                field: if next_u64(&mut state) & 1 == 0 {
+                    FieldBackedField::Primary
+                } else {
+                    FieldBackedField::Secondary
+                },
+                index: (next_u64(&mut state) % EMBEDDED_ARRAY_LEN as u64) as i64,
+                route: if case_index & 1 == 0 {
+                    direct_arguments += 1;
+                    FieldBackedRoute::Direct
+                } else {
+                    arrow_arguments += 1;
+                    FieldBackedRoute::Arrow
+                },
+            };
+            let pattern = match case_index % 4 {
+                0 => FieldAliasPattern::SameElement,
+                1 => FieldAliasPattern::SameFieldDistinctElement,
+                2 => FieldAliasPattern::DifferentField,
+                _ => FieldAliasPattern::DifferentOwner,
+            };
+            pattern_counts[case_index % 4] += 1;
+            let (second_owner, second_field, second_index) = match pattern {
+                FieldAliasPattern::SameElement => (writer.owner, writer.field, writer.index),
+                FieldAliasPattern::SameFieldDistinctElement => (
+                    writer.owner,
+                    writer.field,
+                    (writer.index + 1 + (next_u64(&mut state) % 3) as i64) % EMBEDDED_ARRAY_LEN,
+                ),
+                FieldAliasPattern::DifferentField => {
+                    (writer.owner, writer.field.other(), writer.index)
+                }
+                FieldAliasPattern::DifferentOwner => {
+                    (writer.owner.other(), writer.field, writer.index)
+                }
+            };
+            let second_writer = FieldBackedModelPointer {
+                owner: second_owner,
+                field: second_field,
+                index: second_index,
+                route: if case_index & 2 == 0 {
+                    direct_arguments += 1;
+                    FieldBackedRoute::Direct
+                } else {
+                    arrow_arguments += 1;
+                    FieldBackedRoute::Arrow
+                },
+                ..writer
+            };
+            let reader_storage = if case_index & 4 == 0 {
+                reader_aliases_writer_cases += 1;
+                writer
+            } else {
+                reader_aliases_second_writer_cases += 1;
+                second_writer
+            };
+            let reader = FieldBackedModelPointer {
+                route: if case_index & 4 == 0 {
+                    direct_arguments += 1;
+                    FieldBackedRoute::Direct
+                } else {
+                    arrow_arguments += 1;
+                    FieldBackedRoute::Arrow
+                },
+                ..reader_storage
+            };
+            let writer_twice = case_index & 1 == 0;
+            let second_writer_twice = case_index & 2 == 0;
+            let reader_twice = case_index & 4 == 0;
+            one_hop_calls += usize::from(!writer_twice)
+                + usize::from(!second_writer_twice)
+                + usize::from(!reader_twice);
+            two_hop_calls += usize::from(writer_twice)
+                + usize::from(second_writer_twice)
+                + usize::from(reader_twice);
+            let replacement = 90 + (next_u64(&mut state) % 30) as i64;
+            let delta = 1 + (next_u64(&mut state) % 9) as i64;
+            let expected = field_backed_returned_alias_mutation_expected(
+                writer,
+                second_writer,
+                reader,
+                replacement,
+                delta,
+            );
+            let source = field_backed_returned_alias_mutation_program(
+                writer,
+                second_writer,
+                reader,
+                replacement,
+                delta,
+                writer_twice,
+                second_writer_twice,
+                reader_twice,
+            );
+
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "field-backed returned alias mutation case {case_index}, kind {kind:?}, pattern {pattern:?}, writer {writer:?}, second_writer {second_writer:?}, reader {reader:?}, replacement {replacement}, delta {delta}"
+                ),
+            );
+        }
+
+        assert_interpretation(
+            &field_backed_forwarding_const_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("returned alias mutation const write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &field_backed_forwarding_const_discard_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("returned alias mutation const discard, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &field_backed_forwarding_bounds_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "{} pointer index 5 out of bounds for length {EMBEDDED_ARRAY_LEN}",
+                kind.bounds_prefix()
+            )),
+            &format!("returned alias mutation bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &field_backed_forwarding_type_mismatch_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                kind.other().pointee_label()
+            )),
+            &format!("returned alias mutation pointee type, kind {kind:?}"),
+        );
+    }
+
+    assert_eq!(pattern_counts, [24, 24, 24, 24]);
+    assert_eq!(reader_aliases_writer_cases, 48);
+    assert_eq!(reader_aliases_second_writer_cases, 48);
+    assert_eq!(one_hop_calls, 144);
+    assert_eq!(two_hop_calls, 144);
+    assert_eq!(direct_arguments, 144);
+    assert_eq!(arrow_arguments, 144);
+}
+
+#[test]
 fn pointer_parameter_mutation_diagnostics_match_model_without_panics() {
     for kind in ReturnedPointeeKind::ALL {
         assert_interpretation(
@@ -3545,6 +3706,175 @@ fn field_backed_forwarding_type_mismatch_program(kind: FieldBackedPointeeKind) -
         &kind.other().mutable_pointer_type(),
         &expression,
         "return result == 0;",
+    )
+}
+
+fn field_backed_returned_alias_mutation_expected(
+    writer: FieldBackedModelPointer,
+    second_writer: FieldBackedModelPointer,
+    reader: FieldBackedModelPointer,
+    replacement: i64,
+    delta: i64,
+) -> i64 {
+    debug_assert_eq!(writer.kind, second_writer.kind);
+    debug_assert_eq!(writer.kind, reader.kind);
+    let mut cells = Vec::new();
+    for owner in FieldBackedOwner::ALL {
+        for field in FieldBackedField::ALL {
+            for index in 0..EMBEDDED_ARRAY_LEN {
+                cells.push((
+                    owner,
+                    field,
+                    index,
+                    writer.kind.base_value() + owner.offset() + field.offset() + index,
+                ));
+            }
+        }
+    }
+    cells
+        .iter_mut()
+        .find(|(owner, field, index, _)| {
+            *owner == writer.owner && *field == writer.field && *index == writer.index
+        })
+        .expect("writer cell must exist")
+        .3 = replacement;
+    let observed_after_first = cells
+        .iter()
+        .find(|(owner, field, index, _)| {
+            *owner == reader.owner && *field == reader.field && *index == reader.index
+        })
+        .expect("reader cell must exist")
+        .3;
+    cells
+        .iter_mut()
+        .find(|(owner, field, index, _)| {
+            *owner == second_writer.owner
+                && *field == second_writer.field
+                && *index == second_writer.index
+        })
+        .expect("second writer cell must exist")
+        .3 += delta;
+    let observed_after_second = cells
+        .iter()
+        .find(|(owner, field, index, _)| {
+            *owner == reader.owner && *field == reader.field && *index == reader.index
+        })
+        .expect("reader cell must exist")
+        .3;
+
+    cells
+        .into_iter()
+        .enumerate()
+        .map(|(index, (_, _, _, value))| value * (index as i64 + 1))
+        .sum::<i64>()
+        + writer.index * 17
+        + second_writer.index * 19
+        + reader.index * 23
+        + observed_after_first
+        + observed_after_second
+        + 6
+}
+
+#[allow(clippy::too_many_arguments)]
+fn field_backed_returned_alias_mutation_program(
+    writer: FieldBackedModelPointer,
+    second_writer: FieldBackedModelPointer,
+    reader: FieldBackedModelPointer,
+    replacement: i64,
+    delta: i64,
+    writer_twice: bool,
+    second_writer_twice: bool,
+    reader_twice: bool,
+) -> String {
+    debug_assert_eq!(writer.kind, second_writer.kind);
+    debug_assert_eq!(writer.kind, reader.kind);
+    let kind = writer.kind;
+    let writer_pointer = FieldBackedQualifiedPointer {
+        storage: writer,
+        points_to_const: false,
+    };
+    let second_writer_pointer = FieldBackedQualifiedPointer {
+        storage: second_writer,
+        points_to_const: false,
+    };
+    let reader_pointer = FieldBackedQualifiedPointer {
+        storage: reader,
+        points_to_const: true,
+    };
+    let mutable_type = kind.mutable_pointer_type();
+    let const_type = kind.const_pointer_type();
+    let write_first = kind.write("writer", "replacement");
+    let read_first = kind.read("reader");
+    let read_second = kind.read("reader");
+    let update_second = match kind {
+        FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => {
+            "*second_writer += delta;".to_string()
+        }
+        FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => {
+            "second_writer->value += delta;".to_string()
+        }
+    };
+    let mut elements = Vec::new();
+    for owner in FieldBackedOwner::ALL {
+        for field in FieldBackedField::ALL {
+            let storage = format!("{}.{}", owner.name(), field.name());
+            for index in 0..EMBEDDED_ARRAY_LEN {
+                elements.push(field_backed_element(kind, &storage, index));
+            }
+        }
+    }
+    let checksum = elements
+        .into_iter()
+        .enumerate()
+        .map(|(index, element)| format!("{element} * {}", index + 1))
+        .collect::<Vec<_>>()
+        .join(" + ");
+
+    format!(
+        "{prelude}\n\
+         int mutate_returned_{suffix}({mutable_type}writer, {mutable_type}second_writer,\n\
+                                      {const_type}reader, int replacement, int delta) {{\n\
+             {write_first}\n\
+             int observed_after_first = {read_first};\n\
+             {update_second}\n\
+             int observed_after_second = {read_second};\n\
+             writer = right.secondary + 3;\n\
+             second_writer = left.primary + 2;\n\
+             reader = right.primary + 1;\n\
+             return observed_after_first + observed_after_second +\n\
+                    (writer == right.secondary + 3) +\n\
+                    (second_writer == left.primary + 2) +\n\
+                    (reader == right.primary + 1);\n\
+         }}\n\
+         int main(void) {{\n\
+             struct {holder} *left_view = &left;\n\
+             struct {holder} *right_view = &right;\n\
+             {mutable_type}writer = {writer_expression};\n\
+             {mutable_type}second_writer = {second_writer_expression};\n\
+             {const_type}reader = {reader_expression};\n\
+             int observations = mutate_returned_{suffix}(writer, second_writer, reader,\n\
+                                                          {replacement}, {delta});\n\
+             return {checksum} +\n\
+                    (writer - {writer_storage}) * 17 +\n\
+                    (second_writer - {second_writer_storage}) * 19 +\n\
+                    (reader - {reader_storage}) * 23 + observations +\n\
+                    (writer == {writer_raw}) +\n\
+                    (second_writer == {second_writer_raw}) +\n\
+                    (reader == {reader_raw});\n\
+         }}\n",
+        prelude = field_backed_forwarding_prelude(kind),
+        suffix = kind.suffix(),
+        holder = kind.holder_name(),
+        writer_expression = render_field_backed_forward_call(writer_pointer, writer_twice),
+        second_writer_expression =
+            render_field_backed_forward_call(second_writer_pointer, second_writer_twice),
+        reader_expression = render_field_backed_forward_call(reader_pointer, reader_twice),
+        writer_storage = writer.field_storage(),
+        second_writer_storage = second_writer.field_storage(),
+        reader_storage = reader.field_storage(),
+        writer_raw = writer.render(),
+        second_writer_raw = second_writer.render(),
+        reader_raw = reader.render(),
     )
 }
 
