@@ -2213,6 +2213,193 @@ fn generated_field_backed_returned_pointer_alias_mutations_match_model_without_p
     assert_eq!(arrow_arguments, 144);
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExtendedFieldAliasPattern {
+    SameElement,
+    SameFieldDistinctElement,
+    DifferentPath,
+    DifferentOwner,
+}
+
+#[test]
+fn generated_nested_anonymous_field_backed_returned_pointer_alias_mutations_match_model_without_panics()
+ {
+    let mut state = 0xC057_F13D_AA55_u64;
+    let mut pattern_counts = [0; 4];
+    let mut nested_arguments = 0;
+    let mut anonymous_arguments = 0;
+    let mut direct_arguments = 0;
+    let mut arrow_arguments = 0;
+    let mut one_hop_calls = 0;
+    let mut two_hop_calls = 0;
+
+    for kind in FieldBackedPointeeKind::ALL {
+        for case_index in 0..24 {
+            let writer = ExtendedFieldBackedPointer {
+                kind,
+                path: if (case_index / 2) & 1 == 0 {
+                    nested_arguments += 1;
+                    ExtendedFieldBackedPath::Nested
+                } else {
+                    anonymous_arguments += 1;
+                    ExtendedFieldBackedPath::Anonymous
+                },
+                owner: if next_u64(&mut state) & 1 == 0 {
+                    FieldBackedOwner::Left
+                } else {
+                    FieldBackedOwner::Right
+                },
+                field: if next_u64(&mut state) & 1 == 0 {
+                    FieldBackedField::Primary
+                } else {
+                    FieldBackedField::Secondary
+                },
+                index: (next_u64(&mut state) % EMBEDDED_ARRAY_LEN as u64) as i64,
+                route: if case_index & 1 == 0 {
+                    direct_arguments += 1;
+                    FieldBackedRoute::Direct
+                } else {
+                    arrow_arguments += 1;
+                    FieldBackedRoute::Arrow
+                },
+            };
+            let pattern = match case_index % 4 {
+                0 => ExtendedFieldAliasPattern::SameElement,
+                1 => ExtendedFieldAliasPattern::SameFieldDistinctElement,
+                2 => ExtendedFieldAliasPattern::DifferentPath,
+                _ => ExtendedFieldAliasPattern::DifferentOwner,
+            };
+            pattern_counts[case_index % 4] += 1;
+            let (second_path, second_owner, second_field, second_index) = match pattern {
+                ExtendedFieldAliasPattern::SameElement => {
+                    (writer.path, writer.owner, writer.field, writer.index)
+                }
+                ExtendedFieldAliasPattern::SameFieldDistinctElement => (
+                    writer.path,
+                    writer.owner,
+                    writer.field,
+                    (writer.index + 1 + (next_u64(&mut state) % 3) as i64) % EMBEDDED_ARRAY_LEN,
+                ),
+                ExtendedFieldAliasPattern::DifferentPath => (
+                    writer.path.other(),
+                    writer.owner,
+                    writer.field,
+                    writer.index,
+                ),
+                ExtendedFieldAliasPattern::DifferentOwner => (
+                    writer.path,
+                    writer.owner.other(),
+                    writer.field,
+                    writer.index,
+                ),
+            };
+            let second_writer = ExtendedFieldBackedPointer {
+                path: second_path,
+                owner: second_owner,
+                field: second_field,
+                index: second_index,
+                route: if case_index & 2 == 0 {
+                    direct_arguments += 1;
+                    FieldBackedRoute::Direct
+                } else {
+                    arrow_arguments += 1;
+                    FieldBackedRoute::Arrow
+                },
+                ..writer
+            };
+            let reader_storage = if case_index & 4 == 0 {
+                writer
+            } else {
+                second_writer
+            };
+            let reader = ExtendedFieldBackedPointer {
+                route: if case_index & 4 == 0 {
+                    direct_arguments += 1;
+                    FieldBackedRoute::Direct
+                } else {
+                    arrow_arguments += 1;
+                    FieldBackedRoute::Arrow
+                },
+                ..reader_storage
+            };
+            let writer_twice = case_index & 1 == 0;
+            let second_writer_twice = case_index & 2 == 0;
+            let reader_twice = case_index & 4 == 0;
+            one_hop_calls += usize::from(!writer_twice)
+                + usize::from(!second_writer_twice)
+                + usize::from(!reader_twice);
+            two_hop_calls += usize::from(writer_twice)
+                + usize::from(second_writer_twice)
+                + usize::from(reader_twice);
+            let replacement = 90 + (next_u64(&mut state) % 30) as i64;
+            let delta = 1 + (next_u64(&mut state) % 9) as i64;
+            let expected = extended_field_backed_alias_mutation_expected(
+                writer,
+                second_writer,
+                reader,
+                replacement,
+                delta,
+            );
+            let source = extended_field_backed_alias_mutation_program(
+                writer,
+                second_writer,
+                reader,
+                replacement,
+                delta,
+                writer_twice,
+                second_writer_twice,
+                reader_twice,
+            );
+
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "nested/anonymous returned alias mutation case {case_index}, kind {kind:?}, pattern {pattern:?}, writer {writer:?}, second_writer {second_writer:?}, reader {reader:?}"
+                ),
+            );
+        }
+
+        for path in ExtendedFieldBackedPath::ALL {
+            assert_interpretation(
+                &extended_field_backed_const_container_program(kind, path),
+                ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+                &format!("nested/anonymous const container, kind {kind:?}, path {path:?}"),
+            );
+            assert_interpretation(
+                &extended_field_backed_bounds_program(kind, path),
+                ExpectedInterpretation::OwnedError(format!(
+                    "{} pointer index 5 out of bounds for length {EMBEDDED_ARRAY_LEN}",
+                    kind.bounds_prefix()
+                )),
+                &format!("nested/anonymous bounds, kind {kind:?}, path {path:?}"),
+            );
+        }
+        assert_interpretation(
+            &extended_field_backed_cross_path_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("nested/anonymous cross-path identity, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &extended_field_backed_type_mismatch_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                kind.other().pointee_label()
+            )),
+            &format!("nested/anonymous pointee type, kind {kind:?}"),
+        );
+    }
+
+    assert_eq!(pattern_counts, [24, 24, 24, 24]);
+    assert_eq!(nested_arguments, 48);
+    assert_eq!(anonymous_arguments, 48);
+    assert_eq!(direct_arguments, 144);
+    assert_eq!(arrow_arguments, 144);
+    assert_eq!(one_hop_calls, 144);
+    assert_eq!(two_hop_calls, 144);
+}
+
 #[test]
 fn pointer_parameter_mutation_diagnostics_match_model_without_panics() {
     for kind in ReturnedPointeeKind::ALL {
@@ -3875,6 +4062,446 @@ fn field_backed_returned_alias_mutation_program(
         writer_raw = writer.render(),
         second_writer_raw = second_writer.render(),
         reader_raw = reader.render(),
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExtendedFieldBackedPath {
+    Nested,
+    Anonymous,
+}
+
+impl ExtendedFieldBackedPath {
+    const ALL: [Self; 2] = [Self::Nested, Self::Anonymous];
+
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Nested => "nested",
+            Self::Anonymous => "anonymous",
+        }
+    }
+
+    fn offset(self) -> i64 {
+        match self {
+            Self::Nested => 0,
+            Self::Anonymous => 20,
+        }
+    }
+
+    fn other(self) -> Self {
+        match self {
+            Self::Nested => Self::Anonymous,
+            Self::Anonymous => Self::Nested,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ExtendedFieldBackedPointer {
+    kind: FieldBackedPointeeKind,
+    path: ExtendedFieldBackedPath,
+    owner: FieldBackedOwner,
+    field: FieldBackedField,
+    index: i64,
+    route: FieldBackedRoute,
+}
+
+impl ExtendedFieldBackedPointer {
+    fn object_name(self) -> String {
+        format!("{}_{}", self.path.prefix(), self.owner.name())
+    }
+
+    fn field_storage(self) -> String {
+        let object = self.object_name();
+        let inner = if self.path == ExtendedFieldBackedPath::Nested {
+            ".inner"
+        } else {
+            ""
+        };
+        format!("{object}{inner}.{}", self.field.name())
+    }
+
+    fn render(self) -> String {
+        let object = self.object_name();
+        let field = self.field.name();
+        match (self.path, self.route) {
+            (ExtendedFieldBackedPath::Nested, FieldBackedRoute::Direct) => {
+                format!("({object}.inner.{field} + {})", self.index)
+            }
+            (ExtendedFieldBackedPath::Nested, FieldBackedRoute::Arrow) => {
+                format!("({object}_view->inner.{field} + {})", self.index)
+            }
+            (ExtendedFieldBackedPath::Anonymous, FieldBackedRoute::Direct) => {
+                format!("({object}.{field} + {})", self.index)
+            }
+            (ExtendedFieldBackedPath::Anonymous, FieldBackedRoute::Arrow) => {
+                format!("({object}_view->{field} + {})", self.index)
+            }
+        }
+    }
+
+    fn initial_value(self) -> i64 {
+        self.kind.base_value()
+            + self.path.offset()
+            + self.owner.offset()
+            + self.field.offset()
+            + self.index
+    }
+}
+
+fn extended_field_backed_prelude(kind: FieldBackedPointeeKind) -> String {
+    format!(
+        "{forwarding}\n\
+         struct Nested{holder} {{ struct {holder} inner; }};",
+        forwarding = field_backed_forwarding_prelude(kind),
+        holder = kind.holder_name(),
+    )
+}
+
+fn extended_field_backed_declarations(kind: FieldBackedPointeeKind) -> String {
+    let nested_left = field_backed_initializer(kind, FieldBackedOwner::Left);
+    let nested_right = field_backed_initializer(kind, FieldBackedOwner::Right);
+    let anonymous_left = extended_field_backed_initializer(
+        kind,
+        ExtendedFieldBackedPath::Anonymous,
+        FieldBackedOwner::Left,
+    );
+    let anonymous_right = extended_field_backed_initializer(
+        kind,
+        ExtendedFieldBackedPath::Anonymous,
+        FieldBackedOwner::Right,
+    );
+    format!(
+        "struct Nested{holder} nested_left = {{.inner = {nested_left}}},\n\
+                                  nested_right = {{.inner = {nested_right}}};\n\
+         struct Nested{holder} *nested_left_view = &nested_left;\n\
+         struct Nested{holder} *nested_right_view = &nested_right;\n\
+         struct {{ {field_type} primary[4]; {field_type} secondary[4]; }}\n\
+             anonymous_left = {anonymous_left}, anonymous_right = {anonymous_right},\n\
+             *anonymous_left_view = &anonymous_left,\n\
+             *anonymous_right_view = &anonymous_right;",
+        holder = kind.holder_name(),
+        field_type = kind.field_type(),
+    )
+}
+
+fn extended_field_backed_initializer(
+    kind: FieldBackedPointeeKind,
+    path: ExtendedFieldBackedPath,
+    owner: FieldBackedOwner,
+) -> String {
+    let field_values = |field: FieldBackedField| {
+        let base = kind.base_value() + path.offset() + owner.offset() + field.offset();
+        if matches!(
+            kind,
+            FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char
+        ) {
+            format!("{{{base}, {}, {}, {}}}", base + 1, base + 2, base + 3)
+        } else {
+            format!(
+                "{{{{{base}}}, {{{}}}, {{{}}}, {{{}}}}}",
+                base + 1,
+                base + 2,
+                base + 3
+            )
+        }
+    };
+    format!(
+        "{{.primary = {}, .secondary = {}}}",
+        field_values(FieldBackedField::Primary),
+        field_values(FieldBackedField::Secondary)
+    )
+}
+
+fn render_extended_field_backed_forward_call(
+    pointer: ExtendedFieldBackedPointer,
+    points_to_const: bool,
+    twice: bool,
+) -> String {
+    format!(
+        "forward_{}field_{}{}({})",
+        if points_to_const { "const_" } else { "" },
+        pointer.kind.suffix(),
+        if twice { "_twice" } else { "" },
+        pointer.render(),
+    )
+}
+
+fn extended_field_backed_alias_mutation_expected(
+    writer: ExtendedFieldBackedPointer,
+    second_writer: ExtendedFieldBackedPointer,
+    reader: ExtendedFieldBackedPointer,
+    replacement: i64,
+    delta: i64,
+) -> i64 {
+    debug_assert_eq!(writer.kind, second_writer.kind);
+    debug_assert_eq!(writer.kind, reader.kind);
+    let mut cells = Vec::new();
+    for path in ExtendedFieldBackedPath::ALL {
+        for owner in FieldBackedOwner::ALL {
+            for field in FieldBackedField::ALL {
+                for index in 0..EMBEDDED_ARRAY_LEN {
+                    let pointer = ExtendedFieldBackedPointer {
+                        kind: writer.kind,
+                        path,
+                        owner,
+                        field,
+                        index,
+                        route: FieldBackedRoute::Direct,
+                    };
+                    cells.push((path, owner, field, index, pointer.initial_value()));
+                }
+            }
+        }
+    }
+    let cell_matches = |cell: &(
+        ExtendedFieldBackedPath,
+        FieldBackedOwner,
+        FieldBackedField,
+        i64,
+        i64,
+    ),
+                        pointer: ExtendedFieldBackedPointer| {
+        cell.0 == pointer.path
+            && cell.1 == pointer.owner
+            && cell.2 == pointer.field
+            && cell.3 == pointer.index
+    };
+    cells
+        .iter_mut()
+        .find(|cell| cell_matches(cell, writer))
+        .expect("writer cell must exist")
+        .4 = replacement;
+    let observed_after_first = cells
+        .iter()
+        .find(|cell| cell_matches(cell, reader))
+        .expect("reader cell must exist")
+        .4;
+    cells
+        .iter_mut()
+        .find(|cell| cell_matches(cell, second_writer))
+        .expect("second writer cell must exist")
+        .4 += delta;
+    let observed_after_second = cells
+        .iter()
+        .find(|cell| cell_matches(cell, reader))
+        .expect("reader cell must exist")
+        .4;
+
+    cells
+        .into_iter()
+        .enumerate()
+        .map(|(index, (_, _, _, _, value))| value * (index as i64 + 1))
+        .sum::<i64>()
+        + writer.index * 17
+        + second_writer.index * 19
+        + reader.index * 23
+        + observed_after_first
+        + observed_after_second
+        + 5
+}
+
+#[allow(clippy::too_many_arguments)]
+fn extended_field_backed_alias_mutation_program(
+    writer: ExtendedFieldBackedPointer,
+    second_writer: ExtendedFieldBackedPointer,
+    reader: ExtendedFieldBackedPointer,
+    replacement: i64,
+    delta: i64,
+    writer_twice: bool,
+    second_writer_twice: bool,
+    reader_twice: bool,
+) -> String {
+    let kind = writer.kind;
+    let mutable_type = kind.mutable_pointer_type();
+    let const_type = kind.const_pointer_type();
+    let write_first = kind.write("writer", "replacement");
+    let read = kind.read("reader");
+    let update_second = match kind {
+        FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => {
+            "*second_writer += delta;".to_string()
+        }
+        FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => {
+            "second_writer->value += delta;".to_string()
+        }
+    };
+    let mut elements = Vec::new();
+    for path in ExtendedFieldBackedPath::ALL {
+        for owner in FieldBackedOwner::ALL {
+            for field in FieldBackedField::ALL {
+                let pointer = ExtendedFieldBackedPointer {
+                    kind,
+                    path,
+                    owner,
+                    field,
+                    index: 0,
+                    route: FieldBackedRoute::Direct,
+                };
+                let storage = pointer.field_storage();
+                for index in 0..EMBEDDED_ARRAY_LEN {
+                    elements.push(field_backed_element(kind, &storage, index));
+                }
+            }
+        }
+    }
+    let checksum = elements
+        .into_iter()
+        .enumerate()
+        .map(|(index, element)| format!("{element} * {}", index + 1))
+        .collect::<Vec<_>>()
+        .join(" + ");
+
+    format!(
+        "{prelude}\n\
+         int mutate_extended_{suffix}({mutable_type}writer, {mutable_type}second_writer,\n\
+                                      {const_type}reader, int replacement, int delta) {{\n\
+             {write_first}\n\
+             int observed_after_first = {read};\n\
+             {update_second}\n\
+             int observed_after_second = {read};\n\
+             writer = second_writer;\n\
+             reader = writer;\n\
+             second_writer = 0;\n\
+             return observed_after_first + observed_after_second +\n\
+                    (writer == reader) + (second_writer == 0);\n\
+         }}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             {mutable_type}writer = {writer_expression};\n\
+             {mutable_type}second_writer = {second_writer_expression};\n\
+             {const_type}reader = {reader_expression};\n\
+             int observations = mutate_extended_{suffix}(writer, second_writer, reader,\n\
+                                                           {replacement}, {delta});\n\
+             return {checksum} +\n\
+                    (writer - {writer_storage}) * 17 +\n\
+                    (second_writer - {second_writer_storage}) * 19 +\n\
+                    (reader - {reader_storage}) * 23 + observations +\n\
+                    (writer == {writer_raw}) +\n\
+                    (second_writer == {second_writer_raw}) +\n\
+                    (reader == {reader_raw});\n\
+         }}\n",
+        prelude = extended_field_backed_prelude(kind),
+        suffix = kind.suffix(),
+        declarations = extended_field_backed_declarations(kind),
+        writer_expression = render_extended_field_backed_forward_call(writer, false, writer_twice),
+        second_writer_expression =
+            render_extended_field_backed_forward_call(second_writer, false, second_writer_twice),
+        reader_expression = render_extended_field_backed_forward_call(reader, true, reader_twice),
+        writer_storage = writer.field_storage(),
+        second_writer_storage = second_writer.field_storage(),
+        reader_storage = reader.field_storage(),
+        writer_raw = writer.render(),
+        second_writer_raw = second_writer.render(),
+        reader_raw = reader.render(),
+    )
+}
+
+fn extended_field_backed_diagnostic_program(
+    kind: FieldBackedPointeeKind,
+    operation: &str,
+) -> String {
+    format!(
+        "{prelude}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             {operation}\n\
+         }}\n",
+        prelude = extended_field_backed_prelude(kind),
+        declarations = extended_field_backed_declarations(kind),
+    )
+}
+
+fn extended_field_backed_const_container_program(
+    kind: FieldBackedPointeeKind,
+    path: ExtendedFieldBackedPath,
+) -> String {
+    let initializer = extended_field_backed_initializer(kind, path, FieldBackedOwner::Left);
+    let (declaration, expression) = match path {
+        ExtendedFieldBackedPath::Nested => (
+            format!(
+                "const struct Nested{} locked = {{.inner = {initializer}}};",
+                kind.holder_name()
+            ),
+            "locked.inner.primary + 1",
+        ),
+        ExtendedFieldBackedPath::Anonymous => (
+            format!(
+                "const struct {{ {ty} primary[4]; {ty} secondary[4]; }} locked = {initializer};",
+                ty = kind.field_type()
+            ),
+            "locked.primary + 1",
+        ),
+    };
+    extended_field_backed_diagnostic_program(
+        kind,
+        &format!(
+            "{declaration} {ty}result = forward_field_{suffix}({expression}); return result == 0;",
+            ty = kind.mutable_pointer_type(),
+            suffix = kind.suffix(),
+        ),
+    )
+}
+
+fn extended_field_backed_bounds_program(
+    kind: FieldBackedPointeeKind,
+    path: ExtendedFieldBackedPath,
+) -> String {
+    let pointer = ExtendedFieldBackedPointer {
+        kind,
+        path,
+        owner: FieldBackedOwner::Left,
+        field: FieldBackedField::Primary,
+        index: 5,
+        route: FieldBackedRoute::Arrow,
+    };
+    extended_field_backed_diagnostic_program(
+        kind,
+        &format!(
+            "{ty}result = forward_field_{suffix}({expression}); return result == 0;",
+            ty = kind.mutable_pointer_type(),
+            suffix = kind.suffix(),
+            expression = pointer.render(),
+        ),
+    )
+}
+
+fn extended_field_backed_cross_path_program(kind: FieldBackedPointeeKind) -> String {
+    let nested = ExtendedFieldBackedPointer {
+        kind,
+        path: ExtendedFieldBackedPath::Nested,
+        owner: FieldBackedOwner::Left,
+        field: FieldBackedField::Primary,
+        index: 1,
+        route: FieldBackedRoute::Direct,
+    };
+    let anonymous = ExtendedFieldBackedPointer {
+        path: ExtendedFieldBackedPath::Anonymous,
+        route: FieldBackedRoute::Arrow,
+        ..nested
+    };
+    extended_field_backed_diagnostic_program(
+        kind,
+        &format!("return {} - {};", nested.render(), anonymous.render()),
+    )
+}
+
+fn extended_field_backed_type_mismatch_program(kind: FieldBackedPointeeKind) -> String {
+    let pointer = ExtendedFieldBackedPointer {
+        kind,
+        path: ExtendedFieldBackedPath::Nested,
+        owner: FieldBackedOwner::Right,
+        field: FieldBackedField::Secondary,
+        index: 1,
+        route: FieldBackedRoute::Arrow,
+    };
+    extended_field_backed_diagnostic_program(
+        kind,
+        &format!(
+            "{other_type}result = forward_field_{suffix}({expression}); return result == 0;",
+            other_type = kind.other().mutable_pointer_type(),
+            suffix = kind.suffix(),
+            expression = pointer.render(),
+        ),
     )
 }
 
