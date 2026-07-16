@@ -1641,6 +1641,93 @@ fn generated_two_pointer_parameter_alias_mutations_match_model_without_panics() 
 }
 
 #[test]
+fn generated_mixed_qualification_pointer_parameter_aliases_match_model_without_panics() {
+    let mut state = 0xC057_C0A5_7A11_u64;
+    let mut same_element_cases = 0;
+    let mut same_root_distinct_cases = 0;
+    let mut cross_root_cases = 0;
+    let mut left_writer_cases = 0;
+    let mut right_writer_cases = 0;
+
+    for kind in ReturnedPointeeKind::ALL {
+        for case_index in 0..30 {
+            let writer_root = if (next_u64(&mut state) >> 32) & 1 == 0 {
+                left_writer_cases += 1;
+                ReturnedRoot::Left
+            } else {
+                right_writer_cases += 1;
+                ReturnedRoot::Right
+            };
+            let writer_index = (next_u64(&mut state) % RETURNED_ARRAY_LEN as u64) as i64;
+            let pattern = match case_index % 3 {
+                0 => {
+                    same_element_cases += 1;
+                    ParameterAliasPattern::SameElement
+                }
+                1 => {
+                    same_root_distinct_cases += 1;
+                    ParameterAliasPattern::SameRootDistinct
+                }
+                _ => {
+                    cross_root_cases += 1;
+                    ParameterAliasPattern::CrossRoot
+                }
+            };
+            let (reader_root, reader_index) = match pattern {
+                ParameterAliasPattern::SameElement => (writer_root, writer_index),
+                ParameterAliasPattern::SameRootDistinct => (
+                    writer_root,
+                    (writer_index + 1 + (next_u64(&mut state) % 5) as i64) % RETURNED_ARRAY_LEN,
+                ),
+                ParameterAliasPattern::CrossRoot => (
+                    match writer_root {
+                        ReturnedRoot::Left => ReturnedRoot::Right,
+                        ReturnedRoot::Right => ReturnedRoot::Left,
+                    },
+                    (next_u64(&mut state) % RETURNED_ARRAY_LEN as u64) as i64,
+                ),
+            };
+            let writer = ForwardedModelPointer {
+                kind,
+                root: writer_root,
+                index: writer_index,
+                storage_const: false,
+                points_to_const: false,
+            };
+            let reader = ForwardedModelPointer {
+                root: reader_root,
+                index: reader_index,
+                points_to_const: true,
+                ..writer
+            };
+            let replacement = 130 + (next_u64(&mut state) % 80) as i64;
+            let expected = mixed_qualification_alias_expected(writer, reader, replacement);
+            let source = mixed_qualification_alias_program(writer, reader, replacement);
+
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "mixed-qualification alias case {case_index}, kind {kind:?}, pattern {pattern:?}, writer {writer:?}, reader {reader:?}, replacement {replacement}"
+                ),
+            );
+        }
+    }
+
+    assert_eq!(same_element_cases, 30);
+    assert_eq!(same_root_distinct_cases, 30);
+    assert_eq!(cross_root_cases, 30);
+    assert!(
+        left_writer_cases >= 30,
+        "generated only {left_writer_cases} left-writer cases"
+    );
+    assert!(
+        right_writer_cases >= 30,
+        "generated only {right_writer_cases} right-writer cases"
+    );
+}
+
+#[test]
 fn pointer_parameter_mutation_diagnostics_match_model_without_panics() {
     for kind in ReturnedPointeeKind::ALL {
         assert_interpretation(
@@ -1664,6 +1751,11 @@ fn pointer_parameter_mutation_diagnostics_match_model_without_panics() {
                 kind.other().pointee_label()
             )),
             &format!("pointer parameter mutation type mismatch, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &mixed_qualification_const_storage_writer_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("mixed-qualification const storage writer, kind {kind:?}"),
         );
     }
 }
@@ -2395,6 +2487,106 @@ fn two_pointer_parameter_alias_mutation_program(
     )
 }
 
+fn mixed_qualification_alias_expected(
+    writer: ForwardedModelPointer,
+    reader: ForwardedModelPointer,
+    replacement: i64,
+) -> i64 {
+    debug_assert_eq!(writer.kind, reader.kind);
+    debug_assert!(!writer.storage_const && !writer.points_to_const);
+    debug_assert!(!reader.storage_const && reader.points_to_const);
+    let mut left = std::array::from_fn::<_, { RETURNED_ARRAY_LEN as usize }, _>(|index| {
+        ReturnedRoot::Left.base_value(writer.kind, false) + index as i64
+    });
+    let mut right = std::array::from_fn::<_, { RETURNED_ARRAY_LEN as usize }, _>(|index| {
+        ReturnedRoot::Right.base_value(writer.kind, false) + index as i64
+    });
+
+    match writer.root {
+        ReturnedRoot::Left => left[writer.index as usize] = replacement,
+        ReturnedRoot::Right => right[writer.index as usize] = replacement,
+    }
+    let observed = match reader.root {
+        ReturnedRoot::Left => left[reader.index as usize],
+        ReturnedRoot::Right => right[reader.index as usize],
+    };
+
+    left.into_iter()
+        .chain(right)
+        .enumerate()
+        .map(|(index, value)| value * (index as i64 + 1))
+        .sum::<i64>()
+        + writer.index * 17
+        + reader.index * 19
+        + observed
+        + 2
+}
+
+fn mixed_qualification_alias_program(
+    writer: ForwardedModelPointer,
+    reader: ForwardedModelPointer,
+    replacement: i64,
+) -> String {
+    debug_assert_eq!(writer.kind, reader.kind);
+    let suffix = writer.kind.function_suffix();
+    let writer_type = writer.kind.mutable_pointer_type();
+    let reader_type = writer.kind.const_pointer_type();
+    let left_storage = ForwardedModelPointer {
+        root: ReturnedRoot::Left,
+        index: 0,
+        ..writer
+    }
+    .storage_name();
+    let right_storage = ForwardedModelPointer {
+        root: ReturnedRoot::Right,
+        index: 0,
+        ..writer
+    }
+    .storage_name();
+    let (write, read, element_value): (&str, &str, fn(&str, i64) -> String) = match writer.kind {
+        ReturnedPointeeKind::Int => (
+            "*writer = replacement;",
+            "*reader",
+            |storage: &str, index| format!("{storage}[{index}]"),
+        ),
+        ReturnedPointeeKind::Point | ReturnedPointeeKind::Number => (
+            "writer->value = replacement;",
+            "reader->value",
+            |storage: &str, index| format!("{storage}[{index}].value"),
+        ),
+    };
+    let storage_checksum = [left_storage, right_storage]
+        .into_iter()
+        .flat_map(|storage| (0..RETURNED_ARRAY_LEN).map(move |index| element_value(storage, index)))
+        .enumerate()
+        .map(|(index, element)| format!("{element} * {}", index + 1))
+        .collect::<Vec<_>>()
+        .join(" + ");
+
+    format!(
+        "{FORWARDING_PROGRAM_PRELUDE}\n\
+         int observe_pair_{suffix}({writer_type}writer, {reader_type}reader, int replacement) {{\n\
+             {write}\n\
+             int observed = {read};\n\
+             writer = {right_storage} + 5;\n\
+             reader = {left_storage} + 4;\n\
+             return observed + (writer == {right_storage} + 5) +\n\
+                    (reader == {left_storage} + 4);\n\
+         }}\n\
+         int main(void) {{\n\
+             {writer_type}writer = {writer_storage} + {writer_index};\n\
+             {reader_type}reader = {reader_storage} + {reader_index};\n\
+             int checks = observe_pair_{suffix}(writer, reader, {replacement});\n\
+             return {storage_checksum} + (writer - {writer_storage}) * 17 +\n\
+                    (reader - {reader_storage}) * 19 + checks;\n\
+         }}\n",
+        writer_storage = writer.storage_name(),
+        writer_index = writer.index,
+        reader_storage = reader.storage_name(),
+        reader_index = reader.index,
+    )
+}
+
 fn pointer_parameter_const_write_program(kind: ReturnedPointeeKind) -> String {
     let pointer_type = kind.const_pointer_type();
     let storage = ForwardedModelPointer {
@@ -2414,6 +2606,27 @@ fn pointer_parameter_const_write_program(kind: ReturnedPointeeKind) -> String {
         "{FORWARDING_PROGRAM_PRELUDE}\n\
          void mutate_const({pointer_type}value) {{ {write} }}\n\
          int main(void) {{ mutate_const({storage} + 1); return 0; }}\n"
+    )
+}
+
+fn mixed_qualification_const_storage_writer_program(kind: ReturnedPointeeKind) -> String {
+    let writer_type = kind.mutable_pointer_type();
+    let reader_type = kind.const_pointer_type();
+    let storage = ForwardedModelPointer {
+        kind,
+        root: ReturnedRoot::Left,
+        index: 0,
+        storage_const: true,
+        points_to_const: true,
+    }
+    .storage_name();
+
+    format!(
+        "{FORWARDING_PROGRAM_PRELUDE}\n\
+         int observe_pair({writer_type}writer, {reader_type}reader) {{\n\
+             return (writer == 0) + (reader == 0);\n\
+         }}\n\
+         int main(void) {{ return observe_pair({storage}, {storage}); }}\n"
     )
 }
 

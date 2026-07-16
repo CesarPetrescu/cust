@@ -5147,6 +5147,14 @@ fn supports_pointer_parameter_alias_mutation_model_routes() {
 }
 
 #[test]
+fn supports_pointer_parameter_mixed_qualification_alias_model_routes() {
+    let program =
+        include_str!("fixtures/valid/pointer_parameter_mixed_qualification_alias_model_routes.c");
+
+    assert_eq!(interpret(program).unwrap(), 63);
+}
+
+#[test]
 fn supports_typedef_aggregate_definitions() {
     let program = include_str!("fixtures/valid/typedef_aggregate_definitions.c");
 
