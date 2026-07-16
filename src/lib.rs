@@ -17665,6 +17665,16 @@ impl Interpreter {
     }
 
     fn eval_equality(&mut self, left: &Expr, op: &BinaryOp, right: &Expr) -> CustResult<i64> {
+        if !self.expr_is_pointer_value(left) && !self.expr_is_pointer_value(right) {
+            let lhs = self.eval(left)?;
+            let rhs = self.eval(right)?;
+            return match op {
+                BinaryOp::Eq => Ok((lhs == rhs) as i64),
+                BinaryOp::Ne => Ok((lhs != rhs) as i64),
+                _ => unreachable!("only equality operators use eval_equality"),
+            };
+        }
+
         match (self.eval_pointer(left), self.eval_pointer(right)) {
             (Ok(left_pointer), Ok(right_pointer)) => {
                 let equal = Self::pointer_eq(&left_pointer, &right_pointer);

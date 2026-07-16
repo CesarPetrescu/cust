@@ -5198,6 +5198,16 @@ fn supports_aggregate_compound_literal_field_pointer_alias_mutation_model_routes
 }
 
 #[test]
+fn supports_nested_anonymous_aggregate_compound_literal_field_pointer_alias_mutation_model_routes()
+{
+    let program = include_str!(
+        "fixtures/valid/nested_anonymous_aggregate_compound_literal_field_pointer_alias_mutation_model_routes.c",
+    );
+
+    assert_eq!(interpret(program).unwrap(), 20);
+}
+
+#[test]
 fn supports_typedef_aggregate_definitions() {
     let program = include_str!("fixtures/valid/typedef_aggregate_definitions.c");
 

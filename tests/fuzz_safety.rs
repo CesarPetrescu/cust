@@ -2401,6 +2401,194 @@ fn generated_nested_anonymous_field_backed_returned_pointer_alias_mutations_matc
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExtendedLiteralAliasPattern {
+    SameElement,
+    SameRootDistinctElement,
+    DifferentField,
+    DifferentPath,
+    DifferentLiteralRoot,
+    DifferentPathAndLiteralRoot,
+}
+
+#[test]
+fn generated_nested_anonymous_aggregate_compound_literal_field_pointer_alias_mutations_match_model_without_panics()
+ {
+    let mut state = 0xC057_117E_AA55_u64;
+    let mut pattern_counts = [0; 6];
+    let mut path_counts = [0; 2];
+    let mut wrapper_counts = [0; 4];
+    let mut one_hop_calls = 0;
+    let mut two_hop_calls = 0;
+
+    for kind in FieldBackedPointeeKind::ALL {
+        for case_index in 0..24 {
+            let writer = ExtendedFieldBackedPointer {
+                kind,
+                path: if (case_index / 2) & 1 == 0 {
+                    path_counts[0] += 1;
+                    ExtendedFieldBackedPath::Nested
+                } else {
+                    path_counts[1] += 1;
+                    ExtendedFieldBackedPath::Anonymous
+                },
+                owner: if next_u64(&mut state) & 1 == 0 {
+                    FieldBackedOwner::Left
+                } else {
+                    FieldBackedOwner::Right
+                },
+                field: if next_u64(&mut state) & 1 == 0 {
+                    FieldBackedField::Primary
+                } else {
+                    FieldBackedField::Secondary
+                },
+                index: (next_u64(&mut state) % EMBEDDED_ARRAY_LEN as u64) as i64,
+                route: FieldBackedRoute::Direct,
+            };
+            let pattern = match case_index % 6 {
+                0 => ExtendedLiteralAliasPattern::SameElement,
+                1 => ExtendedLiteralAliasPattern::SameRootDistinctElement,
+                2 => ExtendedLiteralAliasPattern::DifferentField,
+                3 => ExtendedLiteralAliasPattern::DifferentPath,
+                4 => ExtendedLiteralAliasPattern::DifferentLiteralRoot,
+                _ => ExtendedLiteralAliasPattern::DifferentPathAndLiteralRoot,
+            };
+            pattern_counts[case_index % 6] += 1;
+            let (second_path, second_owner, second_field, second_index) = match pattern {
+                ExtendedLiteralAliasPattern::SameElement => {
+                    (writer.path, writer.owner, writer.field, writer.index)
+                }
+                ExtendedLiteralAliasPattern::SameRootDistinctElement => (
+                    writer.path,
+                    writer.owner,
+                    writer.field,
+                    (writer.index + 1 + (next_u64(&mut state) % 3) as i64) % EMBEDDED_ARRAY_LEN,
+                ),
+                ExtendedLiteralAliasPattern::DifferentField => (
+                    writer.path,
+                    writer.owner,
+                    writer.field.other(),
+                    writer.index,
+                ),
+                ExtendedLiteralAliasPattern::DifferentPath => (
+                    writer.path.other(),
+                    writer.owner,
+                    writer.field,
+                    writer.index,
+                ),
+                ExtendedLiteralAliasPattern::DifferentLiteralRoot => (
+                    writer.path,
+                    writer.owner.other(),
+                    writer.field,
+                    writer.index,
+                ),
+                ExtendedLiteralAliasPattern::DifferentPathAndLiteralRoot => (
+                    writer.path.other(),
+                    writer.owner.other(),
+                    writer.field,
+                    writer.index,
+                ),
+            };
+            let second_writer = ExtendedFieldBackedPointer {
+                path: second_path,
+                owner: second_owner,
+                field: second_field,
+                index: second_index,
+                ..writer
+            };
+            let reader = if case_index & 4 == 0 {
+                writer
+            } else {
+                second_writer
+            };
+            let wrappers = [
+                literal_pointer_wrapper(case_index),
+                literal_pointer_wrapper(case_index + 1),
+                literal_pointer_wrapper(case_index + 2),
+            ];
+            for wrapper in wrappers {
+                wrapper_counts[literal_pointer_wrapper_index(wrapper)] += 1;
+            }
+            let twice = [
+                case_index & 1 == 0,
+                case_index & 2 == 0,
+                case_index & 4 == 0,
+            ];
+            one_hop_calls += twice.iter().filter(|value| !**value).count();
+            two_hop_calls += twice.iter().filter(|value| **value).count();
+            let replacement = 90 + (next_u64(&mut state) % 30) as i64;
+            let delta = 1 + (next_u64(&mut state) % 9) as i64;
+            let expected = extended_literal_field_alias_mutation_expected(
+                writer,
+                second_writer,
+                reader,
+                replacement,
+                delta,
+            );
+            let source = extended_literal_field_alias_mutation_program(
+                writer,
+                second_writer,
+                reader,
+                replacement,
+                delta,
+                wrappers,
+                twice,
+            );
+
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "nested/anonymous aggregate-literal field alias case {case_index}, kind {kind:?}, pattern {pattern:?}, writer {writer:?}, second_writer {second_writer:?}, reader {reader:?}"
+                ),
+            );
+        }
+
+        for path in ExtendedFieldBackedPath::ALL {
+            assert_interpretation(
+                &extended_literal_field_const_discard_program(kind, path),
+                ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+                &format!(
+                    "nested/anonymous aggregate-literal recursive const, kind {kind:?}, path {path:?}"
+                ),
+            );
+            assert_interpretation(
+                &extended_literal_field_bounds_program(kind, path),
+                ExpectedInterpretation::OwnedError(format!(
+                    "{} pointer index 5 out of bounds for length {EMBEDDED_ARRAY_LEN}",
+                    kind.bounds_prefix()
+                )),
+                &format!("nested/anonymous aggregate-literal bounds, kind {kind:?}, path {path:?}"),
+            );
+        }
+        assert_interpretation(
+            &extended_literal_field_cross_path_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("nested/anonymous aggregate-literal cross-path, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &extended_literal_field_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("nested/anonymous aggregate-literal cross-root, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &extended_literal_field_type_mismatch_program(kind),
+            ExpectedInterpretation::OwnedError(format!(
+                "cannot convert pointer to {} to pointer to {}",
+                kind.pointee_label(),
+                kind.other().pointee_label()
+            )),
+            &format!("nested/anonymous aggregate-literal pointee type, kind {kind:?}"),
+        );
+    }
+
+    assert_eq!(pattern_counts, [16, 16, 16, 16, 16, 16]);
+    assert_eq!(path_counts, [48, 48]);
+    assert_eq!(wrapper_counts, [72, 72, 72, 72]);
+    assert_eq!(one_hop_calls, 144);
+    assert_eq!(two_hop_calls, 144);
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LiteralFieldAliasPattern {
     SameElement,
     SameRootDistinctElement,
@@ -4662,6 +4850,327 @@ fn extended_field_backed_type_mismatch_program(kind: FieldBackedPointeeKind) -> 
             other_type = kind.other().mutable_pointer_type(),
             suffix = kind.suffix(),
             expression = pointer.render(),
+        ),
+    )
+}
+
+fn extended_literal_holder_name(
+    kind: FieldBackedPointeeKind,
+    path: ExtendedFieldBackedPath,
+) -> String {
+    let prefix = match path {
+        ExtendedFieldBackedPath::Nested => "NestedLiteral",
+        ExtendedFieldBackedPath::Anonymous => "AnonymousLiteral",
+    };
+    format!("{prefix}{}", kind.holder_name())
+}
+
+fn extended_literal_root_name(pointer: ExtendedFieldBackedPointer) -> String {
+    format!("literal_{}_{}", pointer.path.prefix(), pointer.owner.name())
+}
+
+fn extended_literal_field_storage(pointer: ExtendedFieldBackedPointer) -> String {
+    format!(
+        "{}->inner.{}",
+        extended_literal_root_name(pointer),
+        pointer.field.name()
+    )
+}
+
+fn extended_literal_field_prelude(kind: FieldBackedPointeeKind) -> String {
+    let nested = extended_literal_holder_name(kind, ExtendedFieldBackedPath::Nested);
+    let anonymous = extended_literal_holder_name(kind, ExtendedFieldBackedPath::Anonymous);
+    format!(
+        "{forwarding}\n\
+         struct {nested} {{ struct {holder} inner; }};\n\
+         struct {anonymous} {{ struct {{ {field_type} primary[4]; {field_type} secondary[4]; }} inner; }};",
+        forwarding = field_backed_forwarding_prelude(kind),
+        holder = kind.holder_name(),
+        field_type = kind.field_type(),
+    )
+}
+
+fn extended_literal_field_declarations(kind: FieldBackedPointeeKind) -> String {
+    let mut declarations = Vec::new();
+    for path in ExtendedFieldBackedPath::ALL {
+        for owner in FieldBackedOwner::ALL {
+            let pointer = ExtendedFieldBackedPointer {
+                kind,
+                path,
+                owner,
+                field: FieldBackedField::Primary,
+                index: 0,
+                route: FieldBackedRoute::Direct,
+            };
+            let root = extended_literal_root_name(pointer);
+            let holder = extended_literal_holder_name(kind, path);
+            let initializer = extended_literal_field_initializer(kind, path, owner);
+            declarations.push(format!(
+                "struct {holder} *{root} = &(struct {holder}){{.inner = {initializer}}};"
+            ));
+        }
+    }
+    declarations.join("\n")
+}
+
+fn extended_literal_field_initializer(
+    kind: FieldBackedPointeeKind,
+    path: ExtendedFieldBackedPath,
+    owner: FieldBackedOwner,
+) -> String {
+    let initializer = extended_field_backed_initializer(kind, path, owner);
+    let first_value = kind.base_value() + path.offset() + owner.offset();
+    initializer.replacen(
+        &first_value.to_string(),
+        &format!("(marker += 1, {first_value})"),
+        1,
+    )
+}
+
+fn render_extended_literal_field_forward_call(
+    pointer: ExtendedFieldBackedPointer,
+    points_to_const: bool,
+    twice: bool,
+    wrapper: LiteralPointerWrapper,
+) -> String {
+    let root = extended_literal_field_storage(pointer);
+    let suffix = pointer.kind.suffix();
+    let function = format!(
+        "forward_{}field_{suffix}{}",
+        if points_to_const { "const_" } else { "" },
+        if twice { "_twice" } else { "" },
+    );
+    let alternate = extended_literal_field_storage(ExtendedFieldBackedPointer {
+        owner: pointer.owner.other(),
+        ..pointer
+    });
+    match wrapper {
+        LiteralPointerWrapper::Arithmetic => {
+            format!("({function}({root}) + {})", pointer.index)
+        }
+        LiteralPointerWrapper::IndexedAddress => {
+            format!("&{function}({root})[{}]", pointer.index)
+        }
+        LiteralPointerWrapper::Conditional => format!(
+            "(1 ? {function}({root} + {index}) : {function}({alternate}))",
+            index = pointer.index,
+        ),
+        LiteralPointerWrapper::Comma => {
+            format!("(marker += 0, {function}({root} + {}))", pointer.index)
+        }
+    }
+}
+
+fn extended_literal_field_alias_mutation_expected(
+    writer: ExtendedFieldBackedPointer,
+    second_writer: ExtendedFieldBackedPointer,
+    reader: ExtendedFieldBackedPointer,
+    replacement: i64,
+    delta: i64,
+) -> i64 {
+    extended_field_backed_alias_mutation_expected(writer, second_writer, reader, replacement, delta)
+        + 1
+}
+
+#[allow(clippy::too_many_arguments)]
+fn extended_literal_field_alias_mutation_program(
+    writer: ExtendedFieldBackedPointer,
+    second_writer: ExtendedFieldBackedPointer,
+    reader: ExtendedFieldBackedPointer,
+    replacement: i64,
+    delta: i64,
+    wrappers: [LiteralPointerWrapper; 3],
+    twice: [bool; 3],
+) -> String {
+    let kind = writer.kind;
+    let mutable_type = kind.mutable_pointer_type();
+    let const_type = kind.const_pointer_type();
+    let write_first = kind.write("writer", "replacement");
+    let read = kind.read("reader");
+    let update_second = match kind {
+        FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => {
+            "*second_writer += delta;".to_string()
+        }
+        FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => {
+            "second_writer->value += delta;".to_string()
+        }
+    };
+    let mut elements = Vec::new();
+    for path in ExtendedFieldBackedPath::ALL {
+        for owner in FieldBackedOwner::ALL {
+            for field in FieldBackedField::ALL {
+                let storage = extended_literal_field_storage(ExtendedFieldBackedPointer {
+                    kind,
+                    path,
+                    owner,
+                    field,
+                    index: 0,
+                    route: FieldBackedRoute::Direct,
+                });
+                for index in 0..EMBEDDED_ARRAY_LEN {
+                    elements.push(field_backed_element(kind, &storage, index));
+                }
+            }
+        }
+    }
+    let checksum = elements
+        .into_iter()
+        .enumerate()
+        .map(|(index, element)| format!("{element} * {}", index + 1))
+        .collect::<Vec<_>>()
+        .join(" + ");
+    let writer_storage = extended_literal_field_storage(writer);
+    let second_writer_storage = extended_literal_field_storage(second_writer);
+    let reader_storage = extended_literal_field_storage(reader);
+
+    format!(
+        "{prelude}\n\
+         int mutate_extended_literal_{suffix}({mutable_type}writer, {mutable_type}second_writer,\n\
+                                               {const_type}reader, int replacement, int delta) {{\n\
+             {write_first}\n\
+             int observed_after_first = {read};\n\
+             {update_second}\n\
+             int observed_after_second = {read};\n\
+             writer = second_writer;\n\
+             reader = writer;\n\
+             second_writer = 0;\n\
+             return observed_after_first + observed_after_second +\n\
+                    (writer == reader) + (second_writer == 0);\n\
+         }}\n\
+         int main(void) {{\n\
+             int marker = 0;\n\
+             {declarations}\n\
+             {mutable_type}writer = {writer_expression};\n\
+             {mutable_type}second_writer = {second_writer_expression};\n\
+             {const_type}reader = {reader_expression};\n\
+             int observations = mutate_extended_literal_{suffix}(writer, second_writer, reader,\n\
+                                                                  {replacement}, {delta});\n\
+             return {checksum} +\n\
+                    (writer - {writer_storage}) * 17 +\n\
+                    (second_writer - {second_writer_storage}) * 19 +\n\
+                    (reader - {reader_storage}) * 23 + observations +\n\
+                    (writer == {writer_storage} + {writer_index}) +\n\
+                    (second_writer == {second_writer_storage} + {second_writer_index}) +\n\
+                    (reader == {reader_storage} + {reader_index}) + (marker == 4);\n\
+         }}\n",
+        prelude = extended_literal_field_prelude(kind),
+        suffix = kind.suffix(),
+        declarations = extended_literal_field_declarations(kind),
+        writer_expression =
+            render_extended_literal_field_forward_call(writer, false, twice[0], wrappers[0]),
+        second_writer_expression =
+            render_extended_literal_field_forward_call(second_writer, false, twice[1], wrappers[1]),
+        reader_expression =
+            render_extended_literal_field_forward_call(reader, true, twice[2], wrappers[2]),
+        writer_index = writer.index,
+        second_writer_index = second_writer.index,
+        reader_index = reader.index,
+    )
+}
+
+fn extended_literal_field_diagnostic_program(
+    kind: FieldBackedPointeeKind,
+    operation: &str,
+) -> String {
+    format!(
+        "{prelude}\n\
+         int main(void) {{\n\
+             int marker = 0;\n\
+             {declarations}\n\
+             {operation}\n\
+         }}\n",
+        prelude = extended_literal_field_prelude(kind),
+        declarations = extended_literal_field_declarations(kind),
+    )
+}
+
+fn extended_literal_field_const_discard_program(
+    kind: FieldBackedPointeeKind,
+    path: ExtendedFieldBackedPath,
+) -> String {
+    let holder = extended_literal_holder_name(kind, path);
+    let initializer = extended_field_backed_initializer(kind, path, FieldBackedOwner::Left);
+    extended_literal_field_diagnostic_program(
+        kind,
+        &format!(
+            "const struct {holder} *locked = &(const struct {holder}){{.inner = {initializer}}};\n\
+             {mutable_type}result = locked->inner.primary; return result == 0;",
+            mutable_type = kind.mutable_pointer_type(),
+        ),
+    )
+}
+
+fn extended_literal_field_bounds_program(
+    kind: FieldBackedPointeeKind,
+    path: ExtendedFieldBackedPath,
+) -> String {
+    let storage = extended_literal_field_storage(ExtendedFieldBackedPointer {
+        kind,
+        path,
+        owner: FieldBackedOwner::Left,
+        field: FieldBackedField::Primary,
+        index: 0,
+        route: FieldBackedRoute::Direct,
+    });
+    extended_literal_field_diagnostic_program(
+        kind,
+        &format!(
+            "{ty}result = forward_field_{suffix}({storage} + 5); return result == 0;",
+            ty = kind.mutable_pointer_type(),
+            suffix = kind.suffix(),
+        ),
+    )
+}
+
+fn extended_literal_field_cross_path_program(kind: FieldBackedPointeeKind) -> String {
+    let pointer = ExtendedFieldBackedPointer {
+        kind,
+        path: ExtendedFieldBackedPath::Nested,
+        owner: FieldBackedOwner::Left,
+        field: FieldBackedField::Primary,
+        index: 0,
+        route: FieldBackedRoute::Direct,
+    };
+    let nested = extended_literal_field_storage(pointer);
+    let anonymous = extended_literal_field_storage(ExtendedFieldBackedPointer {
+        path: ExtendedFieldBackedPath::Anonymous,
+        ..pointer
+    });
+    extended_literal_field_diagnostic_program(kind, &format!("return {nested} - {anonymous};"))
+}
+
+fn extended_literal_field_cross_root_program(kind: FieldBackedPointeeKind) -> String {
+    let pointer = ExtendedFieldBackedPointer {
+        kind,
+        path: ExtendedFieldBackedPath::Nested,
+        owner: FieldBackedOwner::Left,
+        field: FieldBackedField::Primary,
+        index: 0,
+        route: FieldBackedRoute::Direct,
+    };
+    let left = extended_literal_field_storage(pointer);
+    let right = extended_literal_field_storage(ExtendedFieldBackedPointer {
+        owner: FieldBackedOwner::Right,
+        ..pointer
+    });
+    extended_literal_field_diagnostic_program(kind, &format!("return {left} - {right};"))
+}
+
+fn extended_literal_field_type_mismatch_program(kind: FieldBackedPointeeKind) -> String {
+    let storage = extended_literal_field_storage(ExtendedFieldBackedPointer {
+        kind,
+        path: ExtendedFieldBackedPath::Anonymous,
+        owner: FieldBackedOwner::Right,
+        field: FieldBackedField::Secondary,
+        index: 0,
+        route: FieldBackedRoute::Direct,
+    });
+    extended_literal_field_diagnostic_program(
+        kind,
+        &format!(
+            "{other_type}result = forward_field_{suffix}({storage} + 1); return result == 0;",
+            other_type = kind.other().mutable_pointer_type(),
+            suffix = kind.suffix(),
         ),
     )
 }
