@@ -3351,6 +3351,261 @@ fn generated_function_argument_context_reports_shape_and_type_mismatches_without
 }
 
 #[test]
+fn generated_declaration_initializer_and_assignment_rhs_contexts_match_model_without_panics() {
+    let scalar_routes = [
+        ("direct", "scalar", 0, 3),
+        ("comma", "(marker++, scalar)", 1, 3),
+        ("assignment", "scalar = (marker++, 5)", 1, 5),
+        ("compound assignment", "scalar += (marker++, 2)", 1, 5),
+        ("call", "scalar_call()", 1, 7),
+        ("conditional", "1 ? (marker++, 8) : (marker += 20, 9)", 1, 8),
+        ("cast", "(int)(marker++, 9)", 1, 9),
+        ("nested comma", "((marker++, 1), (marker++, 4))", 2, 4),
+    ];
+    let pointer_routes = [
+        ("direct", "cursor", 0, 1),
+        ("arithmetic", "(marker++, cursor + 1)", 1, 2),
+        ("assignment", "cursor = (marker++, values + 2)", 1, 3),
+        ("call", "(marker++, forward(values + 3))", 1, 4),
+        (
+            "conditional",
+            "1 ? (marker++, values + 1) : (marker += 20, cursor)",
+            1,
+            2,
+        ),
+        ("comma", "(marker++, values + 2)", 1, 3),
+        ("cast", "(marker++, (int *)(values + 3))", 1, 4),
+        (
+            "direct field assignment",
+            "holder.primary = (marker++, values + 1)",
+            1,
+            2,
+        ),
+        (
+            "arrow field assignment",
+            "holder_view->primary = (marker++, values + 2)",
+            1,
+            3,
+        ),
+    ];
+    let aggregate_routes = [
+        ("direct", "point", 0, 3),
+        ("comma", "(marker++, point)", 1, 3),
+        ("assignment", "target = (marker++, replacement)", 1, 5),
+        (
+            "conditional",
+            "1 ? (marker++, replacement) : (marker += 20, point)",
+            1,
+            5,
+        ),
+        ("call", "make_point()", 1, 7),
+        ("compound literal", "(marker++, (struct Point){8})", 1, 8),
+        ("dereference", "(marker++, *slot)", 1, 3),
+        (
+            "dereference assignment",
+            "*slot = (marker++, replacement)",
+            1,
+            5,
+        ),
+        (
+            "direct field assignment",
+            "box.point = (marker++, replacement)",
+            1,
+            5,
+        ),
+        (
+            "arrow field assignment",
+            "view->point = (marker++, replacement)",
+            1,
+            5,
+        ),
+        (
+            "array element assignment",
+            "points[0] = (marker++, replacement)",
+            1,
+            5,
+        ),
+        (
+            "embedded array element assignment",
+            "box.points[0] = (marker++, replacement)",
+            1,
+            5,
+        ),
+    ];
+
+    for context in 0..2 {
+        for (case_index, (label, expression, marker_increments, value)) in
+            scalar_routes.iter().enumerate()
+        {
+            assert_interpretation(
+                &scalar_initializer_or_rhs_program(expression, context),
+                ExpectedInterpretation::Value(marker_increments * 10 + value),
+                &format!("scalar context {context} case {case_index} ({label})"),
+            );
+        }
+        for (case_index, (label, expression, marker_increments, value)) in
+            pointer_routes.iter().enumerate()
+        {
+            assert_interpretation(
+                &pointer_initializer_or_rhs_program(expression, context),
+                ExpectedInterpretation::Value(marker_increments * 10 + value),
+                &format!("pointer context {context} case {case_index} ({label})"),
+            );
+        }
+        for (case_index, (label, expression, marker_increments, value)) in
+            aggregate_routes.iter().enumerate()
+        {
+            assert_interpretation(
+                &aggregate_initializer_or_rhs_program(expression, context),
+                ExpectedInterpretation::Value(marker_increments * 10 + value),
+                &format!("aggregate context {context} case {case_index} ({label})"),
+            );
+        }
+    }
+
+    assert_eq!(scalar_routes.len() * 2, 16);
+    assert_eq!(pointer_routes.len() * 2, 18);
+    assert_eq!(aggregate_routes.len() * 2, 24);
+}
+
+#[test]
+fn generated_declaration_initializer_and_assignment_rhs_mismatches_do_not_panic() {
+    let cases = [
+        (
+            "scalar initializer from pointer",
+            "int values[1] = {1}; int *cursor = values; int result = cursor;",
+            "pointer 'cursor' used as scalar",
+        ),
+        (
+            "scalar assignment from pointer",
+            "int values[1] = {1}; int *cursor = values; int result = 0; result = cursor;",
+            "pointer 'cursor' used as scalar",
+        ),
+        (
+            "scalar initializer from aggregate",
+            "struct Point point = {1}; int result = point;",
+            "struct variable 'point' used as scalar",
+        ),
+        (
+            "scalar assignment from aggregate",
+            "struct Point point = {1}; int result = 0; result = point;",
+            "struct variable 'point' used as scalar",
+        ),
+        (
+            "scalar initializer from void",
+            "int result = touch();",
+            "void function 'touch' used as scalar expression",
+        ),
+        (
+            "scalar assignment from void",
+            "int result = 0; result = touch();",
+            "void function 'touch' used as scalar expression",
+        ),
+        (
+            "pointer initializer from scalar",
+            "int *result = 7;",
+            "expected pointer expression",
+        ),
+        (
+            "pointer assignment from scalar",
+            "int values[1] = {1}; int *result = values; result = 7;",
+            "expected pointer expression",
+        ),
+        (
+            "pointer initializer from aggregate",
+            "struct Point point = {1}; int *result = point;",
+            "struct variable 'point' used as pointer",
+        ),
+        (
+            "pointer assignment from aggregate",
+            "struct Point point = {1}; int values[1] = {1}; int *result = values; result = point;",
+            "struct variable 'point' used as pointer",
+        ),
+        (
+            "pointer initializer from void",
+            "int *result = touch();",
+            "void function 'touch' used as pointer expression",
+        ),
+        (
+            "pointer assignment from void",
+            "int values[1] = {1}; int *result = values; result = touch();",
+            "void function 'touch' used as pointer expression",
+        ),
+        (
+            "aggregate initializer from scalar",
+            "struct Point result = 7;",
+            "expected struct expression",
+        ),
+        (
+            "aggregate assignment from scalar",
+            "struct Point result = {1}; result = 7;",
+            "expected struct expression",
+        ),
+        (
+            "aggregate initializer from pointer",
+            "struct Point point = {1}; struct Point *slot = &point; struct Point result = slot;",
+            "variable 'slot' is not a struct",
+        ),
+        (
+            "aggregate assignment from pointer",
+            "struct Point result = {1}; struct Point *slot = &result; result = slot;",
+            "variable 'slot' is not a struct",
+        ),
+        (
+            "aggregate initializer from void",
+            "struct Point result = touch();",
+            "void function 'touch' used as struct expression",
+        ),
+        (
+            "aggregate assignment from void",
+            "struct Point result = {1}; result = touch();",
+            "void function 'touch' used as struct expression",
+        ),
+        (
+            "pointer initializer const discard",
+            "const int values[1] = {1}; int *result = values;",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "pointer assignment const discard",
+            "const int values[1] = {1}; int mutable[1] = {1}; int *result = mutable; result = values;",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "pointer initializer type mismatch",
+            "int values[1] = {1}; char *result = values;",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "pointer assignment type mismatch",
+            "int values[1] = {1}; char chars[1] = {'a'}; char *result = chars; result = values;",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "aggregate initializer type mismatch",
+            "struct Pair pair = {1}; struct Point result = pair;",
+            "cannot assign struct 'Pair' to struct 'Point'",
+        ),
+        (
+            "aggregate assignment type mismatch",
+            "struct Pair pair = {1}; struct Point result = {1}; result = pair;",
+            "cannot assign struct 'Pair' to struct 'Point'",
+        ),
+    ];
+
+    for (case_index, (label, body, expected)) in cases.iter().enumerate() {
+        let source = format!(
+            "struct Point {{ int x; }};\nstruct Pair {{ int x; }};\nvoid touch(void) {{ return; }}\nint main(void) {{ {body} return 0; }}\n"
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error(expected),
+            &format!("initializer/RHS mismatch case {case_index} ({label})"),
+        );
+    }
+}
+
+#[test]
 fn generated_nonvoid_return_context_reports_result_shape_mismatches_without_panics() {
     let cases = [
         (
@@ -3539,6 +3794,65 @@ fn aggregate_argument_context_program(expression: &str) -> String {
          struct Box *view = &box;\n\
          int result = consume_point({expression});\n\
          return marker * 10 + result;\n\
+         }}\n"
+    )
+}
+
+fn scalar_initializer_or_rhs_program(expression: &str, context: usize) -> String {
+    let statement = match context {
+        0 => format!("int result = {expression};"),
+        1 => format!("int result = 0; result = {expression};"),
+        _ => unreachable!(),
+    };
+    format!(
+        "int marker = 0;\n\
+         int scalar_call(void) {{ marker++; return 7; }}\n\
+         int main(void) {{ int scalar = 3; {statement} return marker * 10 + result; }}\n"
+    )
+}
+
+fn pointer_initializer_or_rhs_program(expression: &str, context: usize) -> String {
+    let statement = match context {
+        0 => format!("int *result = {expression};"),
+        1 => format!("int *result = values; result = {expression};"),
+        _ => unreachable!(),
+    };
+    format!(
+        "struct Holder {{ int *primary; }};\n\
+         int marker = 0;\n\
+         int *forward(int *value) {{ return value; }}\n\
+         int main(void) {{\n\
+         int values[4] = {{1, 2, 3, 4}};\n\
+         int *cursor = values;\n\
+         struct Holder holder = {{values}};\n\
+         struct Holder *holder_view = &holder;\n\
+         {statement}\n\
+         return marker * 10 + *result;\n\
+         }}\n"
+    )
+}
+
+fn aggregate_initializer_or_rhs_program(expression: &str, context: usize) -> String {
+    let statement = match context {
+        0 => format!("struct Point result = {expression};"),
+        1 => format!("struct Point result = {{0}}; result = {expression};"),
+        _ => unreachable!(),
+    };
+    format!(
+        "struct Point {{ int x; }};\n\
+         struct Box {{ struct Point point; struct Point points[1]; }};\n\
+         int marker = 0;\n\
+         struct Point make_point(void) {{ marker++; return (struct Point){{7}}; }}\n\
+         int main(void) {{\n\
+         struct Point point = {{3}};\n\
+         struct Point target = {{3}};\n\
+         struct Point replacement = {{5}};\n\
+         struct Point *slot = &target;\n\
+         struct Point points[1] = {{{{4}}}};\n\
+         struct Box box = {{{{4}}, {{{{6}}}}}};\n\
+         struct Box *view = &box;\n\
+         {statement}\n\
+         return marker * 10 + result.x;\n\
          }}\n"
     )
 }
