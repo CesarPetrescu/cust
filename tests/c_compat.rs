@@ -182,6 +182,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/nested_anonymous_field_backed_pointer_return_alias_mutation_model_routes.c",
     "tests/fixtures/compat/valid/aggregate_compound_literal_field_pointer_alias_mutation_model_routes.c",
     "tests/fixtures/compat/valid/nested_anonymous_aggregate_compound_literal_field_pointer_alias_mutation_model_routes.c",
+    "tests/fixtures/compat/valid/equality_classification_model_routes.c",
     "tests/fixtures/compat/valid/pointer_truthiness_and_equality.c",
     "tests/fixtures/compat/valid/reverse_subscript.c",
     "tests/fixtures/compat/valid/subscript_comma_expressions.c",

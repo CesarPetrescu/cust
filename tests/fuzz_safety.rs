@@ -2589,6 +2589,258 @@ fn generated_nested_anonymous_aggregate_compound_literal_field_pointer_alias_mut
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EqualityRoot {
+    Left,
+    Right,
+    Null,
+}
+
+#[derive(Clone, Debug)]
+struct EqualityOperand {
+    rendered: String,
+    root: EqualityRoot,
+    index: i64,
+    marker_increments: i64,
+}
+
+#[test]
+fn generated_scalar_and_pointer_equality_classification_matches_model_without_panics() {
+    let mut state = 0xC057_E9A1_17E5_u64;
+    let mut scalar_cases = 0;
+    let mut pointer_cases = 0;
+    let mut null_cases = 0;
+    let mut nonzero_cases = 0;
+    let mut side_effect_cases = 0;
+    let mut pointer_route_counts = [0; 8];
+    let mut scalar_route_counts = [0; 8];
+
+    for case_index in 0..32 {
+        let left_value = (next_u64(&mut state) % 7) as i64 - 3;
+        let right_value = if case_index & 1 == 0 {
+            left_value
+        } else {
+            (left_value + 1).min(3)
+        };
+        let left_route = case_index % 8;
+        let right_route = (case_index * 3 + 1) % 8;
+        scalar_route_counts[left_route] += 1;
+        scalar_route_counts[right_route] += 1;
+        let left = equality_scalar_operand(left_route, left_value);
+        let right = equality_scalar_operand(right_route, right_value);
+        let equal = left_value == right_value;
+        let use_equal = case_index & 2 == 0;
+        let comparison = if use_equal { equal } else { !equal };
+        let expected = i64::from(comparison) * 10 + left.1 + right.1;
+        side_effect_cases += usize::from(left.1 + right.1 > 0);
+
+        assert_interpretation(
+            &equality_program(&left.0, if use_equal { "==" } else { "!=" }, &right.0),
+            ExpectedInterpretation::Value(expected),
+            &format!(
+                "scalar equality case {case_index}, routes {left_route}/{right_route}, values {left_value}/{right_value}"
+            ),
+        );
+        scalar_cases += 1;
+    }
+
+    for case_index in 0..48 {
+        let left_root = if next_u64(&mut state) & 1 == 0 {
+            EqualityRoot::Left
+        } else {
+            EqualityRoot::Right
+        };
+        let left_index = (next_u64(&mut state) % 4) as i64;
+        let pattern = case_index % 4;
+        let (right_root, right_index) = match pattern {
+            0 => (left_root, left_index),
+            1 => (left_root, (left_index + 1) % 4),
+            2 => (equality_other_root(left_root), left_index),
+            _ => (EqualityRoot::Null, 0),
+        };
+        let left_route = case_index % 8;
+        let right_route = (case_index * 5 + 3) % 8;
+        pointer_route_counts[left_route] += 1;
+        if right_root != EqualityRoot::Null {
+            pointer_route_counts[right_route] += 1;
+        }
+        let left = equality_pointer_operand(left_route, left_root, left_index);
+        let right = equality_pointer_operand(right_route, right_root, right_index);
+        let equal = left.root == right.root
+            && (left.root == EqualityRoot::Null || left.index == right.index);
+        let use_equal = case_index & 4 == 0;
+        let comparison = if use_equal { equal } else { !equal };
+        let expected =
+            i64::from(comparison) * 10 + left.marker_increments + right.marker_increments;
+        side_effect_cases += usize::from(left.marker_increments + right.marker_increments > 0);
+
+        assert_interpretation(
+            &equality_program(
+                &left.rendered,
+                if use_equal { "==" } else { "!=" },
+                &right.rendered,
+            ),
+            ExpectedInterpretation::Value(expected),
+            &format!(
+                "pointer equality case {case_index}, pattern {pattern}, operands {left:?}/{right:?}"
+            ),
+        );
+        pointer_cases += 1;
+    }
+
+    let scalar_wrappers = [
+        ("+0", 0, 0),
+        ("(int)0", 0, 0),
+        ("(1 ? 0 : 3)", 0, 0),
+        ("(marker++, +0)", 0, 1),
+        ("+1", 1, 0),
+        ("(int)-2", -2, 0),
+        ("(0 ? 0 : 3)", 3, 0),
+        ("(marker++, +4)", 4, 1),
+    ];
+    for case_index in 0..16 {
+        let (scalar, value, marker_increments) = scalar_wrappers[case_index % 8];
+        let pointer =
+            equality_pointer_operand(case_index % 8, EqualityRoot::Left, (case_index % 4) as i64);
+        let scalar_on_left = case_index & 1 == 0;
+        let use_equal = case_index & 2 == 0;
+        let (left, right) = if scalar_on_left {
+            (scalar, pointer.rendered.as_str())
+        } else {
+            (pointer.rendered.as_str(), scalar)
+        };
+
+        if value == 0 {
+            null_cases += 1;
+            let expected =
+                i64::from(!use_equal) * 10 + marker_increments + pointer.marker_increments;
+            side_effect_cases += usize::from(marker_increments + pointer.marker_increments > 0);
+            assert_interpretation(
+                &equality_program(left, if use_equal { "==" } else { "!=" }, right),
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "mixed null equality case {case_index}, scalar {scalar}, pointer {pointer:?}"
+                ),
+            );
+        } else {
+            nonzero_cases += 1;
+            assert_interpretation(
+                &equality_program(left, if use_equal { "==" } else { "!=" }, right),
+                ExpectedInterpretation::Error("cannot compare pointer with nonzero integer"),
+                &format!(
+                    "mixed nonzero equality case {case_index}, scalar {scalar}, pointer {pointer:?}"
+                ),
+            );
+        }
+    }
+
+    assert_interpretation(
+        &equality_program("left", "==", "point"),
+        ExpectedInterpretation::Error("struct variable 'point' used as scalar"),
+        "pointer/aggregate equality type diagnostic",
+    );
+
+    assert_eq!(scalar_cases, 32);
+    assert_eq!(pointer_cases, 48);
+    assert_eq!(null_cases, 8);
+    assert_eq!(nonzero_cases, 8);
+    assert!(side_effect_cases >= 20);
+    assert!(pointer_route_counts.iter().all(|count| *count >= 6));
+    assert_eq!(scalar_route_counts, [8; 8]);
+}
+
+fn equality_other_root(root: EqualityRoot) -> EqualityRoot {
+    match root {
+        EqualityRoot::Left => EqualityRoot::Right,
+        EqualityRoot::Right => EqualityRoot::Left,
+        EqualityRoot::Null => EqualityRoot::Left,
+    }
+}
+
+fn equality_pointer_operand(route: usize, root: EqualityRoot, index: i64) -> EqualityOperand {
+    if root == EqualityRoot::Null {
+        return EqualityOperand {
+            rendered: "0".to_string(),
+            root,
+            index: 0,
+            marker_increments: 0,
+        };
+    }
+    let name = root.name();
+    let field = match root {
+        EqualityRoot::Left => "primary",
+        EqualityRoot::Right => "secondary",
+        EqualityRoot::Null => unreachable!(),
+    };
+    let (rendered, marker_increments) = match route % 8 {
+        0 => (format!("({name} + {index})"), 0),
+        1 => (format!("&{name}[{index}]"), 0),
+        2 => (format!("forward({name} + {index})"), 0),
+        3 => (format!("cursor.{field} + {index}"), 0),
+        4 => (format!("view->{field} + {index}"), 0),
+        5 => (
+            format!(
+                "(1 ? {name} + {index} : {} + 3)",
+                equality_other_root(root).name()
+            ),
+            0,
+        ),
+        6 => (format!("(marker++, {name} + {index})"), 1),
+        _ => (format!("(int *)({name} + {index})"), 0),
+    };
+    EqualityOperand {
+        rendered,
+        root,
+        index,
+        marker_increments,
+    }
+}
+
+impl EqualityRoot {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Null => "0",
+        }
+    }
+}
+
+fn equality_scalar_operand(route: usize, value: i64) -> (String, i64) {
+    let index = value.rem_euclid(4);
+    match route % 8 {
+        0 => (value.to_string(), 0),
+        1 => (format!("+({value})"), 0),
+        2 => (format!("(int)({value})"), 0),
+        3 => (format!("(1 ? {value} : {})", value + 1), 0),
+        4 => (format!("(marker++, {value})"), 1),
+        5 => (
+            format!("view->nested.values[{index}] + ({})", value - index),
+            0,
+        ),
+        6 => (format!("(left + {value}) - left"), 0),
+        _ => (format!("(marker++, +({value}))"), 1),
+    }
+}
+
+fn equality_program(left: &str, op: &str, right: &str) -> String {
+    format!(
+        "struct Point {{ int value; }};\n\
+         struct Inner {{ int values[4]; }};\n\
+         struct Cursor {{ int *primary; int *secondary; struct Inner nested; }};\n\
+         int *forward(int *value) {{ return value; }}\n\
+         int main(void) {{\n\
+         int left[4] = {{4, 7, 9, 12}};\n\
+         int right[4] = {{4, 7, 9, 12}};\n\
+         struct Point point = {{1}};\n\
+         struct Cursor cursor = {{left, right, {{{{0, 1, 2, 3}}}}}};\n\
+         struct Cursor *view = &cursor;\n\
+         int marker = 0;\n\
+         return (({left}) {op} ({right})) * 10 + marker;\n\
+         }}\n"
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LiteralFieldAliasPattern {
     SameElement,
     SameRootDistinctElement,

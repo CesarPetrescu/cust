@@ -8061,6 +8061,24 @@ fn supports_pointer_truthiness_and_equality_comparisons() {
 }
 
 #[test]
+fn supports_model_based_scalar_and_pointer_equality_classification() {
+    let program = include_str!("fixtures/compat/valid/equality_classification_model_routes.c");
+
+    assert_eq!(interpret(program).unwrap(), 129);
+}
+
+#[test]
+fn rejects_wrapped_nonzero_integer_pointer_equality() {
+    let program = include_str!("fixtures/invalid/pointer_wrapped_nonzero_equality.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot compare pointer with nonzero integer"
+    );
+}
+
+#[test]
 fn supports_array_backed_pointer_arithmetic_and_difference() {
     let program = include_str!("fixtures/valid/pointer_arithmetic.c");
 

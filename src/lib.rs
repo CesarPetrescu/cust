@@ -17665,38 +17665,42 @@ impl Interpreter {
     }
 
     fn eval_equality(&mut self, left: &Expr, op: &BinaryOp, right: &Expr) -> CustResult<i64> {
-        if !self.expr_is_pointer_value(left) && !self.expr_is_pointer_value(right) {
-            let lhs = self.eval(left)?;
-            let rhs = self.eval(right)?;
-            return match op {
-                BinaryOp::Eq => Ok((lhs == rhs) as i64),
-                BinaryOp::Ne => Ok((lhs != rhs) as i64),
-                _ => unreachable!("only equality operators use eval_equality"),
-            };
-        }
+        let left_is_pointer = self.expr_is_pointer_value(left);
+        let right_is_pointer = self.expr_is_pointer_value(right);
 
-        match (self.eval_pointer(left), self.eval_pointer(right)) {
-            (Ok(left_pointer), Ok(right_pointer)) => {
-                let equal = Self::pointer_eq(&left_pointer, &right_pointer);
-                Ok((*op == BinaryOp::Eq && equal || *op == BinaryOp::Ne && !equal) as i64)
+        let equal = match (left_is_pointer, right_is_pointer) {
+            (false, false) => self.eval(left)? == self.eval(right)?,
+            (true, true) => {
+                let left_pointer = self.eval_pointer(left)?;
+                let right_pointer = self.eval_pointer(right)?;
+                Self::pointer_eq(&left_pointer, &right_pointer)
             }
-            (Ok(_), Err(_)) if matches!(right, Expr::Number(value) if *value != 0) => Err(
-                CustError::new("cannot compare pointer with nonzero integer"),
-            ),
-            (Err(_), Ok(_)) if matches!(left, Expr::Number(value) if *value != 0) => Err(
-                CustError::new("cannot compare pointer with nonzero integer"),
-            ),
-            (Ok(_), Err(error)) if !matches!(left, Expr::Number(0)) => Err(error),
-            (Err(error), Ok(_)) if !matches!(right, Expr::Number(0)) => Err(error),
-            (Ok(_), Err(_)) | (Err(_), Ok(_)) | (Err(_), Err(_)) => {
-                let lhs = self.eval(left)?;
-                let rhs = self.eval(right)?;
-                match op {
-                    BinaryOp::Eq => Ok((lhs == rhs) as i64),
-                    BinaryOp::Ne => Ok((lhs != rhs) as i64),
-                    _ => unreachable!("only equality operators use eval_equality"),
+            (true, false) => {
+                let pointer = self.eval_pointer(left)?;
+                let value = self.eval(right)?;
+                if value != 0 {
+                    return Err(CustError::new(
+                        "cannot compare pointer with nonzero integer",
+                    ));
                 }
+                Self::pointer_eq(&pointer, &PointerValue::Null)
             }
+            (false, true) => {
+                let value = self.eval(left)?;
+                let pointer = self.eval_pointer(right)?;
+                if value != 0 {
+                    return Err(CustError::new(
+                        "cannot compare pointer with nonzero integer",
+                    ));
+                }
+                Self::pointer_eq(&PointerValue::Null, &pointer)
+            }
+        };
+
+        match op {
+            BinaryOp::Eq => Ok(equal as i64),
+            BinaryOp::Ne => Ok((!equal) as i64),
+            _ => unreachable!("only equality operators use eval_equality"),
         }
     }
 
