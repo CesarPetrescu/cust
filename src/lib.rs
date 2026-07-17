@@ -15590,6 +15590,34 @@ impl Interpreter {
         }
     }
 
+    fn eval_ordering(&mut self, left: &Expr, op: &BinaryOp, right: &Expr) -> CustResult<i64> {
+        let left_is_pointer = self.expr_is_pointer_value(left);
+        let right_is_pointer = self.expr_is_pointer_value(right);
+
+        match (left_is_pointer, right_is_pointer) {
+            (false, false) => {
+                let lhs = self.eval(left)?;
+                let rhs = self.eval(right)?;
+                let result = match op {
+                    BinaryOp::Lt => lhs < rhs,
+                    BinaryOp::Le => lhs <= rhs,
+                    BinaryOp::Gt => lhs > rhs,
+                    BinaryOp::Ge => lhs >= rhs,
+                    _ => unreachable!("only ordering operators use eval_ordering"),
+                };
+                Ok(result as i64)
+            }
+            (true, true) => {
+                let left_pointer = self.eval_pointer(left)?;
+                let right_pointer = self.eval_pointer(right)?;
+                self.pointer_ordering(&left_pointer, *op, &right_pointer)
+            }
+            (true, false) | (false, true) => Err(CustError::new(
+                "pointer ordering comparisons are not supported",
+            )),
+        }
+    }
+
     fn eval_pointer_arithmetic(
         &mut self,
         left: &Expr,
@@ -18830,28 +18858,7 @@ impl Interpreter {
                     }
                 }
                 BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-                    if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
-                        match (self.eval_pointer(left), self.eval_pointer(right)) {
-                            (Ok(left_pointer), Ok(right_pointer)) => {
-                                return self.pointer_ordering(&left_pointer, *op, &right_pointer);
-                            }
-                            (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
-                                return Err(CustError::new(
-                                    "pointer ordering comparisons are not supported",
-                                ));
-                            }
-                            (Err(error), Err(_)) => return Err(error),
-                        }
-                    }
-                    let lhs = self.eval(left)?;
-                    let rhs = self.eval(right)?;
-                    match op {
-                        BinaryOp::Lt => Ok((lhs < rhs) as i64),
-                        BinaryOp::Le => Ok((lhs <= rhs) as i64),
-                        BinaryOp::Gt => Ok((lhs > rhs) as i64),
-                        BinaryOp::Ge => Ok((lhs >= rhs) as i64),
-                        _ => unreachable!("only ordering operators handled in this branch"),
-                    }
+                    self.eval_ordering(left, op, right)
                 }
                 BinaryOp::ShiftLeft
                 | BinaryOp::ShiftRight

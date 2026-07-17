@@ -8079,6 +8079,24 @@ fn rejects_wrapped_nonzero_integer_pointer_equality() {
 }
 
 #[test]
+fn supports_model_based_scalar_and_pointer_ordering_classification() {
+    let program = include_str!("fixtures/compat/valid/ordering_classification_model_routes.c");
+
+    assert_eq!(interpret(program).unwrap(), 130);
+}
+
+#[test]
+fn rejects_pointer_ordering_against_nested_scalar_field_reads() {
+    let program = include_str!("fixtures/invalid/pointer_nested_scalar_ordering.c");
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "pointer ordering comparisons are not supported"
+    );
+}
+
+#[test]
 fn supports_array_backed_pointer_arithmetic_and_difference() {
     let program = include_str!("fixtures/valid/pointer_arithmetic.c");
 

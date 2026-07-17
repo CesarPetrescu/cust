@@ -2748,6 +2748,144 @@ fn generated_scalar_and_pointer_equality_classification_matches_model_without_pa
     assert_eq!(scalar_route_counts, [8; 8]);
 }
 
+#[test]
+fn generated_scalar_and_pointer_ordering_classification_matches_model_without_panics() {
+    let mut state = 0xC057_0ADE_17E5_u64;
+    let operators = ["<", "<=", ">", ">="];
+    let mut scalar_cases = 0;
+    let mut same_root_pointer_cases = 0;
+    let mut cross_root_pointer_cases = 0;
+    let mut null_pointer_cases = 0;
+    let mut mixed_cases = 0;
+    let mut side_effect_cases = 0;
+    let mut pointer_route_counts = [0; 8];
+    let mut scalar_route_counts = [0; 8];
+
+    for case_index in 0..32 {
+        let left_value = (next_u64(&mut state) % 7) as i64 - 3;
+        let right_value = (next_u64(&mut state) % 7) as i64 - 3;
+        let left_route = case_index % 8;
+        let right_route = (case_index * 3 + 1) % 8;
+        let operator = operators[case_index % operators.len()];
+        scalar_route_counts[left_route] += 1;
+        scalar_route_counts[right_route] += 1;
+        let left = equality_scalar_operand(left_route, left_value);
+        let right = equality_scalar_operand(right_route, right_value);
+        let comparison = ordering_model(left_value, operator, right_value);
+        let expected = i64::from(comparison) * 10 + left.1 + right.1;
+        side_effect_cases += usize::from(left.1 + right.1 > 0);
+
+        assert_interpretation(
+            &equality_program(&left.0, operator, &right.0),
+            ExpectedInterpretation::Value(expected),
+            &format!(
+                "scalar ordering case {case_index}, routes {left_route}/{right_route}, values {left_value}/{right_value}, operator {operator}"
+            ),
+        );
+        scalar_cases += 1;
+    }
+
+    for case_index in 0..48 {
+        let left_root = if next_u64(&mut state) & 1 == 0 {
+            EqualityRoot::Left
+        } else {
+            EqualityRoot::Right
+        };
+        let left_index = (next_u64(&mut state) % 4) as i64;
+        let pattern = case_index % 4;
+        let (right_root, right_index) = match pattern {
+            0 => (left_root, left_index),
+            1 => (left_root, (left_index + 1) % 4),
+            2 => (equality_other_root(left_root), left_index),
+            _ => (EqualityRoot::Null, 0),
+        };
+        let left_route = case_index % 8;
+        let right_route = (case_index * 5 + 3) % 8;
+        let operator = operators[(case_index / 4) % operators.len()];
+        pointer_route_counts[left_route] += 1;
+        if right_root != EqualityRoot::Null {
+            pointer_route_counts[right_route] += 1;
+        }
+        let left = equality_pointer_operand(left_route, left_root, left_index);
+        let right = equality_pointer_operand(right_route, right_root, right_index);
+        let source = equality_program(&left.rendered, operator, &right.rendered);
+        let context = format!(
+            "pointer ordering case {case_index}, pattern {pattern}, operator {operator}, operands {left:?}/{right:?}"
+        );
+
+        if right_root == EqualityRoot::Null {
+            null_pointer_cases += 1;
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Error("pointer ordering comparisons are not supported"),
+                &context,
+            );
+        } else if left_root != right_root {
+            cross_root_pointer_cases += 1;
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Error("cannot compare pointers to different arrays"),
+                &context,
+            );
+        } else {
+            same_root_pointer_cases += 1;
+            let comparison = ordering_model(left_index, operator, right_index);
+            let expected =
+                i64::from(comparison) * 10 + left.marker_increments + right.marker_increments;
+            side_effect_cases += usize::from(left.marker_increments + right.marker_increments > 0);
+            assert_interpretation(&source, ExpectedInterpretation::Value(expected), &context);
+        }
+    }
+
+    for case_index in 0..16 {
+        let scalar_value = (case_index as i64 % 7) - 3;
+        let scalar_route = case_index % 8;
+        let pointer_route = (case_index * 3 + 1) % 8;
+        let operator = operators[case_index % operators.len()];
+        let scalar = if scalar_route == 5 {
+            (format!("view->nested.values[{}]", case_index % 4), 0)
+        } else {
+            equality_scalar_operand(scalar_route, scalar_value)
+        };
+        let pointer =
+            equality_pointer_operand(pointer_route, EqualityRoot::Left, (case_index % 4) as i64);
+        let scalar_on_left = case_index & 1 == 0;
+        let (left, right) = if scalar_on_left {
+            (scalar.0.as_str(), pointer.rendered.as_str())
+        } else {
+            (pointer.rendered.as_str(), scalar.0.as_str())
+        };
+
+        assert_interpretation(
+            &equality_program(left, operator, right),
+            ExpectedInterpretation::Error("pointer ordering comparisons are not supported"),
+            &format!(
+                "mixed ordering case {case_index}, scalar route {scalar_route}, pointer route {pointer_route}, operator {operator}"
+            ),
+        );
+        mixed_cases += 1;
+    }
+
+    assert_eq!(scalar_cases, 32);
+    assert_eq!(same_root_pointer_cases, 24);
+    assert_eq!(cross_root_pointer_cases, 12);
+    assert_eq!(null_pointer_cases, 12);
+    assert_eq!(mixed_cases, 16);
+    assert!(side_effect_cases >= 12);
+    assert!(pointer_route_counts.iter().all(|count| *count >= 6));
+    assert_eq!(scalar_route_counts, [8; 8]);
+}
+
+fn ordering_model(left: i64, operator: &str, right: i64) -> bool {
+    match operator {
+        "<" => left < right,
+        "<=" => left <= right,
+        ">" => left > right,
+        ">=" => left >= right,
+        _ => unreachable!("ordering model received unsupported operator"),
+    }
+}
+
 fn equality_other_root(root: EqualityRoot) -> EqualityRoot {
     match root {
         EqualityRoot::Left => EqualityRoot::Right,
@@ -2817,7 +2955,10 @@ fn equality_scalar_operand(route: usize, value: i64) -> (String, i64) {
             format!("view->nested.values[{index}] + ({})", value - index),
             0,
         ),
-        6 => (format!("(left + {value}) - left"), 0),
+        6 => (
+            format!("((left + {index}) - left) + ({})", value - index),
+            0,
+        ),
         _ => (format!("(marker++, +({value}))"), 1),
     }
 }
