@@ -8104,6 +8104,13 @@ fn supports_model_based_scalar_and_pointer_truthiness_classification() {
 }
 
 #[test]
+fn supports_model_based_discard_context_classification() {
+    let program = include_str!("fixtures/valid/discard_context_classification_model_routes.c");
+
+    assert_eq!(interpret(program).unwrap(), 240);
+}
+
+#[test]
 fn supports_array_backed_pointer_arithmetic_and_difference() {
     let program = include_str!("fixtures/valid/pointer_arithmetic.c");
 
@@ -8176,6 +8183,76 @@ int main(void) {
         err.to_string(),
         "cannot subtract pointers to different arrays"
     );
+}
+
+#[test]
+fn discarded_pointer_comma_expressions_evaluate_left_operand_once() {
+    let program = r#"
+int main(void) {
+    int values[2] = {3, 4};
+    int marker = 0;
+    (marker++, values + 1);
+    return marker;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn discarded_aggregate_expressions_do_not_require_scalar_conversion() {
+    let program = r#"
+struct Point {
+    int x;
+};
+
+int main(void) {
+    struct Point point = {7};
+    point;
+    (void)point;
+    return point.x;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn discarded_void_comma_expressions_evaluate_each_operand_once() {
+    let program = r#"
+int marker = 0;
+
+void touch(void) {
+    marker++;
+}
+
+int main(void) {
+    (marker++, touch());
+    return marker;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 2);
+}
+
+#[test]
+fn discarded_aggregate_dereference_assignment_evaluates_pointer_once() {
+    let program = r#"
+struct Point {
+    int x;
+};
+
+int main(void) {
+    struct Point target = {3};
+    struct Point replacement = {7};
+    struct Point *slot = &target;
+    int marker = 0;
+    (*(marker++, slot) = replacement);
+    return marker * 10 + target.x;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 17);
 }
 
 #[test]

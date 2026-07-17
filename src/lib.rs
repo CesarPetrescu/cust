@@ -16527,6 +16527,25 @@ impl Interpreter {
         }
     }
 
+    fn expr_is_void_value(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::VoidCast(_) => true,
+            Expr::Call { name, .. } => matches!(
+                self.functions
+                    .get(name)
+                    .map(|function| &function.return_type),
+                Some(ReturnType::Void)
+            ),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => self.expr_is_void_value(then_expr) && self.expr_is_void_value(else_expr),
+            Expr::Comma(_, right) => self.expr_is_void_value(right),
+            _ => false,
+        }
+    }
+
     fn eval_discard(&mut self, expr: &Expr) -> CustResult<()> {
         if let Expr::Call { name, args } = expr {
             self.call_function(name, args)?;
@@ -16536,75 +16555,47 @@ impl Interpreter {
             self.eval_discard(inner)?;
             return Ok(());
         }
-        match expr {
-            Expr::Assign { name, value }
-                if matches!(self.find_variable(name), Some(Value::Struct { .. })) =>
-            {
-                self.assign_struct_copy(name, value)?;
-                return Ok(());
-            }
-            Expr::ArraySet { name, index, value }
-                if matches!(
-                    self.find_variable(name),
-                    Some(Value::StructArray { .. })
-                        | Some(Value::Pointer {
-                            ty: PointeeType::Struct(_),
-                            ..
-                        })
-                ) =>
-            {
-                self.eval_struct_index_assignment_expr(name, index, value)?;
-                return Ok(());
-            }
-            Expr::StructArraySet {
-                name,
-                fields,
-                index,
-                value,
-            } if self
-                .direct_struct_aggregate_array_field_type(name, fields)?
-                .is_some() =>
-            {
-                self.eval_struct_field_array_element_assignment_expr(name, fields, index, value)?;
-                return Ok(());
-            }
-            Expr::DerefSet { pointer, value } => {
-                if self
-                    .eval_pointer(pointer)
-                    .and_then(|target| self.find_struct_pointer_fields(&target).map(|_| ()))
-                    .is_ok()
-                {
-                    self.assign_struct_pointer_copy(pointer, value)?;
-                    return Ok(());
+        if self.expr_is_void_value(expr) {
+            match expr {
+                Expr::Conditional {
+                    cond,
+                    then_expr,
+                    else_expr,
+                } => {
+                    if self.eval_truthy(cond)? {
+                        self.eval_discard(then_expr)?;
+                    } else {
+                        self.eval_discard(else_expr)?;
+                    }
                 }
+                Expr::Comma(left, right) => {
+                    self.eval_discard(left)?;
+                    self.eval_discard(right)?;
+                }
+                _ => unreachable!("direct calls and void casts are handled above"),
             }
-            _ => {}
-        }
-        if matches!(
-            expr,
-            Expr::StructPtrSet { .. }
-                | Expr::CompoundAssign {
-                    op: CompoundOp::Add | CompoundOp::Sub,
-                    ..
-                }
-                | Expr::StructCompoundSet {
-                    op: CompoundOp::Add | CompoundOp::Sub,
-                    ..
-                }
-                | Expr::StructPtrCompoundSet {
-                    op: CompoundOp::Add | CompoundOp::Sub,
-                    ..
-                }
-                | Expr::Increment { .. }
-        ) && self.eval_pointer(expr).is_ok()
-        {
             return Ok(());
+        }
+        if self.expr_is_pointer_value(expr) {
+            self.eval_pointer(expr)?;
+            return Ok(());
+        }
+        match self.aggregate_expr_type_name(expr) {
+            Ok(_) => {
+                self.eval_struct_expr(expr)?;
+                return Ok(());
+            }
+            Err(error)
+                if error
+                    .to_string()
+                    .contains("conditional branches have mismatched aggregate types") =>
+            {
+                return Err(error);
+            }
+            Err(_) => {}
         }
         match self.eval(expr) {
             Ok(_) => Ok(()),
-            Err(error) if error.to_string() == "pointer value used as scalar" => {
-                self.eval_pointer(expr).map(|_| ())
-            }
             Err(error) => Err(error),
         }
     }

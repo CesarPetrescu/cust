@@ -2961,6 +2961,152 @@ fn generated_scalar_and_pointer_truthiness_classification_matches_model_without_
     assert_eq!(context_counts, [24; 6]);
 }
 
+#[test]
+fn generated_discard_context_classification_matches_model_without_panics() {
+    let routes = [
+        ("scalar increment", "marker++", 1),
+        ("scalar assignment", "scalar = (marker++, 7)", 1),
+        ("scalar compound assignment", "scalar += (marker++, 2)", 1),
+        ("scalar call", "scalar_call()", 1),
+        ("scalar conditional", "1 ? (marker++, scalar) : 0", 1),
+        ("scalar comma", "(marker++, scalar)", 1),
+        ("array assignment", "cursor[0] = (marker++, 8)", 1),
+        ("dereference assignment", "*cursor = (marker++, 9)", 1),
+        ("pointer assignment", "cursor = (marker++, values + 1)", 1),
+        ("pointer compound assignment", "cursor += (marker++, 1)", 1),
+        (
+            "direct pointer field assignment",
+            "holder.primary = (marker++, values + 1)",
+            1,
+        ),
+        (
+            "arrow pointer field assignment",
+            "holder_view->primary = (marker++, values + 1)",
+            1,
+        ),
+        (
+            "aggregate literal pointer field assignment",
+            "((struct Holder){values}).primary = (marker++, values + 1)",
+            1,
+        ),
+        ("pointer call", "(marker++, forward(values + 1))", 1),
+        (
+            "pointer conditional",
+            "(marker++, (1 ? values + 1 : cursor))",
+            1,
+        ),
+        ("pointer cast", "(marker++, (int *)(values + 1))", 1),
+        ("aggregate variable", "(marker++, point)", 1),
+        ("aggregate assignment", "point = (marker++, replacement)", 1),
+        (
+            "aggregate conditional",
+            "(marker++, (1 ? point : replacement))",
+            1,
+        ),
+        ("aggregate call", "(marker++, make_point())", 1),
+        (
+            "aggregate compound literal",
+            "(marker++, (struct Point){9})",
+            1,
+        ),
+        ("aggregate field", "(marker++, box.point)", 1),
+        (
+            "aggregate dereference assignment",
+            "(*(marker++, point_slot) = replacement)",
+            1,
+        ),
+        ("void call", "touch()", 1),
+        ("void comma", "(marker++, touch_noop())", 1),
+        ("void conditional", "1 ? touch() : touch_noop()", 1),
+        ("void cast", "(marker++, (void)scalar)", 1),
+    ];
+    let mut context_counts = [0; 3];
+    let mut family_counts = [0; 4];
+
+    for (route_index, (label, expression, marker_increments)) in routes.iter().enumerate() {
+        for context in 0..3 {
+            let expected = marker_increments * 10 + i64::from(context == 2);
+            assert_interpretation(
+                &discard_context_program(expression, context),
+                ExpectedInterpretation::Value(expected),
+                &format!("discard route {route_index} ({label}), context {context}"),
+            );
+            context_counts[context] += 1;
+        }
+        family_counts[match route_index {
+            0..=7 => 0,
+            8..=15 => 1,
+            16..=22 => 2,
+            _ => 3,
+        }] += 1;
+    }
+
+    assert_interpretation(
+        &discard_scalar_use_program("point"),
+        ExpectedInterpretation::Error("struct variable 'point' used as scalar"),
+        "aggregate scalar-use diagnostic remains exact",
+    );
+    assert_interpretation(
+        &discard_scalar_use_program("touch()"),
+        ExpectedInterpretation::Error("void function 'touch' used as scalar expression"),
+        "void scalar-use diagnostic remains exact",
+    );
+    assert_interpretation(
+        &discard_scalar_use_program("cursor"),
+        ExpectedInterpretation::Error("pointer 'cursor' used as scalar"),
+        "pointer scalar-use diagnostic remains exact",
+    );
+
+    assert_eq!(context_counts, [27; 3]);
+    assert_eq!(family_counts, [8, 8, 7, 4]);
+}
+
+fn discard_context_program(expression: &str, context: usize) -> String {
+    let statement = match context {
+        0 => format!("{expression};"),
+        1 => format!("(void)({expression});"),
+        2 => format!("(({expression}), context_marker++);"),
+        _ => unreachable!(),
+    };
+    format!(
+        "struct Point {{ int x; }};\n\
+         struct Holder {{ int *primary; struct Point point; }};\n\
+         int marker = 0;\n\
+         int scalar_call(void) {{ marker++; return 7; }}\n\
+         void touch(void) {{ marker++; }}\n\
+         void touch_noop(void) {{ return; }}\n\
+         int *forward(int *value) {{ return value; }}\n\
+         struct Point make_point(void) {{ struct Point result = {{5}}; return result; }}\n\
+         int main(void) {{\n\
+         int values[4] = {{1, 2, 3, 4}};\n\
+         int *cursor = values;\n\
+         int scalar = 3;\n\
+         int context_marker = 0;\n\
+         struct Point point = {{5}};\n\
+         struct Point replacement = {{7}};\n\
+         struct Point *point_slot = &point;\n\
+         struct Holder holder = {{values, {{4}}}};\n\
+         struct Holder *holder_view = &holder;\n\
+         struct Holder box = {{values, {{6}}}};\n\
+         {statement}\n\
+         return marker * 10 + context_marker;\n\
+         }}\n"
+    )
+}
+
+fn discard_scalar_use_program(expression: &str) -> String {
+    format!(
+        "struct Point {{ int x; }};\n\
+         void touch(void) {{ return; }}\n\
+         int main(void) {{\n\
+         int values[2] = {{1, 2}};\n\
+         int *cursor = values;\n\
+         struct Point point = {{3}};\n\
+         return {expression};\n\
+         }}\n"
+    )
+}
+
 fn truthiness_pointer_operand(route: usize, truthy: bool, index: i64) -> EqualityOperand {
     if truthy {
         return equality_pointer_operand(route, EqualityRoot::Left, index);
