@@ -17890,7 +17890,12 @@ impl Interpreter {
         let Some(expr) = expr else {
             return Ok(None);
         };
-        match self.return_type_stack.last().cloned() {
+        let return_type = self.return_type_stack.last().cloned();
+        if matches!(return_type, Some(ReturnType::Void)) {
+            self.eval_discard(expr)?;
+            return Ok(Some(ReturnValue::Scalar(0)));
+        }
+        match return_type {
             Some(ReturnType::Struct(_)) => Ok(Some(self.eval_struct_expr(expr)?)),
             Some(ReturnType::Pointer {
                 ty,
@@ -17905,8 +17910,9 @@ impl Interpreter {
                     points_to_const,
                 }))
             }
-            Some(ReturnType::Scalar(_)) | Some(ReturnType::Void) => {
-                Ok(Some(ReturnValue::Scalar(self.eval(expr)?)))
+            Some(ReturnType::Scalar(_)) => Ok(Some(ReturnValue::Scalar(self.eval(expr)?))),
+            Some(ReturnType::Void) => {
+                unreachable!("void returns are handled before classification")
             }
             None => Ok(Some(ReturnValue::Scalar(self.eval(expr)?))),
         }

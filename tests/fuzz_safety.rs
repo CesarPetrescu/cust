@@ -3061,6 +3061,253 @@ fn generated_discard_context_classification_matches_model_without_panics() {
     assert_eq!(family_counts, [8, 8, 7, 4]);
 }
 
+#[test]
+fn generated_void_return_context_rejects_every_value_shape_without_panics() {
+    let expressions = [
+        ("scalar", "marker++"),
+        ("pointer", "(marker++, cursor)"),
+        ("aggregate", "(marker++, point)"),
+        ("void", "(marker++, touch())"),
+    ];
+
+    for (case_index, (label, expression)) in expressions.iter().enumerate() {
+        assert_interpretation(
+            &void_return_context_program(expression),
+            ExpectedInterpretation::Error("void function 'reject_value' returned a value"),
+            &format!("void return case {case_index} ({label})"),
+        );
+    }
+}
+
+#[test]
+fn generated_return_context_classification_matches_model_without_panics() {
+    let scalar_routes = [
+        ("direct", "scalar", 0, 3),
+        ("comma", "(marker++, scalar)", 1, 3),
+        ("assignment", "scalar = (marker++, 5)", 1, 5),
+        ("compound assignment", "scalar += (marker++, 2)", 1, 5),
+        ("call", "scalar_call()", 1, 7),
+        ("conditional", "1 ? (marker++, 8) : (marker += 20, 9)", 1, 8),
+        ("cast", "(int)(marker++, 9)", 1, 9),
+        ("nested comma", "((marker++, 1), (marker++, 4))", 2, 4),
+    ];
+    let pointer_routes = [
+        ("direct", "cursor", 0, 1),
+        ("arithmetic", "(marker++, cursor + 1)", 1, 2),
+        ("assignment", "cursor = (marker++, values + 2)", 1, 3),
+        ("call", "(marker++, forward(values + 3))", 1, 4),
+        (
+            "conditional",
+            "1 ? (marker++, values + 1) : (marker += 20, cursor)",
+            1,
+            2,
+        ),
+        ("comma", "(marker++, values + 2)", 1, 3),
+        ("cast", "(marker++, (int *)(values + 3))", 1, 4),
+        (
+            "field assignment",
+            "holder.primary = (marker++, values + 1)",
+            1,
+            2,
+        ),
+    ];
+    let aggregate_routes = [
+        ("direct", "point", 0, 3),
+        ("comma", "(marker++, point)", 1, 3),
+        ("assignment", "point = (marker++, replacement)", 1, 5),
+        (
+            "conditional",
+            "1 ? (marker++, replacement) : (marker += 20, point)",
+            1,
+            5,
+        ),
+        ("call", "make_point()", 1, 7),
+        ("compound literal", "(marker++, (struct Point){8})", 1, 8),
+        ("dereference", "(marker++, *slot)", 1, 3),
+        (
+            "dereference assignment",
+            "*slot = (marker++, replacement)",
+            1,
+            5,
+        ),
+    ];
+
+    for (case_index, (label, expression, marker_increments, value)) in
+        scalar_routes.iter().enumerate()
+    {
+        assert_interpretation(
+            &scalar_return_context_program(expression),
+            ExpectedInterpretation::Value(marker_increments * 10 + value),
+            &format!("scalar return case {case_index} ({label})"),
+        );
+    }
+    for (case_index, (label, expression, marker_increments, value)) in
+        pointer_routes.iter().enumerate()
+    {
+        assert_interpretation(
+            &pointer_return_context_program(expression),
+            ExpectedInterpretation::Value(marker_increments * 10 + value),
+            &format!("pointer return case {case_index} ({label})"),
+        );
+    }
+    for (case_index, (label, expression, marker_increments, value)) in
+        aggregate_routes.iter().enumerate()
+    {
+        assert_interpretation(
+            &aggregate_return_context_program(expression),
+            ExpectedInterpretation::Value(marker_increments * 10 + value),
+            &format!("aggregate return case {case_index} ({label})"),
+        );
+    }
+
+    assert_eq!(scalar_routes.len(), 8);
+    assert_eq!(pointer_routes.len(), 8);
+    assert_eq!(aggregate_routes.len(), 8);
+}
+
+#[test]
+fn generated_nonvoid_return_context_reports_result_shape_mismatches_without_panics() {
+    let cases = [
+        (
+            "scalar from pointer",
+            "int reject_value(void) { int values[1] = {1}; int *cursor = values; return cursor; }",
+            "pointer 'cursor' used as scalar",
+        ),
+        (
+            "scalar from aggregate",
+            "int reject_value(void) { struct Point point = {1}; return point; }",
+            "struct variable 'point' used as scalar",
+        ),
+        (
+            "pointer from scalar",
+            "int *reject_value(void) { return 7; }",
+            "expected pointer expression",
+        ),
+        (
+            "pointer from aggregate",
+            "int *reject_value(void) { struct Point point = {1}; return point; }",
+            "struct variable 'point' used as pointer",
+        ),
+        (
+            "aggregate from scalar",
+            "struct Point reject_value(void) { return 7; }",
+            "expected struct expression",
+        ),
+        (
+            "aggregate from pointer",
+            "struct Point reject_value(void) { int values[1] = {1}; int *cursor = values; return cursor; }",
+            "variable 'cursor' is not a struct",
+        ),
+        (
+            "pointer const discard",
+            "int *reject_value(void) { const int values[1] = {1}; return values; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "pointer type mismatch",
+            "char *reject_value(void) { int values[1] = {1}; return values; }",
+            "cannot convert pointer to int to pointer to char",
+        ),
+    ];
+
+    for (case_index, (label, function, expected)) in cases.iter().enumerate() {
+        let source = format!(
+            "struct Point {{ int x; }};\n{function}\nint main(void) {{ reject_value(); return 0; }}\n"
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error(expected),
+            &format!("nonvoid return case {case_index} ({label})"),
+        );
+    }
+}
+
+#[test]
+fn generated_empty_return_context_reports_function_shape_mismatches_without_panics() {
+    let cases = [
+        (
+            "scalar",
+            "int reject_value(void) { return; }",
+            "int function 'reject_value' returned without a value",
+        ),
+        (
+            "pointer",
+            "int *reject_value(void) { return; }",
+            "pointer function 'reject_value' returned without a value",
+        ),
+        (
+            "aggregate",
+            "struct Point reject_value(void) { return; }",
+            "struct function 'reject_value' returned without a value",
+        ),
+    ];
+
+    for (case_index, (label, function, expected)) in cases.iter().enumerate() {
+        let source = format!(
+            "struct Point {{ int x; }};\n{function}\nint main(void) {{ reject_value(); return 0; }}\n"
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error(expected),
+            &format!("empty return case {case_index} ({label})"),
+        );
+    }
+}
+
+fn scalar_return_context_program(expression: &str) -> String {
+    format!(
+        "int marker = 0;\n\
+         int scalar_call(void) {{ marker++; return 7; }}\n\
+         int produce(void) {{ int scalar = 3; return {expression}; }}\n\
+         int main(void) {{ int result = produce(); return marker * 10 + result; }}\n"
+    )
+}
+
+fn pointer_return_context_program(expression: &str) -> String {
+    format!(
+        "struct Holder {{ int *primary; }};\n\
+         int marker = 0;\n\
+         int values[4] = {{1, 2, 3, 4}};\n\
+         int *forward(int *value) {{ return value; }}\n\
+         int *produce(void) {{\n\
+         int *cursor = values;\n\
+         struct Holder holder = {{values}};\n\
+         return {expression};\n\
+         }}\n\
+         int main(void) {{ int *result = produce(); return marker * 10 + *result; }}\n"
+    )
+}
+
+fn aggregate_return_context_program(expression: &str) -> String {
+    format!(
+        "struct Point {{ int x; }};\n\
+         int marker = 0;\n\
+         struct Point make_point(void) {{ marker++; return (struct Point){{7}}; }}\n\
+         struct Point produce(void) {{\n\
+         struct Point point = {{3}};\n\
+         struct Point replacement = {{5}};\n\
+         struct Point *slot = &point;\n\
+         return {expression};\n\
+         }}\n\
+         int main(void) {{ struct Point result = produce(); return marker * 10 + result.x; }}\n"
+    )
+}
+
+fn void_return_context_program(expression: &str) -> String {
+    format!(
+        "struct Point {{ int x; }};\n\
+         int marker = 0;\n\
+         void touch(void) {{ marker++; }}\n\
+         void reject_value(void) {{\n\
+         int values[2] = {{1, 2}};\n\
+         int *cursor = values;\n\
+         struct Point point = {{3}};\n\
+         return {expression};\n\
+         }}\n\
+         int main(void) {{ reject_value(); return marker; }}\n"
+    )
+}
+
 fn discard_context_program(expression: &str, context: usize) -> String {
     let statement = match context {
         0 => format!("{expression};"),
