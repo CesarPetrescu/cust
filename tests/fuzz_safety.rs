@@ -2876,6 +2876,158 @@ fn generated_scalar_and_pointer_ordering_classification_matches_model_without_pa
     assert_eq!(scalar_route_counts, [8; 8]);
 }
 
+#[test]
+fn generated_scalar_and_pointer_truthiness_classification_matches_model_without_panics() {
+    let mut state = 0xC057_7A17_17E5_u64;
+    let mut scalar_cases = 0;
+    let mut pointer_cases = 0;
+    let mut true_cases = 0;
+    let mut false_cases = 0;
+    let mut short_circuit_cases = 0;
+    let mut side_effect_cases = 0;
+    let mut scalar_route_counts = [0; 8];
+    let mut pointer_route_counts = [0; 8];
+    let mut context_counts = [0; 6];
+
+    for case_index in 0..48 {
+        let route = case_index % 8;
+        let context = case_index % 6;
+        let value = if (case_index / 8) & 1 == 0 {
+            0
+        } else {
+            1 + (next_u64(&mut state) % 3) as i64
+        };
+        let operand = equality_scalar_operand(route, value);
+        let expected = truthiness_expected(value != 0, operand.1, context);
+
+        assert_interpretation(
+            &truthiness_program(&operand.0, context),
+            ExpectedInterpretation::Value(expected),
+            &format!(
+                "scalar truthiness case {case_index}, route {route}, context {context}, value {value}"
+            ),
+        );
+        scalar_cases += 1;
+        true_cases += usize::from(value != 0);
+        false_cases += usize::from(value == 0);
+        short_circuit_cases += usize::from(matches!(context, 2 | 3));
+        side_effect_cases += usize::from(operand.1 > 0 || matches!(context, 2 | 3));
+        scalar_route_counts[route] += 1;
+        context_counts[context] += 1;
+    }
+
+    for case_index in 0..96 {
+        let route = case_index % 8;
+        let context = case_index % 6;
+        let truthy = (case_index / 8) & 1 == 0;
+        let operand = truthiness_pointer_operand(route, truthy, (case_index % 4) as i64);
+        let expected = truthiness_expected(truthy, operand.marker_increments, context);
+
+        assert_interpretation(
+            &truthiness_program(&operand.rendered, context),
+            ExpectedInterpretation::Value(expected),
+            &format!(
+                "pointer truthiness case {case_index}, route {route}, context {context}, truthy {truthy}, operand {operand:?}"
+            ),
+        );
+        pointer_cases += 1;
+        true_cases += usize::from(truthy);
+        false_cases += usize::from(!truthy);
+        short_circuit_cases += usize::from(matches!(context, 2 | 3));
+        side_effect_cases += usize::from(operand.marker_increments > 0 || matches!(context, 2 | 3));
+        pointer_route_counts[route] += 1;
+        context_counts[context] += 1;
+    }
+
+    assert_interpretation(
+        &truthiness_program("point", 0),
+        ExpectedInterpretation::Error("struct variable 'point' used as scalar"),
+        "aggregate truthiness diagnostic",
+    );
+    assert_interpretation(
+        &truthiness_program("noop()", 0),
+        ExpectedInterpretation::Error("void function 'noop' used as scalar expression"),
+        "void truthiness diagnostic",
+    );
+
+    assert_eq!(scalar_cases, 48);
+    assert_eq!(pointer_cases, 96);
+    assert_eq!(true_cases, 72);
+    assert_eq!(false_cases, 72);
+    assert_eq!(short_circuit_cases, 48);
+    assert!(side_effect_cases >= 64);
+    assert_eq!(scalar_route_counts, [6; 8]);
+    assert_eq!(pointer_route_counts, [12; 8]);
+    assert_eq!(context_counts, [24; 6]);
+}
+
+fn truthiness_pointer_operand(route: usize, truthy: bool, index: i64) -> EqualityOperand {
+    if truthy {
+        return equality_pointer_operand(route, EqualityRoot::Left, index);
+    }
+
+    let (rendered, marker_increments) = match route % 8 {
+        0 => ("(int *)0".to_string(), 0),
+        1 => ("forward((int *)0)".to_string(), 0),
+        2 => ("(1 ? (int *)0 : left)".to_string(), 0),
+        3 => ("(marker++, (int *)0)".to_string(), 1),
+        4 => ("(cursor.primary = (int *)0)".to_string(), 0),
+        5 => ("(view->primary = (int *)0)".to_string(), 0),
+        6 => ("(int *)(int)0".to_string(), 0),
+        _ => ("((int *)0)".to_string(), 0),
+    };
+    EqualityOperand {
+        rendered,
+        root: EqualityRoot::Null,
+        index: 0,
+        marker_increments,
+    }
+}
+
+fn truthiness_expected(truthy: bool, operand_marker_increments: i64, context: usize) -> i64 {
+    let score = match context % 6 {
+        0 | 2 | 3 | 4 | 5 => i64::from(truthy) * 10,
+        1 => i64::from(!truthy) * 10,
+        _ => unreachable!(),
+    };
+    let context_marker_increments = match context % 6 {
+        2 if truthy => 1,
+        3 if !truthy => 1,
+        _ => 0,
+    };
+    score + operand_marker_increments + context_marker_increments
+}
+
+fn truthiness_program(operand: &str, context: usize) -> String {
+    let statement = match context % 6 {
+        0 => format!("if ({operand}) {{ score = 10; }}"),
+        1 => format!("score = !({operand}) * 10;"),
+        2 => format!("score = (({operand}) && (marker++, 1)) * 10;"),
+        3 => format!("score = (({operand}) || (marker++, 0)) * 10;"),
+        4 => format!("score = (({operand}) ? 1 : 0) * 10;"),
+        5 => format!("while (score == 0 && ({operand})) {{ score = 10; }}"),
+        _ => unreachable!(),
+    };
+    format!(
+        "struct Point {{ int value; }};\n\
+         struct Inner {{ int values[4]; }};\n\
+         struct Cursor {{ int *primary; int *secondary; struct Inner nested; }};\n\
+         int *forward(int *value) {{ return value; }}\n\
+         void noop(void) {{ return; }}\n\
+         int main(void) {{\n\
+         int left[4] = {{4, 7, 9, 12}};\n\
+         int right[4] = {{4, 7, 9, 12}};\n\
+         struct Point point = {{1}};\n\
+         struct Cursor cursor = {{left, right, {{{{0, 1, 2, 3}}}}}};\n\
+         struct Cursor *view = &cursor;\n\
+         int marker = 0;\n\
+         int score = 0;\n\
+         {statement}\n\
+         return score + marker;\n\
+         }}\n"
+    )
+}
+
 fn ordering_model(left: i64, operator: &str, right: i64) -> bool {
     match operator {
         "<" => left < right,

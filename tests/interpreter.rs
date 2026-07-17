@@ -8097,6 +8097,13 @@ fn rejects_pointer_ordering_against_nested_scalar_field_reads() {
 }
 
 #[test]
+fn supports_model_based_scalar_and_pointer_truthiness_classification() {
+    let program = include_str!("fixtures/compat/valid/truthiness_classification_model_routes.c");
+
+    assert_eq!(interpret(program).unwrap(), 227);
+}
+
+#[test]
 fn supports_array_backed_pointer_arithmetic_and_difference() {
     let program = include_str!("fixtures/valid/pointer_arithmetic.c");
 

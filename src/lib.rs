@@ -15162,7 +15162,15 @@ impl Interpreter {
     fn eval_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
         match expr {
             Expr::Number(0) => Ok(PointerValue::Null),
-            Expr::PointerCast { expr, .. } => self.eval_pointer(expr),
+            Expr::PointerCast { expr, .. } => {
+                if self.expr_is_pointer_value(expr) {
+                    self.eval_pointer(expr)
+                } else if self.eval(expr)? == 0 {
+                    Ok(PointerValue::Null)
+                } else {
+                    Err(CustError::new("expected pointer expression"))
+                }
+            }
             Expr::Conditional {
                 cond,
                 then_expr,
@@ -16384,6 +16392,11 @@ impl Interpreter {
     }
 
     fn eval_truthy(&mut self, expr: &Expr) -> CustResult<bool> {
+        if self.expr_is_pointer_value(expr) {
+            let pointer = self.eval_pointer(expr)?;
+            return Ok(Self::pointer_truthy(&pointer));
+        }
+
         match expr {
             Expr::Comma(left, right) => {
                 self.eval_discard(left)?;

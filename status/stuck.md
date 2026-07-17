@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-17 relational-ordering classification model run after clean startup inspection, 96 fixed-seed generated cases, a RED/GREEN mixed scalar/pointer ordering fix, exact same-root/cross-root/null/mixed diagnostics, side-effect counts, warning-free GCC/Clang execution, focused Rust verification, and the full required local and Docker gates.
+None. Last reviewed in the 2026-07-17 truthiness/logical-classification model run after clean startup inspection, 144 fixed-seed scalar/pointer generated cases across six truthiness contexts, RED/GREEN arrow pointer-field assignment-result and scalar-zero pointer-cast fixes, exact aggregate/void diagnostics, short-circuit side-effect counts, warning-free GCC/Clang execution, focused Rust verification, and the full required local and Docker gates.
 
 ## Blocker template
 
