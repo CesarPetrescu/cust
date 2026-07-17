@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-17 return-context classification model run after clean startup inspection, 24 valid scalar/pointer/aggregate routes, 15 mismatch/qualification/type/empty cases, void-return RED/GREEN classification, exact diagnostics, warning-free GCC/Clang exit 199, focused Rust verification, and the full required local and Docker gates.
+None. Last reviewed in the 2026-07-17 function-argument context classification model run after clean startup inspection, six aggregate-assignment argument RED/GREEN cycles, 28 valid routes, 12 mismatch/qualification/type cases, exact diagnostics, warning-free GCC/Clang exit 173, focused Rust verification, and the full required local and Docker gates.
 
 ## Blocker template
 

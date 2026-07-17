@@ -6428,6 +6428,89 @@ fn rejects_empty_returns_from_struct_functions() {
 }
 
 #[test]
+fn supports_aggregate_assignment_expressions_as_function_arguments() {
+    let program = "struct Point { int x; };\n\
+                   int read_x(struct Point point) { return point.x; }\n\
+                   int main(void) {\n\
+                   struct Point target = {1};\n\
+                   struct Point replacement = {7};\n\
+                   return read_x(target = replacement) + target.x;\n\
+                   }\n";
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn supports_aggregate_dereference_assignment_expressions_as_function_arguments() {
+    let program = "struct Point { int x; };\n\
+                   int read_x(struct Point point) { return point.x; }\n\
+                   int main(void) {\n\
+                   struct Point target = {1};\n\
+                   struct Point replacement = {7};\n\
+                   struct Point *slot = &target;\n\
+                   return read_x(*slot = replacement) + target.x;\n\
+                   }\n";
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn supports_aggregate_field_assignment_expressions_as_function_arguments() {
+    let program = "struct Point { int x; };\n\
+                   struct Box { struct Point point; };\n\
+                   int read_x(struct Point point) { return point.x; }\n\
+                   int main(void) {\n\
+                   struct Box box = {{1}};\n\
+                   struct Point replacement = {7};\n\
+                   return read_x(box.point = replacement) + box.point.x;\n\
+                   }\n";
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn supports_aggregate_pointer_field_assignment_expressions_as_function_arguments() {
+    let program = "struct Point { int x; };\n\
+                   struct Box { struct Point point; };\n\
+                   int read_x(struct Point point) { return point.x; }\n\
+                   int main(void) {\n\
+                   struct Box box = {{1}};\n\
+                   struct Box *view = &box;\n\
+                   struct Point replacement = {7};\n\
+                   return read_x(view->point = replacement) + box.point.x;\n\
+                   }\n";
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn supports_aggregate_array_element_assignment_expressions_as_function_arguments() {
+    let program = "struct Point { int x; };\n\
+                   int read_x(struct Point point) { return point.x; }\n\
+                   int main(void) {\n\
+                   struct Point points[1] = {{1}};\n\
+                   struct Point replacement = {7};\n\
+                   return read_x(points[0] = replacement) + points[0].x;\n\
+                   }\n";
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn supports_embedded_aggregate_array_element_assignment_expressions_as_function_arguments() {
+    let program = "struct Point { int x; };\n\
+                   struct Box { struct Point points[1]; };\n\
+                   int read_x(struct Point point) { return point.x; }\n\
+                   int main(void) {\n\
+                   struct Box box = {{{1}}};\n\
+                   struct Point replacement = {7};\n\
+                   return read_x(box.points[0] = replacement) + box.points[0].x;\n\
+                   }\n";
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
 fn rejects_mismatched_struct_function_arguments() {
     let program = include_str!("fixtures/invalid/struct_parameter_type_mismatch.c");
 
@@ -8073,6 +8156,15 @@ fn supports_model_based_return_context_classification() {
         include_str!("fixtures/compat/valid/return_context_classification_model_routes.c");
 
     assert_eq!(interpret(program).unwrap(), 199);
+}
+
+#[test]
+fn supports_model_based_function_argument_context_classification() {
+    let program = include_str!(
+        "fixtures/compat/valid/function_argument_context_classification_model_routes.c"
+    );
+
+    assert_eq!(interpret(program).unwrap(), 173);
 }
 
 #[test]

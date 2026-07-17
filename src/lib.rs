@@ -10917,6 +10917,12 @@ impl Interpreter {
                 }
             }
             Expr::Deref(_)
+            | Expr::DerefSet { .. }
+            | Expr::Assign { .. }
+            | Expr::StructSet { .. }
+            | Expr::StructPtrSet { .. }
+            | Expr::ArraySet { .. }
+            | Expr::StructArraySet { .. }
             | Expr::Call { .. }
             | Expr::Conditional { .. }
             | Expr::Comma(_, _)
