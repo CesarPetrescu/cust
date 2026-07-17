@@ -3606,6 +3606,252 @@ fn generated_declaration_initializer_and_assignment_rhs_mismatches_do_not_panic(
 }
 
 #[test]
+fn generated_array_and_aggregate_initializer_elements_match_model_without_panics() {
+    let scalar_routes = [
+        ("direct", "scalar", 0, 3),
+        ("comma", "(marker++, scalar)", 1, 3),
+        ("assignment", "scalar = (marker++, 5)", 1, 5),
+        ("compound assignment", "scalar += (marker++, 2)", 1, 5),
+        ("call", "scalar_call()", 1, 7),
+        ("conditional", "1 ? (marker++, 8) : (marker += 20, 9)", 1, 8),
+        ("cast", "(int)(marker++, 9)", 1, 9),
+        ("nested comma", "((marker++, 1), (marker++, 4))", 2, 4),
+    ];
+    let pointer_routes = [
+        ("direct", "cursor", 0, 1),
+        ("arithmetic", "(marker++, cursor + 1)", 1, 2),
+        ("assignment", "cursor = (marker++, values + 2)", 1, 3),
+        ("call", "(marker++, forward(values + 3))", 1, 4),
+        (
+            "conditional",
+            "1 ? (marker++, values + 1) : (marker += 20, cursor)",
+            1,
+            2,
+        ),
+        ("comma", "(marker++, values + 2)", 1, 3),
+        ("cast", "(marker++, (int *)(values + 3))", 1, 4),
+        (
+            "direct field assignment",
+            "source.primary = (marker++, values + 1)",
+            1,
+            2,
+        ),
+        (
+            "arrow field assignment",
+            "source_view->primary = (marker++, values + 2)",
+            1,
+            3,
+        ),
+    ];
+    let aggregate_routes = [
+        ("direct", "point", 0, 3),
+        ("comma", "(marker++, point)", 1, 3),
+        ("assignment", "target = (marker++, replacement)", 1, 5),
+        (
+            "conditional",
+            "1 ? (marker++, replacement) : (marker += 20, point)",
+            1,
+            5,
+        ),
+        ("call", "make_point()", 1, 7),
+        ("compound literal", "(marker++, (struct Point){8})", 1, 8),
+        ("dereference", "(marker++, *slot)", 1, 3),
+        (
+            "dereference assignment",
+            "*slot = (marker++, replacement)",
+            1,
+            5,
+        ),
+        (
+            "direct field assignment",
+            "source.point = (marker++, replacement)",
+            1,
+            5,
+        ),
+        (
+            "arrow field assignment",
+            "source_view->point = (marker++, replacement)",
+            1,
+            5,
+        ),
+        (
+            "array element assignment",
+            "points[0] = (marker++, replacement)",
+            1,
+            5,
+        ),
+        (
+            "embedded array element assignment",
+            "source.points[0] = (marker++, replacement)",
+            1,
+            5,
+        ),
+    ];
+
+    for context in 0..10 {
+        for (case_index, (label, expression, marker_increments, value)) in
+            scalar_routes.iter().enumerate()
+        {
+            assert_interpretation(
+                &scalar_initializer_element_program(expression, context),
+                ExpectedInterpretation::Value(marker_increments * 10 + value),
+                &format!(
+                    "scalar initializer element context {context} case {case_index} ({label})"
+                ),
+            );
+        }
+    }
+    for context in 0..2 {
+        for (case_index, (label, expression, marker_increments, value)) in
+            pointer_routes.iter().enumerate()
+        {
+            assert_interpretation(
+                &pointer_field_initializer_program(expression, context),
+                ExpectedInterpretation::Value(marker_increments * 10 + value),
+                &format!("pointer field initializer context {context} case {case_index} ({label})"),
+            );
+        }
+        for (case_index, (label, expression, marker_increments, value)) in
+            aggregate_routes.iter().enumerate()
+        {
+            assert_interpretation(
+                &aggregate_field_initializer_program(expression, context),
+                ExpectedInterpretation::Value(marker_increments * 10 + value),
+                &format!(
+                    "aggregate field initializer context {context} case {case_index} ({label})"
+                ),
+            );
+        }
+    }
+
+    assert_interpretation(
+        "int marker = 0;\n\
+         int stamp(int digit) { marker = marker * 10 + digit; return digit; }\n\
+         struct Triple { int first; int second; int third; };\n\
+         int main(void) {\n\
+         int values[3] = {[2] = stamp(1), [0] = stamp(2), stamp(3)};\n\
+         struct Triple triple = {.third = stamp(4), .first = stamp(5), .second = stamp(6)};\n\
+         return (marker == 123456) * 100 + values[0] * 10 + values[1] + values[2]\
+             + triple.first + triple.second + triple.third;\n\
+         }\n",
+        ExpectedInterpretation::Value(139),
+        "positional and designated initializer elements execute once in source order",
+    );
+
+    assert_eq!(scalar_routes.len() * 10, 80);
+    assert_eq!(pointer_routes.len() * 2, 18);
+    assert_eq!(aggregate_routes.len() * 2, 24);
+}
+
+#[test]
+fn generated_array_and_aggregate_initializer_element_mismatches_do_not_panic() {
+    let cases = [
+        (
+            "root scalar array element from pointer",
+            "int values[1] = {1}; int *cursor = values; int result[1] = {cursor};",
+            "pointer 'cursor' used as scalar",
+        ),
+        (
+            "designated scalar array element from aggregate",
+            "struct Point point = {1}; int result[1] = {[0] = point};",
+            "struct variable 'point' used as scalar",
+        ),
+        (
+            "embedded scalar array element from void",
+            "struct ScalarArray box = {{touch()}};",
+            "void function 'touch' used as scalar expression",
+        ),
+        (
+            "aggregate scalar field from pointer",
+            "int values[1] = {1}; int *cursor = values; struct ScalarHolder result = {.scalar = cursor};",
+            "pointer 'cursor' used as scalar",
+        ),
+        (
+            "aggregate scalar field from aggregate",
+            "struct Point point = {1}; struct ScalarHolder result = {point};",
+            "struct variable 'point' used as scalar",
+        ),
+        (
+            "aggregate scalar field from void",
+            "struct ScalarHolder result = {.scalar = touch()};",
+            "void function 'touch' used as scalar expression",
+        ),
+        (
+            "aggregate array element field from pointer",
+            "int values[1] = {1}; int *cursor = values; struct Point result[1] = {{cursor}};",
+            "pointer 'cursor' used as scalar",
+        ),
+        (
+            "designated embedded aggregate array element field from aggregate",
+            "struct Point point = {1}; struct Container result = {.points = {[0] = {point}}};",
+            "struct variable 'point' used as scalar",
+        ),
+        (
+            "pointer field from scalar",
+            "struct Container result = {.pointer = 7};",
+            "expected pointer expression",
+        ),
+        (
+            "pointer field from aggregate",
+            "struct Point point = {1}; struct Container result = {.pointer = point};",
+            "struct variable 'point' used as pointer",
+        ),
+        (
+            "pointer field from void",
+            "struct Container result = {.pointer = touch()};",
+            "void function 'touch' used as pointer expression",
+        ),
+        (
+            "pointer field const discard",
+            "const int values[1] = {1}; struct Container result = {.pointer = values};",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "pointer field type mismatch",
+            "char chars[1] = {'a'}; struct Container result = {.pointer = chars};",
+            "cannot convert pointer to char to pointer to int",
+        ),
+        (
+            "aggregate field from scalar",
+            "struct Container result = {.point = 7};",
+            "expected struct expression",
+        ),
+        (
+            "aggregate field from pointer",
+            "struct Point point = {1}; struct Point *slot = &point; struct Container result = {.point = slot};",
+            "variable 'slot' is not a struct",
+        ),
+        (
+            "aggregate field from void",
+            "struct Container result = {.point = touch()};",
+            "void function 'touch' used as struct expression",
+        ),
+        (
+            "aggregate field type mismatch",
+            "struct Pair pair = {1}; struct Container result = {.point = pair};",
+            "cannot initialize struct field 'point' of type 'Point' with struct 'Pair'",
+        ),
+    ];
+
+    for (case_index, (label, body, expected)) in cases.iter().enumerate() {
+        let source = format!(
+            "struct Point {{ int x; }};\n\
+             struct Pair {{ int x; }};\n\
+             struct ScalarArray {{ int values[1]; }};\n\
+             struct ScalarHolder {{ int scalar; }};\n\
+             struct Container {{ int scalar; int *pointer; struct Point point; struct Point points[1]; }};\n\
+             void touch(void) {{ return; }}\n\
+             int main(void) {{ {body} return 0; }}\n"
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error(expected),
+            &format!("initializer element mismatch case {case_index} ({label})"),
+        );
+    }
+}
+
+#[test]
 fn generated_nonvoid_return_context_reports_result_shape_mismatches_without_panics() {
     let cases = [
         (
@@ -3853,6 +4099,89 @@ fn aggregate_initializer_or_rhs_program(expression: &str, context: usize) -> Str
          struct Box *view = &box;\n\
          {statement}\n\
          return marker * 10 + result.x;\n\
+         }}\n"
+    )
+}
+
+fn scalar_initializer_element_program(expression: &str, context: usize) -> String {
+    let statement = match context {
+        0 => format!("int result[2] = {{{expression}, 4}};"),
+        1 => format!("int result[2] = {{[1] = 4, [0] = {expression}}};"),
+        2 => format!("struct ScalarArray result = {{{{{expression}, 4}}}};"),
+        3 => format!("struct ScalarArray result = {{.values = {{[1] = 4, [0] = {expression}}}}};"),
+        4 => format!("struct ScalarHolder result = {{{expression}}};"),
+        5 => format!("struct ScalarHolder result = {{.scalar = {expression}}};"),
+        6 => format!("struct Point result[2] = {{{{{expression}}}, {{4}}}};"),
+        7 => format!("struct Point result[2] = {{[1] = {{4}}, [0] = {{{expression}}}}};"),
+        8 => format!("struct AggregateArray result = {{{{{{{expression}}}, {{4}}}}}};"),
+        9 => format!(
+            "struct AggregateArray result = {{.points = {{[1] = {{4}}, [0] = {{{expression}}}}}}};"
+        ),
+        _ => unreachable!(),
+    };
+    let result = match context {
+        0 | 1 => "result[0]",
+        2 | 3 => "result.values[0]",
+        4 | 5 => "result.scalar",
+        6 | 7 => "result[0].x",
+        8 | 9 => "result.points[0].x",
+        _ => unreachable!(),
+    };
+    format!(
+        "struct ScalarArray {{ int values[2]; }};\n\
+         struct ScalarHolder {{ int scalar; }};\n\
+         struct Point {{ int x; }};\n\
+         struct AggregateArray {{ struct Point points[2]; }};\n\
+         int marker = 0;\n\
+         int scalar_call(void) {{ marker++; return 7; }}\n\
+         int main(void) {{ int scalar = 3; {statement} return marker * 10 + {result}; }}\n"
+    )
+}
+
+fn pointer_field_initializer_program(expression: &str, context: usize) -> String {
+    let statement = match context {
+        0 => format!("struct PointerHolder result = {{{expression}}};"),
+        1 => format!("struct PointerHolder result = {{.pointer = {expression}}};"),
+        _ => unreachable!(),
+    };
+    format!(
+        "struct Source {{ int *primary; }};\n\
+         struct PointerHolder {{ int *pointer; }};\n\
+         int marker = 0;\n\
+         int *forward(int *value) {{ return value; }}\n\
+         int main(void) {{\n\
+         int values[4] = {{1, 2, 3, 4}};\n\
+         int *cursor = values;\n\
+         struct Source source = {{values}};\n\
+         struct Source *source_view = &source;\n\
+         {statement}\n\
+         return marker * 10 + *result.pointer;\n\
+         }}\n"
+    )
+}
+
+fn aggregate_field_initializer_program(expression: &str, context: usize) -> String {
+    let statement = match context {
+        0 => format!("struct Result result = {{{expression}}};"),
+        1 => format!("struct Result result = {{.point = {expression}}};"),
+        _ => unreachable!(),
+    };
+    format!(
+        "struct Point {{ int x; }};\n\
+         struct Source {{ struct Point point; struct Point points[1]; }};\n\
+         struct Result {{ struct Point point; }};\n\
+         int marker = 0;\n\
+         struct Point make_point(void) {{ marker++; return (struct Point){{7}}; }}\n\
+         int main(void) {{\n\
+         struct Point point = {{3}};\n\
+         struct Point target = {{3}};\n\
+         struct Point replacement = {{5}};\n\
+         struct Point *slot = &target;\n\
+         struct Point points[1] = {{{{4}}}};\n\
+         struct Source source = {{{{4}}, {{{{6}}}}}};\n\
+         struct Source *source_view = &source;\n\
+         {statement}\n\
+         return marker * 10 + result.point.x;\n\
          }}\n"
     )
 }

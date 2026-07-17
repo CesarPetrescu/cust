@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-17 declaration-initializer and assignment-RHS context classification run after clean startup inspection, 58 valid route-context cases, 24 mismatch/qualification/type cases, exact diagnostics, warning-free GCC/Clang exit 180, focused Rust verification, and the full required local and Docker gates.
+None. Last reviewed in the 2026-07-17 array/aggregate initializer-element context classification run after clean startup inspection, 122 valid route-context cases, 17 exact mismatch/qualification/type cases, source-order/single-evaluation checks, warning-free GCC/Clang exit 255, focused Rust verification, and the full required local and Docker gates.
 
 ## Blocker template
 
