@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
 ## Latest autonomous verification
+
+All required verification passed after the 2026-07-18 deterministic scalar-only operand-context classification run. `tests/fuzz_safety.rs` adds 63 valid route/context cases plus 18 exact non-integer-shape cases under panic guards across direct/reverse scalar array indexes, direct/reverse aggregate-pointer indexes, forward/reverse/subtractive pointer offsets, `switch` controls, and `_Static_assert` conditions. RED exposed two correctness gaps: subscript parsing stopped at logical-or precedence, rejecting conditional and assignment index expressions, and `_Static_assert` used pointer-capable truthiness instead of integer scalar evaluation. Index parsing now accepts assignment-precedence expressions while preserving the exact malformed `values[0 = 3;` missing-bracket diagnostic; static assertions reject pointer, aggregate, and void results through established scalar diagnostics. The warning-free fixture returns 97 under Cust, GCC, and Clang.
+
+Verified commands: clean-baseline `cargo test`; focused RED/GREEN scalar-only and static-assert shape models; focused missing-closing-bracket regression; focused interpreter fixture; canonical `cargo test --test c_compat -- --nocapture`; direct warning-free GCC and Clang fixture builds/execution; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust`; and `git diff --check`.
 
 All required verification passed after the 2026-07-17 deterministic array/aggregate initializer-element context classification run. `tests/fuzz_safety.rs` adds 122 valid route-context cases (80 scalar element/field, 18 pointer-field, and 24 aggregate-field) plus 17 exact result-shape, pointer qualification/type, and aggregate-type mismatch cases under panic guards. Positional and designated root scalar arrays, scalar and aggregate array fields, ordinary scalar/pointer/aggregate fields, root aggregate arrays, and embedded aggregate arrays preserve source-order side effects and single evaluation across direct, conditional, comma, assignment, compound-assignment, call, cast, pointer arithmetic/field assignment, and aggregate copy/literal/dereference/assignment-result routes. Existing destination-kind dispatch matched immediately, so this was deliberate property/conformance coverage with no production-code change. The warning-free fixture returns 255 under Cust, GCC, and Clang.
 

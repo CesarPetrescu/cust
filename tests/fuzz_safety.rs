@@ -3606,6 +3606,101 @@ fn generated_declaration_initializer_and_assignment_rhs_mismatches_do_not_panic(
 }
 
 #[test]
+fn generated_static_assert_conditions_reject_non_integer_shapes_without_panics() {
+    let cases = [
+        (
+            "pointer",
+            "int values[1] = {1}; int *cursor = values; _Static_assert(cursor, \"pointer\");",
+            "pointer 'cursor' used as scalar",
+        ),
+        (
+            "aggregate",
+            "struct Point point = {1}; _Static_assert(point, \"aggregate\");",
+            "struct variable 'point' used as scalar",
+        ),
+        (
+            "void",
+            "_Static_assert(touch(), \"void\");",
+            "void function 'touch' used as scalar expression",
+        ),
+    ];
+
+    for (case_index, (label, body, expected)) in cases.iter().enumerate() {
+        let source = format!(
+            "struct Point {{ int x; }};\nvoid touch(void) {{ return; }}\nint main(void) {{ {body} return 0; }}\n"
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error(expected),
+            &format!("static assertion shape case {case_index} ({label})"),
+        );
+    }
+}
+
+#[test]
+fn generated_scalar_only_operand_contexts_match_model_without_panics() {
+    let scalar_routes = [
+        ("direct", "1", 0),
+        ("conditional", "1 ? (marker++, 1) : (marker += 20, 0)", 1),
+        ("comma", "(marker++, 1)", 1),
+        ("assignment", "scalar = (marker++, 1)", 1),
+        ("call", "scalar_call()", 1),
+        ("cast", "(int)(marker++, 1)", 1),
+        (
+            "pointer difference",
+            "(marker++, (right_ptr + 1) - right_ptr)",
+            1,
+        ),
+    ];
+    let context_values = [4, 4, 20, 20, 4, 4, 2, 7, 9];
+
+    for (context, expected_value) in context_values.into_iter().enumerate() {
+        for (case_index, (label, expression, marker_increments)) in scalar_routes.iter().enumerate()
+        {
+            assert_interpretation(
+                &scalar_only_operand_context_program(expression, context),
+                ExpectedInterpretation::Value(marker_increments * 100 + expected_value),
+                &format!("scalar-only context {context} case {case_index} ({label})"),
+            );
+        }
+    }
+
+    assert_eq!(scalar_routes.len() * context_values.len(), 63);
+}
+
+#[test]
+fn generated_scalar_only_operand_shape_mismatches_do_not_panic() {
+    let shapes = [
+        ("pointer", "cursor", "pointer 'cursor' used as scalar"),
+        (
+            "aggregate",
+            "point",
+            "struct variable 'point' used as scalar",
+        ),
+        (
+            "void",
+            "touch()",
+            "void function 'touch' used as scalar expression",
+        ),
+    ];
+
+    for context in 0..5 {
+        for (case_index, (label, expression, scalar_error)) in shapes.iter().enumerate() {
+            let expected = if context == 2 && *label == "pointer" {
+                "cannot add two pointers"
+            } else {
+                scalar_error
+            };
+            assert_interpretation(
+                &scalar_only_shape_mismatch_program(expression, context),
+                ExpectedInterpretation::Error(expected),
+                &format!("scalar-only mismatch context {context} case {case_index} ({label})"),
+            );
+        }
+    }
+}
+
+#[test]
 fn generated_array_and_aggregate_initializer_elements_match_model_without_panics() {
     let scalar_routes = [
         ("direct", "scalar", 0, 3),
@@ -4099,6 +4194,64 @@ fn aggregate_initializer_or_rhs_program(expression: &str, context: usize) -> Str
          struct Box *view = &box;\n\
          {statement}\n\
          return marker * 10 + result.x;\n\
+         }}\n"
+    )
+}
+
+fn scalar_only_operand_context_program(expression: &str, context: usize) -> String {
+    let statement = match context {
+        0 => format!("int result = left[{expression}];"),
+        1 => format!("int result = ({expression})[left];"),
+        2 => format!("int result = point_ptr[{expression}].x;"),
+        3 => format!("int result = ({expression})[point_ptr].x;"),
+        4 => format!("int *selected = left_ptr + ({expression}); int result = *selected;"),
+        5 => format!("int *selected = ({expression}) + left_ptr; int result = *selected;"),
+        6 => format!("int *selected = (left_ptr + 1) - ({expression}); int result = *selected;"),
+        7 => format!(
+            "int result = 0; switch ({expression}) {{ case 0: result = 3; break; case 1: result = 7; break; default: result = 9; }}"
+        ),
+        8 => format!("_Static_assert({expression}, \"scalar route\"); int result = 9;"),
+        _ => unreachable!(),
+    };
+    format!(
+        "struct Point {{ int x; }};\n\
+         int marker = 0;\n\
+         int scalar_call(void) {{ marker++; return 1; }}\n\
+         int main(void) {{\n\
+         int scalar = 1;\n\
+         int left[4] = {{2, 4, 6, 8}};\n\
+         int right[4] = {{1, 3, 5, 7}};\n\
+         int *left_ptr = left;\n\
+         int *right_ptr = right;\n\
+         struct Point points[4] = {{{{10}}, {{20}}, {{30}}, {{40}}}};\n\
+         struct Point *point_ptr = points;\n\
+         {statement}\n\
+         return marker * 100 + result;\n\
+         }}\n"
+    )
+}
+
+fn scalar_only_shape_mismatch_program(expression: &str, context: usize) -> String {
+    let statement = match context {
+        0 => format!("int result = left[{expression}];"),
+        1 => format!("int result = point_ptr[{expression}].x;"),
+        2 => format!("int *selected = left_ptr + ({expression}); int result = *selected;"),
+        3 => format!("int result = 0; switch ({expression}) {{ default: result = 1; break; }}"),
+        4 => format!("_Static_assert({expression}, \"shape\"); int result = 0;"),
+        _ => unreachable!(),
+    };
+    format!(
+        "struct Point {{ int x; }};\n\
+         void touch(void) {{ return; }}\n\
+         int main(void) {{\n\
+         int left[2] = {{1, 2}};\n\
+         int *left_ptr = left;\n\
+         int *cursor = left;\n\
+         struct Point points[2] = {{{{1}}, {{2}}}};\n\
+         struct Point *point_ptr = points;\n\
+         struct Point point = {{1}};\n\
+         {statement}\n\
+         return result;\n\
          }}\n"
     )
 }

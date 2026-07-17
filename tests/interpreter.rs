@@ -8184,6 +8184,14 @@ fn supports_model_based_initializer_element_context_classification() {
 }
 
 #[test]
+fn supports_model_based_scalar_operand_context_classification() {
+    let program =
+        include_str!("fixtures/valid/scalar_operand_context_classification_model_routes.c");
+
+    assert_eq!(interpret(program).unwrap(), 97);
+}
+
+#[test]
 fn rejects_wrapped_nonzero_integer_pointer_equality() {
     let program = include_str!("fixtures/invalid/pointer_wrapped_nonzero_equality.c");
 

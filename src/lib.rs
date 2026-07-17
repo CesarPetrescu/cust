@@ -7954,7 +7954,13 @@ impl Parser {
 
     fn parse_index_expr(&mut self) -> CustResult<Expr> {
         self.reject_missing_index_expr("array index expression")?;
-        let mut expr = self.parse_logical_or()?;
+        let preserve_missing_bracket_diagnostic = matches!(self.peek(), Token::Number(_))
+            && Self::is_assignment_operator(self.peek_next());
+        let mut expr = if preserve_missing_bracket_diagnostic {
+            self.parse_logical_or()?
+        } else {
+            self.parse_assignment_expr()?
+        };
         while self.matches(&Token::Comma) {
             if matches!(
                 self.peek(),
@@ -18135,7 +18141,7 @@ impl Interpreter {
                 Ok(ExecFlow::None)
             }
             Stmt::StaticAssert { condition, message } => {
-                if self.eval_truthy(condition)? {
+                if self.eval(condition)? != 0 {
                     Ok(ExecFlow::None)
                 } else {
                     Err(CustError::new(format!(
