@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-18 — Ordinary named aggregate-array pointer-field dispatch
+
+- `nodes[i].field` uses `StructElementGet`/`Set`/`CompoundSet`, distinct from both direct aggregate fields and embedded aggregate-array element fields. Pointer classification must consult aggregate field metadata before the legacy embedded-array decay fallback; mutation must resolve the element through a const-root-aware helper while reads remain legal through const aggregate slots.
+- Pointer-valued assignment, compound-assignment, and increment results must participate in `expr_is_pointer_value()`, `pointer_expr_pointee_type()`, and `pointer_expr_points_to_const()` before evaluation. For assignment results, merging destination pointee constness with RHS constness preserves the established one-level conversion boundary.
+- Warning-free `cc -std=c11 -Wall -Wextra -Werror` coverage returns 17 and matches Cust. A follow-up probe (`nodes[0].cursor[1]`) isolates the next distinct AST seam: it reports `struct field 'cursor' is not an array`, so pointer-field subscript/address routing remains separate backlog work.
+
 ## Findings
 
 - 2026-07-18: Pointer-valued final fields selected by `StructFieldArrayElementGet`/`Set`/`CompoundSet` need the same three metadata surfaces as other pointer expressions: `pointer_expr_pointee_type`, `pointer_expr_points_to_const`, and `expr_is_pointer_value`. Runtime evaluation should resolve the containing aggregate element once and delegate final-field reads/writes to established struct-pointer helpers. Reads must not reuse the mutating resolver: doing so rejects legal reads through const containing aggregates. Assignment/compound/increment routes retain the mutating resolver for root/field/slot const checks and concrete pointee validation. `Expr::Increment` result constness should delegate to its target expression rather than special-case only pointer variables. Native C confirms direct/nested/reverse replacement and updates with a warning-free exit-9 fixture; side-effecting `sizeof` remains interpreter-only. A minimized adjacent probe shows ordinary `StructElementGet` pointer fields (`nodes[i].cursor`) remain a separate follow-up.

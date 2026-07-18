@@ -8784,6 +8784,247 @@ fn supports_pointer_field_increment_through_embedded_aggregate_array_elements() 
 }
 
 #[test]
+fn reads_pointer_fields_from_named_aggregate_array_elements() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[1] = {7};
+            struct Node nodes[1] = {{values}};
+            return *nodes[0].cursor;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn replaces_pointer_fields_in_named_aggregate_array_elements_once() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[3] = {3, 5, 7};
+            struct Node nodes[1] = {{values}};
+            int index_marker = 0;
+            int rhs_marker = 0;
+            int *result = (nodes[index_marker++].cursor =
+                           (rhs_marker += 1, values + 1));
+            return *result + *nodes[0].cursor + index_marker + rhs_marker;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 12);
+}
+
+#[test]
+fn updates_pointer_fields_in_named_aggregate_array_elements_once() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[4] = {2, 4, 6, 8};
+            struct Node nodes[1] = {{values}};
+            int index_marker = 0;
+            int rhs_marker = 0;
+            int *result = (nodes[index_marker++].cursor +=
+                           (rhs_marker += 1, 2));
+            return *result + *nodes[0].cursor + index_marker + rhs_marker;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn increments_pointer_fields_in_named_aggregate_array_elements_once() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[4] = {2, 4, 6, 8};
+            struct Node nodes[1] = {{values}};
+            int post_index = 0;
+            int pre_index = 0;
+            int *post = nodes[post_index++].cursor++;
+            int *pre = ++nodes[pre_index++].cursor;
+            return *post + *pre + *nodes[0].cursor + post_index + pre_index;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 16);
+}
+
+#[test]
+fn named_aggregate_array_element_pointer_field_updates_match_fixture() {
+    let program =
+        include_str!("fixtures/valid/named_aggregate_array_element_pointer_field_updates.c",);
+
+    assert_eq!(interpret(program).unwrap(), 17);
+}
+
+#[test]
+fn rejects_const_pointer_field_updates_in_named_aggregate_array_elements() {
+    let program = r#"
+        struct Node { int * const cursor; };
+
+        int main(void) {
+            int values[2] = {3, 5};
+            struct Node nodes[1] = {{values}};
+            nodes[0].cursor = values + 1;
+            return 0;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'cursor'"
+    );
+}
+
+#[test]
+fn rejects_const_discard_from_named_aggregate_array_element_pointer_fields() {
+    let program = r#"
+        struct Node { const int *reader; };
+
+        int main(void) {
+            const int values[1] = {3};
+            struct Node nodes[1] = {{values}};
+            int *cursor = nodes[0].reader;
+            return *cursor;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn reads_mutable_pointer_fields_through_const_named_aggregate_array_elements() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[1] = {3};
+            const struct Node nodes[1] = {{values}};
+            int *cursor = nodes[0].cursor;
+            *cursor = 7;
+            return values[0];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn sizeof_named_aggregate_array_element_pointer_field_updates_is_non_evaluating() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[2] = {3, 5};
+            struct Node nodes[1] = {{values}};
+            int index_marker = 0;
+            int rhs_marker = 0;
+            int total = 0;
+            total += sizeof(nodes[index_marker++].cursor) == sizeof(int *);
+            total += sizeof(nodes[index_marker++].cursor =
+                            (rhs_marker++, values + 1)) == sizeof(int *);
+            total += sizeof(nodes[index_marker++].cursor +=
+                            (rhs_marker++, 1)) == sizeof(int *);
+            total += sizeof(nodes[index_marker++].cursor++) == sizeof(int *);
+            return total + (index_marker == 0) + (rhs_marker == 0)
+                + (*nodes[0].cursor == 3);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn rejects_pointer_type_mismatches_in_named_aggregate_array_element_fields() {
+    let program = r#"
+        struct Point { int value; };
+        union Number { int value; };
+        struct Node { struct Point *point; };
+
+        int main(void) {
+            struct Point points[1] = {{1}};
+            union Number numbers[1] = {{2}};
+            struct Node nodes[1] = {{points}};
+            nodes[0].point = numbers;
+            return 0;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot convert pointer to union 'Number' to pointer to struct 'Point'"
+    );
+}
+
+#[test]
+fn rejects_const_discard_from_named_aggregate_array_pointer_field_increment_results() {
+    let program = r#"
+        struct Node { const int *cursor; };
+
+        int main(void) {
+            const int values[2] = {3, 5};
+            struct Node nodes[1] = {{values}};
+            int *bad = nodes[0].cursor++;
+            return *bad;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_pointer_field_updates_in_const_named_aggregate_arrays() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[2] = {3, 5};
+            const struct Node nodes[1] = {{values}};
+            nodes[0].cursor = values + 1;
+            return 0;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign to const variable 'nodes'");
+}
+
+#[test]
+fn preserves_named_aggregate_array_bounds_for_pointer_field_reads() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[1] = {3};
+            struct Node nodes[1] = {{values}};
+            return *nodes[1].cursor;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "struct array 'nodes' index 1 out of bounds for length 1"
+    );
+}
+
+#[test]
 fn supports_pointer_field_updates_through_reverse_and_nested_embedded_aggregate_array_elements() {
     let program = r#"
         struct Node { int *cursor; };
