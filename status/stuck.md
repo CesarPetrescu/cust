@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-18 scalar-only operand-context classification run after clean startup inspection, 63 valid route/context cases, 18 exact non-integer-shape cases, focused RED/GREEN verification, warning-free GCC/Clang exit 97, and the full required local and Docker gates.
+None. Last reviewed in the 2026-07-18 scalar-variable reverse-subscript run after clean startup inspection, focused runtime-shape RED/GREEN tests, exact const/bounds/type diagnostics, warning-free GCC/Clang exit 220, 736 passing interpreter tests, and the full required local and Docker gates. The adjacent non-evaluating `sizeof` gap is a concrete backlog item, not a blocker.
 
 ## Blocker template
 

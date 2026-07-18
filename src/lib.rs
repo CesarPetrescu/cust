@@ -11166,6 +11166,12 @@ impl Interpreter {
                     Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
                 }
                 Some(Value::Pointer { ty, .. }) => Ok(Some(ty.clone())),
+                Some(Value::Scalar { .. }) => {
+                    let Expr::AddressOfArray { index, .. } = expr else {
+                        unreachable!()
+                    };
+                    self.pointer_expr_pointee_type(index)
+                }
                 _ => Ok(None),
             },
             Expr::AddressOfStructField { name, fields }
@@ -11471,11 +11477,12 @@ impl Interpreter {
                 ))) => self.pointer_expr_points_to_const(pointer) || is_const,
                 _ => false,
             },
-            Expr::AddressOfArray { name, .. } => match self.find_variable(name) {
+            Expr::AddressOfArray { name, index } => match self.find_variable(name) {
                 Some(Value::Array(array)) => array.borrow().read_only,
                 Some(Value::Pointer {
                     points_to_const, ..
                 }) => *points_to_const,
+                Some(Value::Scalar { .. }) => self.pointer_expr_points_to_const(index),
                 _ => false,
             },
             Expr::ArrayLiteral { read_only, .. }
@@ -13704,6 +13711,16 @@ impl Interpreter {
         name: &str,
         index: &Expr,
     ) -> CustResult<Option<PointerValue>> {
+        if let Some(pointer) = self.scalar_variable_reverse_subscript_pointer(name, index)? {
+            return match pointer {
+                PointerValue::StructElement { .. } | PointerValue::StructFieldElement { .. } => {
+                    Ok(Some(pointer))
+                }
+                _ => Err(CustError::new(
+                    "subscript pointer does not reference a struct",
+                )),
+            };
+        }
         let Some(Value::Pointer { pointer, ty, .. }) = self.find_variable(name).cloned() else {
             return Ok(None);
         };
@@ -13833,6 +13850,9 @@ impl Interpreter {
         index: &Expr,
         fields: &[String],
     ) -> CustResult<PointerValue> {
+        if let Some(pointer) = self.indexed_struct_pointer(name, index)? {
+            return self.find_struct_pointer_field_pointer(&pointer, fields);
+        }
         let index = self.checked_struct_element_index(name, index)?;
         let scope_id = self
             .find_variable_scope_id(name)
@@ -14221,7 +14241,30 @@ impl Interpreter {
         value: i64,
     ) -> CustResult<()> {
         if let Some(pointer) = self.indexed_struct_pointer(name, index)? {
-            if self.pointer_variable_points_to_const(name) {
+            if matches!(self.find_variable(name), Some(Value::Scalar { .. })) {
+                let direct_const_array = match index {
+                    Expr::Var(pointer_name)
+                        if matches!(
+                            self.find_variable(pointer_name),
+                            Some(Value::StructArray {
+                                read_only: true,
+                                ..
+                            })
+                        ) =>
+                    {
+                        Some(pointer_name)
+                    }
+                    _ => None,
+                };
+                if let Some(pointer_name) = direct_const_array {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const variable '{pointer_name}'"
+                    )));
+                }
+                if self.pointer_expr_points_to_const(index) {
+                    return Err(CustError::new("cannot assign through pointer to const"));
+                }
+            } else if self.pointer_variable_points_to_const(name) {
                 return Err(CustError::new("cannot assign through pointer to const"));
             }
             return self.assign_struct_pointer_field(&pointer, path, value);
@@ -14316,6 +14359,12 @@ impl Interpreter {
         index: &Expr,
         value: &Expr,
     ) -> CustResult<i64> {
+        if let Some(pointer) = self.scalar_field_reverse_subscript_pointer(name, fields, index)? {
+            self.ensure_reverse_subscript_pointee_mutable(index)?;
+            let value = self.eval(value)?;
+            self.assign_deref_pointer(&pointer, value)?;
+            return Ok(value);
+        }
         self.ensure_variable_mutable(name)?;
         let value = self.eval(value)?;
         let (array, index) = self.checked_struct_array_index(name, fields, index)?;
@@ -14338,6 +14387,14 @@ impl Interpreter {
         op: CompoundOp,
         value: &Expr,
     ) -> CustResult<i64> {
+        if let Some(pointer) = self.scalar_field_reverse_subscript_pointer(name, fields, index)? {
+            self.ensure_reverse_subscript_pointee_mutable(index)?;
+            let current = self.deref_pointer(&pointer)?;
+            let rhs = self.eval(value)?;
+            let result = Self::apply_compound_op(current, op, rhs)?;
+            self.assign_deref_pointer(&pointer, result)?;
+            return Ok(result);
+        }
         self.ensure_variable_mutable(name)?;
         let (array, index) = self.checked_struct_array_index(name, fields, index)?;
         let current = array.borrow().elements[index];
@@ -15200,7 +15257,11 @@ impl Interpreter {
             }
             Expr::AddressOf(name) => self.address_of_scalar(name),
             Expr::AddressOfArray { name, index } => {
-                if let Some(Value::StructArray { .. }) = self.find_variable(name) {
+                if let Some(pointer) =
+                    self.scalar_variable_reverse_subscript_pointer(name, index)?
+                {
+                    Ok(pointer)
+                } else if let Some(Value::StructArray { .. }) = self.find_variable(name) {
                     self.find_struct_element_pointer(name, index)
                 } else if let Some(pointer) = self.indexed_struct_pointer(name, index)? {
                     Ok(pointer)
@@ -15236,7 +15297,15 @@ impl Interpreter {
                 name,
                 fields,
                 index,
-            } => self.find_struct_array_field_pointer(name, fields, index),
+            } => {
+                if let Some(pointer) =
+                    self.scalar_field_reverse_subscript_pointer(name, fields, index)?
+                {
+                    Ok(pointer)
+                } else {
+                    self.find_struct_array_field_pointer(name, fields, index)
+                }
+            }
             Expr::AddressOfStructElementArrayField {
                 name,
                 index,
@@ -15925,6 +15994,96 @@ impl Interpreter {
             None => return Err(CustError::new(format!("undefined variable '{name}'"))),
         };
         self.checked_pointer_value_index(&pointer, index_value)
+    }
+
+    fn scalar_variable_reverse_subscript_pointer(
+        &mut self,
+        name: &str,
+        pointer_expr: &Expr,
+    ) -> CustResult<Option<PointerValue>> {
+        let offset = match self.find_variable(name) {
+            Some(Value::Scalar { value, .. }) => *value,
+            Some(_) | None => return Ok(None),
+        };
+
+        self.reverse_subscript_pointer_from_offset(offset, pointer_expr)
+            .map(Some)
+    }
+
+    fn scalar_field_reverse_subscript_pointer(
+        &mut self,
+        name: &str,
+        fields: &[String],
+        pointer_expr: &Expr,
+    ) -> CustResult<Option<PointerValue>> {
+        let offset = match self.find_variable(name) {
+            Some(Value::Struct {
+                type_name,
+                fields: field_map,
+            }) => match Self::nested_field_value(type_name, field_map, fields)?.1 {
+                StructFieldValue::Scalar { value, .. } => *value,
+                StructFieldValue::Array { .. }
+                | StructFieldValue::Struct { .. }
+                | StructFieldValue::StructArray { .. }
+                | StructFieldValue::Pointer { .. } => return Ok(None),
+            },
+            Some(_) | None => return Ok(None),
+        };
+
+        self.reverse_subscript_pointer_from_offset(offset, pointer_expr)
+            .map(Some)
+    }
+
+    fn reverse_subscript_pointer_from_offset(
+        &mut self,
+        offset: i64,
+        pointer_expr: &Expr,
+    ) -> CustResult<PointerValue> {
+        if !self.expr_is_pointer_value(pointer_expr) {
+            return Err(CustError::new(
+                "subscript requires one pointer operand and one scalar operand",
+            ));
+        }
+
+        if let Expr::Var(pointer_name) = pointer_expr {
+            match self.find_variable(pointer_name) {
+                Some(Value::Array(_)) => {
+                    let (array, index) =
+                        self.checked_array_index(pointer_name, &Expr::Number(offset))?;
+                    return Ok(PointerValue::ArrayElement {
+                        array,
+                        source_name: Some(pointer_name.clone()),
+                        index,
+                    });
+                }
+                Some(Value::StructArray { .. }) => {
+                    return self.find_struct_element_pointer(pointer_name, &Expr::Number(offset));
+                }
+                Some(Value::Pointer { .. }) | None => {}
+                Some(Value::Scalar { .. } | Value::Struct { .. }) => {
+                    return Err(CustError::new(
+                        "subscript requires one pointer operand and one scalar operand",
+                    ));
+                }
+            }
+        }
+
+        let pointer = self.eval_pointer(pointer_expr)?;
+        self.offset_array_pointer(&pointer, offset)
+    }
+
+    fn ensure_reverse_subscript_pointee_mutable(&self, pointer_expr: &Expr) -> CustResult<()> {
+        let directly_names_array = match pointer_expr {
+            Expr::Var(name) => matches!(
+                self.find_variable(name),
+                Some(Value::Array(_) | Value::StructArray { .. })
+            ),
+            _ => false,
+        };
+        if directly_names_array {
+            return Ok(());
+        }
+        self.ensure_pointer_expr_pointee_mutable(pointer_expr)
     }
 
     fn checked_pointer_value_index(
@@ -17551,6 +17710,15 @@ impl Interpreter {
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
             Expr::ArrayGet { name, index } => {
+                if let Some(pointer) =
+                    self.scalar_variable_reverse_subscript_pointer(name, index)?
+                {
+                    let current = self.deref_pointer(&pointer)?;
+                    let updated = Self::apply_increment_op(current, op);
+                    self.ensure_reverse_subscript_pointee_mutable(index)?;
+                    self.assign_deref_pointer(&pointer, updated)?;
+                    return Ok(Self::increment_result(current, updated, prefix));
+                }
                 let (array, index) = match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => {
                         self.ensure_pointer_variable_pointee_mutable(name)?;
@@ -17577,6 +17745,15 @@ impl Interpreter {
                 fields,
                 index,
             } => {
+                if let Some(pointer) =
+                    self.scalar_field_reverse_subscript_pointer(name, fields, index)?
+                {
+                    let current = self.deref_pointer(&pointer)?;
+                    let updated = Self::apply_increment_op(current, op);
+                    self.ensure_reverse_subscript_pointee_mutable(index)?;
+                    self.assign_deref_pointer(&pointer, updated)?;
+                    return Ok(Self::increment_result(current, updated, prefix));
+                }
                 self.ensure_variable_mutable(name)?;
                 let (array, index) = self.checked_struct_array_index(name, fields, index)?;
                 let current = array.borrow().elements[index];
@@ -17671,6 +17848,14 @@ impl Interpreter {
         op: CompoundOp,
         value: &Expr,
     ) -> CustResult<i64> {
+        if let Some(pointer) = self.scalar_variable_reverse_subscript_pointer(name, index)? {
+            self.ensure_reverse_subscript_pointee_mutable(index)?;
+            let current = self.deref_pointer(&pointer)?;
+            let rhs = self.eval(value)?;
+            let result = Self::apply_compound_op(current, op, rhs)?;
+            self.assign_deref_pointer(&pointer, result)?;
+            return Ok(result);
+        }
         let (array, index) = match self.find_variable(name).cloned() {
             Some(Value::Pointer { pointer, .. }) => {
                 self.ensure_pointer_variable_pointee_mutable(name)?;
@@ -18217,6 +18402,14 @@ impl Interpreter {
                 Ok(ExecFlow::None)
             }
             Stmt::ArrayAssign { name, index, value } => {
+                if let Some(pointer) =
+                    self.scalar_variable_reverse_subscript_pointer(name, index)?
+                {
+                    self.ensure_reverse_subscript_pointee_mutable(index)?;
+                    let value = self.eval(value)?;
+                    self.assign_deref_pointer(&pointer, value)?;
+                    return Ok(ExecFlow::None);
+                }
                 if matches!(
                     self.find_variable(name),
                     Some(Value::StructArray { .. })
@@ -18453,7 +18646,11 @@ impl Interpreter {
                 fields,
                 index,
             } => {
-                if self.struct_field_is_pointer(name, fields) {
+                if let Some(pointer) =
+                    self.scalar_field_reverse_subscript_pointer(name, fields, index)?
+                {
+                    self.deref_pointer(&pointer)
+                } else if self.struct_field_is_pointer(name, fields) {
                     let pointer =
                         self.direct_struct_pointer_field_index_pointer(name, fields, index)?;
                     self.deref_pointer(&pointer)
@@ -18611,6 +18808,14 @@ impl Interpreter {
                 self.eval_increment_expr(target, *op, *prefix)
             }
             Expr::ArraySet { name, index, value } => {
+                if let Some(pointer) =
+                    self.scalar_variable_reverse_subscript_pointer(name, index)?
+                {
+                    self.ensure_reverse_subscript_pointee_mutable(index)?;
+                    let value = self.eval(value)?;
+                    self.assign_deref_pointer(&pointer, value)?;
+                    return Ok(value);
+                }
                 if matches!(
                     self.find_variable(name),
                     Some(Value::StructArray { .. })
@@ -18762,16 +18967,24 @@ impl Interpreter {
                 let pointer = self.eval_pointer(pointer)?;
                 self.deref_pointer(&pointer)
             }
-            Expr::ArrayGet { name, index } => match self.find_variable(name).cloned() {
-                Some(Value::Pointer { .. }) => {
-                    let (array, _, index) = self.checked_pointer_index(name, index)?;
-                    Ok(array.borrow().elements[index])
+            Expr::ArrayGet { name, index } => {
+                if let Some(pointer) =
+                    self.scalar_variable_reverse_subscript_pointer(name, index)?
+                {
+                    self.deref_pointer(&pointer)
+                } else {
+                    match self.find_variable(name).cloned() {
+                        Some(Value::Pointer { .. }) => {
+                            let (array, _, index) = self.checked_pointer_index(name, index)?;
+                            Ok(array.borrow().elements[index])
+                        }
+                        Some(_) | None => {
+                            let (array, index) = self.checked_array_index(name, index)?;
+                            Ok(array.borrow().elements[index])
+                        }
+                    }
                 }
-                Some(_) | None => {
-                    let (array, index) = self.checked_array_index(name, index)?;
-                    Ok(array.borrow().elements[index])
-                }
-            },
+            }
             Expr::StringGet { values, index } => {
                 let index_value = self.eval(index)?;
                 let Ok(index) = usize::try_from(index_value) else {

@@ -3132,6 +3132,140 @@ fn supports_c_style_reverse_subscript_expressions() {
 }
 
 #[test]
+fn supports_scalar_variable_reverse_subscript_lvalues() {
+    let program = include_str!("fixtures/valid/scalar_variable_reverse_subscript.c");
+
+    assert_eq!(interpret(program).unwrap(), 220);
+}
+
+#[test]
+fn scalar_variable_reverse_subscripts_preserve_const_diagnostics() {
+    let program = r#"
+        int main(void) {
+            const int values[2] = {3, 5};
+            int index = 1;
+            index[values] = 8;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot modify read-only array 'values'"
+    );
+}
+
+#[test]
+fn scalar_variable_reverse_subscripts_preserve_direct_array_bounds_diagnostics() {
+    let program = r#"
+        int main(void) {
+            int values[2] = {3, 5};
+            int index = 2;
+            return index[values];
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array 'values' index 2 out of bounds for length 2"
+    );
+}
+
+#[test]
+fn scalar_variable_reverse_subscripts_reject_two_scalar_operands() {
+    let program = r#"
+        int main(void) {
+            int left = 0;
+            int right = 1;
+            return left[right];
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "subscript requires one pointer operand and one scalar operand"
+    );
+}
+
+#[test]
+fn supports_scalar_field_reverse_subscript_lvalues() {
+    let program = r#"
+        struct Index {
+            int value;
+        };
+
+        int main(void) {
+            int values[3] = {3, 5, 7};
+            struct Index index = {1};
+            index.value[values] += 4;
+            int *slot = &index.value[values];
+            *slot += 3;
+            return index.value[values];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 12);
+}
+
+#[test]
+fn scalar_variable_reverse_aggregate_subscripts_preserve_const_diagnostics() {
+    let program = r#"
+        struct Point {
+            int x;
+        };
+
+        int main(void) {
+            const struct Point points[2] = {{3}, {5}};
+            int index = 1;
+            index[points].x = 8;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const variable 'points'"
+    );
+}
+
+#[test]
+fn scalar_variable_reverse_aggregate_subscripts_preserve_bounds_diagnostics() {
+    let program = r#"
+        struct Point {
+            int x;
+        };
+
+        int main(void) {
+            struct Point points[2] = {{3}, {5}};
+            int index = 2;
+            return index[points].x;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "struct array 'points' index 2 out of bounds for length 2"
+    );
+}
+
+#[test]
+fn scalar_variable_reverse_aggregate_subscripts_reject_scalar_pointers() {
+    let program = r#"
+        int main(void) {
+            int values[2] = {3, 5};
+            int *pointer = values;
+            int index = 1;
+            return index[pointer].field;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "subscript pointer does not reference a struct"
+    );
+}
+
+#[test]
 fn supports_comma_expressions_in_subscript_indices() {
     let program = include_str!("fixtures/valid/subscript_comma_expressions.c");
 
