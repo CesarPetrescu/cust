@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-18 — Ordinary named aggregate-array pointer-field subscripts
+
+- `nodes[i].field[j]` is represented by `StructElementArrayGet` (and matching set/compound variants) for both embedded arrays and stored pointer fields. Runtime and metadata dispatch must inspect `StructFieldType` before choosing the legacy embedded-array path; scalar pointees use checked scalar pointer indexing, while named aggregate pointees use aggregate pointer offset/field resolution.
+- Supporting aggregate pointees requires more than postfix `.field` routing: `aggregate_expr_type_name()` and `eval_struct_expr()` must recognize aggregate-valued `StructElementArrayGet`/`Set` results. Reads deep-clone the selected aggregate, while copy assignment should reuse the established aggregate-pointer assignment path so const/type checks and assignment-result copies stay consistent.
+- Metadata-only `sizeof` must not clone/evaluate a runtime pointer. Resolve the pointer expression's `PointeeType::Struct` and selected field type from declarations. Warning-free `cc -std=c11 -Wall -Wextra -Werror` coverage returns 80 and matches Cust; side-effecting one-time-evaluation checks remain interpreter-focused to avoid relying on unspecified C operand order.
+
 ## 2026-07-18 — Ordinary named aggregate-array pointer-field dispatch
 
 - `nodes[i].field` uses `StructElementGet`/`Set`/`CompoundSet`, distinct from both direct aggregate fields and embedded aggregate-array element fields. Pointer classification must consult aggregate field metadata before the legacy embedded-array decay fallback; mutation must resolve the element through a const-root-aware helper while reads remain legal through const aggregate slots.

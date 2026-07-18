@@ -8864,6 +8864,339 @@ fn named_aggregate_array_element_pointer_field_updates_match_fixture() {
 }
 
 #[test]
+fn named_aggregate_array_pointer_field_subscript_reads() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[3] = {3, 5, 7};
+            struct Node nodes[1] = {{values}};
+            return nodes[0].cursor[1] + 1[nodes[0].cursor];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 10);
+}
+
+#[test]
+fn named_aggregate_array_pointer_field_subscripts_match_fixture() {
+    let program = include_str!("fixtures/valid/named_aggregate_array_pointer_field_subscripts.c");
+
+    assert_eq!(interpret(program).unwrap(), 80);
+}
+
+#[test]
+fn named_aggregate_array_pointer_field_subscript_writes_evaluate_once() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[3] = {3, 5, 7};
+            struct Node nodes[1] = {{values}};
+            int outer = 0;
+            int inner = 0;
+            int rhs = 0;
+            int result = nodes[outer++].cursor[inner++] = (rhs += 1, 9);
+            return result + values[0] + outer + inner + rhs;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 21);
+}
+
+#[test]
+fn named_aggregate_array_pointer_field_subscript_compound_writes_evaluate_once() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[3] = {3, 5, 7};
+            struct Node nodes[1] = {{values}};
+            int outer = 0;
+            int inner = 0;
+            int rhs = 0;
+            int result = nodes[outer++].cursor[inner++] += (rhs += 1, 4);
+            return result + values[0] + outer + inner + rhs;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 17);
+}
+
+#[test]
+fn named_aggregate_array_pointer_field_subscript_increments_evaluate_once() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[3] = {3, 5, 7};
+            struct Node nodes[1] = {{values}};
+            int post_outer = 0;
+            int post_inner = 0;
+            int pre_outer = 0;
+            int pre_inner = 1;
+            int post = nodes[post_outer++].cursor[post_inner++]++;
+            int pre = ++nodes[pre_outer++].cursor[pre_inner++];
+            return post + pre + values[0] + values[1]
+                + post_outer + post_inner + pre_outer + pre_inner;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 24);
+}
+
+#[test]
+fn named_aggregate_array_pointer_field_subscript_addresses_alias_storage_once() {
+    let program = r#"
+        struct Node { int *cursor; };
+
+        int main(void) {
+            int values[2] = {3, 5};
+            struct Node nodes[1] = {{values}};
+            int outer = 0;
+            int inner = 1;
+            int *slot = &nodes[outer++].cursor[inner++];
+            *slot = 9;
+            return *slot + values[1] + outer + inner;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 21);
+}
+
+#[test]
+fn named_aggregate_array_aggregate_pointer_field_subscript_reads() {
+    let program = r#"
+        struct Point { int value; };
+        struct Node { struct Point *cursor; };
+
+        int main(void) {
+            struct Point points[2] = {{3}, {5}};
+            struct Node nodes[1] = {{points}};
+            return nodes[0].cursor[1].value;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 5);
+}
+
+#[test]
+fn named_aggregate_array_aggregate_pointer_field_subscript_copy_reads() {
+    let program = r#"
+        struct Point { int value; };
+        struct Node { struct Point *cursor; };
+
+        int main(void) {
+            struct Point points[2] = {{3}, {5}};
+            struct Node nodes[1] = {{points}};
+            int outer = 0;
+            int inner = 1;
+            struct Point copy = nodes[outer++].cursor[inner++];
+            copy.value = 9;
+            return copy.value + points[1].value + outer + inner;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 17);
+}
+
+#[test]
+fn named_aggregate_array_aggregate_pointer_field_subscript_lvalues_evaluate_once() {
+    let program = r#"
+        struct Point { int value; };
+        struct Node { struct Point *cursor; };
+
+        int main(void) {
+            struct Point points[2] = {{3}, {5}};
+            struct Node nodes[1] = {{points}};
+            int outer = 0;
+            int inner = 0;
+            int assigned = (nodes[outer++].cursor[inner++].value = 7);
+            int compound = (nodes[outer++ - 1].cursor[inner++].value += 2);
+            int post = nodes[outer++ - 2].cursor[inner++ - 2].value++;
+            int pre = ++nodes[outer++ - 3].cursor[inner++ - 2].value;
+            struct Point *slot = &nodes[outer++ - 4].cursor[inner++ - 4];
+            slot->value += 1;
+            1[nodes[0].cursor].value += 1;
+            return assigned + compound + post + pre + slot->value
+                + points[0].value + points[1].value + outer + inner;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 66);
+}
+
+#[test]
+fn named_aggregate_array_aggregate_pointer_field_subscript_copy_assignment_evaluates_once() {
+    let program = r#"
+        struct Point { int value; };
+        struct Node { struct Point *cursor; };
+
+        int main(void) {
+            struct Point points[2] = {{3}, {5}};
+            struct Point replacement = {9};
+            struct Node nodes[1] = {{points}};
+            int outer = 0;
+            int inner = 1;
+            int rhs = 0;
+            struct Point result = (nodes[outer++].cursor[inner++] =
+                                   (rhs++, replacement));
+            replacement.value = 4;
+            return result.value + points[1].value + replacement.value
+                + outer + inner + rhs;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 26);
+}
+
+#[test]
+fn named_aggregate_array_aggregate_pointer_field_subscripts_preserve_const() {
+    let program = r#"
+        struct Point { int value; };
+        struct Node { const struct Point *cursor; };
+
+        int main(void) {
+            struct Point points[1] = {{3}};
+            struct Node nodes[1] = {{points}};
+            return nodes[0].cursor[0].value = 9;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "cannot assign through pointer to const");
+}
+
+#[test]
+fn sizeof_named_aggregate_array_pointer_field_subscripts_is_non_evaluating() {
+    let program = r#"
+        struct Node { char *bytes; };
+
+        int main(void) {
+            char values[2] = {'a', 'b'};
+            struct Node nodes[1] = {{values}};
+            int outer = 0;
+            int inner = 0;
+            int rhs = 0;
+            int ok = 0;
+            ok += sizeof(nodes[outer++].bytes[inner++]) == sizeof(char);
+            ok += sizeof(nodes[outer++].bytes[inner++] = (rhs++, 'x')) == sizeof(char);
+            ok += sizeof(nodes[outer++].bytes[inner++] += (rhs++, 1)) == sizeof(char);
+            ok += sizeof(nodes[outer++].bytes[inner++]++) == sizeof(char);
+            return ok + (outer == 0) + (inner == 0) + (rhs == 0)
+                + (values[0] == 'a');
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn sizeof_named_aggregate_array_aggregate_pointer_field_subscripts_is_non_evaluating() {
+    let program = r#"
+        struct Point { int value; };
+        struct Node { struct Point *points; };
+
+        int main(void) {
+            struct Point points[1] = {{3}};
+            struct Node nodes[1] = {{points}};
+            int outer = 0;
+            int inner = 0;
+            int rhs = 0;
+            int ok = 0;
+            ok += sizeof(nodes[outer++].points[inner++]) == sizeof(struct Point);
+            ok += sizeof(nodes[outer++].points[inner++].value = (rhs++, 9)) == sizeof(int);
+            ok += sizeof(nodes[outer++].points[inner++].value += (rhs++, 2)) == sizeof(int);
+            ok += sizeof(nodes[outer++].points[inner++].value++) == sizeof(int);
+            return ok + (outer == 0) + (inner == 0) + (rhs == 0)
+                + (points[0].value == 3);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn named_aggregate_array_pointer_field_subscript_addresses_preserve_const() {
+    let program = r#"
+        struct Node { const int *reader; };
+
+        int main(void) {
+            int values[1] = {3};
+            struct Node nodes[1] = {{values}};
+            int *bad = &nodes[0].reader[0];
+            return *bad;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn named_aggregate_array_pointer_field_subscripts_preserve_diagnostics() {
+    let cases = [
+        (
+            r#"
+                struct Node { const int *cursor; };
+                int main(void) {
+                    int values[1] = {3};
+                    struct Node nodes[1] = {{values}};
+                    return nodes[0].cursor[0] = 9;
+                }
+            "#,
+            "cannot assign through pointer to const",
+        ),
+        (
+            r#"
+                struct Node { int *cursor; };
+                int main(void) {
+                    int values[2] = {3, 5};
+                    struct Node nodes[1] = {{values}};
+                    return nodes[0].cursor[2];
+                }
+            "#,
+            "array pointer index 2 out of bounds for length 2",
+        ),
+        (
+            r#"
+                struct Node { int *cursor; };
+                int main(void) {
+                    int values[1] = {3};
+                    struct Node nodes[1] = {{values}};
+                    return nodes[1].cursor[0];
+                }
+            "#,
+            "struct array 'nodes' index 1 out of bounds for length 1",
+        ),
+        (
+            r#"
+                struct Point { int value; };
+                union Number { int value; };
+                struct Node { struct Point *cursor; };
+                int main(void) {
+                    struct Point points[1] = {{3}};
+                    struct Node nodes[1] = {{points}};
+                    union Number *bad = &nodes[0].cursor[0];
+                    return bad->value;
+                }
+            "#,
+            "cannot convert pointer to struct 'Point' to pointer to union 'Number'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        match interpret(program) {
+            Ok(value) => panic!("expected '{expected}', got {value}; program: {program}"),
+            Err(err) => assert_eq!(err.to_string(), expected, "program: {program}"),
+        }
+    }
+}
+
+#[test]
 fn rejects_const_pointer_field_updates_in_named_aggregate_array_elements() {
     let program = r#"
         struct Node { int * const cursor; };

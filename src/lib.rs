@@ -9641,6 +9641,20 @@ impl Parser {
                         fields.push(field);
                         Expr::StructPtrGet { pointer, fields }
                     }
+                    Expr::StructElementArrayGet {
+                        name,
+                        index,
+                        fields,
+                        array_index,
+                    } => Expr::StructPtrGet {
+                        pointer: Box::new(Expr::StructElementArrayGet {
+                            name,
+                            index,
+                            fields,
+                            array_index,
+                        }),
+                        fields: vec![field],
+                    },
                     Expr::StructPtrArrayGet {
                         pointer,
                         fields,
@@ -11201,6 +11215,7 @@ impl Interpreter {
             Expr::AddressOfStructElementField { name, fields, .. }
             | Expr::AddressOfStructElementArrayField { name, fields, .. }
             | Expr::StructElementGet { name, fields, .. }
+            | Expr::StructElementArrayGet { name, fields, .. }
             | Expr::StructElementSet { name, fields, .. }
             | Expr::StructElementCompoundSet { name, fields, .. } => {
                 match self.find_variable(name) {
@@ -11479,12 +11494,23 @@ impl Interpreter {
                     self.direct_struct_array_field_points_to_const(name, fields)
                 }
             }
-            Expr::AddressOfStructElementField { name, fields, .. }
-            | Expr::AddressOfStructElementArrayField { name, fields, .. } => self
+            Expr::AddressOfStructElementField { name, fields, .. } => self
                 .find_variable_scope_id(name)
                 .and_then(|scope_id| {
                     self.struct_field_points_to_const(scope_id, name, Some(0), fields)
                         .ok()
+                })
+                .unwrap_or(false),
+            Expr::AddressOfStructElementArrayField { name, fields, .. } => self
+                .struct_element_field_metadata(name, fields)
+                .ok()
+                .flatten()
+                .map(|(field_type, is_const, points_to_const)| match field_type {
+                    StructFieldType::Pointer(_) => points_to_const,
+                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => {
+                        self.struct_array_element_field_points_to_const(name, fields) || is_const
+                    }
+                    StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
                 })
                 .unwrap_or(false),
             Expr::StructGet { name, fields } => {
@@ -11534,6 +11560,18 @@ impl Interpreter {
                 .unwrap_or(false),
             Expr::AddressOfAggregateLiteral { read_only, .. } => *read_only,
             Expr::StructElementGet { name, fields, .. } => self
+                .struct_element_field_metadata(name, fields)
+                .ok()
+                .flatten()
+                .map(|(field_type, is_const, points_to_const)| match field_type {
+                    StructFieldType::Pointer(_) => points_to_const,
+                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => {
+                        self.struct_array_element_field_points_to_const(name, fields) || is_const
+                    }
+                    StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
+                })
+                .unwrap_or(false),
+            Expr::StructElementArrayGet { name, fields, .. } => self
                 .struct_element_field_metadata(name, fields)
                 .ok()
                 .flatten()
@@ -15487,7 +15525,21 @@ impl Interpreter {
                 index,
                 fields,
                 array_index,
-            } => self.find_struct_element_array_field_pointer(name, index, fields, array_index),
+            } => {
+                if matches!(
+                    self.struct_element_field_metadata(name, fields)?,
+                    Some((StructFieldType::Pointer(_), _, _))
+                ) {
+                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    self.struct_pointer_pointer_field_index_pointer(
+                        &element_pointer,
+                        fields,
+                        array_index,
+                    )
+                } else {
+                    self.find_struct_element_array_field_pointer(name, index, fields, array_index)
+                }
+            }
             Expr::AddressOfStructPtrArrayField {
                 pointer,
                 fields,
@@ -15676,6 +15728,19 @@ impl Interpreter {
                             ))
                         })
                 }
+            }
+            Expr::StructElementArrayGet {
+                name,
+                index,
+                fields,
+                array_index,
+            } => {
+                let element_pointer = self.find_struct_element_pointer(name, index)?;
+                self.struct_pointer_pointer_field_index_pointer(
+                    &element_pointer,
+                    fields,
+                    array_index,
+                )
             }
             Expr::StructPtrGet { pointer, fields } => {
                 let pointer = self.eval_pointer(pointer)?;
@@ -17751,6 +17816,15 @@ impl Interpreter {
                     None => Err(CustError::new(format!("undefined variable '{name}'"))),
                 }
             }
+            Expr::StructElementArrayGet { name, fields, .. }
+            | Expr::StructElementArraySet { name, fields, .. } => {
+                match self.struct_element_field_metadata(name, fields)? {
+                    Some((StructFieldType::Pointer(PointeeType::Struct(type_name)), _, _)) => {
+                        Ok(type_name)
+                    }
+                    _ => Err(CustError::new("expected struct expression")),
+                }
+            }
             Expr::StructGet { name, fields } | Expr::StructSet { name, fields, .. } => {
                 match self.find_variable(name) {
                     Some(Value::Struct { type_name, .. }) => {
@@ -17970,10 +18044,10 @@ impl Interpreter {
     }
 
     fn sizeof_struct_pointer_field(&self, pointer: &Expr, path: &[String]) -> CustResult<i64> {
-        let pointer = self.clone_for_sizeof_pointer(pointer)?;
-        let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
-        let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
-        self.struct_field_value_size(field_value)
+        let Some(PointeeType::Struct(type_name)) = self.pointer_expr_pointee_type(pointer)? else {
+            return Err(CustError::new("expected pointer expression"));
+        };
+        self.sizeof_aggregate_field_type(&type_name, path)
     }
 
     fn sizeof_struct_array_indexed_value(&self, name: &str, path: &[String]) -> CustResult<i64> {
@@ -18060,12 +18134,11 @@ impl Interpreter {
                         .ok_or_else(|| {
                             CustError::new(format!("undefined struct type '{type_name}'"))
                         }),
-                    StructFieldValue::Scalar { .. } | StructFieldValue::Pointer { .. } => {
-                        Err(CustError::new(format!(
-                            "struct field '{}' is not an array",
-                            Self::field_path_label(path)
-                        )))
-                    }
+                    StructFieldValue::Pointer { ty, .. } => ty.size(&self.struct_types),
+                    StructFieldValue::Scalar { .. } => Err(CustError::new(format!(
+                        "struct field '{}' is not an array",
+                        Self::field_path_label(path)
+                    ))),
                     StructFieldValue::Struct { type_name, .. } => Err(CustError::new(format!(
                         "struct field '{}' is a struct '{type_name}'",
                         Self::field_path_label(path)
@@ -18120,22 +18193,6 @@ impl Interpreter {
             }
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
-        }
-    }
-
-    fn clone_for_sizeof_pointer(&self, pointer: &Expr) -> CustResult<PointerValue> {
-        match pointer {
-            Expr::Var(name) => match self.find_variable(name) {
-                Some(Value::Pointer { pointer, .. }) => Ok(pointer.clone()),
-                Some(Value::Struct { .. }) => self.address_of_scalar(name),
-                Some(_) => Err(CustError::new(format!(
-                    "variable '{name}' is not a pointer"
-                ))),
-                None => Err(CustError::new(format!("undefined variable '{name}'"))),
-            },
-            Expr::AddressOf(name) => self.address_of_scalar(name),
-            Expr::Deref(inner) => self.clone_for_sizeof_pointer(inner),
-            _ => Err(CustError::new("expected pointer expression")),
         }
     }
 
@@ -18322,19 +18379,37 @@ impl Interpreter {
                 fields,
                 array_index,
             } => {
-                let (array, index) =
-                    self.checked_struct_element_array_index(name, index, fields, array_index)?;
-                let current = array.borrow().elements[index];
-                let updated = Self::apply_increment_op(current, op);
-                let mut array = array.borrow_mut();
-                if array.read_only {
-                    return Err(CustError::new(format!(
-                        "cannot modify read-only array '{}'",
-                        Self::field_path_label(fields)
-                    )));
+                if let Some((StructFieldType::Pointer(_), _, points_to_const)) =
+                    self.struct_element_field_metadata(name, fields)?
+                {
+                    if points_to_const {
+                        return Err(CustError::new("cannot assign through pointer to const"));
+                    }
+                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    let field_element_pointer = self.struct_pointer_pointer_field_index_pointer(
+                        &element_pointer,
+                        fields,
+                        array_index,
+                    )?;
+                    let current = self.deref_pointer(&field_element_pointer)?;
+                    let updated = Self::apply_increment_op(current, op);
+                    self.assign_deref_pointer(&field_element_pointer, updated)?;
+                    Ok(Self::increment_result(current, updated, prefix))
+                } else {
+                    let (array, index) =
+                        self.checked_struct_element_array_index(name, index, fields, array_index)?;
+                    let current = array.borrow().elements[index];
+                    let updated = Self::apply_increment_op(current, op);
+                    let mut array = array.borrow_mut();
+                    if array.read_only {
+                        return Err(CustError::new(format!(
+                            "cannot modify read-only array '{}'",
+                            Self::field_path_label(fields)
+                        )));
+                    }
+                    array.elements[index] = updated;
+                    Ok(Self::increment_result(current, updated, prefix))
                 }
-                array.elements[index] = updated;
-                Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::StructGet { name, fields } => {
                 let current = self.read_struct_field(name, fields)?;
@@ -18513,6 +18588,25 @@ impl Interpreter {
             {
                 self.eval_struct_field_array_element_assignment_expr(name, fields, index, value)
             }
+            Expr::StructElementArraySet {
+                name,
+                index,
+                fields,
+                array_index,
+                value,
+            } if matches!(
+                self.struct_element_field_metadata(name, fields)?,
+                Some((StructFieldType::Pointer(PointeeType::Struct(_)), _, _))
+            ) =>
+            {
+                let pointer = Expr::AddressOfStructElementArrayField {
+                    name: name.clone(),
+                    index: index.clone(),
+                    fields: fields.clone(),
+                    array_index: array_index.clone(),
+                };
+                self.eval_struct_pointer_assignment_expr(&pointer, value)
+            }
             Expr::DerefSet { pointer, value } => {
                 self.eval_struct_pointer_assignment_expr(pointer, value)
             }
@@ -18594,6 +18688,14 @@ impl Interpreter {
                         None => Err(CustError::new(format!("undefined variable '{name}'"))),
                     }
                 }
+            }
+            Expr::StructElementArrayGet { .. } => {
+                let pointer = self.eval_pointer(expr)?;
+                let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
+                Ok(ReturnValue::Struct {
+                    type_name,
+                    fields: StructFieldValue::deep_clone_fields(fields),
+                })
             }
             Expr::Deref(pointer) => {
                 let pointer = self.eval_pointer(pointer)?;
@@ -19243,9 +19345,22 @@ impl Interpreter {
                 fields,
                 array_index,
             } => {
-                let (array, index) =
-                    self.checked_struct_element_array_index(name, index, fields, array_index)?;
-                Ok(array.borrow().elements[index])
+                if matches!(
+                    self.struct_element_field_metadata(name, fields)?,
+                    Some((StructFieldType::Pointer(_), _, _))
+                ) {
+                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    let field_element_pointer = self.struct_pointer_pointer_field_index_pointer(
+                        &element_pointer,
+                        fields,
+                        array_index,
+                    )?;
+                    self.deref_pointer(&field_element_pointer)
+                } else {
+                    let (array, index) =
+                        self.checked_struct_element_array_index(name, index, fields, array_index)?;
+                    Ok(array.borrow().elements[index])
+                }
             }
             Expr::StructPtrArrayGet {
                 pointer,
@@ -19404,18 +19519,35 @@ impl Interpreter {
                 array_index,
                 value,
             } => {
-                let value = self.eval(value)?;
-                let (array, index) =
-                    self.checked_struct_element_array_index(name, index, fields, array_index)?;
-                let mut array = array.borrow_mut();
-                if array.read_only {
-                    return Err(CustError::new(format!(
-                        "cannot modify read-only array '{}'",
-                        Self::field_path_label(fields)
-                    )));
+                if let Some((StructFieldType::Pointer(_), _, points_to_const)) =
+                    self.struct_element_field_metadata(name, fields)?
+                {
+                    if points_to_const {
+                        return Err(CustError::new("cannot assign through pointer to const"));
+                    }
+                    let value = self.eval(value)?;
+                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    let field_element_pointer = self.struct_pointer_pointer_field_index_pointer(
+                        &element_pointer,
+                        fields,
+                        array_index,
+                    )?;
+                    self.assign_deref_pointer(&field_element_pointer, value)?;
+                    Ok(value)
+                } else {
+                    let value = self.eval(value)?;
+                    let (array, index) =
+                        self.checked_struct_element_array_index(name, index, fields, array_index)?;
+                    let mut array = array.borrow_mut();
+                    if array.read_only {
+                        return Err(CustError::new(format!(
+                            "cannot modify read-only array '{}'",
+                            Self::field_path_label(fields)
+                        )));
+                    }
+                    array.elements[index] = value;
+                    Ok(value)
                 }
-                array.elements[index] = value;
-                Ok(value)
             }
             Expr::StructArrayCompoundSet {
                 name,
@@ -19445,20 +19577,39 @@ impl Interpreter {
                 op,
                 value,
             } => {
-                let (array, index) =
-                    self.checked_struct_element_array_index(name, index, fields, array_index)?;
-                let current = array.borrow().elements[index];
-                let rhs = self.eval(value)?;
-                let result = Self::apply_compound_op(current, *op, rhs)?;
-                let mut array = array.borrow_mut();
-                if array.read_only {
-                    return Err(CustError::new(format!(
-                        "cannot modify read-only array '{}'",
-                        Self::field_path_label(fields)
-                    )));
+                if let Some((StructFieldType::Pointer(_), _, points_to_const)) =
+                    self.struct_element_field_metadata(name, fields)?
+                {
+                    if points_to_const {
+                        return Err(CustError::new("cannot assign through pointer to const"));
+                    }
+                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    let field_element_pointer = self.struct_pointer_pointer_field_index_pointer(
+                        &element_pointer,
+                        fields,
+                        array_index,
+                    )?;
+                    let current = self.deref_pointer(&field_element_pointer)?;
+                    let rhs = self.eval(value)?;
+                    let result = Self::apply_compound_op(current, *op, rhs)?;
+                    self.assign_deref_pointer(&field_element_pointer, result)?;
+                    Ok(result)
+                } else {
+                    let (array, index) =
+                        self.checked_struct_element_array_index(name, index, fields, array_index)?;
+                    let current = array.borrow().elements[index];
+                    let rhs = self.eval(value)?;
+                    let result = Self::apply_compound_op(current, *op, rhs)?;
+                    let mut array = array.borrow_mut();
+                    if array.read_only {
+                        return Err(CustError::new(format!(
+                            "cannot modify read-only array '{}'",
+                            Self::field_path_label(fields)
+                        )));
+                    }
+                    array.elements[index] = result;
+                    Ok(result)
                 }
-                array.elements[index] = result;
-                Ok(result)
             }
             Expr::DerefSet { pointer, value } => {
                 self.ensure_pointer_expr_pointee_mutable(pointer)?;
