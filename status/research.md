@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-19 — Aggregate-valued named aggregate-array pointer-field consumers
+
+- `eval_struct_expr()` and `aggregate_expr_type_name()` already recognized aggregate-valued `StructElementArrayGet`/`Set`, but function binding still used a second hand-maintained allowlist in `eval_struct_argument()`. Add both variants there so direct indexed pointer-field reads and copy-assignment results bind by value while preserving established aggregate type diagnostics.
+- Parenthesized aggregate assignment results followed by `.` re-enter `parse_postfix_suffix()`. `StructElementArraySet` must join the aggregate-valued postfix allowlist so `(nodes[i].points[j] = replacement).field` lowers to `AggregateFieldGet`; runtime evaluation and non-evaluating `sizeof` then reuse existing assignment-result aggregate metadata and deep-copy paths.
+- Warning-free `gcc` and `clang -std=c11 -Wall -Wextra -Werror` executions return 201 like Cust. Keep one-time evaluation markers in separate statements so native operand-order differences do not weaken the oracle.
+
 ## 2026-07-18 — Ordinary named aggregate-array pointer-field subscripts
 
 - `nodes[i].field[j]` is represented by `StructElementArrayGet` (and matching set/compound variants) for both embedded arrays and stored pointer fields. Runtime and metadata dispatch must inspect `StructFieldType` before choosing the legacy embedded-array path; scalar pointees use checked scalar pointer indexing, while named aggregate pointees use aggregate pointer offset/field resolution.

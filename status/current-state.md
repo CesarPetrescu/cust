@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Latest autonomous verification
+
+All required verification passed after the 2026-07-19 aggregate-valued named aggregate-array pointer-field consumer audit. `nodes[i].aggregate_pointer_field[j]` reads and copy-assignment results now bind as by-value function arguments, and assignment-result postfix field access such as `(nodes[i].points[j] = replacement).tag` parses as aggregate field selection. Direct/assignment returns, conditional/comma/discard contexts, deep-copy isolation, one-time target/RHS evaluation, exact const/type diagnostics, and non-evaluating `sizeof` are covered. Two focused RED failures exposed the missing `StructElementArrayGet`/`Set` cases in `eval_struct_argument()`; a third RED exposed `StructElementArraySet` missing from postfix aggregate field-access routing. A warning-free compiler-oracle fixture returns 201 under Cust, GCC, and Clang; six focused tests raise the interpreter suite to 803 tests.
+
+Verified commands: focused direct-argument, assignment-result argument, return-copy, type-diagnostic, assignment-result postfix, and non-evaluating `sizeof` RED/GREEN or coverage tests; focused 11-test aggregate-pointer-field subscript consumer sweep; recursion-depth regression; `cargo test --test c_compat -- --nocapture`; direct Cust/GCC/Clang fixture execution (201); `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test` (803 interpreter tests); `docker compose run --rm test`; `docker compose run --rm cust`; and `git diff --check`.
 
 All required verification passed after the 2026-07-18 ordinary named aggregate-array pointer-field subscript/address run. `nodes[i].pointer_field[j]` now distinguishes pointer-valued fields from embedded array fields across scalar and named-aggregate pointees. Direct/reverse reads, replacement and arithmetic compound assignment, prefix/postfix increment, element address-of, aggregate field lvalues, aggregate deep-copy reads/assignment results, concrete pointee/const metadata, exact inner/outer bounds and type diagnostics, one-time index/RHS evaluation, and non-evaluating `sizeof` are covered. The final focused RED exposed aggregate-valued `StructElementArrayGet`/`Set` missing from aggregate type/evaluation dispatch; those routes now deep-clone reads and delegate copy assignment through the established aggregate-pointer path. A warning-free compiler-oracle fixture returns 80 under Cust and native `cc`; fifteen focused tests raise the interpreter suite to 797 tests.
 

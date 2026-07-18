@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-18 ordinary named aggregate-array pointer-field subscript/address run after focused RED/GREEN coverage, warning-free Cust/native exit 80, 797 passing interpreter tests, and the full required local and Docker gates. Aggregate-valued consumer-context parity for the newly enabled `StructElementArrayGet`/`Set` routes is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-19 aggregate-valued named aggregate-array pointer-field consumer run after three focused RED/GREEN fixes, warning-free Cust/GCC/Clang exit 201, 803 passing interpreter tests, and the full required local and Docker gates. Nested/anonymous holder and union containing-array parity is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 

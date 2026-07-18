@@ -8886,6 +8886,14 @@ fn named_aggregate_array_pointer_field_subscripts_match_fixture() {
 }
 
 #[test]
+fn named_aggregate_array_pointer_field_aggregate_consumers_match_fixture() {
+    let program =
+        include_str!("fixtures/valid/named_aggregate_array_pointer_field_aggregate_consumers.c",);
+
+    assert_eq!(interpret(program).unwrap(), 201);
+}
+
+#[test]
 fn named_aggregate_array_pointer_field_subscript_writes_evaluate_once() {
     let program = r#"
         struct Node { int *cursor; };
@@ -8998,6 +9006,105 @@ fn named_aggregate_array_aggregate_pointer_field_subscript_copy_reads() {
     "#;
 
     assert_eq!(interpret(program).unwrap(), 17);
+}
+
+#[test]
+fn named_aggregate_array_aggregate_pointer_field_subscript_reads_bind_as_arguments() {
+    let program = r#"
+        struct Point { int value; };
+        struct Node { struct Point *cursor; };
+
+        int read(struct Point point) {
+            point.value = 9;
+            return point.value;
+        }
+
+        int main(void) {
+            struct Point points[1] = {{3}};
+            struct Node nodes[1] = {{points}};
+            return read(nodes[0].cursor[0]) + points[0].value;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 12);
+}
+
+#[test]
+fn named_aggregate_array_aggregate_pointer_field_subscript_assignment_results_bind_as_arguments() {
+    let program = r#"
+        struct Point { int value; };
+        struct Node { struct Point *cursor; };
+
+        int read(struct Point point) {
+            point.value = 11;
+            return point.value;
+        }
+
+        int main(void) {
+            struct Point points[1] = {{3}};
+            struct Point replacement = {7};
+            struct Node nodes[1] = {{points}};
+            return read(nodes[0].cursor[0] = replacement) + points[0].value;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 18);
+}
+
+#[test]
+fn named_aggregate_array_aggregate_pointer_field_subscripts_return_copies() {
+    let program = r#"
+        struct Point { int value; };
+        struct Node { struct Point *cursor; };
+
+        struct Point read(void) {
+            struct Point points[1] = {{3}};
+            struct Node nodes[1] = {{points}};
+            return nodes[0].cursor[0];
+        }
+
+        struct Point replace(void) {
+            struct Point points[1] = {{3}};
+            struct Point replacement = {7};
+            struct Node nodes[1] = {{points}};
+            return nodes[0].cursor[0] = replacement;
+        }
+
+        int main(void) {
+            struct Point first = read();
+            struct Point second = replace();
+            first.value = 11;
+            second.value = 13;
+            return first.value + second.value;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 24);
+}
+
+#[test]
+fn named_aggregate_array_aggregate_pointer_field_subscript_arguments_preserve_type_diagnostics() {
+    let program = r#"
+        struct Point { int value; };
+        struct Pair { int value; };
+        struct Node { struct Point *cursor; };
+
+        int read(struct Pair pair) {
+            return pair.value;
+        }
+
+        int main(void) {
+            struct Point points[1] = {{3}};
+            struct Node nodes[1] = {{points}};
+            return read(nodes[0].cursor[0]);
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "function 'read' struct parameter 'pair' expected struct 'Pair', got struct 'Point'"
+    );
 }
 
 #[test]
@@ -9114,6 +9221,30 @@ fn sizeof_named_aggregate_array_aggregate_pointer_field_subscripts_is_non_evalua
     "#;
 
     assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn sizeof_named_aggregate_array_aggregate_pointer_field_assignment_result_fields_is_non_evaluating()
+{
+    let program = r#"
+        struct Point { char tag; int value; };
+        struct Node { struct Point *points; };
+
+        int main(void) {
+            struct Point points[1] = {{'a', 3}};
+            struct Point replacement = {'z', 9};
+            struct Node nodes[1] = {{points}};
+            int outer = 0;
+            int inner = 0;
+            int rhs = 0;
+            int ok = sizeof((nodes[outer++].points[inner++] =
+                             (rhs++, replacement)).tag) == sizeof(char);
+            return ok + (outer == 0) + (inner == 0) + (rhs == 0)
+                + (points[0].tag == 'a');
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 5);
 }
 
 #[test]

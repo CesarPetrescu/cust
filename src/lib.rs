@@ -9671,6 +9671,7 @@ impl Parser {
                     | Expr::Assign { .. }
                     | Expr::ArraySet { .. }
                     | Expr::StructArraySet { .. }
+                    | Expr::StructElementArraySet { .. }
                     | Expr::StructSet { .. }
                     | Expr::StructPtrSet { .. }
                     | Expr::DerefSet { .. }
@@ -10944,6 +10945,8 @@ impl Interpreter {
             | Expr::StructPtrSet { .. }
             | Expr::ArraySet { .. }
             | Expr::StructArraySet { .. }
+            | Expr::StructElementArrayGet { .. }
+            | Expr::StructElementArraySet { .. }
             | Expr::Call { .. }
             | Expr::Conditional { .. }
             | Expr::Comma(_, _)
