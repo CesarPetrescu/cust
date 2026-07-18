@@ -11281,6 +11281,34 @@ impl Interpreter {
                 }
                 Ok(None)
             }
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            }
+            | Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructFieldArrayElementCompoundSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            } => match self.struct_field_array_element_field_metadata(
+                name,
+                array_fields,
+                index,
+                fields,
+            )? {
+                Some((StructFieldType::Pointer(ty), _, _)) => Ok(Some(ty)),
+                _ => Ok(None),
+            },
             Expr::StringLiteral(_) => Ok(Some(PointeeType::Scalar(CType::Char))),
             Expr::ArrayLiteral { elem_type, .. } => Ok(Some(PointeeType::Scalar(*elem_type))),
             Expr::AggregateArrayLiteral { type_name, .. } => {
@@ -11363,6 +11391,71 @@ impl Interpreter {
             }
         }
         Ok(None)
+    }
+
+    fn aggregate_type_field_metadata(
+        &self,
+        type_name: &str,
+        path: &[String],
+    ) -> CustResult<Option<(StructFieldType, bool, bool)>> {
+        let mut current_type_name = type_name.to_string();
+        for (index, field_name) in path.iter().enumerate() {
+            let Some(struct_type) = self.struct_types.get(&current_type_name) else {
+                return Ok(None);
+            };
+            let Some(field) = struct_type
+                .fields
+                .iter()
+                .find(|field| field.name == *field_name)
+            else {
+                return Ok(None);
+            };
+            if index + 1 == path.len() {
+                return Ok(Some((
+                    field.ty.clone(),
+                    field.is_const,
+                    field.points_to_const,
+                )));
+            }
+            match &field.ty {
+                StructFieldType::Struct(nested_type) => {
+                    current_type_name = nested_type.clone();
+                }
+                _ => return Ok(None),
+            }
+        }
+        Ok(None)
+    }
+
+    fn struct_field_array_element_field_metadata(
+        &self,
+        name: &str,
+        array_fields: &[String],
+        pointer_expr: &Expr,
+        fields: &[String],
+    ) -> CustResult<Option<(StructFieldType, bool, bool)>> {
+        if let Some(PointeeType::Struct(type_name)) =
+            self.scalar_field_reverse_subscript_pointee_type(name, array_fields, pointer_expr)?
+        {
+            return self.aggregate_type_field_metadata(&type_name, fields);
+        }
+
+        let Some(Value::Struct {
+            type_name,
+            fields: field_map,
+        }) = self.find_variable(name)
+        else {
+            return Ok(None);
+        };
+        let (_, array_value) = Self::nested_field_value(type_name, field_map, array_fields)?;
+        let StructFieldValue::StructArray {
+            type_name: element_type,
+            ..
+        } = array_value
+        else {
+            return Ok(None);
+        };
+        self.aggregate_type_field_metadata(element_type, fields)
     }
 
     fn pointer_expr_points_to_const(&self, expr: &Expr) -> bool {
@@ -11560,11 +11653,47 @@ impl Interpreter {
                 .is_some_and(|(field_type, _, points_to_const)| {
                     matches!(field_type, StructFieldType::Pointer(_)) && points_to_const
                 }),
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            } => self
+                .struct_field_array_element_field_metadata(name, array_fields, index, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_)) && points_to_const
+                }),
+            Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                value,
+            } => self
+                .struct_field_array_element_field_metadata(name, array_fields, index, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_))
+                        && (points_to_const || self.pointer_expr_points_to_const(value))
+                }),
+            Expr::StructFieldArrayElementCompoundSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            } => self
+                .struct_field_array_element_field_metadata(name, array_fields, index, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_)) && points_to_const
+                }),
             Expr::CompoundAssign { name, .. } => self.pointer_variable_points_to_const(name),
-            Expr::Increment { target, .. } => match target.as_ref() {
-                Expr::Var(name) => self.pointer_variable_points_to_const(name),
-                _ => false,
-            },
+            Expr::Increment { target, .. } => self.pointer_expr_points_to_const(target),
             _ => false,
         }
     }
@@ -13227,6 +13356,20 @@ impl Interpreter {
             Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
         }
+    }
+
+    fn struct_field_array_element_pointer(
+        &mut self,
+        name: &str,
+        array_fields: &[String],
+        index: &Expr,
+    ) -> CustResult<PointerValue> {
+        if let Some(pointer) =
+            self.scalar_field_reverse_subscript_pointer(name, array_fields, index)?
+        {
+            return Ok(pointer);
+        }
+        self.find_struct_array_field_pointer(name, array_fields, index)
     }
 
     fn struct_field_array_element_assignment_pointer(
@@ -15479,6 +15622,16 @@ impl Interpreter {
                     Err(_) => self.read_struct_pointer_pointer_field(&pointer, fields),
                 }
             }
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            } => {
+                let target_pointer =
+                    self.struct_field_array_element_pointer(name, array_fields, index)?;
+                self.read_struct_pointer_pointer_field(&target_pointer, fields)
+            }
             Expr::StructPtrArrayGet {
                 pointer,
                 fields,
@@ -15523,6 +15676,60 @@ impl Interpreter {
                     value_pointer.clone(),
                 )?;
                 Ok(value_pointer)
+            }
+            Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                value,
+            } => {
+                let metadata = self.struct_field_array_element_field_metadata(
+                    name,
+                    array_fields,
+                    index,
+                    fields,
+                )?;
+                let Some((StructFieldType::Pointer(_), _, points_to_const)) = metadata else {
+                    return Err(CustError::new("expected pointer expression"));
+                };
+                self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
+                let value_pointer = self.eval_pointer(value)?;
+                let target_pointer =
+                    self.struct_field_array_element_assignment_pointer(name, array_fields, index)?;
+                self.assign_struct_pointer_pointer_field(
+                    &target_pointer,
+                    fields,
+                    value_pointer.clone(),
+                )?;
+                Ok(value_pointer)
+            }
+            Expr::StructFieldArrayElementCompoundSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                op,
+                value,
+            } => {
+                let offset = self.eval(value)?;
+                let offset = match op {
+                    CompoundOp::Add => offset,
+                    CompoundOp::Sub => -offset,
+                    CompoundOp::Mul
+                    | CompoundOp::Div
+                    | CompoundOp::Rem
+                    | CompoundOp::BitAnd
+                    | CompoundOp::BitOr
+                    | CompoundOp::BitXor
+                    | CompoundOp::ShiftLeft
+                    | CompoundOp::ShiftRight => return Err(Self::pointer_compound_error(*op)),
+                };
+                let target_pointer =
+                    self.struct_field_array_element_assignment_pointer(name, array_fields, index)?;
+                let (_, updated) =
+                    self.offset_struct_pointer_pointer_field(&target_pointer, fields, offset)?;
+                Ok(updated)
             }
             Expr::StructCompoundSet {
                 name,
@@ -15619,6 +15826,25 @@ impl Interpreter {
                         IncrementOp::Dec => -1,
                     };
                     let updated = self.offset_array_pointer(&current, offset)?;
+                    if *prefix { Ok(updated) } else { Ok(current) }
+                }
+                Expr::StructFieldArrayElementGet {
+                    name,
+                    array_fields,
+                    index,
+                    fields,
+                } => {
+                    let target_pointer = self.struct_field_array_element_assignment_pointer(
+                        name,
+                        array_fields,
+                        index,
+                    )?;
+                    let offset = match op {
+                        IncrementOp::Inc => 1,
+                        IncrementOp::Dec => -1,
+                    };
+                    let (current, updated) =
+                        self.offset_struct_pointer_pointer_field(&target_pointer, fields, offset)?;
                     if *prefix { Ok(updated) } else { Ok(current) }
                 }
                 Expr::Var(name) => {
@@ -16235,6 +16461,29 @@ impl Interpreter {
             | Expr::StructPtrCompoundSet {
                 pointer, fields, ..
             } => self.struct_pointer_field_decays_to_pointer(pointer, fields),
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            }
+            | Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructFieldArrayElementCompoundSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            } => matches!(
+                self.struct_field_array_element_field_metadata(name, array_fields, index, fields),
+                Ok(Some((StructFieldType::Pointer(_), _, _)))
+            ),
             Expr::Increment { target, .. } => self.expr_is_pointer_value(target),
             Expr::Call { name, .. } => matches!(
                 self.functions

@@ -8711,6 +8711,201 @@ fn supports_embedded_aggregate_array_element_field_increment_decrement() {
 }
 
 #[test]
+fn supports_pointer_field_replacement_through_embedded_aggregate_array_elements() {
+    let program = r#"
+        struct Node { int *cursor; };
+        struct Box { struct Node nodes[2]; };
+
+        int main(void) {
+            int values[3] = {3, 5, 7};
+            struct Box box = {{{values}, {values + 2}}};
+            int *result = (box.nodes[0].cursor = values + 1);
+            return *result + *box.nodes[0].cursor;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 10);
+}
+
+#[test]
+fn pointer_field_replacement_through_embedded_aggregate_array_element_evaluates_once() {
+    let program = r#"
+        struct Node { int *cursor; };
+        struct Box { struct Node nodes[1]; };
+
+        int main(void) {
+            int values[2] = {3, 5};
+            struct Box box = {{{values}}};
+            int index_marker = 0;
+            int rhs_marker = 0;
+            int *result = (
+                box.nodes[index_marker++].cursor = (rhs_marker++, values + 1)
+            );
+            return *result + index_marker + rhs_marker + *box.nodes[0].cursor;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 12);
+}
+
+#[test]
+fn supports_pointer_field_compound_assignment_through_embedded_aggregate_array_elements() {
+    let program = r#"
+        struct Node { int *cursor; };
+        struct Box { struct Node nodes[1]; };
+
+        int main(void) {
+            int values[3] = {3, 5, 7};
+            struct Box box = {{{values}}};
+            int *result = (box.nodes[0].cursor += 2);
+            return *result + *box.nodes[0].cursor;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn supports_pointer_field_increment_through_embedded_aggregate_array_elements() {
+    let program = r#"
+        struct Node { int *cursor; };
+        struct Box { struct Node nodes[1]; };
+
+        int main(void) {
+            int values[4] = {2, 4, 6, 8};
+            struct Box box = {{{values + 1}}};
+            int *post = box.nodes[0].cursor++;
+            int *pre = ++box.nodes[0].cursor;
+            return *post + *pre + *box.nodes[0].cursor;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 20);
+}
+
+#[test]
+fn supports_pointer_field_updates_through_reverse_and_nested_embedded_aggregate_array_elements() {
+    let program = r#"
+        struct Node { int *cursor; };
+        struct Layer { struct Node nodes[1]; };
+        struct Box { struct Layer layer; };
+        struct Index { int value; };
+
+        int main(void) {
+            int values[3] = {3, 5, 7};
+            struct Node loose[1] = {{values}};
+            struct Index index = {0};
+            struct Box box = {{{{values + 1}}}};
+            int *reverse = (index.value[loose].cursor = values + 2);
+            int *nested = (box.layer.nodes[0].cursor += 1);
+            return *reverse + *index.value[loose].cursor + *nested + *box.layer.nodes[0].cursor;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 28);
+}
+
+#[test]
+fn embedded_aggregate_array_element_pointer_field_updates_match_fixture() {
+    let program =
+        include_str!("fixtures/valid/embedded_aggregate_array_element_pointer_field_updates.c",);
+
+    assert_eq!(interpret(program).unwrap(), 9);
+}
+
+#[test]
+fn sizeof_pointer_field_update_through_embedded_aggregate_array_element_is_non_evaluating() {
+    let program = r#"
+        struct Node { int *cursor; };
+        struct Box { struct Node nodes[1]; };
+
+        int main(void) {
+            int values[2] = {3, 5};
+            struct Box box = {{{values}}};
+            int index_marker = 0;
+            int rhs_marker = 0;
+            int result_size = sizeof(
+                (box.nodes[index_marker++].cursor += (rhs_marker++, 1))
+            );
+            return (result_size == sizeof(int *)) +
+                   (index_marker == 0) +
+                   (rhs_marker == 0) +
+                   (*box.nodes[0].cursor == 3);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 4);
+}
+
+#[test]
+fn reads_pointer_fields_through_const_embedded_aggregate_array_elements() {
+    let program = r#"
+        struct Node { int *cursor; };
+        struct Box { struct Node nodes[1]; };
+
+        int main(void) {
+            int values[1] = {7};
+            const struct Box box = {{{values}}};
+            return *box.nodes[0].cursor;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn rejects_const_pointer_field_assignment_through_embedded_aggregate_array_element() {
+    let program = include_str!(
+        "fixtures/invalid/const_embedded_aggregate_array_element_pointer_field_assignment.c",
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot assign to const struct field 'cursor'"
+    );
+}
+
+#[test]
+fn rejects_const_discard_in_pointer_field_assignment_through_embedded_aggregate_array_element() {
+    let program = include_str!(
+        "fixtures/invalid/embedded_aggregate_array_element_pointer_field_const_discard.c",
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_const_discard_from_pointer_field_increment_result_through_embedded_array_element() {
+    let program = include_str!(
+        "fixtures/invalid/embedded_aggregate_array_element_pointer_field_increment_const_discard.c",
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_type_mismatch_in_pointer_field_assignment_through_embedded_aggregate_array_element() {
+    let program = include_str!(
+        "fixtures/invalid/embedded_aggregate_array_element_pointer_field_type_mismatch.c",
+    );
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot convert pointer to char to pointer to int"
+    );
+}
+
+#[test]
 fn supports_reverse_embedded_aggregate_array_element_field_assignment() {
     let program = r#"
         struct Point { int value; };
