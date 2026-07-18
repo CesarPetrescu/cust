@@ -17154,15 +17154,25 @@ impl Interpreter {
             Expr::StructFieldArrayElementSet {
                 name,
                 array_fields,
+                index,
                 fields,
                 ..
             }
             | Expr::StructFieldArrayElementCompoundSet {
                 name,
                 array_fields,
+                index,
                 fields,
                 ..
-            } => self.sizeof_struct_field_array_element_field(name, array_fields, fields),
+            } => match self.sizeof_scalar_field_reverse_subscript_field(
+                name,
+                array_fields,
+                index,
+                fields,
+            )? {
+                Some(size) => Ok(size),
+                None => self.sizeof_struct_field_array_element_field(name, array_fields, fields),
+            },
             Expr::StructElementGet {
                 name,
                 index,
@@ -17230,8 +17240,12 @@ impl Interpreter {
             Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
                 self.sizeof_assignment_result(name)
             }
-            Expr::ArraySet { name, .. } | Expr::ArrayCompoundSet { name, .. } => {
-                self.sizeof_indexed_value(name)
+            Expr::ArraySet { name, index, .. } | Expr::ArrayCompoundSet { name, index, .. } => {
+                if let Some(size) = self.sizeof_scalar_variable_reverse_subscript(name, index)? {
+                    Ok(size)
+                } else {
+                    self.sizeof_indexed_value(name)
+                }
             }
             Expr::DerefSet { pointer, .. } | Expr::DerefCompoundSet { pointer, .. } => {
                 self.sizeof_deref(pointer)
@@ -17239,14 +17253,36 @@ impl Interpreter {
             Expr::StructSet { name, fields, .. } | Expr::StructCompoundSet { name, fields, .. } => {
                 self.sizeof_struct_field(name, fields)
             }
-            Expr::StructArraySet { name, fields, .. }
-            | Expr::StructArrayCompoundSet { name, fields, .. } => {
-                self.sizeof_struct_array_indexed_value(name, fields)
+            Expr::StructArraySet {
+                name,
+                fields,
+                index,
+                ..
             }
-            Expr::StructElementSet { name, fields, .. }
-            | Expr::StructElementCompoundSet { name, fields, .. } => {
-                self.sizeof_struct_element_field(name, fields)
+            | Expr::StructArrayCompoundSet {
+                name,
+                fields,
+                index,
+                ..
+            } => match self.sizeof_scalar_field_reverse_subscript(name, fields, index)? {
+                Some(size) => Ok(size),
+                None => self.sizeof_struct_array_indexed_value(name, fields),
+            },
+            Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                ..
             }
+            | Expr::StructElementCompoundSet {
+                name,
+                index,
+                fields,
+                ..
+            } => match self.sizeof_scalar_variable_reverse_subscript_field(name, index, fields)? {
+                Some(size) => Ok(size),
+                None => self.sizeof_struct_element_field(name, fields),
+            },
             Expr::StructElementArraySet { name, fields, .. }
             | Expr::StructElementArrayCompoundSet { name, fields, .. } => {
                 self.sizeof_struct_element_array_indexed_value(name, fields)

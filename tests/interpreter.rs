@@ -3146,6 +3146,90 @@ fn supports_sizeof_scalar_variable_and_field_reverse_subscripts_without_evaluati
 }
 
 #[test]
+fn supports_sizeof_reverse_subscript_lvalue_results_without_evaluating_operands() {
+    let program = include_str!("fixtures/valid/sizeof_reverse_subscript_lvalue_results.c");
+
+    assert_eq!(interpret(program).unwrap(), 13);
+}
+
+#[test]
+fn supports_sizeof_scalar_variable_reverse_subscript_assignment_results_without_evaluation() {
+    let program = r#"
+        int main(void) {
+            int values[2] = {3, 5};
+            int index = 1;
+            int pointer_marker = 0;
+            int rhs_marker = 0;
+            int size_matches = sizeof(
+                index[(pointer_marker += 1, values)] = (rhs_marker += 1, 9)
+            ) == sizeof(values[index]);
+            return size_matches + pointer_marker * 10 + rhs_marker * 100;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn supports_sizeof_scalar_variable_reverse_subscript_compound_assignment_results_without_evaluation()
+ {
+    let program = r#"
+        int main(void) {
+            char bytes[2] = {'a', 'b'};
+            int index = 1;
+            int pointer_marker = 0;
+            int rhs_marker = 0;
+            int size_matches = sizeof(
+                index[(pointer_marker += 1, bytes)] += (rhs_marker += 1, 2)
+            ) == sizeof(bytes[index]);
+            return size_matches + pointer_marker * 10 + rhs_marker * 100;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn supports_sizeof_scalar_field_reverse_subscript_assignment_results_without_evaluation() {
+    let program = r#"
+        struct Index { int value; };
+
+        int main(void) {
+            char bytes[2] = {'a', 'b'};
+            struct Index selector = {1};
+            int pointer_marker = 0;
+            int rhs_marker = 0;
+            int size_matches = sizeof(
+                selector.value[(pointer_marker += 1, bytes)] = (rhs_marker += 1, 'x')
+            ) == sizeof(bytes[selector.value]);
+            return size_matches + pointer_marker * 10 + rhs_marker * 100;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn supports_sizeof_reverse_subscript_aggregate_field_assignment_results_without_evaluation() {
+    let program = r#"
+        struct Point { int x; char tag; };
+
+        int main(void) {
+            struct Point points[2] = {{3, 'a'}, {5, 'b'}};
+            int index = 1;
+            int pointer_marker = 0;
+            int rhs_marker = 0;
+            int size_matches = sizeof(
+                index[(pointer_marker += 1, points)].tag = (rhs_marker += 1, 'x')
+            ) == sizeof(points[index].tag);
+            return size_matches + pointer_marker * 10 + rhs_marker * 100;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
 fn sizeof_scalar_variable_reverse_subscripts_reject_two_scalar_operands() {
     let program = r#"
         int main(void) {
