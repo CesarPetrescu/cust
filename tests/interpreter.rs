@@ -3139,6 +3139,46 @@ fn supports_scalar_variable_reverse_subscript_lvalues() {
 }
 
 #[test]
+fn supports_sizeof_scalar_variable_and_field_reverse_subscripts_without_evaluating_operands() {
+    let program = include_str!("fixtures/valid/sizeof_scalar_reverse_subscripts.c");
+
+    assert_eq!(interpret(program).unwrap(), 16);
+}
+
+#[test]
+fn sizeof_scalar_variable_reverse_subscripts_reject_two_scalar_operands() {
+    let program = r#"
+        int main(void) {
+            int left = 0;
+            int right = 1;
+            return sizeof(left[right]);
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "subscript requires one pointer operand and one scalar operand"
+    );
+}
+
+#[test]
+fn sizeof_scalar_variable_reverse_subscripts_reject_scalar_pointer_field_access() {
+    let program = r#"
+        int main(void) {
+            int values[2] = {3, 5};
+            int *pointer = values;
+            int index = 1;
+            return sizeof(index[pointer].field);
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "subscript pointer does not reference a struct"
+    );
+}
+
+#[test]
 fn scalar_variable_reverse_subscripts_preserve_const_diagnostics() {
     let program = r#"
         int main(void) {

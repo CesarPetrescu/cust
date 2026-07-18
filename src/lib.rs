@@ -16994,6 +16994,108 @@ impl Interpreter {
         u32::try_from(rhs).map_err(|_| CustError::new("shift count too large"))
     }
 
+    fn reverse_subscript_pointee_type(&self, pointer_expr: &Expr) -> CustResult<PointeeType> {
+        if !self.expr_is_pointer_value(pointer_expr) {
+            return Err(CustError::new(
+                "subscript requires one pointer operand and one scalar operand",
+            ));
+        }
+        self.pointer_expr_pointee_type(pointer_expr)?
+            .ok_or_else(|| CustError::new("expected pointer expression"))
+    }
+
+    fn scalar_variable_reverse_subscript_pointee_type(
+        &self,
+        name: &str,
+        pointer_expr: &Expr,
+    ) -> CustResult<Option<PointeeType>> {
+        match self.find_variable(name) {
+            Some(Value::Scalar { .. }) => {
+                self.reverse_subscript_pointee_type(pointer_expr).map(Some)
+            }
+            Some(_) | None => Ok(None),
+        }
+    }
+
+    fn scalar_field_reverse_subscript_pointee_type(
+        &self,
+        name: &str,
+        fields: &[String],
+        pointer_expr: &Expr,
+    ) -> CustResult<Option<PointeeType>> {
+        let is_scalar_field = match self.find_variable(name) {
+            Some(Value::Struct {
+                type_name,
+                fields: field_map,
+            }) => matches!(
+                Self::nested_field_value(type_name, field_map, fields)?.1,
+                StructFieldValue::Scalar { .. }
+            ),
+            Some(_) | None => false,
+        };
+        if !is_scalar_field {
+            return Ok(None);
+        }
+        self.reverse_subscript_pointee_type(pointer_expr).map(Some)
+    }
+
+    fn sizeof_scalar_variable_reverse_subscript(
+        &self,
+        name: &str,
+        pointer_expr: &Expr,
+    ) -> CustResult<Option<i64>> {
+        self.scalar_variable_reverse_subscript_pointee_type(name, pointer_expr)?
+            .map(|pointee| pointee.size(&self.struct_types))
+            .transpose()
+    }
+
+    fn sizeof_scalar_field_reverse_subscript(
+        &self,
+        name: &str,
+        fields: &[String],
+        pointer_expr: &Expr,
+    ) -> CustResult<Option<i64>> {
+        self.scalar_field_reverse_subscript_pointee_type(name, fields, pointer_expr)?
+            .map(|pointee| pointee.size(&self.struct_types))
+            .transpose()
+    }
+
+    fn sizeof_reverse_subscript_field(
+        &self,
+        pointee: PointeeType,
+        fields: &[String],
+    ) -> CustResult<i64> {
+        match pointee {
+            PointeeType::Struct(type_name) => self.sizeof_aggregate_field_type(&type_name, fields),
+            PointeeType::Scalar(_) => Err(CustError::new(
+                "subscript pointer does not reference a struct",
+            )),
+        }
+    }
+
+    fn sizeof_scalar_variable_reverse_subscript_field(
+        &self,
+        name: &str,
+        pointer_expr: &Expr,
+        fields: &[String],
+    ) -> CustResult<Option<i64>> {
+        self.scalar_variable_reverse_subscript_pointee_type(name, pointer_expr)?
+            .map(|pointee| self.sizeof_reverse_subscript_field(pointee, fields))
+            .transpose()
+    }
+
+    fn sizeof_scalar_field_reverse_subscript_field(
+        &self,
+        name: &str,
+        scalar_fields: &[String],
+        pointer_expr: &Expr,
+        selected_fields: &[String],
+    ) -> CustResult<Option<i64>> {
+        self.scalar_field_reverse_subscript_pointee_type(name, scalar_fields, pointer_expr)?
+            .map(|pointee| self.sizeof_reverse_subscript_field(pointee, selected_fields))
+            .transpose()
+    }
+
     fn sizeof_expr(&self, expr: &Expr) -> CustResult<i64> {
         match expr {
             Expr::Number(_) => Ok(INT_SIZE),
@@ -17027,16 +17129,29 @@ impl Interpreter {
             Expr::SizeOfType(_) | Expr::SizeOfValue(_) | Expr::AlignOfType(_) => Ok(INT_SIZE),
             Expr::Var(name) => self.sizeof_variable(name),
             Expr::StructGet { name, fields } => self.sizeof_struct_field(name, fields),
-            Expr::StructArrayGet { name, fields, .. } => {
-                self.sizeof_struct_array_indexed_value(name, fields)
-            }
+            Expr::StructArrayGet {
+                name,
+                fields,
+                index,
+            } => match self.sizeof_scalar_field_reverse_subscript(name, fields, index)? {
+                Some(size) => Ok(size),
+                None => self.sizeof_struct_array_indexed_value(name, fields),
+            },
             Expr::StructFieldArrayElementGet {
                 name,
                 array_fields,
+                index,
                 fields,
-                ..
-            }
-            | Expr::StructFieldArrayElementSet {
+            } => match self.sizeof_scalar_field_reverse_subscript_field(
+                name,
+                array_fields,
+                index,
+                fields,
+            )? {
+                Some(size) => Ok(size),
+                None => self.sizeof_struct_field_array_element_field(name, array_fields, fields),
+            },
+            Expr::StructFieldArrayElementSet {
                 name,
                 array_fields,
                 fields,
@@ -17048,9 +17163,14 @@ impl Interpreter {
                 fields,
                 ..
             } => self.sizeof_struct_field_array_element_field(name, array_fields, fields),
-            Expr::StructElementGet { name, fields, .. } => {
-                self.sizeof_struct_element_field(name, fields)
-            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => match self.sizeof_scalar_variable_reverse_subscript_field(name, index, fields)? {
+                Some(size) => Ok(size),
+                None => self.sizeof_struct_element_field(name, fields),
+            },
             Expr::StructElementArrayGet { name, fields, .. } => {
                 self.sizeof_struct_element_array_indexed_value(name, fields)
             }
@@ -17077,15 +17197,22 @@ impl Interpreter {
                     None => Err(CustError::new("expected pointer expression")),
                 }
             }
-            Expr::ArrayGet { name, .. } => match self.find_variable(name) {
-                Some(Value::StructArray { type_name, .. }) => self
-                    .struct_types
-                    .get(type_name)
-                    .map(|struct_type| struct_type.size(&self.struct_types))
-                    .transpose()?
-                    .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
-                _ => self.sizeof_indexed_value(name),
-            },
+            Expr::ArrayGet { name, index } => {
+                if let Some(size) = self.sizeof_scalar_variable_reverse_subscript(name, index)? {
+                    return Ok(size);
+                }
+                match self.find_variable(name) {
+                    Some(Value::StructArray { type_name, .. }) => self
+                        .struct_types
+                        .get(type_name)
+                        .map(|struct_type| struct_type.size(&self.struct_types))
+                        .transpose()?
+                        .ok_or_else(|| {
+                            CustError::new(format!("undefined struct type '{type_name}'"))
+                        }),
+                    _ => self.sizeof_indexed_value(name),
+                }
+            }
             Expr::StringGet { .. } => Ok(CHAR_SIZE),
             Expr::AddressOf(_)
             | Expr::AddressOfArray { .. }
@@ -17501,6 +17628,10 @@ impl Interpreter {
                 let (_, field_value) = Self::nested_field_value(type_name, first_element, path)?;
                 self.struct_field_value_size(field_value)
             }
+            Some(Value::Pointer {
+                ty: PointeeType::Struct(type_name),
+                ..
+            }) => self.sizeof_aggregate_field_type(type_name, path),
             Some(_) => Err(CustError::new(format!(
                 "variable '{name}' is not a struct array"
             ))),

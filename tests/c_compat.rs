@@ -194,6 +194,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/pointer_truthiness_and_equality.c",
     "tests/fixtures/compat/valid/reverse_subscript.c",
     "tests/fixtures/compat/valid/scalar_variable_reverse_subscript.c",
+    "tests/fixtures/compat/valid/sizeof_scalar_reverse_subscripts.c",
     "tests/fixtures/compat/valid/subscript_comma_expressions.c",
     "tests/fixtures/compat/valid/string_literal_element_address.c",
     "tests/fixtures/compat/valid/pointer_typedef_aliases.c",

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-18 scalar-variable reverse-subscript run after clean startup inspection, focused runtime-shape RED/GREEN tests, exact const/bounds/type diagnostics, warning-free GCC/Clang exit 220, 736 passing interpreter tests, and the full required local and Docker gates. The adjacent non-evaluating `sizeof` gap is a concrete backlog item, not a blocker.
+None. Last reviewed in the 2026-07-18 scalar reverse-subscript `sizeof` run after clean startup inspection, three focused RED/GREEN regressions, thirteen direct/reverse type relationships, side-effect non-evaluation coverage, exact shape diagnostics, warning-free GCC/Clang exit 13, 739 passing interpreter tests, and the full required local and Docker gates. Reverse-subscript assignment-result `sizeof` metadata is a concrete next backlog item, not a blocker.
 
 ## Blocker template
 
