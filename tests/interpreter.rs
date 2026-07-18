@@ -8711,6 +8711,265 @@ fn supports_embedded_aggregate_array_element_field_increment_decrement() {
 }
 
 #[test]
+fn supports_reverse_embedded_aggregate_array_element_field_assignment() {
+    let program = r#"
+        struct Point { int value; };
+        struct Index { int value; };
+
+        int main(void) {
+            struct Point points[2] = {{3}, {5}};
+            struct Index index = {1};
+            int result = index.value[points].value = 9;
+            return result + points[1].value;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 18);
+}
+
+#[test]
+fn embedded_aggregate_array_element_field_replacement_assignment_evaluates_once() {
+    let program = r#"
+        struct Point { int value; };
+        struct Box { struct Point points[2]; };
+        struct Index { int value; };
+
+        int main(void) {
+            struct Box box = {{{3}, {5}}};
+            struct Point points[2] = {{6}, {8}};
+            struct Index index = {1};
+            int direct_index_marker = 0;
+            int direct_rhs_marker = 0;
+            int reverse_pointer_marker = 0;
+            int reverse_rhs_marker = 0;
+            int direct_result = box.points[(direct_index_marker += 1, 0)].value =
+                (direct_rhs_marker += 1, 7);
+            int reverse_result = index.value[(reverse_pointer_marker += 1, points)].value =
+                (reverse_rhs_marker += 1, 9);
+            return direct_result + reverse_result + box.points[0].value + points[1].value
+                + direct_index_marker + direct_rhs_marker
+                + reverse_pointer_marker + reverse_rhs_marker;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 36);
+}
+
+#[test]
+fn direct_embedded_aggregate_array_element_field_compound_assignment_evaluates_once() {
+    let program = r#"
+        struct Point { int value; };
+        struct Box { struct Point points[2]; };
+
+        int main(void) {
+            struct Box box = {{{3}, {10}}};
+            int index_marker = 0;
+            int rhs_marker = 0;
+            int result = (box.points[index_marker++].value += (rhs_marker += 1, 2));
+            int ok = 0;
+            ok += result == 5;
+            ok += index_marker == 1;
+            ok += rhs_marker == 1;
+            ok += box.points[0].value == 5;
+            ok += box.points[1].value == 10;
+            return ok;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 5);
+}
+
+#[test]
+fn reverse_embedded_aggregate_array_element_field_compound_assignment_evaluates_once() {
+    let program = r#"
+        struct Point { int value; };
+        struct Index { int value; };
+
+        int main(void) {
+            struct Point points[2] = {{3}, {5}};
+            struct Index index = {1};
+            int pointer_marker = 0;
+            int rhs_marker = 0;
+            int result = (index.value[(pointer_marker += 1, points)].value +=
+                          (rhs_marker += 1, 2));
+            int ok = 0;
+            ok += result == 7;
+            ok += pointer_marker == 1;
+            ok += rhs_marker == 1;
+            ok += points[0].value == 3;
+            ok += points[1].value == 7;
+            return ok;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 5);
+}
+
+#[test]
+fn supports_embedded_aggregate_array_element_field_assignment() {
+    let program =
+        include_str!("fixtures/valid/embedded_aggregate_array_element_field_assignment.c");
+
+    assert_eq!(interpret(program).unwrap(), 16);
+}
+
+#[test]
+fn embedded_aggregate_array_element_field_assignment_preserves_diagnostics() {
+    let cases = [
+        (
+            r#"
+                struct Point { int value; };
+                struct Box { const struct Point points[2]; };
+                int main(void) {
+                    struct Box box = {{{3}, {5}}};
+                    return box.points[0].value = 9;
+                }
+            "#,
+            "cannot assign to const struct field 'points'",
+        ),
+        (
+            r#"
+                struct Point { const int value; };
+                struct Box { struct Point points[2]; };
+                int main(void) {
+                    struct Box box = {{{3}, {5}}};
+                    return box.points[0].value += 2;
+                }
+            "#,
+            "cannot assign to const struct field 'value'",
+        ),
+        (
+            r#"
+                struct Point { int value; };
+                struct Index { int value; };
+                int main(void) {
+                    const struct Point points[2] = {{3}, {5}};
+                    struct Index index = {1};
+                    return index.value[points].value = 9;
+                }
+            "#,
+            "cannot assign to const variable 'points'",
+        ),
+        (
+            r#"
+                struct Point { int value; };
+                struct Box { struct Point points[2]; };
+                int main(void) {
+                    struct Box box = {{{3}, {5}}};
+                    return box.points[2].value = 9;
+                }
+            "#,
+            "struct array field 'points' index 2 out of bounds for length 2",
+        ),
+        (
+            r#"
+                struct Point { int value; };
+                struct Index { int value; };
+                int main(void) {
+                    struct Point points[2] = {{3}, {5}};
+                    struct Index index = {2};
+                    return index.value[points].value += 2;
+                }
+            "#,
+            "struct array 'points' index 2 out of bounds for length 2",
+        ),
+        (
+            r#"
+                struct Index { int value; };
+                int main(void) {
+                    int values[2] = {3, 5};
+                    struct Index index = {1};
+                    return index.value[values].value = 9;
+                }
+            "#,
+            "pointer does not reference a struct",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        match interpret(program) {
+            Ok(value) => panic!("expected '{expected}', got {value}; program: {program}"),
+            Err(err) => assert_eq!(err.to_string(), expected, "program: {program}"),
+        }
+    }
+}
+
+#[test]
+fn aggregate_pointer_field_indexed_assignments_preserve_pointee_constness() {
+    let const_pointee = r#"
+        struct Point { int value; };
+        struct Cursor { const struct Point *points; };
+        int main(void) {
+            struct Point points[1] = {{1}};
+            struct Cursor cursor = {points};
+            return cursor.points[0].value += 2;
+        }
+    "#;
+    assert_eq!(
+        interpret(const_pointee).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+
+    let const_slot = r#"
+        struct Point { int value; };
+        struct Cursor { struct Point * const points; };
+        int main(void) {
+            struct Point points[1] = {{1}};
+            const struct Cursor cursor = {points};
+            int result = cursor.points[0].value = 9;
+            return result + points[0].value;
+        }
+    "#;
+    assert_eq!(interpret(const_slot).unwrap(), 18);
+}
+
+#[test]
+fn sizeof_embedded_aggregate_array_element_field_assignments_is_non_evaluating() {
+    let program = r#"
+        struct Point { int value; char tag; };
+        struct Box { struct Point points[2]; };
+        struct Index { int value; };
+
+        int main(void) {
+            struct Box box = {{{3, 'a'}, {5, 'b'}}};
+            struct Point points[2] = {{7, 'c'}, {9, 'd'}};
+            struct Index index = {1};
+            int direct_index_marker = 0;
+            int direct_rhs_marker = 0;
+            int reverse_pointer_marker = 0;
+            int reverse_rhs_marker = 0;
+            int ok = 0;
+
+            ok += sizeof(
+                box.points[(direct_index_marker += 1, 0)].tag =
+                    (direct_rhs_marker += 1, 'x')
+            ) == sizeof(char);
+            ok += sizeof(
+                box.points[(direct_index_marker += 1, 1)].value +=
+                    (direct_rhs_marker += 1, 2)
+            ) == sizeof(int);
+            ok += sizeof(
+                index.value[(reverse_pointer_marker += 1, points)].tag =
+                    (reverse_rhs_marker += 1, 'y')
+            ) == sizeof(char);
+            ok += sizeof(
+                index.value[(reverse_pointer_marker += 1, points)].value *=
+                    (reverse_rhs_marker += 1, 2)
+            ) == sizeof(int);
+            ok += direct_index_marker == 0;
+            ok += direct_rhs_marker == 0;
+            ok += reverse_pointer_marker == 0;
+            ok += reverse_rhs_marker == 0;
+            ok += box.points[0].tag == 'a' && box.points[1].value == 5;
+            ok += points[1].tag == 'd' && points[1].value == 9;
+            return ok;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 10);
+}
+
+#[test]
 fn embedded_aggregate_array_element_field_increment_preserves_diagnostics() {
     let cases = [
         (

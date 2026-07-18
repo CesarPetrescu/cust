@@ -13229,65 +13229,45 @@ impl Interpreter {
         }
     }
 
-    fn assign_struct_field_array_element_field(
+    fn struct_field_array_element_assignment_pointer(
         &mut self,
         name: &str,
         array_fields: &[String],
         index: &Expr,
-        fields: &[String],
-        value: i64,
-    ) -> CustResult<()> {
-        self.ensure_variable_mutable(name)?;
-        let index_value = self.eval(index)?;
-        let struct_types = self.struct_types.clone();
-        match self.find_variable_mut(name) {
-            Some(Value::Struct {
-                type_name,
-                fields: field_map,
-            }) => {
-                let (_, array_value) =
-                    Self::nested_field_value_mut(type_name, field_map, array_fields)?;
-                let StructFieldValue::StructArray {
-                    type_name: element_type,
-                    elements,
-                    is_const,
-                } = array_value
-                else {
-                    return Err(CustError::new(format!(
-                        "struct field '{}' is not a struct array",
-                        Self::field_path_label(array_fields)
-                    )));
-                };
-                if *is_const {
-                    return Err(CustError::new(format!(
-                        "cannot assign to const struct field '{}'",
-                        Self::field_path_label(array_fields)
-                    )));
+    ) -> CustResult<PointerValue> {
+        if let Some(pointer) =
+            self.scalar_field_reverse_subscript_pointer(name, array_fields, index)?
+        {
+            match index {
+                Expr::Var(pointer_name)
+                    if matches!(
+                        self.find_variable(pointer_name),
+                        Some(Value::StructArray { .. })
+                    ) =>
+                {
+                    self.ensure_variable_mutable(pointer_name)?;
                 }
-                let len = elements.len();
-                let Ok(index) = usize::try_from(index_value) else {
-                    return Err(CustError::new(format!(
-                        "struct array field '{}' index {index_value} out of bounds for length {len}",
-                        Self::field_path_label(array_fields)
-                    )));
-                };
-                let element = elements.get_mut(index).ok_or_else(|| {
-                    CustError::new(format!(
-                        "struct array field '{}' index {index_value} out of bounds for length {len}",
-                        Self::field_path_label(array_fields)
-                    ))
-                })?;
-                Self::assign_scalar_field_in_map(
-                    &struct_types,
-                    element_type,
-                    element,
-                    fields,
-                    value,
-                )
+                _ => {}
             }
-            Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
-            None => Err(CustError::new(format!("undefined variable '{name}'"))),
+            self.ensure_reverse_subscript_pointee_mutable(index)?;
+            return Ok(pointer);
         }
+
+        if self.struct_field_is_pointer(name, array_fields) {
+            if self.struct_pointer_field_points_to_const(name, array_fields) {
+                return Err(CustError::new("cannot assign through pointer to const"));
+            }
+            return self.find_struct_array_field_pointer(name, array_fields, index);
+        }
+
+        self.ensure_variable_mutable(name)?;
+        if self.direct_struct_array_field_points_to_const(name, array_fields) {
+            return Err(CustError::new(format!(
+                "cannot assign to const struct field '{}'",
+                Self::field_path_label(array_fields)
+            )));
+        }
+        self.find_struct_array_field_pointer(name, array_fields, index)
     }
 
     fn find_struct_array_field_pointer(
@@ -17942,32 +17922,8 @@ impl Interpreter {
                 index,
                 fields,
             } => {
-                let pointer = if let Some(pointer) =
-                    self.scalar_field_reverse_subscript_pointer(name, array_fields, index)?
-                {
-                    match index.as_ref() {
-                        Expr::Var(pointer_name)
-                            if matches!(
-                                self.find_variable(pointer_name),
-                                Some(Value::StructArray { .. })
-                            ) =>
-                        {
-                            self.ensure_variable_mutable(pointer_name)?;
-                        }
-                        _ => {}
-                    }
-                    self.ensure_reverse_subscript_pointee_mutable(index)?;
-                    pointer
-                } else {
-                    self.ensure_variable_mutable(name)?;
-                    if self.direct_struct_array_field_points_to_const(name, array_fields) {
-                        return Err(CustError::new(format!(
-                            "cannot assign to const struct field '{}'",
-                            Self::field_path_label(array_fields)
-                        )));
-                    }
-                    self.find_struct_array_field_pointer(name, array_fields, index)?
-                };
+                let pointer =
+                    self.struct_field_array_element_assignment_pointer(name, array_fields, index)?;
                 let current = self.read_struct_pointer_field(&pointer, fields)?;
                 let updated = Self::apply_increment_op(current, op);
                 self.assign_struct_pointer_field(&pointer, fields, updated)?;
@@ -18878,13 +18834,9 @@ impl Interpreter {
                 value,
             } => {
                 let value = self.eval(value)?;
-                self.assign_struct_field_array_element_field(
-                    name,
-                    array_fields,
-                    index,
-                    fields,
-                    value,
-                )?;
+                let pointer =
+                    self.struct_field_array_element_assignment_pointer(name, array_fields, index)?;
+                self.assign_struct_pointer_field(&pointer, fields, value)?;
                 Ok(value)
             }
             Expr::StructFieldArrayElementCompoundSet {
@@ -18895,17 +18847,12 @@ impl Interpreter {
                 op,
                 value,
             } => {
-                let current =
-                    self.read_struct_field_array_element_field(name, array_fields, index, fields)?;
+                let pointer =
+                    self.struct_field_array_element_assignment_pointer(name, array_fields, index)?;
+                let current = self.read_struct_pointer_field(&pointer, fields)?;
                 let rhs = self.eval(value)?;
                 let result = Self::apply_compound_op(current, *op, rhs)?;
-                self.assign_struct_field_array_element_field(
-                    name,
-                    array_fields,
-                    index,
-                    fields,
-                    result,
-                )?;
+                self.assign_struct_pointer_field(&pointer, fields, result)?;
                 Ok(result)
             }
             Expr::StructElementGet {
