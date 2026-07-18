@@ -9709,6 +9709,7 @@ impl Parser {
             Expr::Var(_)
             | Expr::ArrayGet { .. }
             | Expr::StructArrayGet { .. }
+            | Expr::StructFieldArrayElementGet { .. }
             | Expr::StructElementGet { .. }
             | Expr::StructElementArrayGet { .. }
             | Expr::StructPtrArrayGet { .. }
@@ -17933,6 +17934,43 @@ impl Interpreter {
                     )));
                 }
                 array.elements[index] = updated;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            } => {
+                let pointer = if let Some(pointer) =
+                    self.scalar_field_reverse_subscript_pointer(name, array_fields, index)?
+                {
+                    match index.as_ref() {
+                        Expr::Var(pointer_name)
+                            if matches!(
+                                self.find_variable(pointer_name),
+                                Some(Value::StructArray { .. })
+                            ) =>
+                        {
+                            self.ensure_variable_mutable(pointer_name)?;
+                        }
+                        _ => {}
+                    }
+                    self.ensure_reverse_subscript_pointee_mutable(index)?;
+                    pointer
+                } else {
+                    self.ensure_variable_mutable(name)?;
+                    if self.direct_struct_array_field_points_to_const(name, array_fields) {
+                        return Err(CustError::new(format!(
+                            "cannot assign to const struct field '{}'",
+                            Self::field_path_label(array_fields)
+                        )));
+                    }
+                    self.find_struct_array_field_pointer(name, array_fields, index)?
+                };
+                let current = self.read_struct_pointer_field(&pointer, fields)?;
+                let updated = Self::apply_increment_op(current, op);
+                self.assign_struct_pointer_field(&pointer, fields, updated)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::StructElementGet {

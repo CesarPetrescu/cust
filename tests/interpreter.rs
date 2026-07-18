@@ -8673,6 +8673,155 @@ fn supports_increment_decrement_for_scalar_indexed_and_deref_lvalues() {
 }
 
 #[test]
+fn supports_prefix_increment_for_embedded_aggregate_array_element_fields() {
+    let program = r#"
+        struct Point { int value; };
+        struct Box { struct Point points[2]; };
+
+        int main(void) {
+            struct Box box = {{{3}, {5}}};
+            return ++box.points[1].value;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 6);
+}
+
+#[test]
+fn supports_prefix_increment_for_reverse_aggregate_subscript_fields() {
+    let program = r#"
+        struct Point { int value; };
+        struct Index { int value; };
+
+        int main(void) {
+            struct Point points[2] = {{3}, {5}};
+            struct Index index = {1};
+            return ++index.value[points].value;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 6);
+}
+
+#[test]
+fn supports_embedded_aggregate_array_element_field_increment_decrement() {
+    let program = include_str!("fixtures/valid/embedded_aggregate_array_element_field_increment.c");
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn embedded_aggregate_array_element_field_increment_preserves_diagnostics() {
+    let cases = [
+        (
+            r#"
+                struct Point { int value; };
+                struct Box { const struct Point points[2]; };
+                int main(void) {
+                    struct Box box = {{{3}, {5}}};
+                    return ++box.points[0].value;
+                }
+            "#,
+            "cannot assign to const struct field 'points'",
+        ),
+        (
+            r#"
+                struct Point { const int value; };
+                struct Box { struct Point points[2]; };
+                int main(void) {
+                    struct Box box = {{{3}, {5}}};
+                    return ++box.points[0].value;
+                }
+            "#,
+            "cannot assign to const struct field 'value'",
+        ),
+        (
+            r#"
+                struct Point { int value; };
+                struct Index { int value; };
+                int main(void) {
+                    const struct Point points[2] = {{3}, {5}};
+                    struct Index index = {1};
+                    return ++index.value[points].value;
+                }
+            "#,
+            "cannot assign to const variable 'points'",
+        ),
+        (
+            r#"
+                struct Point { int value; };
+                struct Box { struct Point points[2]; };
+                int main(void) {
+                    struct Box box = {{{3}, {5}}};
+                    return box.points[2].value++;
+                }
+            "#,
+            "struct array field 'points' index 2 out of bounds for length 2",
+        ),
+        (
+            r#"
+                struct Point { int value; };
+                struct Index { int value; };
+                int main(void) {
+                    struct Point points[2] = {{3}, {5}};
+                    struct Index index = {2};
+                    return index.value[points].value++;
+                }
+            "#,
+            "struct array 'points' index 2 out of bounds for length 2",
+        ),
+        (
+            r#"
+                struct Index { int value; };
+                int main(void) {
+                    int values[2] = {3, 5};
+                    struct Index index = {1};
+                    return ++index.value[values].value;
+                }
+            "#,
+            "pointer does not reference a struct",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        match interpret(program) {
+            Ok(value) => panic!("expected '{expected}', got {value}; program: {program}"),
+            Err(err) => assert_eq!(err.to_string(), expected, "program: {program}"),
+        }
+    }
+}
+
+#[test]
+fn sizeof_embedded_aggregate_array_element_field_increments_is_non_evaluating() {
+    let program = r#"
+        struct Point { int value; char tag; };
+        struct Box { struct Point points[2]; };
+        struct Index { int value; };
+
+        int main(void) {
+            struct Box box = {{{3, 'a'}, {5, 'b'}}};
+            struct Point points[2] = {{7, 'c'}, {9, 'd'}};
+            struct Index index = {1};
+            int direct_marker = 0;
+            int reverse_marker = 0;
+            int ok = 0;
+
+            ok += sizeof(++box.points[(direct_marker += 1, 0)].tag) == sizeof(char);
+            ok += sizeof(box.points[(direct_marker += 1, 1)].value--) == sizeof(int);
+            ok += sizeof(++index.value[(reverse_marker += 1, points)].tag) == sizeof(char);
+            ok += sizeof(index.value[(reverse_marker += 1, points)].value--) == sizeof(int);
+            ok += direct_marker == 0;
+            ok += reverse_marker == 0;
+            ok += box.points[0].tag == 'a' && box.points[1].value == 5;
+            ok += points[1].tag == 'd' && points[1].value == 9;
+            return ok;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
 fn supports_bitwise_and_shift_operators_with_c_precedence() {
     let program = include_str!("fixtures/valid/bitwise_operators.c");
 

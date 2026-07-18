@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-18 reverse-subscript lvalue-result `sizeof` run after clean startup inspection, four focused RED/GREEN regressions, eleven assignment/compound/increment type relationships, pointer/index/RHS non-evaluation markers, warning-free GCC exit 13, 744 passing interpreter tests, and the full required local and Docker gates. Clang's `-Wunevaluated-expression` under `-Werror` is a documented native-oracle boundary, not a Cust blocker. Embedded aggregate-array element field increment/decrement parity is the next concrete backlog item.
+None. Last reviewed in the 2026-07-18 embedded aggregate-array element field increment/decrement run after clean startup inspection, focused direct/reverse RED/GREEN tests, one-time index/pointer evaluation coverage, exact const/bounds/type diagnostics, non-evaluating `sizeof` markers, warning-free Cust/GCC/Clang exit 14, 749 passing interpreter tests, and the full required local and Docker gates. The full Clang `c_compat` sweep's pre-existing `-Wconstant-logical-operand` warning is documented but does not affect the canonical/default-compiler gate or the new fixture. Embedded aggregate-array element field replacement/compound-assignment parity is the next concrete backlog item.
 
 ## Blocker template
 
