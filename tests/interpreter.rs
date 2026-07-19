@@ -9075,6 +9075,81 @@ fn adjusted_aggregate_parameter_recursive_identity_model_routes_match_fixture() 
 }
 
 #[test]
+fn adjusted_aggregate_parameter_alias_mutation_model_routes_match_fixture() {
+    let program =
+        include_str!("fixtures/valid/adjusted_aggregate_parameter_alias_mutation_model_routes.c",);
+
+    assert_eq!(interpret(program).unwrap(), 40);
+}
+
+#[test]
+fn aggregate_array_field_elements_decay_embedded_arrays_for_direct_access() {
+    let program = r#"
+        struct Point { int value; };
+        struct Inner { int values[3]; struct Point points[2]; };
+        struct Item { struct Inner nested; };
+        struct Wrapper { struct Item items[2]; };
+
+        int main(void) {
+            struct Wrapper wrapper;
+            wrapper.items[0].nested.values[1] = 7;
+            2[wrapper.items[0].nested.values] = 9;
+            wrapper.items[0].nested.points[1].value = 11;
+            int *scalar = &wrapper.items[0].nested.values[1];
+            struct Point *point = &wrapper.items[0].nested.points[1];
+            return *scalar + wrapper.items[0].nested.values[2] + point->value;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 27);
+}
+
+#[test]
+fn adjusted_aggregate_parameter_alias_helpers_preserve_identity_and_write_order() {
+    let program = r#"
+        struct Point { int value; };
+        struct Inner { int values[3]; struct Point points[3]; };
+        struct Item { struct Inner nested; };
+        struct Wrapper { struct Item items[2]; };
+
+        int *forward_int(int *slot) { return slot; }
+        int *forward_int_twice(int *slot) { return forward_int(slot); }
+        const int *forward_const_int(const int *slot) { return slot; }
+
+        int mutate(int *first, int *second, const int *reader) {
+            *first = 20;
+            int before = *reader;
+            *second += 3;
+            int after = *reader;
+            first = 0;
+            second = 0;
+            reader = 0;
+            return before + after;
+        }
+
+        int probe(struct Item items[]) {
+            int *first = forward_int(&items[0].nested.values[1]);
+            int *second = forward_int_twice(&items[0].nested.values[1]);
+            const int *reader = forward_const_int(&items[0].nested.values[1]);
+            int observed = mutate(first, second, reader);
+            return observed + *first + *second + *reader;
+        }
+
+        int main(void) {
+            struct Item root[2];
+            struct Wrapper wrapper;
+            root[0].nested.values[1] = 4;
+            wrapper.items[0].nested.values[1] = 5;
+            return probe(root) + probe(wrapper.items)
+                + root[0].nested.values[1]
+                + wrapper.items[0].nested.values[1];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 270);
+}
+
+#[test]
 fn sizeof_aggregate_array_parameter_embedded_array_field_operations_is_non_evaluating() {
     let program = r#"
         struct Point { int value; };

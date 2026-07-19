@@ -15890,7 +15890,10 @@ impl Interpreter {
             } => {
                 let target_pointer =
                     self.struct_field_array_element_pointer(name, array_fields, index)?;
-                self.read_struct_pointer_pointer_field(&target_pointer, fields)
+                match self.find_struct_pointer_array_field_base_pointer(&target_pointer, fields) {
+                    Ok(pointer) => Ok(pointer),
+                    Err(_) => self.read_struct_pointer_pointer_field(&target_pointer, fields),
+                }
             }
             Expr::StructPtrArrayGet {
                 pointer,
@@ -16828,8 +16831,17 @@ impl Interpreter {
                 array_fields,
                 index,
                 fields,
-            }
-            | Expr::StructFieldArrayElementSet {
+            } => matches!(
+                self.struct_field_array_element_field_metadata(name, array_fields, index, fields),
+                Ok(Some((
+                    StructFieldType::Pointer(_)
+                        | StructFieldType::Array(_, _)
+                        | StructFieldType::StructArray(_, _),
+                    _,
+                    _
+                )))
+            ),
+            Expr::StructFieldArrayElementSet {
                 name,
                 array_fields,
                 index,

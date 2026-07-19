@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-19 — Ordered alias mutation through adjusted aggregate parameters
+
+- C array adjustment copies the outer aggregate pointer slot; embedded pointers captured from it retain the concrete outer owner/path/index. Model two mutable writers and a `const` reader by storage identity, apply writes in source order, and separately score intermediate/final reader observations plus caller pointer identities.
+- An outer aggregate-array field element selecting a nested array is represented by `Expr::StructFieldArrayElementGet`. Pointer-value classification must include `StructFieldType::Array` and `StructFieldType::StructArray`, while assignment-result variants remain pointer-valued only for ordinary pointer fields. Runtime pointer evaluation must try embedded-array base decay before pointer-field reads.
+- The warning-free compiler-oracle fixture uses only defined same-element aliases and ABI-independent value/identity checks. Cust, GCC, and Clang return 40 with `-std=c11 -Wall -Wextra -Werror`. Implementation and recovery details are in `references/cust-adjusted-aggregate-parameter-alias-mutations.md`.
+
 ## 2026-07-19 — Model-based recursive identity through adjusted aggregate parameters
 
 - Model adjusted parameters by the argument's concrete storage identity plus outer aggregate index, nested field path, and inner element index. C array adjustment copies a pointer slot; it does not flatten field-decayed outer-array identity or merge distinct embedded arrays from different outer elements.

@@ -2517,6 +2517,80 @@ fn generated_adjusted_aggregate_parameter_embedded_field_pointers_match_model_wi
 }
 
 #[test]
+fn generated_adjusted_parameter_alias_mutations_match_model_without_panics() {
+    let mut relation_counts = [0; 6];
+    let mut direct_routes = 0;
+    let mut reverse_routes = 0;
+    let mut one_hop_routes = 0;
+    let mut two_hop_routes = 0;
+    let mut root_arguments = 0;
+    let mut field_arguments = 0;
+
+    for kind in AdjustedParameterFieldKind::ALL {
+        for case_index in 0..24 {
+            let relation_index = case_index % AdjustedParameterRelation::ALL.len();
+            let relation = AdjustedParameterRelation::ALL[relation_index];
+            relation_counts[relation_index] += 1;
+            let first = adjusted_parameter_first_pointer(kind, relation_index, case_index);
+            let second = adjusted_parameter_related_pointer(first, relation);
+            let reader = if case_index & 1 == 0 { first } else { second };
+            let two_hop = [
+                case_index & 1 == 0,
+                case_index & 2 == 0,
+                case_index & 4 == 0,
+            ];
+            let replacement = 151 + case_index as i64;
+            let delta = 1 + (case_index % 7) as i64;
+
+            for pointer in [first, second, reader] {
+                match pointer.route {
+                    AdjustedParameterRoute::Direct => direct_routes += 1,
+                    AdjustedParameterRoute::Reverse => reverse_routes += 1,
+                }
+                if pointer.storage.is_root() {
+                    root_arguments += 1;
+                } else {
+                    field_arguments += 1;
+                }
+            }
+            one_hop_routes += two_hop.iter().filter(|twice| !**twice).count();
+            two_hop_routes += two_hop.iter().filter(|twice| **twice).count();
+
+            let source = adjusted_parameter_alias_mutation_program(
+                first,
+                second,
+                reader,
+                replacement,
+                delta,
+                two_hop,
+            );
+            let expected = adjusted_parameter_alias_mutation_expected(
+                first,
+                second,
+                reader,
+                replacement,
+                delta,
+            );
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "adjusted parameter alias mutation case {case_index}, kind {kind:?}, relation {relation:?}, first {first:?}, second {second:?}, reader {reader:?}"
+                ),
+            );
+        }
+    }
+
+    assert_eq!(relation_counts, [8; 6]);
+    assert_eq!(direct_routes, 72);
+    assert_eq!(reverse_routes, 72);
+    assert_eq!(one_hop_routes, 72);
+    assert_eq!(two_hop_routes, 72);
+    assert!(root_arguments >= 30);
+    assert!(field_arguments >= 90);
+}
+
+#[test]
 fn generated_nested_anonymous_aggregate_compound_literal_field_pointer_alias_mutations_match_model_without_panics()
  {
     let mut state = 0xC057_117E_AA55_u64;
@@ -9861,6 +9935,13 @@ impl AdjustedParameterFieldKind {
         }
     }
 
+    fn suffix(self) -> &'static str {
+        match self {
+            Self::Scalar => "int",
+            Self::Aggregate => "point",
+        }
+    }
+
     fn read(self, pointer: &str) -> String {
         match self {
             Self::Scalar => format!("*{pointer}"),
@@ -9872,6 +9953,13 @@ impl AdjustedParameterFieldKind {
         match self {
             Self::Scalar => format!("*{pointer} = {value}"),
             Self::Aggregate => format!("{pointer}->value = {value}"),
+        }
+    }
+
+    fn compound_add(self, pointer: &str, value: i64) -> String {
+        match self {
+            Self::Scalar => format!("*{pointer} += {value}"),
+            Self::Aggregate => format!("{pointer}->value += {value}"),
         }
     }
 
@@ -9945,6 +10033,24 @@ impl AdjustedParameterPointer {
             }
             AdjustedParameterRoute::Reverse => {
                 format!("&({inner}++)[{parameter}[{outer}++].nested.{field}]")
+            }
+        }
+    }
+
+    fn render_static_address(self, parameter: &str) -> String {
+        let field = self.kind.field_name();
+        match self.route {
+            AdjustedParameterRoute::Direct => {
+                format!(
+                    "&{parameter}[{}].nested.{field}[{}]",
+                    self.outer, self.inner
+                )
+            }
+            AdjustedParameterRoute::Reverse => {
+                format!(
+                    "&{}[{parameter}[{}].nested.{field}]",
+                    self.inner, self.outer
+                )
             }
         }
     }
@@ -10236,6 +10342,118 @@ fn adjusted_parameter_aggregate_type_mismatch_program(storage: AdjustedParameter
         declarations = adjusted_parameter_declarations(),
         storage = storage.expression(),
     )
+}
+
+fn adjusted_parameter_forward_expr(
+    pointer: AdjustedParameterPointer,
+    address: &str,
+    two_hop: bool,
+    is_const: bool,
+) -> String {
+    format!(
+        "forward_{}alias_{}{}({address})",
+        if is_const { "const_" } else { "" },
+        pointer.kind.suffix(),
+        if two_hop { "_twice" } else { "" },
+    )
+}
+
+fn adjusted_parameter_alias_mutation_program(
+    first: AdjustedParameterPointer,
+    second: AdjustedParameterPointer,
+    reader: AdjustedParameterPointer,
+    replacement: i64,
+    delta: i64,
+    two_hop: [bool; 3],
+) -> String {
+    let kind = first.kind;
+    let first_address = first.render_static_address("first_items");
+    let second_address = second.render_static_address("second_items");
+    let reader_address = reader.render_static_address("reader_items");
+    let first_forward = adjusted_parameter_forward_expr(first, &first_address, two_hop[0], false);
+    let second_forward =
+        adjusted_parameter_forward_expr(second, &second_address, two_hop[1], false);
+    let reader_forward = adjusted_parameter_forward_expr(reader, &reader_address, two_hop[2], true);
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+
+    format!(
+        "{prelude}\n\
+         {pointer_type}forward_alias_{suffix}({pointer_type}value) {{ return value; }}\n\
+         {pointer_type}forward_alias_{suffix}_twice({pointer_type}value) {{ return forward_alias_{suffix}(value); }}\n\
+         {const_pointer_type}forward_const_alias_{suffix}({const_pointer_type}value) {{ return value; }}\n\
+         {const_pointer_type}forward_const_alias_{suffix}_twice({const_pointer_type}value) {{ return forward_const_alias_{suffix}(value); }}\n\
+         int mutate_alias_{suffix}({pointer_type}first, {pointer_type}second, {const_pointer_type}reader, {pointer_type}fallback) {{\n\
+             {write_first};\n\
+             int before = {read_reader};\n\
+             {compound_second};\n\
+             int after = {read_reader};\n\
+             first = fallback; second = fallback; reader = fallback;\n\
+             return before * 3 + after * 5 + (first == fallback) + (second == fallback) + (reader == fallback);\n\
+         }}\n\
+         int probe(struct Item first_items[], struct Item second_items[], struct Item reader_items[]) {{\n\
+             {pointer_type}a = {first_forward};\n\
+             {pointer_type}b = {second_forward};\n\
+             {const_pointer_type}r = {reader_forward};\n\
+             {initialize_first}; {initialize_second};\n\
+             int observed = mutate_alias_{suffix}(a, b, r, a);\n\
+             int caller_identity = (a == {first_address}) + (b == {second_address}) + (r == {reader_address});\n\
+             return observed + {read_a} * 7 + {read_b} * 11 + {read_r} * 13 + caller_identity * 17;\n\
+         }}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             return probe({first_storage}, {second_storage}, {reader_storage});\n\
+         }}\n",
+        prelude = adjusted_parameter_prelude(),
+        declarations = adjusted_parameter_declarations(),
+        write_first = kind.write("first", replacement),
+        read_reader = kind.read("reader"),
+        compound_second = kind.compound_add("second", delta),
+        initialize_first = kind.write("a", first.model_value()),
+        initialize_second = kind.write("b", second.model_value()),
+        read_a = kind.read("a"),
+        read_b = kind.read("b"),
+        read_r = kind.read("r"),
+        first_storage = first.storage.expression(),
+        second_storage = second.storage.expression(),
+        reader_storage = reader.storage.expression(),
+    )
+}
+
+fn adjusted_parameter_alias_mutation_expected(
+    first: AdjustedParameterPointer,
+    second: AdjustedParameterPointer,
+    reader: AdjustedParameterPointer,
+    replacement: i64,
+    delta: i64,
+) -> i64 {
+    let same = first.same_element(second);
+    let mut first_value = replacement;
+    let mut second_value = if same {
+        replacement
+    } else {
+        second.model_value()
+    };
+    let before = if reader.same_element(first) {
+        first_value
+    } else {
+        second_value
+    };
+    if same {
+        first_value += delta;
+        second_value = first_value;
+    } else {
+        second_value += delta;
+    }
+    let after = if reader.same_element(first) {
+        first_value
+    } else {
+        second_value
+    };
+    let reader_value = after;
+    let observed = before * 3 + after * 5 + 3;
+    observed + first_value * 7 + second_value * 11 + reader_value * 13 + 3 * 17
 }
 
 #[derive(Clone)]

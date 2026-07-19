@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-19 deterministic adjusted-aggregate-parameter identity-model run after 60 generated model cases, 14 targeted diagnostic checks, warning-free Cust/GCC/Clang exit 35, 41 passing fuzz-safety tests, 830 passing interpreter tests, and the full required local and Docker gates. Ordered two-writer/const-reader model expansion is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-19 adjusted-aggregate-parameter alias-mutation run after 48 generated two-writer/const-reader cases, direct nested-array decay RED/GREEN, warning-free Cust/GCC/Clang exit 40, 42 passing fuzz-safety tests, 833 passing interpreter tests, and the full required local and Docker gates. Nested named/anonymous/union path expansion is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 
