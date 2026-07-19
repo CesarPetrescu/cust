@@ -8962,6 +8962,231 @@ fn aggregate_array_parameter_nested_pointer_field_subscript_updates() {
 }
 
 #[test]
+fn aggregate_array_parameter_nested_pointer_field_replacement_updates_slot_once() {
+    let program = r#"
+        struct Inner { int *cursor; };
+        union Choice { struct Inner nested; int marker; };
+
+        int replace(union Choice choices[], int *replacement) {
+            int outer = 0;
+            int rhs = 0;
+            int *result =
+                choices[outer++].nested.cursor = replacement + (rhs++, 1);
+            return result[1] + choices[0].nested.cursor[0] + outer + rhs;
+        }
+
+        int main(void) {
+            int original[2] = {2, 3};
+            int replacement[3] = {5, 7, 11};
+            union Choice choices[1] = {{.nested = {original}}};
+            return replace(choices, replacement);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 20);
+}
+
+#[test]
+fn aggregate_array_parameter_nested_pointer_field_compound_and_increment_updates() {
+    let program = r#"
+        struct Inner { int *cursor; };
+        union Choice { struct Inner nested; int marker; };
+
+        int update(union Choice choices[]) {
+            int outer = 0;
+            int rhs = 0;
+            int *after_compound =
+                (choices[outer++].nested.cursor += (rhs++, 1));
+            int *old = choices[0].nested.cursor++;
+            int *updated = --choices[0].nested.cursor;
+            return after_compound[0] + old[0] + updated[1] + outer + rhs;
+        }
+
+        int main(void) {
+            int values[3] = {2, 3, 5};
+            union Choice choices[1] = {{.nested = {values}}};
+            return update(choices);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 13);
+}
+
+#[test]
+fn adjusted_aggregate_parameter_pointer_field_updates_match_fixture() {
+    let program =
+        include_str!("fixtures/valid/adjusted_aggregate_parameter_pointer_field_updates.c",);
+
+    assert_eq!(interpret(program).unwrap(), 63);
+}
+
+#[test]
+fn aggregate_array_parameter_pointer_field_updates_distinguish_qualifiers() {
+    let program = r#"
+        struct MutableInner { int *cursor; };
+        union MutableChoice { struct MutableInner nested; int marker; };
+        struct ConstViewInner { const int *cursor; };
+        union ConstViewChoice { struct ConstViewInner nested; int marker; };
+
+        int replace_through_const_parameter_slot(
+            union MutableChoice choices[const 1],
+            int *replacement
+        ) {
+            choices[0].nested.cursor = replacement;
+            return choices[0].nested.cursor[1];
+        }
+
+        int replace_const_view(
+            union ConstViewChoice choices[],
+            const int *replacement
+        ) {
+            const int *result = choices[0].nested.cursor = replacement;
+            return result[0] + choices[0].nested.cursor[1];
+        }
+
+        int main(void) {
+            int original[2] = {2, 3};
+            int replacement[2] = {5, 7};
+            const int fixed[2] = {11, 13};
+            union MutableChoice mutable_choices[1] = {{.nested = {original}}};
+            union ConstViewChoice const_view_choices[1] = {{.nested = {original}}};
+            return replace_through_const_parameter_slot(mutable_choices, replacement)
+                + replace_const_view(const_view_choices, fixed);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 31);
+}
+
+#[test]
+fn aggregate_array_parameter_pointer_field_updates_preserve_diagnostics() {
+    let cases = [
+        (
+            r#"
+                struct Inner { int *cursor; };
+                union Choice { struct Inner nested; int marker; };
+                int replace(const union Choice choices[], int *replacement) {
+                    choices[0].nested.cursor = replacement;
+                    return 0;
+                }
+                int main(void) {
+                    int values[1] = {2};
+                    int replacement[1] = {3};
+                    union Choice choices[1] = {{.nested = {values}}};
+                    return replace(choices, replacement);
+                }
+            "#,
+            "cannot assign through pointer to const",
+        ),
+        (
+            r#"
+                struct Inner { int * const cursor; };
+                union Choice { struct Inner nested; int marker; };
+                int replace(union Choice choices[], int *replacement) {
+                    choices[0].nested.cursor = replacement;
+                    return 0;
+                }
+                int main(void) {
+                    int values[1] = {2};
+                    int replacement[1] = {3};
+                    union Choice choices[1] = {{.nested = {values}}};
+                    return replace(choices, replacement);
+                }
+            "#,
+            "cannot assign to const struct field 'cursor'",
+        ),
+        (
+            r#"
+                struct Inner { const int *cursor; };
+                union Choice { struct Inner nested; int marker; };
+                int *replace(union Choice choices[], const int *replacement) {
+                    return choices[0].nested.cursor = replacement;
+                }
+                int main(void) {
+                    int values[1] = {2};
+                    const int replacement[1] = {3};
+                    union Choice choices[1] = {{.nested = {values}}};
+                    return replace(choices, replacement)[0];
+                }
+            "#,
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            r#"
+                struct Inner { int *cursor; };
+                union Choice { struct Inner nested; int marker; };
+                int shift(union Choice choices[]) {
+                    choices[0].nested.cursor += 2;
+                    return 0;
+                }
+                int main(void) {
+                    int values[2] = {2, 3};
+                    union Choice choices[1] = {{.nested = {values}}};
+                    return shift(choices);
+                }
+            "#,
+            "array pointer index 2 out of bounds for length 2",
+        ),
+        (
+            r#"
+                struct Point { int value; };
+                union Number { int value; };
+                struct Inner { struct Point *cursor; };
+                union Choice { struct Inner nested; int marker; };
+                int replace(union Choice choices[], union Number *replacement) {
+                    choices[0].nested.cursor = replacement;
+                    return 0;
+                }
+                int main(void) {
+                    struct Point points[1] = {{2}};
+                    union Number replacements[1] = {{3}};
+                    union Choice choices[1] = {{.nested = {points}}};
+                    return replace(choices, replacements);
+                }
+            "#,
+            "cannot convert pointer to union 'Number' to pointer to struct 'Point'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        match interpret(program) {
+            Ok(value) => panic!("expected '{expected}', got {value}; program: {program}"),
+            Err(err) => assert_eq!(err.to_string(), expected, "program: {program}"),
+        }
+    }
+}
+
+#[test]
+fn sizeof_aggregate_array_parameter_pointer_field_updates_is_non_evaluating() {
+    let program = r#"
+        struct Inner { int *cursor; };
+        union Choice { struct Inner nested; int marker; };
+
+        int inspect(union Choice choices[], int *replacement) {
+            int outer = 0;
+            int rhs = 0;
+            int ok = 0;
+            ok += sizeof(choices[outer++].nested.cursor = (rhs++, replacement))
+                == sizeof(int *);
+            ok += sizeof(choices[outer++].nested.cursor += (rhs++, 1))
+                == sizeof(int *);
+            ok += sizeof(choices[outer++].nested.cursor++) == sizeof(int *);
+            return ok + (outer == 0) + (rhs == 0);
+        }
+
+        int main(void) {
+            int values[2] = {2, 3};
+            int replacement[2] = {5, 7};
+            union Choice choices[1] = {{.nested = {values}}};
+            return inspect(choices, replacement)
+                + (choices[0].nested.cursor == values);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 6);
+}
+
+#[test]
 fn aggregate_array_parameter_nested_pointer_field_addresses_and_sizeof_evaluate_once() {
     let program = r#"
         struct Inner { int *values; };

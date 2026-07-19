@@ -14002,6 +14002,14 @@ impl Interpreter {
         name: &str,
         index: &Expr,
     ) -> CustResult<PointerValue> {
+        if matches!(self.find_variable(name), Some(Value::Pointer { .. })) {
+            if self.pointer_variable_points_to_const(name) {
+                return Err(CustError::new("cannot assign through pointer to const"));
+            }
+            return self.indexed_struct_pointer(name, index)?.ok_or_else(|| {
+                CustError::new(format!("variable '{name}' is not a struct pointer"))
+            });
+        }
         self.ensure_variable_mutable(name)?;
         self.find_struct_element_pointer(name, index)
     }

@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-19 — Pointer-field slot updates through adjusted aggregate-array parameters
+
+- `StructElementSet` / `StructElementCompoundSet` and pointer increment over `StructElementGet` keep their specialized AST when the containing array parameter has adjusted to `Value::Pointer`. Their shared mutating resolver must therefore select `indexed_struct_pointer()` for adjusted parameters and retain `find_struct_element_pointer()` only for stored aggregate arrays.
+- A const array-parameter pointer slot (`T items[const N]`) prevents rebinding the parameter but does not qualify the aggregate pointee. Do not run ordinary variable-slot mutability checks before mutation through an adjusted parameter; instead reject only `pointer_variable_points_to_const(name)` and let aggregate field assignment enforce a const pointer field slot separately.
+- Clang `-Wall -Wextra -Werror` rejects side-effecting pointer assignment/increment operands inside `sizeof` under `-Wunevaluated-expression`; keep marker-based non-evaluation coverage interpreter-only and use side-effect-free pointer-size relationships in `c_compat`. The compiler-neutral fixture returns 63 under Cust/GCC/Clang. See `references/cust-adjusted-aggregate-array-parameter-pointer-field-updates.md`.
+
 ## 2026-07-19 — Nested-holder pointer-field subscripts through adjusted aggregate-array parameters
 
 - A bare `choices[i].nested.pointer_field[j]` keeps the specialized `StructElementArrayGet`/set/update/address AST even inside a function where `union Choice choices[]` has undergone C array-to-pointer adjustment. Runtime helpers therefore cannot infer storage shape from syntax: direct arrays are `Value::StructArray`, adjusted parameters are `Value::Pointer { ty: PointeeType::Struct(..) }`.
