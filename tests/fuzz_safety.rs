@@ -2437,6 +2437,13 @@ enum LiteralAdjustedParameterRelation {
     DifferentLiteralRoot,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DirectLiteralAdjustedParameterRelation {
+    SameElement,
+    SameArrayDistinctElement,
+    SeparateLiteralRoot,
+}
+
 #[test]
 fn generated_adjusted_aggregate_parameter_embedded_field_pointers_match_model_without_panics() {
     let mut relation_counts = [0; 6];
@@ -2781,6 +2788,108 @@ fn generated_compound_literal_outer_array_adjusted_parameter_aliases_match_model
 
     assert_eq!(relation_counts, [12; 4]);
     assert!(path_counts.iter().all(|count| *count >= 36));
+    assert_eq!(direct_routes, 72);
+    assert_eq!(reverse_routes, 72);
+    assert_eq!(one_hop_routes, 72);
+    assert_eq!(two_hop_routes, 72);
+}
+
+#[test]
+fn generated_direct_aggregate_array_literal_adjusted_parameter_aliases_match_model_without_panics()
+{
+    let mut relation_counts = [0; 3];
+    let mut direct_routes = 0;
+    let mut reverse_routes = 0;
+    let mut one_hop_routes = 0;
+    let mut two_hop_routes = 0;
+
+    for kind in AdjustedParameterFieldKind::ALL {
+        for case_index in 0..24 {
+            let relation_index = case_index % DirectLiteralAdjustedParameterRelation::ALL.len();
+            let relation = DirectLiteralAdjustedParameterRelation::ALL[relation_index];
+            relation_counts[relation_index] += 1;
+            let first = direct_literal_adjusted_parameter_first_pointer(kind, case_index);
+            let second = direct_literal_adjusted_parameter_related_pointer(first, relation);
+            let reader = if case_index & 2 == 0 { first } else { second };
+            let two_hop = [
+                case_index & 1 == 0,
+                case_index & 2 == 0,
+                case_index & 4 == 0,
+            ];
+            let replacement = 251 + case_index as i64;
+            let delta = 1 + (case_index % 7) as i64;
+
+            for pointer in [first, second, reader] {
+                match pointer.route {
+                    AdjustedParameterRoute::Direct => direct_routes += 1,
+                    AdjustedParameterRoute::Reverse => reverse_routes += 1,
+                }
+            }
+            one_hop_routes += two_hop.iter().filter(|twice| !**twice).count();
+            two_hop_routes += two_hop.iter().filter(|twice| **twice).count();
+
+            let source = direct_literal_adjusted_parameter_alias_mutation_program(
+                first,
+                second,
+                reader,
+                replacement,
+                delta,
+                two_hop,
+            );
+            let expected = adjusted_parameter_alias_mutation_expected(
+                first,
+                second,
+                reader,
+                replacement,
+                delta,
+            ) + 19;
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "direct aggregate-array literal adjusted-parameter case {case_index}, kind {kind:?}, relation {relation:?}, first {first:?}, second {second:?}, reader {reader:?}"
+                ),
+            );
+        }
+
+        assert_interpretation(
+            &direct_literal_adjusted_parameter_inner_bounds_program(kind),
+            ExpectedInterpretation::Error(kind.inner_bounds_error()),
+            &format!("direct aggregate-array literal inner bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &direct_literal_adjusted_parameter_outer_bounds_program(kind),
+            ExpectedInterpretation::Error(
+                "struct array pointer index 2 out of bounds for length 2",
+            ),
+            &format!("direct aggregate-array literal outer bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &direct_literal_adjusted_parameter_const_discard_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("direct aggregate-array literal const discard, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &direct_literal_adjusted_parameter_const_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("direct aggregate-array literal const write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &direct_literal_adjusted_parameter_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("direct aggregate-array literal cross-root identity, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &direct_literal_adjusted_parameter_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "direct aggregate-array literal aggregate type mismatch",
+    );
+
+    assert_eq!(relation_counts, [16; 3]);
     assert_eq!(direct_routes, 72);
     assert_eq!(reverse_routes, 72);
     assert_eq!(one_hop_routes, 72);
@@ -10439,6 +10548,54 @@ impl LiteralAdjustedParameterRelation {
     ];
 }
 
+impl DirectLiteralAdjustedParameterRelation {
+    const ALL: [Self; 3] = [
+        Self::SameElement,
+        Self::SameArrayDistinctElement,
+        Self::SeparateLiteralRoot,
+    ];
+}
+
+fn direct_literal_adjusted_parameter_first_pointer(
+    kind: AdjustedParameterFieldKind,
+    case_index: usize,
+) -> AdjustedParameterPointer {
+    AdjustedParameterPointer {
+        kind,
+        storage: AdjustedParameterStorage::RootLeft,
+        outer: ((case_index / 3) % 2) as i64,
+        inner: ((case_index * 2 + 1) % 3) as i64,
+        route: if case_index & 1 == 0 {
+            AdjustedParameterRoute::Direct
+        } else {
+            AdjustedParameterRoute::Reverse
+        },
+    }
+}
+
+fn direct_literal_adjusted_parameter_related_pointer(
+    first: AdjustedParameterPointer,
+    relation: DirectLiteralAdjustedParameterRelation,
+) -> AdjustedParameterPointer {
+    let mut second = AdjustedParameterPointer {
+        route: match first.route {
+            AdjustedParameterRoute::Direct => AdjustedParameterRoute::Reverse,
+            AdjustedParameterRoute::Reverse => AdjustedParameterRoute::Direct,
+        },
+        ..first
+    };
+    match relation {
+        DirectLiteralAdjustedParameterRelation::SameElement => {}
+        DirectLiteralAdjustedParameterRelation::SameArrayDistinctElement => {
+            second.inner = (first.inner + 1) % 3;
+        }
+        DirectLiteralAdjustedParameterRelation::SeparateLiteralRoot => {
+            second.storage = AdjustedParameterStorage::RootRight;
+        }
+    }
+    second
+}
+
 fn literal_adjusted_parameter_first_pointer(
     kind: AdjustedParameterFieldKind,
     case_index: usize,
@@ -11046,6 +11203,184 @@ fn adjusted_parameter_alias_mutation_expected(
     let reader_value = after;
     let observed = before * 3 + after * 5 + 3;
     observed + first_value * 7 + second_value * 11 + reader_value * 13 + 3 * 17
+}
+
+fn direct_literal_adjusted_parameter_alias_mutation_program(
+    first: AdjustedParameterPointer,
+    second: AdjustedParameterPointer,
+    reader: AdjustedParameterPointer,
+    replacement: i64,
+    delta: i64,
+    two_hop: [bool; 3],
+) -> String {
+    let kind = first.kind;
+    let separate_roots = second.storage == AdjustedParameterStorage::RootRight;
+    let first_parameter = if separate_roots {
+        "first_items"
+    } else {
+        "items"
+    };
+    let second_parameter = if separate_roots {
+        "second_items"
+    } else {
+        "items"
+    };
+    let reader_parameter = if reader.storage == AdjustedParameterStorage::RootRight {
+        second_parameter
+    } else {
+        first_parameter
+    };
+    let first_address = first.render_static_address(first_parameter);
+    let second_address = second.render_static_address(second_parameter);
+    let reader_address = reader.render_static_address(reader_parameter);
+    let first_forward = adjusted_parameter_forward_expr(first, &first_address, two_hop[0], false);
+    let second_forward =
+        adjusted_parameter_forward_expr(second, &second_address, two_hop[1], false);
+    let reader_forward = adjusted_parameter_forward_expr(reader, &reader_address, two_hop[2], true);
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let parameters = if separate_roots {
+        "struct Item first_items[], struct Item second_items[]"
+    } else {
+        "struct Item items[]"
+    };
+    let literal = "(struct Item[2]){{ .nested = { .values = {++marker} } }, {}}";
+    let left_literal = "(struct Item[2]){{ .nested = { .values = {++left_marker} } }, {}}";
+    let right_literal = "(struct Item[2]){{ .nested = { .values = {++right_marker} } }, {}}";
+    let (arguments, marker_check) = if separate_roots {
+        (
+            format!("{left_literal}, {right_literal}"),
+            "left_marker == 1 && right_marker == 1",
+        )
+    } else {
+        (literal.to_string(), "marker == 1")
+    };
+
+    format!(
+        "{prelude}\n\
+         int marker = 0; int left_marker = 0; int right_marker = 0;\n\
+         {pointer_type}forward_alias_{suffix}({pointer_type}value) {{ return value; }}\n\
+         {pointer_type}forward_alias_{suffix}_twice({pointer_type}value) {{ return forward_alias_{suffix}(value); }}\n\
+         {const_pointer_type}forward_const_alias_{suffix}({const_pointer_type}value) {{ return value; }}\n\
+         {const_pointer_type}forward_const_alias_{suffix}_twice({const_pointer_type}value) {{ return forward_const_alias_{suffix}(value); }}\n\
+         int mutate_alias_{suffix}({pointer_type}first, {pointer_type}second, {const_pointer_type}reader, {pointer_type}fallback) {{\n\
+             {write_first};\n\
+             int before = {read_reader};\n\
+             {compound_second};\n\
+             int after = {read_reader};\n\
+             first = fallback; second = fallback; reader = fallback;\n\
+             return before * 3 + after * 5 + (first == fallback) + (second == fallback) + (reader == fallback);\n\
+         }}\n\
+         int probe({parameters}) {{\n\
+             {pointer_type}a = {first_forward};\n\
+             {pointer_type}b = {second_forward};\n\
+             {const_pointer_type}r = {reader_forward};\n\
+             {initialize_first}; {initialize_second};\n\
+             int observed = mutate_alias_{suffix}(a, b, r, a);\n\
+             int caller_identity = (a == {first_address}) + (b == {second_address}) + (r == {reader_address});\n\
+             return observed + {read_a} * 7 + {read_b} * 11 + {read_r} * 13 + caller_identity * 17;\n\
+         }}\n\
+         int main(void) {{\n\
+             int result = probe({arguments});\n\
+             return result + ({marker_check}) * 19;\n\
+         }}\n",
+        prelude = adjusted_parameter_prelude(),
+        write_first = kind.write("first", replacement),
+        read_reader = kind.read("reader"),
+        compound_second = kind.compound_add("second", delta),
+        initialize_first = kind.write("a", first.model_value()),
+        initialize_second = kind.write("b", second.model_value()),
+        read_a = kind.read("a"),
+        read_b = kind.read("b"),
+        read_r = kind.read("r"),
+    )
+}
+
+fn direct_literal_adjusted_parameter_inner_bounds_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    format!(
+        "{prelude}\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[3]; return {read}; }}\n\
+         int main(void) {{ return probe((struct Item[2]){{{{}}, {{}}}}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn direct_literal_adjusted_parameter_outer_bounds_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    format!(
+        "{prelude}\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[2].nested.{field}[0]; return {read}; }}\n\
+         int main(void) {{ return probe((struct Item[2]){{{{}}, {{}}}}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn direct_literal_adjusted_parameter_const_discard_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    format!(
+        "{prelude}\n\
+         typedef const struct Item ConstItems[2];\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[0]; return {read}; }}\n\
+         int main(void) {{ return probe((ConstItems){{{{}}, {{}}}}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn direct_literal_adjusted_parameter_const_write_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let write = kind.write("slot", 7);
+    format!(
+        "{prelude}\n\
+         typedef const struct Item ConstItems[2];\n\
+         int probe(const struct Item items[]) {{ {const_pointer_type}slot = &items[0].nested.{field}[0]; {write}; return {read}; }}\n\
+         int main(void) {{ return probe((ConstItems){{{{}}, {{}}}}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        const_pointer_type = kind.const_pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn direct_literal_adjusted_parameter_cross_root_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    format!(
+        "{prelude}\n\
+         int probe(struct Item first[], struct Item second[]) {{\n\
+             {pointer_type}a = &first[0].nested.{field}[0];\n\
+             {pointer_type}b = &second[0].nested.{field}[0];\n\
+             return a - b;\n\
+         }}\n\
+         int main(void) {{ return probe((struct Item[2]){{{{}}, {{}}}}, (struct Item[2]){{{{}}, {{}}}}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+    )
+}
+
+fn direct_literal_adjusted_parameter_type_mismatch_program() -> String {
+    format!(
+        "{prelude}\n\
+         struct Other {{ int value; }};\n\
+         int probe(struct Item items[]) {{ struct Other *slot = &items[0].nested.points[0]; return slot->value; }}\n\
+         int main(void) {{ return probe((struct Item[2]){{{{}}, {{}}}}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+    )
 }
 
 #[derive(Clone)]

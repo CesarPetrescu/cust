@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 ## Latest autonomous verification
+
+All required verification passed after the 2026-07-20 direct aggregate-array compound-literal adjusted-parameter run. Forty-eight fixed scalar/named-aggregate two-writer/const-reader cases balance same-element, same-array-distinct, and separate-literal relationships while passing mutable `(struct Item[2]){...}` roots directly to C-adjusted parameters. Direct/reverse addresses and one/two-hop forwarding retain hidden-root/outer-index/inner-index identity; per-root initializer markers prove each argument literal is captured once, and copied callee slots remain local. Eleven targeted panic-guarded checks retain exact inner/outer bounds, const-discard/write, aggregate type, and cross-root subtraction diagnostics. The warning-free fixture passes mutable and const-typedef literals directly and returns 72 under Cust, GCC, and Clang; the suite now has 45 fuzz-safety tests and 836 interpreter tests.
+
+Verified commands: focused generated model and fixture coverage (immediate GREEN conformance closure); direct GCC/Clang `-std=c11 -Wall -Wextra -Werror` fixture execution (72); recursion-depth regression; canonical `cargo test --test c_compat -- --nocapture`; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; and `docker compose run --rm cust` (exit 0, output `10`).
 
 All required verification passed after the 2026-07-19 aggregate-compound-literal outer-array adjusted-parameter run. Forty-eight fixed scalar/named-aggregate two-writer/const-reader cases now balance same-element, same-array-distinct, cross-field, and separate-literal relationships across named, anonymous, and union-containing captured roots. Direct/reverse addresses and one/two-hop forwarding preserve recursive literal-root/path/outer-index/inner-index identity, six initializer markers prove each generated root is captured once, and copied callee slots remain local. Nineteen targeted panic-guarded checks retain exact inner/outer bounds, const-discard, concrete aggregate type, and cross-root subtraction diagnostics. The warning-free fixture returns 67 under Cust, GCC, and Clang; the suite now has 44 fuzz-safety tests and 835 interpreter tests.
 

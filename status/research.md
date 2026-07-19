@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-20 — Direct aggregate-array literals through adjusted parameters
+
+- A direct `(struct Item[N]){...}` argument decays once while binding an adjusted aggregate parameter; embedded pointers derived in the callee must retain the hidden literal root plus outer and inner indexes through forwarding and copied pointer slots.
+- Use separate marker objects for separate direct literal arguments. Clang `-Werror` correctly rejects two unsequenced `++marker` modifications in one call, even when a final count would look deterministic; independent `left_marker`/`right_marker` objects preserve a warning-free defined oracle.
+- Existing Cust behavior passed immediately. Forty-eight generated cases plus 11 exact diagnostics pass, and the warning-free fixture returns 72 under Cust/GCC/Clang. See `references/cust-adjusted-aggregate-parameter-direct-compound-literal-arguments.md`.
+
 ## 2026-07-19 — Compound-literal outer arrays through adjusted parameters
 
 - Capturing an aggregate compound literal's address once gives its named, anonymous, or union-containing outer-array fields a stable hidden root for the enclosing block. C array adjustment copies only the selected outer pointer slot; it must retain literal root, containing path, outer index, embedded field, and inner index through helper calls.
