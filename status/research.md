@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-19 — Model-based recursive identity through adjusted aggregate parameters
+
+- Model adjusted parameters by the argument's concrete storage identity plus outer aggregate index, nested field path, and inner element index. C array adjustment copies a pointer slot; it does not flatten field-decayed outer-array identity or merge distinct embedded arrays from different outer elements.
+- Balance direct `&items[i].nested.field[j]` and reverse `&j[items[i].nested.field]` spellings, and initialize generated cells through the captured pointers. Initializing via an unrelated direct nested scalar write on `wrapper.items[i]` exercises a different AST seam and can obscure the adjusted-parameter property under test.
+- Native C safely oracles same-embedded-array equality/difference/ordering and equality across distinct roots, but cross-root subtraction/ordering remains interpreter-only because those operations are undefined in C. The warning-free static fixture returns 35 under Cust/GCC/Clang; the generated matrix keeps cross-root diagnostic assertions under panic guards.
+
 ## 2026-07-19 — Embedded array fields through adjusted aggregate parameters
 
 - Specialized `StructElementArray*` syntax does not reveal whether the outer aggregate array is stored directly or arrived through C array adjustment. Resolve `items[i]` as an interpreter-owned aggregate pointer first, then inspect the selected field metadata to distinguish embedded arrays from pointer-valued fields; this keeps outer and inner expressions single-evaluation.

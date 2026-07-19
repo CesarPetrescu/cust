@@ -2410,6 +2410,112 @@ enum ExtendedLiteralAliasPattern {
     DifferentPathAndLiteralRoot,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AdjustedParameterRelation {
+    SameElement,
+    SameArrayDistinctElement,
+    DifferentOuterElement,
+    DifferentFieldPath,
+    DifferentOwner,
+    RootVersusField,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AdjustedParameterOperation {
+    Read,
+    WriteThroughAddress,
+    Equality,
+    Difference,
+    Ordering,
+}
+
+#[test]
+fn generated_adjusted_aggregate_parameter_embedded_field_pointers_match_model_without_panics() {
+    let mut relation_counts = [0; 6];
+    let mut operation_counts = [0; 5];
+    let mut root_argument_cases = 0;
+    let mut field_argument_cases = 0;
+    let mut direct_routes = 0;
+    let mut reverse_routes = 0;
+
+    for kind in AdjustedParameterFieldKind::ALL {
+        for (relation_index, relation) in AdjustedParameterRelation::ALL.into_iter().enumerate() {
+            for (operation_index, operation) in
+                AdjustedParameterOperation::ALL.into_iter().enumerate()
+            {
+                relation_counts[relation_index] += 1;
+                operation_counts[operation_index] += 1;
+                let first = adjusted_parameter_first_pointer(kind, relation_index, operation_index);
+                let second = adjusted_parameter_related_pointer(first, relation);
+                for pointer in [first, second] {
+                    if pointer.storage.is_root() {
+                        root_argument_cases += 1;
+                    } else {
+                        field_argument_cases += 1;
+                    }
+                    match pointer.route {
+                        AdjustedParameterRoute::Direct => direct_routes += 1,
+                        AdjustedParameterRoute::Reverse => reverse_routes += 1,
+                    }
+                }
+                let (source, expected) = adjusted_parameter_model_program(first, second, operation);
+
+                assert_interpretation(
+                    &source,
+                    expected,
+                    &format!(
+                        "adjusted aggregate parameter case, kind {kind:?}, relation {relation:?}, operation {operation:?}, first {first:?}, second {second:?}"
+                    ),
+                );
+            }
+        }
+
+        for storage in [
+            AdjustedParameterStorage::RootLeft,
+            AdjustedParameterStorage::LeftPrimary,
+        ] {
+            assert_interpretation(
+                &adjusted_parameter_inner_bounds_program(kind, storage),
+                ExpectedInterpretation::Error(kind.inner_bounds_error()),
+                &format!("adjusted parameter inner bounds, kind {kind:?}, storage {storage:?}"),
+            );
+            assert_interpretation(
+                &adjusted_parameter_outer_bounds_program(kind, storage),
+                ExpectedInterpretation::OwnedError(format!(
+                    "struct array{} pointer index 2 out of bounds for length 2",
+                    if storage.is_root() { "" } else { " field" }
+                )),
+                &format!("adjusted parameter outer bounds, kind {kind:?}, storage {storage:?}"),
+            );
+            assert_interpretation(
+                &adjusted_parameter_const_ancestor_program(kind, storage),
+                ExpectedInterpretation::Error("cannot assign through pointer to const"),
+                &format!("adjusted parameter const ancestor, kind {kind:?}, storage {storage:?}"),
+            );
+        }
+    }
+
+    for storage in [
+        AdjustedParameterStorage::RootLeft,
+        AdjustedParameterStorage::LeftPrimary,
+    ] {
+        assert_interpretation(
+            &adjusted_parameter_aggregate_type_mismatch_program(storage),
+            ExpectedInterpretation::Error(
+                "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+            ),
+            &format!("adjusted parameter aggregate type mismatch, storage {storage:?}"),
+        );
+    }
+
+    assert_eq!(relation_counts, [10; 6]);
+    assert_eq!(operation_counts, [12; 5]);
+    assert!(root_argument_cases >= 30);
+    assert!(field_argument_cases >= 60);
+    assert_eq!(direct_routes, 60);
+    assert_eq!(reverse_routes, 60);
+}
+
 #[test]
 fn generated_nested_anonymous_aggregate_compound_literal_field_pointer_alias_mutations_match_model_without_panics()
  {
@@ -9723,6 +9829,413 @@ impl ScalarExpr {
             Self::Comma(left, right) => format!("({}, {})", left.render(), right.render()),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AdjustedParameterFieldKind {
+    Scalar,
+    Aggregate,
+}
+
+impl AdjustedParameterFieldKind {
+    const ALL: [Self; 2] = [Self::Scalar, Self::Aggregate];
+
+    fn pointer_type(self) -> &'static str {
+        match self {
+            Self::Scalar => "int *",
+            Self::Aggregate => "struct Point *",
+        }
+    }
+
+    fn const_pointer_type(self) -> &'static str {
+        match self {
+            Self::Scalar => "const int *",
+            Self::Aggregate => "const struct Point *",
+        }
+    }
+
+    fn field_name(self) -> &'static str {
+        match self {
+            Self::Scalar => "values",
+            Self::Aggregate => "points",
+        }
+    }
+
+    fn read(self, pointer: &str) -> String {
+        match self {
+            Self::Scalar => format!("*{pointer}"),
+            Self::Aggregate => format!("{pointer}->value"),
+        }
+    }
+
+    fn write(self, pointer: &str, value: i64) -> String {
+        match self {
+            Self::Scalar => format!("*{pointer} = {value}"),
+            Self::Aggregate => format!("{pointer}->value = {value}"),
+        }
+    }
+
+    fn inner_bounds_error(self) -> &'static str {
+        match self {
+            Self::Scalar => "array 'values' index 3 out of bounds for length 3",
+            Self::Aggregate => "struct array field 'points' index 3 out of bounds for length 3",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AdjustedParameterStorage {
+    RootLeft,
+    RootRight,
+    LeftPrimary,
+    LeftSecondary,
+    RightPrimary,
+    RightSecondary,
+}
+
+impl AdjustedParameterStorage {
+    fn is_root(self) -> bool {
+        matches!(self, Self::RootLeft | Self::RootRight)
+    }
+
+    fn expression(self) -> &'static str {
+        match self {
+            Self::RootLeft => "root_left",
+            Self::RootRight => "root_right",
+            Self::LeftPrimary => "wrapper_left.primary",
+            Self::LeftSecondary => "wrapper_left.secondary",
+            Self::RightPrimary => "wrapper_right.primary",
+            Self::RightSecondary => "wrapper_right.secondary",
+        }
+    }
+
+    fn model_offset(self) -> i64 {
+        match self {
+            Self::RootLeft => 0,
+            Self::RootRight => 20,
+            Self::LeftPrimary => 40,
+            Self::LeftSecondary => 60,
+            Self::RightPrimary => 80,
+            Self::RightSecondary => 100,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AdjustedParameterRoute {
+    Direct,
+    Reverse,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct AdjustedParameterPointer {
+    kind: AdjustedParameterFieldKind,
+    storage: AdjustedParameterStorage,
+    outer: i64,
+    inner: i64,
+    route: AdjustedParameterRoute,
+}
+
+impl AdjustedParameterPointer {
+    fn render_address(self, parameter: &str, outer: &str, inner: &str) -> String {
+        let field = self.kind.field_name();
+        match self.route {
+            AdjustedParameterRoute::Direct => {
+                format!("&{parameter}[{outer}++].nested.{field}[{inner}++]")
+            }
+            AdjustedParameterRoute::Reverse => {
+                format!("&({inner}++)[{parameter}[{outer}++].nested.{field}]")
+            }
+        }
+    }
+
+    fn model_value(self) -> i64 {
+        self.storage.model_offset() + self.outer * 4 + self.inner + 1
+    }
+
+    fn same_array(self, other: Self) -> bool {
+        self.kind == other.kind && self.storage == other.storage && self.outer == other.outer
+    }
+
+    fn same_element(self, other: Self) -> bool {
+        self.same_array(other) && self.inner == other.inner
+    }
+}
+
+impl AdjustedParameterRelation {
+    const ALL: [Self; 6] = [
+        Self::SameElement,
+        Self::SameArrayDistinctElement,
+        Self::DifferentOuterElement,
+        Self::DifferentFieldPath,
+        Self::DifferentOwner,
+        Self::RootVersusField,
+    ];
+}
+
+impl AdjustedParameterOperation {
+    const ALL: [Self; 5] = [
+        Self::Read,
+        Self::WriteThroughAddress,
+        Self::Equality,
+        Self::Difference,
+        Self::Ordering,
+    ];
+}
+
+fn adjusted_parameter_first_pointer(
+    kind: AdjustedParameterFieldKind,
+    relation_index: usize,
+    operation_index: usize,
+) -> AdjustedParameterPointer {
+    AdjustedParameterPointer {
+        kind,
+        storage: match (relation_index + operation_index) % 3 {
+            0 => AdjustedParameterStorage::RootLeft,
+            1 => AdjustedParameterStorage::LeftPrimary,
+            _ => AdjustedParameterStorage::RightSecondary,
+        },
+        outer: ((relation_index + operation_index) % 2) as i64,
+        inner: ((relation_index * 2 + operation_index) % 3) as i64,
+        route: if (relation_index + operation_index) % 2 == 0 {
+            AdjustedParameterRoute::Direct
+        } else {
+            AdjustedParameterRoute::Reverse
+        },
+    }
+}
+
+fn adjusted_parameter_related_pointer(
+    first: AdjustedParameterPointer,
+    relation: AdjustedParameterRelation,
+) -> AdjustedParameterPointer {
+    let mut second = AdjustedParameterPointer {
+        route: match first.route {
+            AdjustedParameterRoute::Direct => AdjustedParameterRoute::Reverse,
+            AdjustedParameterRoute::Reverse => AdjustedParameterRoute::Direct,
+        },
+        ..first
+    };
+    match relation {
+        AdjustedParameterRelation::SameElement => {}
+        AdjustedParameterRelation::SameArrayDistinctElement => second.inner = (first.inner + 1) % 3,
+        AdjustedParameterRelation::DifferentOuterElement => second.outer = (first.outer + 1) % 2,
+        AdjustedParameterRelation::DifferentFieldPath => {
+            second.storage = match first.storage {
+                AdjustedParameterStorage::LeftPrimary => AdjustedParameterStorage::LeftSecondary,
+                AdjustedParameterStorage::LeftSecondary => AdjustedParameterStorage::LeftPrimary,
+                AdjustedParameterStorage::RightPrimary => AdjustedParameterStorage::RightSecondary,
+                AdjustedParameterStorage::RightSecondary => AdjustedParameterStorage::RightPrimary,
+                AdjustedParameterStorage::RootLeft | AdjustedParameterStorage::RootRight => {
+                    AdjustedParameterStorage::LeftSecondary
+                }
+            }
+        }
+        AdjustedParameterRelation::DifferentOwner => {
+            second.storage = match first.storage {
+                AdjustedParameterStorage::RootLeft => AdjustedParameterStorage::RootRight,
+                AdjustedParameterStorage::RootRight => AdjustedParameterStorage::RootLeft,
+                AdjustedParameterStorage::LeftPrimary => AdjustedParameterStorage::RightPrimary,
+                AdjustedParameterStorage::LeftSecondary => AdjustedParameterStorage::RightSecondary,
+                AdjustedParameterStorage::RightPrimary => AdjustedParameterStorage::LeftPrimary,
+                AdjustedParameterStorage::RightSecondary => AdjustedParameterStorage::LeftSecondary,
+            }
+        }
+        AdjustedParameterRelation::RootVersusField => {
+            second.storage = if first.storage.is_root() {
+                AdjustedParameterStorage::RightPrimary
+            } else {
+                AdjustedParameterStorage::RootRight
+            }
+        }
+    }
+    second
+}
+
+fn adjusted_parameter_prelude() -> &'static str {
+    "struct Point { int value; };\n\
+     struct Inner { int values[3]; struct Point points[3]; };\n\
+     struct Item { struct Inner nested; };\n\
+     struct Wrapper { struct Item primary[2]; struct Item secondary[2]; };"
+}
+
+fn adjusted_parameter_declarations() -> &'static str {
+    "struct Item root_left[2];\n\
+     struct Item root_right[2];\n\
+     struct Wrapper wrapper_left;\n\
+     struct Wrapper wrapper_right;"
+}
+
+fn adjusted_parameter_model_program(
+    first: AdjustedParameterPointer,
+    second: AdjustedParameterPointer,
+    operation: AdjustedParameterOperation,
+) -> (String, ExpectedInterpretation) {
+    let first_initial = first.model_value();
+    let second_initial = second.model_value();
+    let effective_first_initial = if first.same_element(second) {
+        second_initial
+    } else {
+        first_initial
+    };
+    let first_address = first.render_address("first", "outer_a", "inner_a");
+    let second_address = second.render_address("second", "outer_b", "inner_b");
+    let initialize_first = first.kind.write("a", first_initial);
+    let initialize_second = second.kind.write("b", second_initial);
+    let marker_score = 4;
+    let (operation_source, expected) = match operation {
+        AdjustedParameterOperation::Read => (
+            format!(
+                "return {} + {} + marker_score;",
+                first.kind.read("a"),
+                second.kind.read("b")
+            ),
+            ExpectedInterpretation::Value(effective_first_initial + second_initial + marker_score),
+        ),
+        AdjustedParameterOperation::WriteThroughAddress => {
+            let replacement = 151;
+            let observed_second = if first.same_element(second) {
+                replacement
+            } else {
+                second_initial
+            };
+            (
+                format!(
+                    "{}; return {} + {} + marker_score;",
+                    first.kind.write("a", replacement),
+                    first.kind.read("a"),
+                    second.kind.read("b")
+                ),
+                ExpectedInterpretation::Value(replacement + observed_second + marker_score),
+            )
+        }
+        AdjustedParameterOperation::Equality => (
+            "return (a == b) * 10 + marker_score;".to_string(),
+            ExpectedInterpretation::Value(
+                i64::from(first.same_element(second)) * 10 + marker_score,
+            ),
+        ),
+        AdjustedParameterOperation::Difference if first.same_array(second) => (
+            "return (a - b) + 20 + marker_score;".to_string(),
+            ExpectedInterpretation::Value(first.inner - second.inner + 20 + marker_score),
+        ),
+        AdjustedParameterOperation::Difference => (
+            "return (a - b) + marker_score;".to_string(),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+        ),
+        AdjustedParameterOperation::Ordering if first.same_array(second) => (
+            "return (a < b) * 10 + marker_score;".to_string(),
+            ExpectedInterpretation::Value(
+                i64::from(first.inner < second.inner) * 10 + marker_score,
+            ),
+        ),
+        AdjustedParameterOperation::Ordering => (
+            "return (a < b) * 10 + marker_score;".to_string(),
+            ExpectedInterpretation::Error("cannot compare pointers to different arrays"),
+        ),
+    };
+    let source = format!(
+        "{prelude}\n\
+         int probe(struct Item first[], struct Item second[]) {{\n\
+             int outer_a = {first_outer}; int inner_a = {first_inner};\n\
+             int outer_b = {second_outer}; int inner_b = {second_inner};\n\
+             {pointer_type}a = {first_address};\n\
+             {pointer_type}b = {second_address};\n\
+             {initialize_first};\n\
+             {initialize_second};\n\
+             int marker_score = (outer_a == {first_outer_plus_one}) +\n\
+                 (inner_a == {first_inner_plus_one}) +\n\
+                 (outer_b == {second_outer_plus_one}) +\n\
+                 (inner_b == {second_inner_plus_one});\n\
+             {operation_source}\n\
+         }}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             return probe({first_storage}, {second_storage});\n\
+         }}\n",
+        prelude = adjusted_parameter_prelude(),
+        declarations = adjusted_parameter_declarations(),
+        pointer_type = first.kind.pointer_type(),
+        first_outer = first.outer,
+        first_inner = first.inner,
+        second_outer = second.outer,
+        second_inner = second.inner,
+        first_outer_plus_one = first.outer + 1,
+        first_inner_plus_one = first.inner + 1,
+        second_outer_plus_one = second.outer + 1,
+        second_inner_plus_one = second.inner + 1,
+        first_storage = first.storage.expression(),
+        second_storage = second.storage.expression(),
+    );
+    (source, expected)
+}
+
+fn adjusted_parameter_inner_bounds_program(
+    kind: AdjustedParameterFieldKind,
+    storage: AdjustedParameterStorage,
+) -> String {
+    format!(
+        "{prelude}\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[3]; return {read}; }}\n\
+         int main(void) {{ {declarations} return probe({storage}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        declarations = adjusted_parameter_declarations(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+        storage = storage.expression(),
+    )
+}
+
+fn adjusted_parameter_outer_bounds_program(
+    kind: AdjustedParameterFieldKind,
+    storage: AdjustedParameterStorage,
+) -> String {
+    format!(
+        "{prelude}\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[2].nested.{field}[0]; return {read}; }}\n\
+         int main(void) {{ {declarations} return probe({storage}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        declarations = adjusted_parameter_declarations(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+        storage = storage.expression(),
+    )
+}
+
+fn adjusted_parameter_const_ancestor_program(
+    kind: AdjustedParameterFieldKind,
+    storage: AdjustedParameterStorage,
+) -> String {
+    let selected_storage = if storage.is_root() {
+        "locked"
+    } else {
+        "wrapper.primary"
+    };
+    format!(
+        "struct Point {{ int value; }};\n\
+         struct Inner {{ int values[3]; struct Point points[3]; }};\n\
+         struct Item {{ const struct Inner nested; }};\n\
+         struct Wrapper {{ struct Item primary[2]; }};\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[0]; {write}; return 0; }}\n\
+         int main(void) {{ struct Item locked[2]; struct Wrapper wrapper; return probe({selected_storage}); }}\n",
+        pointer_type = kind.const_pointer_type(),
+        field = kind.field_name(),
+        write = kind.write("slot", 9),
+    )
+}
+
+fn adjusted_parameter_aggregate_type_mismatch_program(storage: AdjustedParameterStorage) -> String {
+    format!(
+        "{prelude}\n\
+         struct Other {{ int value; }};\n\
+         int probe(struct Item items[]) {{ struct Other *slot = &items[0].nested.points[0]; return slot->value; }}\n\
+         int main(void) {{ {declarations} return probe({storage}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        declarations = adjusted_parameter_declarations(),
+        storage = storage.expression(),
+    )
 }
 
 #[derive(Clone)]

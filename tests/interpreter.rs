@@ -9066,6 +9066,15 @@ fn adjusted_aggregate_parameter_embedded_array_fields_match_fixture() {
 }
 
 #[test]
+fn adjusted_aggregate_parameter_recursive_identity_model_routes_match_fixture() {
+    let program = include_str!(
+        "fixtures/valid/adjusted_aggregate_parameter_recursive_identity_model_routes.c",
+    );
+
+    assert_eq!(interpret(program).unwrap(), 35);
+}
+
+#[test]
 fn sizeof_aggregate_array_parameter_embedded_array_field_operations_is_non_evaluating() {
     let program = r#"
         struct Point { int value; };
