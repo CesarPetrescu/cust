@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-19 — Nested containing paths through adjusted aggregate parameters
+
+- C array adjustment preserves the concrete outer array selected from root storage, a direct aggregate field, a nested named or anonymous field, or a union member. Model that outer owner/path separately from the selected outer and inner indexes; helper calls and copied parameter slots do not create new storage roots.
+- Coverage counters are part of the generator contract. Expanding storage variants while retaining the old route formula initially left anonymous/union path counts below the required floor; use a dedicated nested-storage selector for the alias model rather than perturbing the earlier identity model's root/field balance.
+- Same-root equality/mutation is a valid native oracle, while subtraction/order across different containing paths or separate roots stays interpreter-only. The warning-free fixture returns 32 under Cust/GCC/Clang. See `references/cust-adjusted-aggregate-parameter-nested-path-alias-mutations.md`.
+
 ## 2026-07-19 — Ordered alias mutation through adjusted aggregate parameters
 
 - C array adjustment copies the outer aggregate pointer slot; embedded pointers captured from it retain the concrete outer owner/path/index. Model two mutable writers and a `const` reader by storage identity, apply writes in source order, and separately score intermediate/final reader observations plus caller pointer identities.

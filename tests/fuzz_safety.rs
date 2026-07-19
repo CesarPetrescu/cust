@@ -2519,6 +2519,7 @@ fn generated_adjusted_aggregate_parameter_embedded_field_pointers_match_model_wi
 #[test]
 fn generated_adjusted_parameter_alias_mutations_match_model_without_panics() {
     let mut relation_counts = [0; 6];
+    let mut path_counts = [0; 5];
     let mut direct_routes = 0;
     let mut reverse_routes = 0;
     let mut one_hop_routes = 0;
@@ -2531,7 +2532,7 @@ fn generated_adjusted_parameter_alias_mutations_match_model_without_panics() {
             let relation_index = case_index % AdjustedParameterRelation::ALL.len();
             let relation = AdjustedParameterRelation::ALL[relation_index];
             relation_counts[relation_index] += 1;
-            let first = adjusted_parameter_first_pointer(kind, relation_index, case_index);
+            let first = adjusted_parameter_nested_first_pointer(kind, relation_index, case_index);
             let second = adjusted_parameter_related_pointer(first, relation);
             let reader = if case_index & 1 == 0 { first } else { second };
             let two_hop = [
@@ -2543,6 +2544,7 @@ fn generated_adjusted_parameter_alias_mutations_match_model_without_panics() {
             let delta = 1 + (case_index % 7) as i64;
 
             for pointer in [first, second, reader] {
+                path_counts[pointer.storage.path_index()] += 1;
                 match pointer.route {
                     AdjustedParameterRoute::Direct => direct_routes += 1,
                     AdjustedParameterRoute::Reverse => reverse_routes += 1,
@@ -2588,6 +2590,74 @@ fn generated_adjusted_parameter_alias_mutations_match_model_without_panics() {
     assert_eq!(two_hop_routes, 72);
     assert!(root_arguments >= 30);
     assert!(field_arguments >= 90);
+    assert!(path_counts.iter().all(|count| *count >= 8));
+}
+
+#[test]
+fn generated_nested_adjusted_parameter_diagnostics_remain_exact_without_panics() {
+    let nested_storages = [
+        AdjustedParameterStorage::NamedLeftPrimary,
+        AdjustedParameterStorage::AnonymousLeftPrimary,
+        AdjustedParameterStorage::UnionLeftPrimary,
+    ];
+
+    for kind in AdjustedParameterFieldKind::ALL {
+        for storage in nested_storages {
+            assert_interpretation(
+                &adjusted_parameter_inner_bounds_program(kind, storage),
+                ExpectedInterpretation::Error(kind.inner_bounds_error()),
+                &format!(
+                    "nested adjusted parameter inner bounds, kind {kind:?}, storage {storage:?}"
+                ),
+            );
+            assert_interpretation(
+                &adjusted_parameter_outer_bounds_program(kind, storage),
+                ExpectedInterpretation::Error(
+                    "struct array field pointer index 2 out of bounds for length 2",
+                ),
+                &format!(
+                    "nested adjusted parameter outer bounds, kind {kind:?}, storage {storage:?}"
+                ),
+            );
+            assert_interpretation(
+                &adjusted_parameter_nested_const_ancestor_program(kind, storage),
+                ExpectedInterpretation::Error("cannot assign through pointer to const"),
+                &format!(
+                    "nested adjusted parameter const ancestor, kind {kind:?}, storage {storage:?}"
+                ),
+            );
+        }
+
+        let first = AdjustedParameterPointer {
+            kind,
+            storage: AdjustedParameterStorage::NamedLeftPrimary,
+            outer: 0,
+            inner: 1,
+            route: AdjustedParameterRoute::Direct,
+        };
+        let second = AdjustedParameterPointer {
+            storage: AdjustedParameterStorage::AnonymousLeftPrimary,
+            route: AdjustedParameterRoute::Reverse,
+            ..first
+        };
+        let (difference_source, difference_expected) =
+            adjusted_parameter_model_program(first, second, AdjustedParameterOperation::Difference);
+        assert_interpretation(
+            &difference_source,
+            difference_expected,
+            &format!("nested adjusted parameter cross-path difference, kind {kind:?}"),
+        );
+    }
+
+    for storage in nested_storages {
+        assert_interpretation(
+            &adjusted_parameter_aggregate_type_mismatch_program(storage),
+            ExpectedInterpretation::Error(
+                "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+            ),
+            &format!("nested adjusted parameter aggregate type mismatch, storage {storage:?}"),
+        );
+    }
 }
 
 #[test]
@@ -9979,11 +10049,65 @@ enum AdjustedParameterStorage {
     LeftSecondary,
     RightPrimary,
     RightSecondary,
+    NamedLeftPrimary,
+    NamedLeftSecondary,
+    NamedRightPrimary,
+    NamedRightSecondary,
+    AnonymousLeftPrimary,
+    AnonymousLeftSecondary,
+    AnonymousRightPrimary,
+    AnonymousRightSecondary,
+    UnionLeftPrimary,
+    UnionLeftSecondary,
+    UnionRightPrimary,
+    UnionRightSecondary,
 }
 
 impl AdjustedParameterStorage {
+    const ALL: [Self; 18] = [
+        Self::RootLeft,
+        Self::RootRight,
+        Self::LeftPrimary,
+        Self::LeftSecondary,
+        Self::RightPrimary,
+        Self::RightSecondary,
+        Self::NamedLeftPrimary,
+        Self::NamedLeftSecondary,
+        Self::NamedRightPrimary,
+        Self::NamedRightSecondary,
+        Self::AnonymousLeftPrimary,
+        Self::AnonymousLeftSecondary,
+        Self::AnonymousRightPrimary,
+        Self::AnonymousRightSecondary,
+        Self::UnionLeftPrimary,
+        Self::UnionLeftSecondary,
+        Self::UnionRightPrimary,
+        Self::UnionRightSecondary,
+    ];
+
     fn is_root(self) -> bool {
         matches!(self, Self::RootLeft | Self::RootRight)
+    }
+
+    fn path_index(self) -> usize {
+        match self {
+            Self::RootLeft | Self::RootRight => 0,
+            Self::LeftPrimary | Self::LeftSecondary | Self::RightPrimary | Self::RightSecondary => {
+                1
+            }
+            Self::NamedLeftPrimary
+            | Self::NamedLeftSecondary
+            | Self::NamedRightPrimary
+            | Self::NamedRightSecondary => 2,
+            Self::AnonymousLeftPrimary
+            | Self::AnonymousLeftSecondary
+            | Self::AnonymousRightPrimary
+            | Self::AnonymousRightSecondary => 3,
+            Self::UnionLeftPrimary
+            | Self::UnionLeftSecondary
+            | Self::UnionRightPrimary
+            | Self::UnionRightSecondary => 4,
+        }
     }
 
     fn expression(self) -> &'static str {
@@ -9994,17 +10118,71 @@ impl AdjustedParameterStorage {
             Self::LeftSecondary => "wrapper_left.secondary",
             Self::RightPrimary => "wrapper_right.primary",
             Self::RightSecondary => "wrapper_right.secondary",
+            Self::NamedLeftPrimary => "named_left.nested.primary",
+            Self::NamedLeftSecondary => "named_left.nested.secondary",
+            Self::NamedRightPrimary => "named_right.nested.primary",
+            Self::NamedRightSecondary => "named_right.nested.secondary",
+            Self::AnonymousLeftPrimary => "anonymous_left.nested.primary",
+            Self::AnonymousLeftSecondary => "anonymous_left.nested.secondary",
+            Self::AnonymousRightPrimary => "anonymous_right.nested.primary",
+            Self::AnonymousRightSecondary => "anonymous_right.nested.secondary",
+            Self::UnionLeftPrimary => "choice_left.nested.primary",
+            Self::UnionLeftSecondary => "choice_left.nested.secondary",
+            Self::UnionRightPrimary => "choice_right.nested.primary",
+            Self::UnionRightSecondary => "choice_right.nested.secondary",
         }
     }
 
     fn model_offset(self) -> i64 {
+        Self::ALL
+            .iter()
+            .position(|storage| *storage == self)
+            .expect("adjusted parameter storage must be modeled") as i64
+            * 20
+    }
+
+    fn other_field(self) -> Self {
         match self {
-            Self::RootLeft => 0,
-            Self::RootRight => 20,
-            Self::LeftPrimary => 40,
-            Self::LeftSecondary => 60,
-            Self::RightPrimary => 80,
-            Self::RightSecondary => 100,
+            Self::RootLeft | Self::RootRight => Self::LeftSecondary,
+            Self::LeftPrimary => Self::LeftSecondary,
+            Self::LeftSecondary => Self::LeftPrimary,
+            Self::RightPrimary => Self::RightSecondary,
+            Self::RightSecondary => Self::RightPrimary,
+            Self::NamedLeftPrimary => Self::NamedLeftSecondary,
+            Self::NamedLeftSecondary => Self::NamedLeftPrimary,
+            Self::NamedRightPrimary => Self::NamedRightSecondary,
+            Self::NamedRightSecondary => Self::NamedRightPrimary,
+            Self::AnonymousLeftPrimary => Self::AnonymousLeftSecondary,
+            Self::AnonymousLeftSecondary => Self::AnonymousLeftPrimary,
+            Self::AnonymousRightPrimary => Self::AnonymousRightSecondary,
+            Self::AnonymousRightSecondary => Self::AnonymousRightPrimary,
+            Self::UnionLeftPrimary => Self::UnionLeftSecondary,
+            Self::UnionLeftSecondary => Self::UnionLeftPrimary,
+            Self::UnionRightPrimary => Self::UnionRightSecondary,
+            Self::UnionRightSecondary => Self::UnionRightPrimary,
+        }
+    }
+
+    fn other_owner(self) -> Self {
+        match self {
+            Self::RootLeft => Self::RootRight,
+            Self::RootRight => Self::RootLeft,
+            Self::LeftPrimary => Self::RightPrimary,
+            Self::LeftSecondary => Self::RightSecondary,
+            Self::RightPrimary => Self::LeftPrimary,
+            Self::RightSecondary => Self::LeftSecondary,
+            Self::NamedLeftPrimary => Self::NamedRightPrimary,
+            Self::NamedLeftSecondary => Self::NamedRightSecondary,
+            Self::NamedRightPrimary => Self::NamedLeftPrimary,
+            Self::NamedRightSecondary => Self::NamedLeftSecondary,
+            Self::AnonymousLeftPrimary => Self::AnonymousRightPrimary,
+            Self::AnonymousLeftSecondary => Self::AnonymousRightSecondary,
+            Self::AnonymousRightPrimary => Self::AnonymousLeftPrimary,
+            Self::AnonymousRightSecondary => Self::AnonymousLeftSecondary,
+            Self::UnionLeftPrimary => Self::UnionRightPrimary,
+            Self::UnionLeftSecondary => Self::UnionRightSecondary,
+            Self::UnionRightPrimary => Self::UnionLeftPrimary,
+            Self::UnionRightSecondary => Self::UnionLeftSecondary,
         }
     }
 }
@@ -10111,6 +10289,17 @@ fn adjusted_parameter_first_pointer(
     }
 }
 
+fn adjusted_parameter_nested_first_pointer(
+    kind: AdjustedParameterFieldKind,
+    relation_index: usize,
+    case_index: usize,
+) -> AdjustedParameterPointer {
+    let mut pointer = adjusted_parameter_first_pointer(kind, relation_index, case_index);
+    pointer.storage = AdjustedParameterStorage::ALL
+        [(relation_index + case_index) % AdjustedParameterStorage::ALL.len()];
+    pointer
+}
+
 fn adjusted_parameter_related_pointer(
     first: AdjustedParameterPointer,
     relation: AdjustedParameterRelation,
@@ -10127,29 +10316,14 @@ fn adjusted_parameter_related_pointer(
         AdjustedParameterRelation::SameArrayDistinctElement => second.inner = (first.inner + 1) % 3,
         AdjustedParameterRelation::DifferentOuterElement => second.outer = (first.outer + 1) % 2,
         AdjustedParameterRelation::DifferentFieldPath => {
-            second.storage = match first.storage {
-                AdjustedParameterStorage::LeftPrimary => AdjustedParameterStorage::LeftSecondary,
-                AdjustedParameterStorage::LeftSecondary => AdjustedParameterStorage::LeftPrimary,
-                AdjustedParameterStorage::RightPrimary => AdjustedParameterStorage::RightSecondary,
-                AdjustedParameterStorage::RightSecondary => AdjustedParameterStorage::RightPrimary,
-                AdjustedParameterStorage::RootLeft | AdjustedParameterStorage::RootRight => {
-                    AdjustedParameterStorage::LeftSecondary
-                }
-            }
+            second.storage = first.storage.other_field();
         }
         AdjustedParameterRelation::DifferentOwner => {
-            second.storage = match first.storage {
-                AdjustedParameterStorage::RootLeft => AdjustedParameterStorage::RootRight,
-                AdjustedParameterStorage::RootRight => AdjustedParameterStorage::RootLeft,
-                AdjustedParameterStorage::LeftPrimary => AdjustedParameterStorage::RightPrimary,
-                AdjustedParameterStorage::LeftSecondary => AdjustedParameterStorage::RightSecondary,
-                AdjustedParameterStorage::RightPrimary => AdjustedParameterStorage::LeftPrimary,
-                AdjustedParameterStorage::RightSecondary => AdjustedParameterStorage::LeftSecondary,
-            }
+            second.storage = first.storage.other_owner();
         }
         AdjustedParameterRelation::RootVersusField => {
             second.storage = if first.storage.is_root() {
-                AdjustedParameterStorage::RightPrimary
+                AdjustedParameterStorage::UnionRightPrimary
             } else {
                 AdjustedParameterStorage::RootRight
             }
@@ -10162,14 +10336,23 @@ fn adjusted_parameter_prelude() -> &'static str {
     "struct Point { int value; };\n\
      struct Inner { int values[3]; struct Point points[3]; };\n\
      struct Item { struct Inner nested; };\n\
-     struct Wrapper { struct Item primary[2]; struct Item secondary[2]; };"
+     struct Wrapper { struct Item primary[2]; struct Item secondary[2]; };\n\
+     struct NamedHolder { struct Wrapper nested; };\n\
+     struct AnonymousHolder { struct { struct Item primary[2]; struct Item secondary[2]; } nested; };\n\
+     union Choice { struct Wrapper nested; int marker; };"
 }
 
 fn adjusted_parameter_declarations() -> &'static str {
     "struct Item root_left[2];\n\
      struct Item root_right[2];\n\
      struct Wrapper wrapper_left;\n\
-     struct Wrapper wrapper_right;"
+     struct Wrapper wrapper_right;\n\
+     struct NamedHolder named_left;\n\
+     struct NamedHolder named_right;\n\
+     struct AnonymousHolder anonymous_left;\n\
+     struct AnonymousHolder anonymous_right;\n\
+     union Choice choice_left;\n\
+     union Choice choice_right;"
 }
 
 fn adjusted_parameter_model_program(
@@ -10329,6 +10512,32 @@ fn adjusted_parameter_const_ancestor_program(
         pointer_type = kind.const_pointer_type(),
         field = kind.field_name(),
         write = kind.write("slot", 9),
+    )
+}
+
+fn adjusted_parameter_nested_const_ancestor_program(
+    kind: AdjustedParameterFieldKind,
+    storage: AdjustedParameterStorage,
+) -> String {
+    format!(
+        "struct Point {{ int value; }};\n\
+         struct Inner {{ int values[3]; struct Point points[3]; }};\n\
+         struct Item {{ const struct Inner nested; }};\n\
+         struct Wrapper {{ struct Item primary[2]; struct Item secondary[2]; }};\n\
+         struct NamedHolder {{ struct Wrapper nested; }};\n\
+         struct AnonymousHolder {{ struct {{ struct Item primary[2]; struct Item secondary[2]; }} nested; }};\n\
+         union Choice {{ struct Wrapper nested; int marker; }};\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[0]; {write}; return 0; }}\n\
+         int main(void) {{\n\
+             struct NamedHolder named_left; struct NamedHolder named_right;\n\
+             struct AnonymousHolder anonymous_left; struct AnonymousHolder anonymous_right;\n\
+             union Choice choice_left; union Choice choice_right;\n\
+             return probe({storage});\n\
+         }}\n",
+        pointer_type = kind.const_pointer_type(),
+        field = kind.field_name(),
+        write = kind.write("slot", 9),
+        storage = storage.expression(),
     )
 }
 

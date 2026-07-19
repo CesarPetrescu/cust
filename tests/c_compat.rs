@@ -166,6 +166,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_embedded_array_fields.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_recursive_identity_model_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_alias_mutation_model_routes.c",
+    "tests/fixtures/compat/valid/adjusted_aggregate_parameter_nested_path_alias_mutation_routes.c",
     "tests/fixtures/compat/valid/inferred_aggregate_array_declarations.c",
     "tests/fixtures/compat/valid/integer_literal_bases.c",
     "tests/fixtures/compat/valid/integer_literal_suffixes.c",

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-19 adjusted-aggregate-parameter alias-mutation run after 48 generated two-writer/const-reader cases, direct nested-array decay RED/GREEN, warning-free Cust/GCC/Clang exit 40, 42 passing fuzz-safety tests, 833 passing interpreter tests, and the full required local and Docker gates. Nested named/anonymous/union path expansion is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-19 nested adjusted-aggregate-parameter alias-modeling run after 48 generated two-writer/const-reader cases across five outer-array path families, 23 targeted diagnostic checks, warning-free Cust/GCC/Clang exit 32, 43 passing fuzz-safety tests, 834 passing interpreter tests, and the full required local and Docker gates. Aggregate-compound-literal outer-array arguments are a scoped follow-up, not an external blocker.
 
 ## Blocker template
 
