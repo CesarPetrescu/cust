@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-19 — Nested-holder pointer-field subscripts through adjusted aggregate-array parameters
+
+- A bare `choices[i].nested.pointer_field[j]` keeps the specialized `StructElementArrayGet`/set/update/address AST even inside a function where `union Choice choices[]` has undergone C array-to-pointer adjustment. Runtime helpers therefore cannot infer storage shape from syntax: direct arrays are `Value::StructArray`, adjusted parameters are `Value::Pointer { ty: PointeeType::Struct(..) }`.
+- Resolve the containing element with `indexed_struct_pointer()` first and fall back to stored-array `find_struct_element_pointer()`. Reuse that shared resolver for reads, writes, compound assignment, increment, and address-of so each outer index is evaluated once and both named struct/union pointer targets retain interpreter-owned identity.
+- `struct_element_field_metadata()`, pointer-result type/const inference, truthiness classification, aggregate assignment-result typing, and non-evaluating `sizeof` should derive selected field metadata from the declared aggregate type for either storage form. Do not inspect/evaluate a first runtime element for adjusted parameters. Warning-free GCC/Clang and Cust return 32 on the nested named/anonymous/union fixture. See `references/cust-adjusted-aggregate-array-parameter-pointer-fields.md`.
+
 ## 2026-07-19 — Aggregate-valued named aggregate-array pointer-field consumers
 
 - `eval_struct_expr()` and `aggregate_expr_type_name()` already recognized aggregate-valued `StructElementArrayGet`/`Set`, but function binding still used a second hand-maintained allowlist in `eval_struct_argument()`. Add both variants there so direct indexed pointer-field reads and copy-assignment results bind by value while preserving established aggregate type diagnostics.

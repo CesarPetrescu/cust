@@ -8894,6 +8894,190 @@ fn named_aggregate_array_pointer_field_aggregate_consumers_match_fixture() {
 }
 
 #[test]
+fn nested_holder_array_pointer_field_subscripts_match_fixture() {
+    let program = include_str!("fixtures/valid/nested_holder_array_pointer_field_subscripts.c");
+
+    assert_eq!(interpret(program).unwrap(), 32);
+}
+
+#[test]
+fn nested_named_holder_array_pointer_field_subscript_reads() {
+    let program = r#"
+        struct Inner { int *cursor; };
+        struct Holder { struct Inner nested; };
+
+        int main(void) {
+            int values[2] = {3, 4};
+            struct Holder holders[1] = {{{values}}};
+            return holders[0].nested.cursor[1];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 4);
+}
+
+#[test]
+fn aggregate_array_parameter_nested_pointer_field_subscript_reads() {
+    let program = r#"
+        struct Point { int value; };
+        struct Inner { struct Point *points; };
+        union Choice { struct Inner nested; int marker; };
+
+        struct Point read(union Choice choices[]) {
+            return choices[0].nested.points[0];
+        }
+
+        int main(void) {
+            struct Point points[1] = {{6}};
+            union Choice choices[1] = {{.nested = {points}}};
+            struct Point result = read(choices);
+            return result.value;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 6);
+}
+
+#[test]
+fn aggregate_array_parameter_nested_pointer_field_subscript_updates() {
+    let program = r#"
+        struct Inner { int *values; };
+        union Choice { struct Inner nested; int marker; };
+
+        int update(union Choice choices[]) {
+            choices[0].nested.values[0] = 7;
+            choices[0].nested.values[1] += 3;
+            return ++choices[0].nested.values[0]
+                + choices[0].nested.values[1];
+        }
+
+        int main(void) {
+            int values[2] = {2, 4};
+            union Choice choices[1] = {{.nested = {values}}};
+            return update(choices) + values[0] + values[1];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 30);
+}
+
+#[test]
+fn aggregate_array_parameter_nested_pointer_field_addresses_and_sizeof_evaluate_once() {
+    let program = r#"
+        struct Inner { int *values; };
+        union Choice { struct Inner nested; int marker; };
+
+        int inspect(union Choice choices[]) {
+            int outer = 0;
+            int inner = 1;
+            int *slot = &choices[outer++].nested.values[inner++];
+            *slot += 4;
+            int measured = sizeof(choices[outer++].nested.values[inner++]);
+            return *slot + outer + inner + (measured == sizeof(int));
+        }
+
+        int main(void) {
+            int values[3] = {2, 4, 6};
+            union Choice choices[1] = {{.nested = {values}}};
+            return inspect(choices) + values[1];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 20);
+}
+
+#[test]
+fn sizeof_aggregate_array_parameter_nested_pointer_field_updates_is_non_evaluating() {
+    let program = r#"
+        struct Inner { char *bytes; };
+        union Choice { struct Inner nested; int marker; };
+
+        int inspect(union Choice choices[]) {
+            int outer = 0;
+            int inner = 0;
+            int rhs = 0;
+            int ok = 0;
+            ok += sizeof(choices[outer++].nested.bytes[inner++]) == sizeof(char);
+            ok += sizeof(choices[outer++].nested.bytes[inner++] = (rhs++, 'x'))
+                == sizeof(char);
+            ok += sizeof(choices[outer++].nested.bytes[inner++] += (rhs++, 1))
+                == sizeof(char);
+            ok += sizeof(choices[outer++].nested.bytes[inner++]++) == sizeof(char);
+            return ok + (outer == 0) + (inner == 0) + (rhs == 0);
+        }
+
+        int main(void) {
+            char bytes[1] = {'a'};
+            union Choice choices[1] = {{.nested = {bytes}}};
+            return inspect(choices) + (bytes[0] == 'a');
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn aggregate_array_parameter_nested_pointer_field_subscripts_preserve_diagnostics() {
+    let cases = [
+        (
+            r#"
+                struct Inner { const int *values; };
+                union Choice { struct Inner nested; int marker; };
+                int update(union Choice choices[]) {
+                    return choices[0].nested.values[0] = 9;
+                }
+                int main(void) {
+                    int values[1] = {3};
+                    union Choice choices[1] = {{.nested = {values}}};
+                    return update(choices);
+                }
+            "#,
+            "cannot assign through pointer to const",
+        ),
+        (
+            r#"
+                struct Inner { int *values; };
+                union Choice { struct Inner nested; int marker; };
+                int read(union Choice choices[]) {
+                    return choices[0].nested.values[2];
+                }
+                int main(void) {
+                    int values[2] = {3, 5};
+                    union Choice choices[1] = {{.nested = {values}}};
+                    return read(choices);
+                }
+            "#,
+            "array pointer index 2 out of bounds for length 2",
+        ),
+        (
+            r#"
+                struct Point { int value; };
+                union Number { int value; };
+                struct Inner { struct Point *points; };
+                union Choice { struct Inner nested; int marker; };
+                int convert(union Choice choices[]) {
+                    union Number *bad = &choices[0].nested.points[0];
+                    return bad->value;
+                }
+                int main(void) {
+                    struct Point points[1] = {{3}};
+                    union Choice choices[1] = {{.nested = {points}}};
+                    return convert(choices);
+                }
+            "#,
+            "cannot convert pointer to struct 'Point' to pointer to union 'Number'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        match interpret(program) {
+            Ok(value) => panic!("expected '{expected}', got {value}; program: {program}"),
+            Err(err) => assert_eq!(err.to_string(), expected, "program: {program}"),
+        }
+    }
+}
+
+#[test]
 fn named_aggregate_array_pointer_field_subscript_writes_evaluate_once() {
     let program = r#"
         struct Node { int *cursor; };

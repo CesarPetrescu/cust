@@ -11221,32 +11221,19 @@ impl Interpreter {
             | Expr::StructElementArrayGet { name, fields, .. }
             | Expr::StructElementSet { name, fields, .. }
             | Expr::StructElementCompoundSet { name, fields, .. } => {
-                match self.find_variable(name) {
-                    Some(Value::StructArray {
-                        type_name,
-                        elements,
-                        ..
-                    }) => {
-                        let Some(first_element) = elements.first() else {
-                            return Ok(None);
-                        };
-                        match Self::nested_field_value(type_name, first_element, fields)? {
-                            (_, StructFieldValue::Scalar { ty, .. }) => {
-                                Ok(Some(PointeeType::Scalar(*ty)))
-                            }
-                            (_, StructFieldValue::Array { value, .. }) => {
-                                Ok(Some(PointeeType::Scalar(value.borrow().elem_type)))
-                            }
-                            (_, StructFieldValue::Struct { type_name, .. }) => {
-                                Ok(Some(PointeeType::Struct(type_name.clone())))
-                            }
-                            (_, StructFieldValue::Pointer { ty, .. }) => Ok(Some(ty.clone())),
-                            (_, StructFieldValue::StructArray { type_name, .. }) => {
-                                Ok(Some(PointeeType::Struct(type_name.clone())))
-                            }
-                        }
+                match self.struct_element_field_metadata(name, fields)? {
+                    Some((StructFieldType::Scalar(ty), _, _)) => Ok(Some(PointeeType::Scalar(ty))),
+                    Some((StructFieldType::Array(elem_type, _), _, _)) => {
+                        Ok(Some(PointeeType::Scalar(elem_type)))
                     }
-                    _ => Ok(None),
+                    Some((StructFieldType::Struct(type_name), _, _)) => {
+                        Ok(Some(PointeeType::Struct(type_name)))
+                    }
+                    Some((StructFieldType::Pointer(ty), _, _)) => Ok(Some(ty)),
+                    Some((StructFieldType::StructArray(type_name, _), _, _)) => {
+                        Ok(Some(PointeeType::Struct(type_name)))
+                    }
+                    None => Ok(None),
                 }
             }
             Expr::StructPtrGet { pointer, fields }
@@ -13093,12 +13080,14 @@ impl Interpreter {
 
     fn struct_element_field_decays_to_pointer(&self, name: &str, path: &[String]) -> bool {
         matches!(
-            self.find_variable(name),
-            Some(Value::StructArray { type_name, elements, .. })
-                if elements.first().is_some_and(|fields| matches!(
-                    Self::nested_field_value(type_name, fields, path),
-                    Ok((_, StructFieldValue::Pointer { .. } | StructFieldValue::Array { .. } | StructFieldValue::StructArray { .. }))
-                ))
+            self.struct_element_field_metadata(name, path),
+            Ok(Some((
+                StructFieldType::Pointer(_)
+                    | StructFieldType::Array(_, _)
+                    | StructFieldType::StructArray(_, _),
+                _,
+                _
+            )))
         )
     }
 
@@ -13107,8 +13096,13 @@ impl Interpreter {
         name: &str,
         path: &[String],
     ) -> CustResult<Option<(StructFieldType, bool, bool)>> {
-        let Some(Value::StructArray { type_name, .. }) = self.find_variable(name) else {
-            return Ok(None);
+        let type_name = match self.find_variable(name) {
+            Some(Value::StructArray { type_name, .. })
+            | Some(Value::Pointer {
+                ty: PointeeType::Struct(type_name),
+                ..
+            }) => type_name,
+            _ => return Ok(None),
         };
         self.aggregate_type_field_metadata(type_name, path)
     }
@@ -13990,6 +13984,17 @@ impl Interpreter {
             name: name.to_string(),
             index,
         })
+    }
+
+    fn indexed_struct_element_pointer(
+        &mut self,
+        name: &str,
+        index: &Expr,
+    ) -> CustResult<PointerValue> {
+        match self.indexed_struct_pointer(name, index)? {
+            Some(pointer) => Ok(pointer),
+            None => self.find_struct_element_pointer(name, index),
+        }
     }
 
     fn find_struct_element_assignment_pointer(
@@ -15533,7 +15538,7 @@ impl Interpreter {
                     self.struct_element_field_metadata(name, fields)?,
                     Some((StructFieldType::Pointer(_), _, _))
                 ) {
-                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    let element_pointer = self.indexed_struct_element_pointer(name, index)?;
                     self.struct_pointer_pointer_field_index_pointer(
                         &element_pointer,
                         fields,
@@ -15720,7 +15725,7 @@ impl Interpreter {
                     self.struct_element_field_metadata(name, fields)?,
                     Some((StructFieldType::Pointer(_), _, _))
                 ) {
-                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    let element_pointer = self.indexed_struct_element_pointer(name, index)?;
                     self.read_struct_pointer_pointer_field(&element_pointer, fields)
                 } else {
                     self.find_struct_element_array_field_base_pointer(name, index, fields)
@@ -15738,7 +15743,7 @@ impl Interpreter {
                 fields,
                 array_index,
             } => {
-                let element_pointer = self.find_struct_element_pointer(name, index)?;
+                let element_pointer = self.indexed_struct_element_pointer(name, index)?;
                 self.struct_pointer_pointer_field_index_pointer(
                     &element_pointer,
                     fields,
@@ -18148,6 +18153,31 @@ impl Interpreter {
                     ))),
                 }
             }
+            Some(Value::Pointer {
+                ty: PointeeType::Struct(type_name),
+                ..
+            }) => match self.aggregate_type_field_metadata(type_name, path)? {
+                Some((StructFieldType::Array(elem_type, _), _, _)) => Ok(elem_type.size()),
+                Some((StructFieldType::StructArray(type_name, _), _, _)) => self
+                    .struct_types
+                    .get(&type_name)
+                    .map(|struct_type| struct_type.size(&self.struct_types))
+                    .transpose()?
+                    .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+                Some((StructFieldType::Pointer(ty), _, _)) => ty.size(&self.struct_types),
+                Some((StructFieldType::Scalar(_), _, _)) => Err(CustError::new(format!(
+                    "struct field '{}' is not an array",
+                    Self::field_path_label(path)
+                ))),
+                Some((StructFieldType::Struct(type_name), _, _)) => Err(CustError::new(format!(
+                    "struct field '{}' is a struct '{type_name}'",
+                    Self::field_path_label(path)
+                ))),
+                None => Err(CustError::new(format!(
+                    "undefined struct field '{}'",
+                    Self::field_path_label(path)
+                ))),
+            },
             Some(_) => Err(CustError::new(format!(
                 "variable '{name}' is not a struct array"
             ))),
@@ -18388,7 +18418,7 @@ impl Interpreter {
                     if points_to_const {
                         return Err(CustError::new("cannot assign through pointer to const"));
                     }
-                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    let element_pointer = self.indexed_struct_element_pointer(name, index)?;
                     let field_element_pointer = self.struct_pointer_pointer_field_index_pointer(
                         &element_pointer,
                         fields,
@@ -19352,7 +19382,7 @@ impl Interpreter {
                     self.struct_element_field_metadata(name, fields)?,
                     Some((StructFieldType::Pointer(_), _, _))
                 ) {
-                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    let element_pointer = self.indexed_struct_element_pointer(name, index)?;
                     let field_element_pointer = self.struct_pointer_pointer_field_index_pointer(
                         &element_pointer,
                         fields,
@@ -19529,7 +19559,7 @@ impl Interpreter {
                         return Err(CustError::new("cannot assign through pointer to const"));
                     }
                     let value = self.eval(value)?;
-                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    let element_pointer = self.indexed_struct_element_pointer(name, index)?;
                     let field_element_pointer = self.struct_pointer_pointer_field_index_pointer(
                         &element_pointer,
                         fields,
@@ -19586,7 +19616,7 @@ impl Interpreter {
                     if points_to_const {
                         return Err(CustError::new("cannot assign through pointer to const"));
                     }
-                    let element_pointer = self.find_struct_element_pointer(name, index)?;
+                    let element_pointer = self.indexed_struct_element_pointer(name, index)?;
                     let field_element_pointer = self.struct_pointer_pointer_field_index_pointer(
                         &element_pointer,
                         fields,
