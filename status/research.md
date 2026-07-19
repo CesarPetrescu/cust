@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-19 — Compound-literal outer arrays through adjusted parameters
+
+- Capturing an aggregate compound literal's address once gives its named, anonymous, or union-containing outer-array fields a stable hidden root for the enclosing block. C array adjustment copies only the selected outer pointer slot; it must retain literal root, containing path, outer index, embedded field, and inner index through helper calls.
+- A fixed matrix can model same-element, same-array-distinct, cross-field, and separate-literal relationships while six initializer markers prove roots are not re-evaluated. Cross-root subtraction remains interpreter-only because native C leaves unrelated-array subtraction undefined.
+- Existing Cust behavior passed immediately. The warning-free fixture returns 67 under Cust/GCC/Clang; details and recovery commands are in `references/cust-adjusted-aggregate-parameter-compound-literal-outer-arrays.md`.
+
 ## 2026-07-19 — Nested containing paths through adjusted aggregate parameters
 
 - C array adjustment preserves the concrete outer array selected from root storage, a direct aggregate field, a nested named or anonymous field, or a union member. Model that outer owner/path separately from the selected outer and inner indexes; helper calls and copied parameter slots do not create new storage roots.

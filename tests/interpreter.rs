@@ -9092,6 +9092,15 @@ fn adjusted_aggregate_parameter_nested_path_alias_mutation_routes_match_fixture(
 }
 
 #[test]
+fn adjusted_aggregate_parameter_compound_literal_outer_alias_routes_match_fixture() {
+    let program = include_str!(
+        "fixtures/valid/adjusted_aggregate_parameter_compound_literal_outer_alias_routes.c",
+    );
+
+    assert_eq!(interpret(program).unwrap(), 67);
+}
+
+#[test]
 fn aggregate_array_field_elements_decay_embedded_arrays_for_direct_access() {
     let program = r#"
         struct Point { int value; };
