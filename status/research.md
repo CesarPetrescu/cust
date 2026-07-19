@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-19 — Embedded array fields through adjusted aggregate parameters
+
+- Specialized `StructElementArray*` syntax does not reveal whether the outer aggregate array is stored directly or arrived through C array adjustment. Resolve `items[i]` as an interpreter-owned aggregate pointer first, then inspect the selected field metadata to distinguish embedded arrays from pointer-valued fields; this keeps outer and inner expressions single-evaluation.
+- When an adjusted parameter receives an outer array decayed from an aggregate field (`read(wrapper.items)`), a second embedded aggregate-array index cannot be represented by the flat root-array pointer variants. `PointerValue::NestedStructArrayElement` retains the parent pointer, nested field path, and selected index and delegates immutable/mutable aggregate resolution recursively.
+- Every new pointer target needs explicit identity handling. The adjacent equality RED produced 5 instead of 6 because `pointer_eq()` omitted the recursive target even though pointer difference and ordering worked. Compare parent pointers with `pointer_eq()` rather than derived `PartialEq`; this preserves interpreter-owned storage identity and avoids structural comparison of reference-counted storage. The warning-free fixture returns 82 under Cust/GCC/Clang.
+
 ## 2026-07-19 — Pointer-field slot updates through adjusted aggregate-array parameters
 
 - `StructElementSet` / `StructElementCompoundSet` and pointer increment over `StructElementGet` keep their specialized AST when the containing array parameter has adjusted to `Value::Pointer`. Their shared mutating resolver must therefore select `indexed_struct_pointer()` for adjusted parameters and retain `find_struct_element_pointer()` only for stored aggregate arrays.

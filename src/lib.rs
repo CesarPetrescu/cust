@@ -10583,6 +10583,11 @@ enum PointerValue {
         fields: Vec<String>,
         index: usize,
     },
+    NestedStructArrayElement {
+        pointer: Box<PointerValue>,
+        fields: Vec<String>,
+        index: usize,
+    },
     StructField {
         scope_id: usize,
         name: String,
@@ -11871,6 +11876,17 @@ impl Interpreter {
                 }
                 _ => Ok(None),
             },
+            PointerValue::NestedStructArrayElement {
+                pointer, fields, ..
+            } => {
+                let (_, field_map) = self.find_struct_pointer_fields(pointer)?;
+                match Self::nested_field_value("", field_map, fields)?.1 {
+                    StructFieldValue::StructArray { type_name, .. } => {
+                        Ok(Some(PointeeType::Struct(type_name.clone())))
+                    }
+                    _ => Ok(None),
+                }
+            }
             PointerValue::StructFieldElementField {
                 scope_id,
                 name,
@@ -13035,6 +13051,16 @@ impl Interpreter {
                         Self::nested_field_path_is_const(fields, path).unwrap_or(false)
                     })
             }
+            Some(Value::Pointer {
+                ty: PointeeType::Struct(type_name),
+                points_to_const,
+                ..
+            }) => {
+                *points_to_const
+                    || self
+                        .const_aggregate_field_label_for_path(type_name, path)
+                        .is_some()
+            }
             _ => false,
         }
     }
@@ -13552,33 +13578,14 @@ impl Interpreter {
         })
     }
 
-    fn find_struct_element_array_field_pointer(
-        &mut self,
-        name: &str,
-        index: &Expr,
-        fields: &[String],
-        array_index: &Expr,
-    ) -> CustResult<PointerValue> {
-        let (array, index) =
-            self.checked_struct_element_array_index(name, index, fields, array_index)?;
-        Ok(PointerValue::ArrayElement {
-            array,
-            source_name: Some(Self::field_path_label(fields).to_string()),
-            index,
-        })
-    }
-
     fn find_struct_element_array_field_base_pointer(
         &mut self,
         name: &str,
         index: &Expr,
         fields: &[String],
     ) -> CustResult<PointerValue> {
-        let array = self.find_struct_element_array_field(name, index, fields)?;
-        Ok(PointerValue::ArrayBase {
-            array,
-            source_name: Some(Self::field_path_label(fields).to_string()),
-        })
+        let element_pointer = self.indexed_struct_element_pointer(name, index)?;
+        self.find_struct_pointer_array_field_base_pointer(&element_pointer, fields)
     }
 
     fn direct_struct_aggregate_array_field_type(
@@ -13763,7 +13770,8 @@ impl Interpreter {
                 name,
                 index,
             } => Ok(Some((*scope_id, name.clone(), Some(*index)))),
-            PointerValue::StructFieldElement { .. } => Ok(None),
+            PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. } => Ok(None),
             PointerValue::Null => Err(CustError::new("null pointer dereference")),
             _ => Err(CustError::new("pointer does not reference a struct")),
         }
@@ -13775,7 +13783,17 @@ impl Interpreter {
         fields: &[String],
     ) -> CustResult<Option<PointerValue>> {
         let Some((scope_id, name, element_index)) = Self::struct_pointer_source(pointer)? else {
-            return Ok(None);
+            let (type_name, field_map) = self.find_struct_pointer_fields(pointer)?;
+            return match Self::nested_field_value(&type_name, field_map, fields)?.1 {
+                StructFieldValue::StructArray { .. } => {
+                    Ok(Some(PointerValue::NestedStructArrayElement {
+                        pointer: Box::new(pointer.clone()),
+                        fields: fields.to_vec(),
+                        index: 0,
+                    }))
+                }
+                _ => Ok(None),
+            };
         };
         match self.struct_field_by_scope(scope_id, &name, element_index, fields)? {
             StructFieldValue::StructArray { .. } => Ok(Some(PointerValue::StructFieldElement {
@@ -13796,13 +13814,35 @@ impl Interpreter {
         index: &Expr,
     ) -> CustResult<Option<PointerValue>> {
         let Some((scope_id, name, element_index)) = Self::struct_pointer_source(pointer)? else {
-            return Ok(None);
+            let (type_name, field_map) = self.find_struct_pointer_fields(pointer)?;
+            let len = match Self::nested_field_value(&type_name, field_map, fields)?.1 {
+                StructFieldValue::StructArray { elements, .. } => elements.len(),
+                _ => return Ok(None),
+            };
+            let index_value = self.eval(index)?;
+            let Ok(index) = usize::try_from(index_value) else {
+                return Err(CustError::new(format!(
+                    "struct array field '{}' index {index_value} out of bounds for length {len}",
+                    Self::field_path_label(fields)
+                )));
+            };
+            if index >= len {
+                return Err(CustError::new(format!(
+                    "struct array field '{}' index {index_value} out of bounds for length {len}",
+                    Self::field_path_label(fields)
+                )));
+            }
+            return Ok(Some(PointerValue::NestedStructArrayElement {
+                pointer: Box::new(pointer.clone()),
+                fields: fields.to_vec(),
+                index,
+            }));
         };
-        let index_value = self.eval(index)?;
         let len = match self.struct_field_by_scope(scope_id, &name, element_index, fields)? {
             StructFieldValue::StructArray { elements, .. } => elements.len(),
             _ => return Ok(None),
         };
+        let index_value = self.eval(index)?;
         let Ok(index) = usize::try_from(index_value) else {
             return Err(CustError::new(format!(
                 "struct array field '{}' index {index_value} out of bounds for length {len}",
@@ -13915,9 +13955,9 @@ impl Interpreter {
     ) -> CustResult<Option<PointerValue>> {
         if let Some(pointer) = self.scalar_variable_reverse_subscript_pointer(name, index)? {
             return match pointer {
-                PointerValue::StructElement { .. } | PointerValue::StructFieldElement { .. } => {
-                    Ok(Some(pointer))
-                }
+                PointerValue::StructElement { .. }
+                | PointerValue::StructFieldElement { .. }
+                | PointerValue::NestedStructArrayElement { .. } => Ok(Some(pointer)),
                 _ => Err(CustError::new(
                     "subscript pointer does not reference a struct",
                 )),
@@ -13932,9 +13972,9 @@ impl Interpreter {
         let index_value = self.eval(index)?;
         let pointer = self.offset_array_pointer(&pointer, index_value)?;
         match pointer {
-            PointerValue::StructElement { .. } | PointerValue::StructFieldElement { .. } => {
-                Ok(Some(pointer))
-            }
+            PointerValue::StructElement { .. }
+            | PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. } => Ok(Some(pointer)),
             _ => Err(CustError::new("struct pointer is not indexable")),
         }
     }
@@ -14534,6 +14574,17 @@ impl Interpreter {
         index: &Expr,
         path: &[String],
     ) -> CustResult<Rc<RefCell<ArrayValue>>> {
+        if let Some(pointer) = self.indexed_struct_pointer(name, index)? {
+            let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
+            let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
+            return match field_value {
+                StructFieldValue::Array { value, .. } => Ok(Rc::clone(value)),
+                _ => Err(CustError::new(format!(
+                    "struct field '{}' is not an array",
+                    Self::field_path_label(path)
+                ))),
+            };
+        }
         let index = self.checked_struct_element_index(name, index)?;
         match self.find_variable(name) {
             Some(Value::StructArray {
@@ -14554,6 +14605,27 @@ impl Interpreter {
                 "variable '{name}' is not a struct array"
             ))),
             None => Err(CustError::new(format!("undefined variable '{name}'"))),
+        }
+    }
+
+    fn ensure_struct_element_array_field_mutable(
+        &self,
+        name: &str,
+        path: &[String],
+    ) -> CustResult<()> {
+        match self.find_variable(name) {
+            Some(Value::Pointer {
+                ty: PointeeType::Struct(type_name),
+                points_to_const,
+                ..
+            }) if *points_to_const
+                || self
+                    .const_aggregate_field_label_for_path(type_name, path)
+                    .is_some() =>
+            {
+                Err(CustError::new("cannot assign through pointer to const"))
+            }
+            _ => Ok(()),
         }
     }
 
@@ -14718,6 +14790,21 @@ impl Interpreter {
                 fields,
                 *index,
             ),
+            PointerValue::NestedStructArrayElement {
+                pointer,
+                fields,
+                index,
+            } => {
+                let (_, field_map) = self.find_struct_pointer_fields(pointer)?;
+                match Self::nested_field_value("", field_map, fields)?.1 {
+                    StructFieldValue::StructArray {
+                        type_name,
+                        elements,
+                        ..
+                    } => Ok((type_name.clone(), &elements[*index])),
+                    _ => Err(CustError::new("pointer does not reference a struct array")),
+                }
+            }
             PointerValue::StructField {
                 scope_id,
                 name,
@@ -14825,6 +14912,21 @@ impl Interpreter {
                 fields,
                 *index,
             ),
+            PointerValue::NestedStructArrayElement {
+                pointer,
+                fields,
+                index,
+            } => {
+                let (_, field_map) = self.find_struct_pointer_fields_mut(pointer)?;
+                match Self::nested_field_value_mut("", field_map, fields)?.1 {
+                    StructFieldValue::StructArray {
+                        type_name,
+                        elements,
+                        ..
+                    } => Ok((type_name.clone(), &mut elements[*index])),
+                    _ => Err(CustError::new("pointer does not reference a struct array")),
+                }
+            }
             PointerValue::StructField {
                 scope_id,
                 name,
@@ -15542,18 +15644,22 @@ impl Interpreter {
                 fields,
                 array_index,
             } => {
-                if matches!(
-                    self.struct_element_field_metadata(name, fields)?,
-                    Some((StructFieldType::Pointer(_), _, _))
-                ) {
-                    let element_pointer = self.indexed_struct_element_pointer(name, index)?;
+                let element_pointer = self.indexed_struct_element_pointer(name, index)?;
+                if self
+                    .struct_pointer_pointer_field_type(&element_pointer, fields)?
+                    .is_some()
+                {
                     self.struct_pointer_pointer_field_index_pointer(
                         &element_pointer,
                         fields,
                         array_index,
                     )
                 } else {
-                    self.find_struct_element_array_field_pointer(name, index, fields, array_index)
+                    self.find_struct_pointer_array_field_pointer(
+                        &element_pointer,
+                        fields,
+                        array_index,
+                    )
                 }
             }
             Expr::AddressOfStructPtrArrayField {
@@ -15752,11 +15858,22 @@ impl Interpreter {
                 array_index,
             } => {
                 let element_pointer = self.indexed_struct_element_pointer(name, index)?;
-                self.struct_pointer_pointer_field_index_pointer(
-                    &element_pointer,
-                    fields,
-                    array_index,
-                )
+                if self
+                    .struct_pointer_pointer_field_type(&element_pointer, fields)?
+                    .is_some()
+                {
+                    self.struct_pointer_pointer_field_index_pointer(
+                        &element_pointer,
+                        fields,
+                        array_index,
+                    )
+                } else {
+                    self.find_struct_pointer_array_field_pointer(
+                        &element_pointer,
+                        fields,
+                        array_index,
+                    )
+                }
             }
             Expr::StructPtrGet { pointer, fields } => {
                 let pointer = self.eval_pointer(pointer)?;
@@ -16180,6 +16297,11 @@ impl Interpreter {
                 fields,
                 *index as i64 + offset,
             ),
+            PointerValue::NestedStructArrayElement {
+                pointer,
+                fields,
+                index,
+            } => self.nested_struct_array_pointer_at(pointer, fields, *index as i64 + offset),
             PointerValue::ArrayBase { array, source_name } => {
                 self.array_pointer_at(array, source_name.clone(), offset)
             }
@@ -16189,6 +16311,34 @@ impl Interpreter {
                 index,
             } => self.array_pointer_at(array, source_name.clone(), *index as i64 + offset),
         }
+    }
+
+    fn nested_struct_array_pointer_at(
+        &self,
+        pointer: &PointerValue,
+        fields: &[String],
+        index: i64,
+    ) -> CustResult<PointerValue> {
+        let (type_name, field_map) = self.find_struct_pointer_fields(pointer)?;
+        let len = match Self::nested_field_value(&type_name, field_map, fields)?.1 {
+            StructFieldValue::StructArray { elements, .. } => elements.len(),
+            _ => return Err(CustError::new("pointer does not reference a struct array")),
+        };
+        let Ok(index_usize) = usize::try_from(index) else {
+            return Err(CustError::new(format!(
+                "struct array field pointer index {index} out of bounds for length {len}"
+            )));
+        };
+        if index_usize >= len {
+            return Err(CustError::new(format!(
+                "struct array field pointer index {index} out of bounds for length {len}"
+            )));
+        }
+        Ok(PointerValue::NestedStructArrayElement {
+            pointer: Box::new(pointer.clone()),
+            fields: fields.to_vec(),
+            index: index_usize,
+        })
     }
 
     fn struct_array_pointer_at(
@@ -16281,7 +16431,8 @@ impl Interpreter {
             }
             PointerValue::Struct { .. }
             | PointerValue::StructElement { .. }
-            | PointerValue::StructFieldElement { .. } => {
+            | PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. } => {
                 Err(CustError::new("struct pointer used as scalar"))
             }
             PointerValue::StructFieldElementField {
@@ -16366,7 +16517,8 @@ impl Interpreter {
             }
             PointerValue::Struct { .. }
             | PointerValue::StructElement { .. }
-            | PointerValue::StructFieldElement { .. } => {
+            | PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. } => {
                 Err(CustError::new("struct pointer used as scalar"))
             }
             PointerValue::StructFieldElementField { .. } => {
@@ -16511,7 +16663,8 @@ impl Interpreter {
             }
             PointerValue::Struct { .. }
             | PointerValue::StructElement { .. }
-            | PointerValue::StructFieldElement { .. } => {
+            | PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. } => {
                 Err(CustError::new("struct pointer is not indexable"))
             }
             PointerValue::ArrayBase { array, source_name } => {
@@ -16753,6 +16906,22 @@ impl Interpreter {
                 },
             ) => left_scope == right_scope && left_name == right_name && left_index == right_index,
             (
+                PointerValue::NestedStructArrayElement {
+                    pointer: left_pointer,
+                    fields: left_fields,
+                    index: left_index,
+                },
+                PointerValue::NestedStructArrayElement {
+                    pointer: right_pointer,
+                    fields: right_fields,
+                    index: right_index,
+                },
+            ) => {
+                Self::pointer_eq(left_pointer, right_pointer)
+                    && left_fields == right_fields
+                    && left_index == right_index
+            }
+            (
                 PointerValue::StructFieldElement {
                     scope_id: left_scope,
                     name: left_name,
@@ -16879,6 +17048,7 @@ impl Interpreter {
             | PointerValue::Struct { .. }
             | PointerValue::StructElement { .. }
             | PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. }
             | PointerValue::StructField { .. }
             | PointerValue::StructFieldElementField { .. } => {
                 Err(CustError::new("scalar pointer arithmetic is not supported"))
@@ -16917,6 +17087,35 @@ impl Interpreter {
 
     fn pointer_difference(&self, left: &PointerValue, right: &PointerValue) -> CustResult<i64> {
         match (left, right) {
+            (
+                PointerValue::NestedStructArrayElement {
+                    pointer: left_pointer,
+                    fields: left_fields,
+                    index: left_index,
+                },
+                PointerValue::NestedStructArrayElement {
+                    pointer: right_pointer,
+                    fields: right_fields,
+                    index: right_index,
+                },
+            ) => {
+                if !Self::pointer_eq(left_pointer, right_pointer) || left_fields != right_fields {
+                    return Err(CustError::new(
+                        "cannot subtract pointers to different arrays",
+                    ));
+                }
+                self.nested_struct_array_pointer_at(left_pointer, left_fields, *left_index as i64)?;
+                self.nested_struct_array_pointer_at(
+                    right_pointer,
+                    right_fields,
+                    *right_index as i64,
+                )?;
+                Ok(*left_index as i64 - *right_index as i64)
+            }
+            (PointerValue::NestedStructArrayElement { .. }, _)
+            | (_, PointerValue::NestedStructArrayElement { .. }) => Err(CustError::new(
+                "cannot subtract pointers to different arrays",
+            )),
             (
                 PointerValue::StructFieldElement {
                     scope_id: left_scope,
@@ -17838,6 +18037,7 @@ impl Interpreter {
                     Some((StructFieldType::Pointer(PointeeType::Struct(type_name)), _, _)) => {
                         Ok(type_name)
                     }
+                    Some((StructFieldType::StructArray(type_name, _), _, _)) => Ok(type_name),
                     _ => Err(CustError::new("expected struct expression")),
                 }
             }
@@ -18437,6 +18637,7 @@ impl Interpreter {
                     self.assign_deref_pointer(&field_element_pointer, updated)?;
                     Ok(Self::increment_result(current, updated, prefix))
                 } else {
+                    self.ensure_struct_element_array_field_mutable(name, fields)?;
                     let (array, index) =
                         self.checked_struct_element_array_index(name, index, fields, array_index)?;
                     let current = array.borrow().elements[index];
@@ -18637,9 +18838,23 @@ impl Interpreter {
                 value,
             } if matches!(
                 self.struct_element_field_metadata(name, fields)?,
-                Some((StructFieldType::Pointer(PointeeType::Struct(_)), _, _))
+                Some((
+                    StructFieldType::Pointer(PointeeType::Struct(_))
+                        | StructFieldType::StructArray(_, _),
+                    _,
+                    _
+                ))
             ) =>
             {
+                if matches!(
+                    self.struct_element_field_metadata(name, fields)?,
+                    Some((StructFieldType::StructArray(_, _), true, _))
+                ) {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
                 let pointer = Expr::AddressOfStructElementArrayField {
                     name: name.clone(),
                     index: index.clone(),
@@ -19576,6 +19791,7 @@ impl Interpreter {
                     self.assign_deref_pointer(&field_element_pointer, value)?;
                     Ok(value)
                 } else {
+                    self.ensure_struct_element_array_field_mutable(name, fields)?;
                     let value = self.eval(value)?;
                     let (array, index) =
                         self.checked_struct_element_array_index(name, index, fields, array_index)?;
@@ -19636,6 +19852,7 @@ impl Interpreter {
                     self.assign_deref_pointer(&field_element_pointer, result)?;
                     Ok(result)
                 } else {
+                    self.ensure_struct_element_array_field_mutable(name, fields)?;
                     let (array, index) =
                         self.checked_struct_element_array_index(name, index, fields, array_index)?;
                     let current = array.borrow().elements[index];
