@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-20 — Conditional/comma-wrapped direct literals through adjusted parameters
+
+- Conditional array operands decay to the selected pointer before adjusted-parameter binding; only the selected compound-literal initializer executes. A comma wrapper evaluates its scalar left operand before the literal on the right. Cust's existing pointer classifiers and hidden literal roots already compose correctly across both forms.
+- Distinct function arguments remain unsequenced, so use separate marker objects for each argument in native fixtures. Cross-root subtraction stays interpreter-only because unrelated-array subtraction is undefined in C.
+- Thirty-six generated alias cases, six const-typedef wrapper cases, and 11 exact diagnostics pass. The warning-free fixture returns 69 under Cust/GCC/Clang. See `references/cust-adjusted-aggregate-parameter-wrapped-direct-compound-literals.md`.
+
 ## 2026-07-20 — Direct aggregate-array literals through adjusted parameters
 
 - A direct `(struct Item[N]){...}` argument decays once while binding an adjusted aggregate parameter; embedded pointers derived in the callee must retain the hidden literal root plus outer and inner indexes through forwarding and copied pointer slots.

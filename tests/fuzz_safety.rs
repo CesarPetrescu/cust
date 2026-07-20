@@ -2444,6 +2444,13 @@ enum DirectLiteralAdjustedParameterRelation {
     SeparateLiteralRoot,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WrappedDirectLiteralRoute {
+    ConditionalTrue,
+    ConditionalFalse,
+    Comma,
+}
+
 #[test]
 fn generated_adjusted_aggregate_parameter_embedded_field_pointers_match_model_without_panics() {
     let mut relation_counts = [0; 6];
@@ -2894,6 +2901,109 @@ fn generated_direct_aggregate_array_literal_adjusted_parameter_aliases_match_mod
     assert_eq!(reverse_routes, 72);
     assert_eq!(one_hop_routes, 72);
     assert_eq!(two_hop_routes, 72);
+}
+
+#[test]
+fn generated_wrapped_direct_aggregate_array_literal_adjusted_parameter_aliases_match_model_without_panics()
+ {
+    let mut relation_counts = [0; 3];
+    let mut route_counts = [0; 3];
+    let mut one_hop_routes = 0;
+    let mut two_hop_routes = 0;
+
+    for kind in AdjustedParameterFieldKind::ALL {
+        for case_index in 0..18 {
+            let relation_index = case_index % DirectLiteralAdjustedParameterRelation::ALL.len();
+            let relation = DirectLiteralAdjustedParameterRelation::ALL[relation_index];
+            let route = WrappedDirectLiteralRoute::ALL[(case_index / 3) % 3];
+            relation_counts[relation_index] += 1;
+            route_counts[route.index()] += 1;
+            let first = direct_literal_adjusted_parameter_first_pointer(kind, case_index);
+            let second = direct_literal_adjusted_parameter_related_pointer(first, relation);
+            let reader = if case_index & 2 == 0 { first } else { second };
+            let two_hop = [
+                case_index & 1 == 0,
+                case_index & 2 == 0,
+                case_index & 4 == 0,
+            ];
+            one_hop_routes += two_hop.iter().filter(|twice| !**twice).count();
+            two_hop_routes += two_hop.iter().filter(|twice| **twice).count();
+            let replacement = 401 + case_index as i64;
+            let delta = 1 + (case_index % 7) as i64;
+            let source = wrapped_direct_literal_adjusted_parameter_alias_program(
+                first,
+                second,
+                reader,
+                replacement,
+                delta,
+                two_hop,
+                route,
+            );
+            let expected = adjusted_parameter_alias_mutation_expected(
+                first,
+                second,
+                reader,
+                replacement,
+                delta,
+            ) + 19;
+
+            assert_interpretation(
+                &source,
+                ExpectedInterpretation::Value(expected),
+                &format!(
+                    "wrapped direct literal case {case_index}, kind {kind:?}, relation {relation:?}, route {route:?}"
+                ),
+            );
+        }
+
+        for route in WrappedDirectLiteralRoute::ALL {
+            assert_interpretation(
+                &wrapped_direct_literal_const_parameter_program(route),
+                ExpectedInterpretation::Value(17),
+                &format!("wrapped const direct literal route {route:?}"),
+            );
+        }
+        assert_interpretation(
+            &wrapped_direct_literal_inner_bounds_program(kind),
+            ExpectedInterpretation::Error(kind.inner_bounds_error()),
+            &format!("wrapped direct literal inner bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &wrapped_direct_literal_outer_bounds_program(kind),
+            ExpectedInterpretation::Error(
+                "struct array pointer index 2 out of bounds for length 2",
+            ),
+            &format!("wrapped direct literal outer bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &wrapped_direct_literal_const_discard_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("wrapped direct literal const discard, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &wrapped_direct_literal_const_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("wrapped direct literal const write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &wrapped_direct_literal_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("wrapped direct literal cross-root identity, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &wrapped_direct_literal_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "wrapped direct literal aggregate type mismatch",
+    );
+
+    assert_eq!(relation_counts, [12; 3]);
+    assert_eq!(route_counts, [12; 3]);
+    assert_eq!(one_hop_routes, 50);
+    assert_eq!(two_hop_routes, 58);
 }
 
 #[test]
@@ -11379,6 +11489,229 @@ fn direct_literal_adjusted_parameter_type_mismatch_program() -> String {
          struct Other {{ int value; }};\n\
          int probe(struct Item items[]) {{ struct Other *slot = &items[0].nested.points[0]; return slot->value; }}\n\
          int main(void) {{ return probe((struct Item[2]){{{{}}, {{}}}}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+    )
+}
+
+impl WrappedDirectLiteralRoute {
+    const ALL: [Self; 3] = [Self::ConditionalTrue, Self::ConditionalFalse, Self::Comma];
+
+    fn index(self) -> usize {
+        match self {
+            Self::ConditionalTrue => 0,
+            Self::ConditionalFalse => 1,
+            Self::Comma => 2,
+        }
+    }
+
+    fn render(self, type_name: &str, prefix: &str) -> String {
+        let selected = format!(
+            "({type_name}){{{{ .nested = {{ .values = {{++{prefix}_selected}} }} }}, {{}}}}"
+        );
+        let unselected = format!(
+            "({type_name}){{{{ .nested = {{ .values = {{++{prefix}_unselected}} }} }}, {{}}}}"
+        );
+        match self {
+            Self::ConditionalTrue => format!("(1 ? {selected} : {unselected})"),
+            Self::ConditionalFalse => format!("(0 ? {unselected} : {selected})"),
+            Self::Comma => format!("(++{prefix}_comma, {selected})"),
+        }
+    }
+
+    fn marker_check(self, prefix: &str) -> String {
+        let comma_expected = i64::from(self == Self::Comma);
+        format!(
+            "{prefix}_selected == 1 && {prefix}_unselected == 0 && {prefix}_comma == {comma_expected}"
+        )
+    }
+}
+
+fn wrapped_direct_literal_adjusted_parameter_alias_program(
+    first: AdjustedParameterPointer,
+    second: AdjustedParameterPointer,
+    reader: AdjustedParameterPointer,
+    replacement: i64,
+    delta: i64,
+    two_hop: [bool; 3],
+    route: WrappedDirectLiteralRoute,
+) -> String {
+    let kind = first.kind;
+    let separate_roots = second.storage == AdjustedParameterStorage::RootRight;
+    let first_parameter = if separate_roots {
+        "first_items"
+    } else {
+        "items"
+    };
+    let second_parameter = if separate_roots {
+        "second_items"
+    } else {
+        "items"
+    };
+    let reader_parameter = if reader.storage == AdjustedParameterStorage::RootRight {
+        second_parameter
+    } else {
+        first_parameter
+    };
+    let first_address = first.render_static_address(first_parameter);
+    let second_address = second.render_static_address(second_parameter);
+    let reader_address = reader.render_static_address(reader_parameter);
+    let first_forward = adjusted_parameter_forward_expr(first, &first_address, two_hop[0], false);
+    let second_forward =
+        adjusted_parameter_forward_expr(second, &second_address, two_hop[1], false);
+    let reader_forward = adjusted_parameter_forward_expr(reader, &reader_address, two_hop[2], true);
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let parameters = if separate_roots {
+        "struct Item first_items[], struct Item second_items[]"
+    } else {
+        "struct Item items[]"
+    };
+    let (arguments, marker_check) = if separate_roots {
+        (
+            format!(
+                "{}, {}",
+                route.render("struct Item[2]", "left"),
+                route.render("struct Item[2]", "right")
+            ),
+            format!(
+                "({}) && ({})",
+                route.marker_check("left"),
+                route.marker_check("right")
+            ),
+        )
+    } else {
+        (
+            route.render("struct Item[2]", "root"),
+            route.marker_check("root"),
+        )
+    };
+
+    format!(
+        "{prelude}\n\
+         int root_selected = 0; int root_unselected = 0; int root_comma = 0;\n\
+         int left_selected = 0; int left_unselected = 0; int left_comma = 0;\n\
+         int right_selected = 0; int right_unselected = 0; int right_comma = 0;\n\
+         {pointer_type}forward_alias_{suffix}({pointer_type}value) {{ return value; }}\n\
+         {pointer_type}forward_alias_{suffix}_twice({pointer_type}value) {{ return forward_alias_{suffix}(value); }}\n\
+         {const_pointer_type}forward_const_alias_{suffix}({const_pointer_type}value) {{ return value; }}\n\
+         {const_pointer_type}forward_const_alias_{suffix}_twice({const_pointer_type}value) {{ return forward_const_alias_{suffix}(value); }}\n\
+         int wrapped_mutate_{suffix}({pointer_type}first, {pointer_type}second, {const_pointer_type}reader, {pointer_type}fallback) {{\n\
+             {write_first}; int before = {read_reader}; {compound_second}; int after = {read_reader};\n\
+             first = fallback; second = fallback; reader = fallback;\n\
+             return before * 3 + after * 5 + (first == fallback) + (second == fallback) + (reader == fallback);\n\
+         }}\n\
+         int probe({parameters}) {{\n\
+             {pointer_type}a = {first_forward}; {pointer_type}b = {second_forward}; {const_pointer_type}r = {reader_forward};\n\
+             {initialize_first}; {initialize_second};\n\
+             int observed = wrapped_mutate_{suffix}(a, b, r, a);\n\
+             int caller_identity = (a == {first_address}) + (b == {second_address}) + (r == {reader_address});\n\
+             return observed + {read_a} * 7 + {read_b} * 11 + {read_r} * 13 + caller_identity * 17;\n\
+         }}\n\
+         int main(void) {{ int result = probe({arguments}); return result + ({marker_check}) * 19; }}\n",
+        prelude = adjusted_parameter_prelude(),
+        write_first = kind.write("first", replacement),
+        read_reader = kind.read("reader"),
+        compound_second = kind.compound_add("second", delta),
+        initialize_first = kind.write("a", first.model_value()),
+        initialize_second = kind.write("b", second.model_value()),
+        read_a = kind.read("a"),
+        read_b = kind.read("b"),
+        read_r = kind.read("r"),
+    )
+}
+
+fn wrapped_direct_literal_const_parameter_program(route: WrappedDirectLiteralRoute) -> String {
+    let argument = route.render("ConstItems", "root");
+    let marker_check = route.marker_check("root");
+    format!(
+        "{prelude}\n\
+         typedef const struct Item ConstItems[2];\n\
+         int root_selected = 0; int root_unselected = 0; int root_comma = 0;\n\
+         int read_const(const struct Item items[]) {{ return items[0].nested.values[0] + 6; }}\n\
+         int main(void) {{ return read_const({argument}) + ({marker_check}) * 10; }}\n",
+        prelude = adjusted_parameter_prelude(),
+    )
+}
+
+fn wrapped_direct_literal_inner_bounds_program(kind: AdjustedParameterFieldKind) -> String {
+    let argument = WrappedDirectLiteralRoute::ConditionalTrue.render("struct Item[2]", "root");
+    format!(
+        "{prelude}\nint root_selected = 0; int root_unselected = 0; int root_comma = 0;\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[3]; return {read}; }}\n\
+         int main(void) {{ return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn wrapped_direct_literal_outer_bounds_program(kind: AdjustedParameterFieldKind) -> String {
+    let argument = WrappedDirectLiteralRoute::Comma.render("struct Item[2]", "root");
+    format!(
+        "{prelude}\nint root_selected = 0; int root_unselected = 0; int root_comma = 0;\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[2].nested.{field}[0]; return {read}; }}\n\
+         int main(void) {{ return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn wrapped_direct_literal_const_discard_program(kind: AdjustedParameterFieldKind) -> String {
+    let argument = WrappedDirectLiteralRoute::ConditionalFalse.render("ConstItems", "root");
+    format!(
+        "{prelude}\ntypedef const struct Item ConstItems[2];\n\
+         int root_selected = 0; int root_unselected = 0; int root_comma = 0;\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[0]; return {read}; }}\n\
+         int main(void) {{ return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn wrapped_direct_literal_const_write_program(kind: AdjustedParameterFieldKind) -> String {
+    let argument = WrappedDirectLiteralRoute::Comma.render("ConstItems", "root");
+    format!(
+        "{prelude}\ntypedef const struct Item ConstItems[2];\n\
+         int root_selected = 0; int root_unselected = 0; int root_comma = 0;\n\
+         int probe(const struct Item items[]) {{ {const_pointer_type}slot = &items[0].nested.{field}[0]; {write}; return {read}; }}\n\
+         int main(void) {{ return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        const_pointer_type = kind.const_pointer_type(),
+        field = kind.field_name(),
+        write = kind.write("slot", 7),
+        read = kind.read("slot"),
+    )
+}
+
+fn wrapped_direct_literal_cross_root_program(kind: AdjustedParameterFieldKind) -> String {
+    let first_argument =
+        WrappedDirectLiteralRoute::ConditionalTrue.render("struct Item[2]", "left");
+    let second_argument = WrappedDirectLiteralRoute::Comma.render("struct Item[2]", "right");
+    format!(
+        "{prelude}\nint left_selected = 0; int left_unselected = 0; int left_comma = 0;\n\
+         int right_selected = 0; int right_unselected = 0; int right_comma = 0;\n\
+         int probe(struct Item first[], struct Item second[]) {{\n\
+             {pointer_type}a = &first[0].nested.{field}[0]; {pointer_type}b = &second[0].nested.{field}[0]; return a - b;\n\
+         }}\nint main(void) {{ return probe({first_argument}, {second_argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+    )
+}
+
+fn wrapped_direct_literal_type_mismatch_program() -> String {
+    let argument = WrappedDirectLiteralRoute::ConditionalFalse.render("struct Item[2]", "root");
+    format!(
+        "{prelude}\nint root_selected = 0; int root_unselected = 0; int root_comma = 0;\n\
+         struct Other {{ int value; }};\n\
+         int probe(struct Item items[]) {{ struct Other *slot = &items[0].nested.points[0]; return slot->value; }}\n\
+         int main(void) {{ return probe({argument}); }}\n",
         prelude = adjusted_parameter_prelude(),
     )
 }
