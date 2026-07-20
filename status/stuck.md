@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-20 conditional/comma-wrapped direct aggregate-array literal adjusted-parameter run after 36 generated two-writer/const-reader cases, six const-typedef wrapper checks, 11 targeted diagnostics, warning-free Cust/GCC/Clang exit 69, 46 passing fuzz-safety tests, 837 passing interpreter tests, and the full required local and Docker gates. Outer-pointer offset/indexed-address wrapper composition is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-20 wrapped nonzero-offset direct aggregate-array literal adjusted-parameter run after 54 generated two-writer/const-reader cases, nine const-typedef wrapper combinations, 13 targeted diagnostics, warning-free Cust/GCC/Clang exit 37, 47 passing fuzz-safety tests, 838 passing interpreter tests, and the full required local and Docker gates. Applying the offset matrix to captured aggregate-compound-literal array fields is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 

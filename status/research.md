@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-20 — Nonzero offsets on wrapped direct literals through adjusted parameters
+
+- Array compound literals decay before `+ 1`, reverse `1 + literal`, or `&literal[1]`; passing that pointer to an adjusted aggregate parameter must retain the hidden root's original length and current outer index rather than rebasing storage at zero.
+- A callee receiving element one may legally reach the preceding same-array element with `items[-1]`. Cust, GCC, and Clang agree on the warning-free fixture at exit 37; exact Cust diagnostics report absolute root indexes 3 and -1 for upper/lower failures from a length-three root.
+- Fifty-four generated alias cases, nine const-typedef wrapper combinations, and 13 exact diagnostics pass. See `tests/fixtures/compat/valid/adjusted_aggregate_parameter_wrapped_direct_compound_literal_offset_routes.c`; no production change was needed because existing hidden-root pointer metadata already preserved the nonzero base.
+
 ## 2026-07-20 — Conditional/comma-wrapped direct literals through adjusted parameters
 
 - Conditional array operands decay to the selected pointer before adjusted-parameter binding; only the selected compound-literal initializer executes. A comma wrapper evaluates its scalar left operand before the literal on the right. Cust's existing pointer classifiers and hidden literal roots already compose correctly across both forms.

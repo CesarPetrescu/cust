@@ -170,6 +170,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_compound_literal_outer_alias_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_direct_compound_literal_alias_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_wrapped_direct_compound_literal_alias_routes.c",
+    "tests/fixtures/compat/valid/adjusted_aggregate_parameter_wrapped_direct_compound_literal_offset_routes.c",
     "tests/fixtures/compat/valid/inferred_aggregate_array_declarations.c",
     "tests/fixtures/compat/valid/integer_literal_bases.c",
     "tests/fixtures/compat/valid/integer_literal_suffixes.c",
