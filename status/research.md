@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-20 — Post-forward wrappers around direct aggregate-array literals
+
+- No external documentation was needed. A conditional or comma expression over a pointer returned by `struct Item *` / `const struct Item *` helpers copies one interpreter-owned pointer value; placing that expression before or after `+ 1`, reverse `1 +`, or indexed address formation must retain the selected hidden root, absolute base, concrete aggregate pointee type, and qualification.
+- Six hundred forty-eight generated alias cases, a 108-case const-array-typedef matrix, and 14 exact bounds/const/root/type/lifetime diagnostics passed without production changes. Separate inner and post-forward markers prove selected branches and comma left operands execute once while unselected branches do not execute.
+- The warning-free fixture `adjusted_aggregate_parameter_post_forward_wrapped_direct_compound_literal_routes.c` returns 49 under Cust, GCC, and Clang. See `references/cust-post-forward-wrapped-direct-compound-literal-adjusted-parameters.md`.
+- The next distinct seam is the same post-forward wrapper composition over captured named/anonymous/union aggregate-compound-literal array fields, where owner/path metadata must survive in addition to root/base metadata.
+
 ## 2026-07-20 — Outer-pointer helpers around wrapped direct aggregate-array literals
 
 - No external documentation was needed. A direct aggregate-array compound literal decays to a pointer to its hidden root; copying that pointer through one/two `struct Item *` or `const struct Item *` return helpers before or after `+ 1`, reverse `1 +`, or `&literal[1]` must preserve root identity, absolute base, concrete pointee type, and qualification.

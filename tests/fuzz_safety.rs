@@ -2466,6 +2466,12 @@ enum CapturedOuterForwardRoute {
     TwoHopAfterOffset,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PostForwardWrapperPlacement {
+    BeforeOffset,
+    AfterOffset,
+}
+
 #[test]
 fn generated_adjusted_aggregate_parameter_embedded_field_pointers_match_model_without_panics() {
     let mut relation_counts = [0; 6];
@@ -3276,6 +3282,176 @@ fn generated_outer_forwarded_wrapped_direct_aggregate_array_literal_adjusted_par
     assert_eq!(inner_one_hop_routes + inner_two_hop_routes, 648);
     assert!(inner_one_hop_routes >= 270);
     assert!(inner_two_hop_routes >= 270);
+}
+
+#[test]
+fn generated_post_forward_wrapped_direct_aggregate_array_literal_adjusted_parameter_aliases_match_model_without_panics()
+ {
+    let mut relation_counts = [0; 3];
+    let mut inner_wrapper_counts = [0; 3];
+    let mut post_wrapper_counts = [0; 3];
+    let mut offset_counts = [0; 3];
+    let mut placement_counts = [0; 2];
+    let mut outer_hop_counts = [0; 2];
+    let mut inner_one_hop_routes = 0;
+    let mut inner_two_hop_routes = 0;
+    let mut case_index = 0;
+
+    for kind in AdjustedParameterFieldKind::ALL {
+        for (relation_index, relation) in DirectLiteralAdjustedParameterRelation::ALL
+            .into_iter()
+            .enumerate()
+        {
+            for inner_wrapper in WrappedDirectLiteralRoute::ALL {
+                for post_wrapper in WrappedDirectLiteralRoute::ALL {
+                    for offset in WrappedDirectLiteralOffsetRoute::ALL {
+                        for placement in PostForwardWrapperPlacement::ALL {
+                            for outer_two_hop in [false, true] {
+                                relation_counts[relation_index] += 1;
+                                inner_wrapper_counts[inner_wrapper.index()] += 1;
+                                post_wrapper_counts[post_wrapper.index()] += 1;
+                                offset_counts[offset.index()] += 1;
+                                placement_counts[placement.index()] += 1;
+                                outer_hop_counts[usize::from(outer_two_hop)] += 1;
+
+                                let first = direct_literal_adjusted_parameter_first_pointer(
+                                    kind, case_index,
+                                );
+                                let second = direct_literal_adjusted_parameter_related_pointer(
+                                    first, relation,
+                                );
+                                let reader = if case_index & 2 == 0 { first } else { second };
+                                let inner_two_hop = [
+                                    case_index & 1 == 0,
+                                    case_index & 2 == 0,
+                                    case_index & 4 == 0,
+                                ];
+                                inner_one_hop_routes +=
+                                    inner_two_hop.iter().filter(|twice| !**twice).count();
+                                inner_two_hop_routes +=
+                                    inner_two_hop.iter().filter(|twice| **twice).count();
+                                let replacement = 1201 + case_index as i64;
+                                let delta = 1 + (case_index % 7) as i64;
+                                let source = post_forward_wrapped_direct_literal_adjusted_parameter_alias_program(
+                                    first,
+                                    second,
+                                    reader,
+                                    replacement,
+                                    delta,
+                                    inner_two_hop,
+                                    inner_wrapper,
+                                    post_wrapper,
+                                    offset,
+                                    placement,
+                                    outer_two_hop,
+                                );
+                                let expected = adjusted_parameter_alias_mutation_expected(
+                                    first,
+                                    second,
+                                    reader,
+                                    replacement,
+                                    delta,
+                                ) + 19;
+
+                                assert_interpretation(
+                                    &source,
+                                    ExpectedInterpretation::Value(expected),
+                                    &format!(
+                                        "post-forward wrapped direct literal case {case_index}, kind {kind:?}, relation {relation:?}, inner wrapper {inner_wrapper:?}, post wrapper {post_wrapper:?}, offset {offset:?}, placement {placement:?}, two hop {outer_two_hop}"
+                                    ),
+                                );
+                                case_index += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assert_interpretation(
+            &post_forward_wrapped_direct_literal_inner_bounds_program(kind),
+            ExpectedInterpretation::Error(kind.inner_bounds_error()),
+            &format!("post-forward wrapped direct literal inner bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &post_forward_wrapped_direct_literal_outer_bounds_program(kind, 2),
+            ExpectedInterpretation::Error(
+                "struct array pointer index 3 out of bounds for length 3",
+            ),
+            &format!("post-forward wrapped direct literal upper bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &post_forward_wrapped_direct_literal_outer_bounds_program(kind, -2),
+            ExpectedInterpretation::Error(
+                "struct array pointer index -1 out of bounds for length 3",
+            ),
+            &format!("post-forward wrapped direct literal lower bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &post_forward_wrapped_direct_literal_const_discard_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("post-forward wrapped direct literal const discard, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &post_forward_wrapped_direct_literal_const_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("post-forward wrapped direct literal const write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &post_forward_wrapped_direct_literal_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("post-forward wrapped direct literal cross-root, kind {kind:?}"),
+        );
+    }
+
+    for inner_wrapper in WrappedDirectLiteralRoute::ALL {
+        for post_wrapper in WrappedDirectLiteralRoute::ALL {
+            for offset in WrappedDirectLiteralOffsetRoute::ALL {
+                for placement in PostForwardWrapperPlacement::ALL {
+                    for outer_two_hop in [false, true] {
+                        assert_interpretation(
+                            &post_forward_wrapped_direct_literal_const_parameter_program(
+                                inner_wrapper,
+                                post_wrapper,
+                                offset,
+                                placement,
+                                outer_two_hop,
+                            ),
+                            ExpectedInterpretation::Value(17),
+                            &format!(
+                                "post-forward wrapped const direct literal route {inner_wrapper:?}, {post_wrapper:?}, {offset:?}, {placement:?}, two hop {outer_two_hop}"
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert_interpretation(
+        &post_forward_wrapped_direct_literal_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "post-forward wrapped direct literal aggregate type mismatch",
+    );
+    assert_interpretation(
+        &post_forward_wrapped_direct_literal_lifetime_program(),
+        ExpectedInterpretation::Error(
+            "pointer to out-of-scope variable '__cust_compound_aggregate_array#0'",
+        ),
+        "post-forward wrapped direct literal lifetime",
+    );
+
+    assert_eq!(case_index, 648);
+    assert_eq!(relation_counts, [216; 3]);
+    assert_eq!(inner_wrapper_counts, [216; 3]);
+    assert_eq!(post_wrapper_counts, [216; 3]);
+    assert_eq!(offset_counts, [216; 3]);
+    assert_eq!(placement_counts, [324; 2]);
+    assert_eq!(outer_hop_counts, [324; 2]);
+    assert_eq!(inner_one_hop_routes + inner_two_hop_routes, 1944);
+    assert!(inner_one_hop_routes >= 900);
+    assert!(inner_two_hop_routes >= 900);
 }
 
 #[test]
@@ -12305,6 +12481,417 @@ impl CapturedOuterForwardRoute {
             }
         }
     }
+}
+
+impl PostForwardWrapperPlacement {
+    const ALL: [Self; 2] = [Self::BeforeOffset, Self::AfterOffset];
+
+    fn index(self) -> usize {
+        match self {
+            Self::BeforeOffset => 0,
+            Self::AfterOffset => 1,
+        }
+    }
+}
+
+fn post_forward_pointer_wrapper(
+    wrapper: WrappedDirectLiteralRoute,
+    selected: &str,
+    unselected: &str,
+    prefix: &str,
+) -> String {
+    match wrapper {
+        WrappedDirectLiteralRoute::ConditionalTrue => format!(
+            "(1 ? (++{prefix}_selected, {selected}) : (++{prefix}_unselected, {unselected}))"
+        ),
+        WrappedDirectLiteralRoute::ConditionalFalse => format!(
+            "(0 ? (++{prefix}_unselected, {unselected}) : (++{prefix}_selected, {selected}))"
+        ),
+        WrappedDirectLiteralRoute::Comma => {
+            format!("(++{prefix}_comma, ++{prefix}_selected, {selected})")
+        }
+    }
+}
+
+fn post_forward_wrapped_direct_literal_argument(
+    inner_wrapper: WrappedDirectLiteralRoute,
+    post_wrapper: WrappedDirectLiteralRoute,
+    type_name: &str,
+    prefix: &str,
+    offset: WrappedDirectLiteralOffsetRoute,
+    placement: PostForwardWrapperPlacement,
+    outer_two_hop: bool,
+    points_to_const: bool,
+) -> String {
+    let inner_prefix = format!("{prefix}_inner");
+    let post_prefix = format!("{prefix}_post");
+    let wrapped = wrapped_direct_literal_offset_base(inner_wrapper, type_name, &inner_prefix);
+    let helper = match (points_to_const, outer_two_hop) {
+        (false, false) => "forward_outer",
+        (false, true) => "forward_outer_twice",
+        (true, false) => "forward_const_outer",
+        (true, true) => "forward_const_outer_twice",
+    };
+    let forwarded = format!("{helper}({wrapped})");
+    let unselected_literal = format!("({type_name})") + "{{}, {}, {}}";
+    let unselected = format!("{helper}({unselected_literal})");
+
+    match placement {
+        PostForwardWrapperPlacement::BeforeOffset => offset.render(&post_forward_pointer_wrapper(
+            post_wrapper,
+            &forwarded,
+            &unselected,
+            &post_prefix,
+        )),
+        PostForwardWrapperPlacement::AfterOffset => post_forward_pointer_wrapper(
+            post_wrapper,
+            &offset.render(&forwarded),
+            &offset.render(&unselected),
+            &post_prefix,
+        ),
+    }
+}
+
+fn post_forward_marker_check(
+    inner_wrapper: WrappedDirectLiteralRoute,
+    post_wrapper: WrappedDirectLiteralRoute,
+    prefix: &str,
+) -> String {
+    format!(
+        "({}) && ({})",
+        inner_wrapper.marker_check(&format!("{prefix}_inner")),
+        post_wrapper.marker_check(&format!("{prefix}_post")),
+    )
+}
+
+fn post_forward_marker_declarations() -> &'static str {
+    "int root_inner_selected = 0; int root_inner_unselected = 0; int root_inner_comma = 0;\n\
+     int root_post_selected = 0; int root_post_unselected = 0; int root_post_comma = 0;\n\
+     int left_inner_selected = 0; int left_inner_unselected = 0; int left_inner_comma = 0;\n\
+     int left_post_selected = 0; int left_post_unselected = 0; int left_post_comma = 0;\n\
+     int right_inner_selected = 0; int right_inner_unselected = 0; int right_inner_comma = 0;\n\
+     int right_post_selected = 0; int right_post_unselected = 0; int right_post_comma = 0;"
+}
+
+#[allow(clippy::too_many_arguments)]
+fn post_forward_wrapped_direct_literal_adjusted_parameter_alias_program(
+    first: AdjustedParameterPointer,
+    second: AdjustedParameterPointer,
+    reader: AdjustedParameterPointer,
+    replacement: i64,
+    delta: i64,
+    inner_two_hop: [bool; 3],
+    inner_wrapper: WrappedDirectLiteralRoute,
+    post_wrapper: WrappedDirectLiteralRoute,
+    offset: WrappedDirectLiteralOffsetRoute,
+    placement: PostForwardWrapperPlacement,
+    outer_two_hop: bool,
+) -> String {
+    let kind = first.kind;
+    let separate_roots = second.storage == AdjustedParameterStorage::RootRight;
+    let first_parameter = if separate_roots {
+        "first_items"
+    } else {
+        "items"
+    };
+    let second_parameter = if separate_roots {
+        "second_items"
+    } else {
+        "items"
+    };
+    let reader_parameter = if reader.storage == AdjustedParameterStorage::RootRight {
+        second_parameter
+    } else {
+        first_parameter
+    };
+    let first_address = first.render_static_address(first_parameter);
+    let second_address = second.render_static_address(second_parameter);
+    let reader_address = reader.render_static_address(reader_parameter);
+    let first_forward =
+        adjusted_parameter_forward_expr(first, &first_address, inner_two_hop[0], false);
+    let second_forward =
+        adjusted_parameter_forward_expr(second, &second_address, inner_two_hop[1], false);
+    let reader_forward =
+        adjusted_parameter_forward_expr(reader, &reader_address, inner_two_hop[2], true);
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let parameters = if separate_roots {
+        "struct Item first_items[], struct Item second_items[]"
+    } else {
+        "struct Item items[]"
+    };
+    let render_argument = |prefix: &str| {
+        post_forward_wrapped_direct_literal_argument(
+            inner_wrapper,
+            post_wrapper,
+            "struct Item[3]",
+            prefix,
+            offset,
+            placement,
+            outer_two_hop,
+            false,
+        )
+    };
+    let (arguments, marker_check) = if separate_roots {
+        (
+            format!("{}, {}", render_argument("left"), render_argument("right")),
+            format!(
+                "({}) && ({})",
+                post_forward_marker_check(inner_wrapper, post_wrapper, "left"),
+                post_forward_marker_check(inner_wrapper, post_wrapper, "right")
+            ),
+        )
+    } else {
+        (
+            render_argument("root"),
+            post_forward_marker_check(inner_wrapper, post_wrapper, "root"),
+        )
+    };
+
+    format!(
+        "{prelude}\n{outer_helpers}\n{marker_declarations}\n\
+         {pointer_type}forward_alias_{suffix}({pointer_type}value) {{ return value; }}\n\
+         {pointer_type}forward_alias_{suffix}_twice({pointer_type}value) {{ return forward_alias_{suffix}(value); }}\n\
+         {const_pointer_type}forward_const_alias_{suffix}({const_pointer_type}value) {{ return value; }}\n\
+         {const_pointer_type}forward_const_alias_{suffix}_twice({const_pointer_type}value) {{ return forward_const_alias_{suffix}(value); }}\n\
+         int post_forward_mutate_{suffix}({pointer_type}first, {pointer_type}second, {const_pointer_type}reader, {pointer_type}fallback) {{\n\
+             {write_first}; int before = {read_reader}; {compound_second}; int after = {read_reader};\n\
+             first = fallback; second = fallback; reader = fallback;\n\
+             return before * 3 + after * 5 + (first == fallback) + (second == fallback) + (reader == fallback);\n\
+         }}\n\
+         int probe({parameters}) {{\n\
+             {pointer_type}a = {first_forward}; {pointer_type}b = {second_forward}; {const_pointer_type}r = {reader_forward};\n\
+             {initialize_first}; {initialize_second};\n\
+             int observed = post_forward_mutate_{suffix}(a, b, r, a);\n\
+             int caller_identity = (a == {first_address}) + (b == {second_address}) + (r == {reader_address});\n\
+             return observed + {read_a} * 7 + {read_b} * 11 + {read_r} * 13 + caller_identity * 17;\n\
+         }}\n\
+         int main(void) {{ int result = probe({arguments}); return result + ({marker_check}) * 19; }}\n",
+        prelude = adjusted_parameter_prelude(),
+        outer_helpers = captured_outer_forwarding_helpers(),
+        marker_declarations = post_forward_marker_declarations(),
+        write_first = kind.write("first", replacement),
+        read_reader = kind.read("reader"),
+        compound_second = kind.compound_add("second", delta),
+        initialize_first = kind.write("a", first.model_value()),
+        initialize_second = kind.write("b", second.model_value()),
+        read_a = kind.read("a"),
+        read_b = kind.read("b"),
+        read_r = kind.read("r"),
+    )
+}
+
+fn post_forward_wrapped_direct_literal_const_parameter_program(
+    inner_wrapper: WrappedDirectLiteralRoute,
+    post_wrapper: WrappedDirectLiteralRoute,
+    offset: WrappedDirectLiteralOffsetRoute,
+    placement: PostForwardWrapperPlacement,
+    outer_two_hop: bool,
+) -> String {
+    let argument = post_forward_wrapped_direct_literal_argument(
+        inner_wrapper,
+        post_wrapper,
+        "ConstItems",
+        "root",
+        offset,
+        placement,
+        outer_two_hop,
+        true,
+    );
+    let marker_check = post_forward_marker_check(inner_wrapper, post_wrapper, "root");
+    format!(
+        "{prelude}\n{outer_helpers}\ntypedef const struct Item ConstItems[3];\n\
+         {marker_declarations}\n\
+         int read_const(const struct Item items[]) {{ return items[0].nested.values[0] + 6; }}\n\
+         int main(void) {{ return read_const({argument}) + ({marker_check}) * 10; }}\n",
+        prelude = adjusted_parameter_prelude(),
+        outer_helpers = captured_outer_forwarding_helpers(),
+        marker_declarations = post_forward_marker_declarations(),
+    )
+}
+
+fn post_forward_wrapped_direct_literal_inner_bounds_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let argument = post_forward_wrapped_direct_literal_argument(
+        WrappedDirectLiteralRoute::ConditionalTrue,
+        WrappedDirectLiteralRoute::Comma,
+        "struct Item[3]",
+        "root",
+        WrappedDirectLiteralOffsetRoute::PointerPlusOne,
+        PostForwardWrapperPlacement::AfterOffset,
+        true,
+        false,
+    );
+    format!(
+        "{prelude}\n{outer_helpers}\n{markers}\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[3]; return {read}; }}\n\
+         int main(void) {{ return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        outer_helpers = captured_outer_forwarding_helpers(),
+        markers = post_forward_marker_declarations(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn post_forward_wrapped_direct_literal_outer_bounds_program(
+    kind: AdjustedParameterFieldKind,
+    outer: i64,
+) -> String {
+    let argument = post_forward_wrapped_direct_literal_argument(
+        WrappedDirectLiteralRoute::Comma,
+        WrappedDirectLiteralRoute::ConditionalFalse,
+        "struct Item[3]",
+        "root",
+        WrappedDirectLiteralOffsetRoute::IndexedAddress,
+        PostForwardWrapperPlacement::BeforeOffset,
+        false,
+        false,
+    );
+    format!(
+        "{prelude}\n{outer_helpers}\n{markers}\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[{outer}].nested.{field}[0]; return {read}; }}\n\
+         int main(void) {{ return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        outer_helpers = captured_outer_forwarding_helpers(),
+        markers = post_forward_marker_declarations(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn post_forward_wrapped_direct_literal_const_discard_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let argument = post_forward_wrapped_direct_literal_argument(
+        WrappedDirectLiteralRoute::ConditionalFalse,
+        WrappedDirectLiteralRoute::ConditionalTrue,
+        "ConstItems",
+        "root",
+        WrappedDirectLiteralOffsetRoute::OnePlusPointer,
+        PostForwardWrapperPlacement::AfterOffset,
+        false,
+        true,
+    );
+    format!(
+        "{prelude}\n{outer_helpers}\ntypedef const struct Item ConstItems[3];\n{markers}\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[0]; return {read}; }}\n\
+         int main(void) {{ return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        outer_helpers = captured_outer_forwarding_helpers(),
+        markers = post_forward_marker_declarations(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn post_forward_wrapped_direct_literal_const_write_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let argument = post_forward_wrapped_direct_literal_argument(
+        WrappedDirectLiteralRoute::Comma,
+        WrappedDirectLiteralRoute::Comma,
+        "ConstItems",
+        "root",
+        WrappedDirectLiteralOffsetRoute::IndexedAddress,
+        PostForwardWrapperPlacement::BeforeOffset,
+        true,
+        true,
+    );
+    format!(
+        "{prelude}\n{outer_helpers}\ntypedef const struct Item ConstItems[3];\n{markers}\n\
+         int probe(const struct Item items[]) {{ {const_pointer_type}slot = &items[0].nested.{field}[0]; {write}; return {read}; }}\n\
+         int main(void) {{ return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        outer_helpers = captured_outer_forwarding_helpers(),
+        markers = post_forward_marker_declarations(),
+        const_pointer_type = kind.const_pointer_type(),
+        field = kind.field_name(),
+        write = kind.write("slot", 7),
+        read = kind.read("slot"),
+    )
+}
+
+fn post_forward_wrapped_direct_literal_cross_root_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let first_argument = post_forward_wrapped_direct_literal_argument(
+        WrappedDirectLiteralRoute::ConditionalTrue,
+        WrappedDirectLiteralRoute::ConditionalFalse,
+        "struct Item[3]",
+        "left",
+        WrappedDirectLiteralOffsetRoute::PointerPlusOne,
+        PostForwardWrapperPlacement::BeforeOffset,
+        false,
+        false,
+    );
+    let second_argument = post_forward_wrapped_direct_literal_argument(
+        WrappedDirectLiteralRoute::Comma,
+        WrappedDirectLiteralRoute::Comma,
+        "struct Item[3]",
+        "right",
+        WrappedDirectLiteralOffsetRoute::IndexedAddress,
+        PostForwardWrapperPlacement::AfterOffset,
+        true,
+        false,
+    );
+    format!(
+        "{prelude}\n{outer_helpers}\n{markers}\n\
+         int probe(struct Item first[], struct Item second[]) {{ {pointer_type}a = &first[0].nested.{field}[0]; {pointer_type}b = &second[0].nested.{field}[0]; return a - b; }}\n\
+         int main(void) {{ return probe({first_argument}, {second_argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        outer_helpers = captured_outer_forwarding_helpers(),
+        markers = post_forward_marker_declarations(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+    )
+}
+
+fn post_forward_wrapped_direct_literal_type_mismatch_program() -> String {
+    let argument = post_forward_wrapped_direct_literal_argument(
+        WrappedDirectLiteralRoute::ConditionalFalse,
+        WrappedDirectLiteralRoute::ConditionalTrue,
+        "struct Item[3]",
+        "root",
+        WrappedDirectLiteralOffsetRoute::OnePlusPointer,
+        PostForwardWrapperPlacement::AfterOffset,
+        true,
+        false,
+    );
+    format!(
+        "{prelude}\n{outer_helpers}\n{markers}\nstruct Other {{ int value; }};\n\
+         int probe(struct Item items[]) {{ struct Other *slot = &items[0].nested.points[0]; return slot->value; }}\n\
+         int main(void) {{ return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        outer_helpers = captured_outer_forwarding_helpers(),
+        markers = post_forward_marker_declarations(),
+    )
+}
+
+fn post_forward_wrapped_direct_literal_lifetime_program() -> String {
+    let argument = post_forward_wrapped_direct_literal_argument(
+        WrappedDirectLiteralRoute::ConditionalTrue,
+        WrappedDirectLiteralRoute::Comma,
+        "struct Item[3]",
+        "root",
+        WrappedDirectLiteralOffsetRoute::PointerPlusOne,
+        PostForwardWrapperPlacement::AfterOffset,
+        true,
+        false,
+    );
+    format!(
+        "{prelude}\n{outer_helpers}\n{markers}\n\
+         struct Item *dangling(void) {{ return {argument}; }}\n\
+         int main(void) {{ struct Item *result = dangling(); return result[-1].nested.values[0]; }}\n",
+        prelude = adjusted_parameter_prelude(),
+        outer_helpers = captured_outer_forwarding_helpers(),
+        markers = post_forward_marker_declarations(),
+    )
 }
 
 fn wrapped_direct_literal_adjusted_parameter_alias_program(
