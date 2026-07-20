@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-20 — Conditional/comma wrappers around captured field offsets
+
+- No external documentation was needed. Existing C conditional and comma semantics imply that only the selected conditional branch executes and the comma left operand executes before the selected field pointer; the warning-free fixture keeps each marker in a separate full expression.
+- Wrapping a captured named, anonymous, or union-containing array field before `+ 1`, reverse `1 +`, or `&field[1]` must preserve the chosen containing root/path and absolute field index through C parameter adjustment. Cust's existing pointer metadata already composes correctly across these wrappers.
+- Seventy-two generated alias cases and 13 exact diagnostics pass without production changes. The generated RED was a harness oracle bug: comma routes incremented the comma marker but not the selected-route marker expected by the shared check. After correcting the generator, the model passed. The warning-free fixture `adjusted_aggregate_parameter_wrapped_compound_literal_field_offset_routes.c` returns 44 under Cust, GCC, and Clang. See `references/cust-wrapped-captured-field-offset-adjusted-parameters.md`.
+
 ## 2026-07-20 — Nonzero offsets on captured compound-literal array fields
 
 - Aggregate compound literals captured once by address retain stable hidden containing storage. Applying `field + 1`, reverse `1 + field`, or `&field[1]` must advance the selected embedded aggregate-array field pointer without rebasing its owner/path metadata when C array-parameter adjustment copies the pointer slot.
