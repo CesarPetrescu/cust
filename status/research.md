@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-20 — Post-forward wrappers around captured aggregate-compound-literal fields
+
+- No external documentation was needed. A conditional or comma expression over a helper-returned field pointer copies one pointer value; placing that expression before or after `+ 1`, reverse `1 +`, or indexed address formation must retain the hidden containing root, recursive field path, absolute base, concrete aggregate pointee type, and qualification.
+- Two thousand five hundred ninety-two generated alias cases and 14 exact bounds/const/root/type/lifetime diagnostics passed without production changes. Separate inner/post markers prove selected branches and comma left operands execute once while unselected branches do not; six captured roots remain stable.
+- The warning-free fixture `adjusted_aggregate_parameter_post_forward_wrapped_compound_literal_field_routes.c` returns 45 under Cust, GCC, and Clang. See `references/cust-post-forward-wrapped-captured-field-adjusted-parameters.md`.
+- The next distinct seam is re-forwarding the post-wrapper result through another helper before/after offset formation, which composes two function-boundary copies around the wrapper while retaining field owner/path metadata.
+
 ## 2026-07-20 — Post-forward wrappers around direct aggregate-array literals
 
 - No external documentation was needed. A conditional or comma expression over a pointer returned by `struct Item *` / `const struct Item *` helpers copies one interpreter-owned pointer value; placing that expression before or after `+ 1`, reverse `1 +`, or indexed address formation must retain the selected hidden root, absolute base, concrete aggregate pointee type, and qualification.
