@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 ## Latest autonomous verification
+
+All required verification passed after the 2026-07-21 post-wrapper re-forwarded direct aggregate-array compound-literal adjusted-parameter run. One thousand two hundred ninety-six generated scalar/named-aggregate two-writer/const-reader cases exhaustively cross same-element, same-array-distinct, and separate-root relationships; inner and post conditional/comma wrappers; all three nonzero offsets; one/two-hop initial helpers; one/two-hop re-forwarding helpers; and re-forwarding before/after offset formation. A separate 216-case const-array-typedef matrix covers every wrapper/offset/helper/placement route. Separate inner/post markers, hidden roots, inner forwarding, and copied slots preserve root/base/outer/inner identity. Fourteen panic-guarded bounds, const, cross-root, concrete type, and out-of-scope lifetime diagnostics pass. The warning-free fixture returns 49 under Cust, GCC, and Clang. The suite now has 55 fuzz-safety tests and 846 interpreter tests.
+
+Verified commands: focused static fixture coverage (immediate GREEN conformance closure); focused generated model RED on an incorrect expected matrix count followed by GREEN after correcting the independent test oracle; direct GCC/Clang `-std=c11 -Wall -Wextra -Werror` fixture execution (49); canonical `c_compat`; recursion-depth regression; and `cargo fmt`. The full required local/Docker gates were run after this status update; see the final run report.
 
 All required verification passed after the 2026-07-20 post-wrapper re-forwarded captured aggregate-compound-literal field adjusted-parameter run. Five thousand one hundred eighty-four generated scalar/named-aggregate two-writer/const-reader cases exhaustively cross named, anonymous, and union-containing paths; same-element, same-field-distinct, cross-field, and separate-root relationships; inner and post conditional/comma wrappers; all three nonzero offsets; one/two-hop initial helpers; one/two-hop re-forwarding helpers; and re-forwarding before/after offset formation. Separate inner/post markers, six captured roots, inner forwarding, and copied slots preserve root/path/base/outer/inner identity. Fourteen panic-guarded bounds, recursive const, cross-root, concrete type, and out-of-scope lifetime diagnostics pass. The warning-free fixture returns 45 under Cust, GCC, and Clang. The suite now has 54 fuzz-safety tests and 845 interpreter tests.
 

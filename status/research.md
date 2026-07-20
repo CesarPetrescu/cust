@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-21 — Post-wrapper re-forwarding of direct aggregate-array literals
+
+- No external documentation was needed. Each helper boundary copies one interpreter-owned aggregate pointer slot; applying a second one/two-hop helper before or after `+ 1`, reverse `1 +`, or indexed address formation must retain the direct literal's hidden root, absolute base, concrete aggregate pointee type, and qualification.
+- One thousand two hundred ninety-six generated alias cases, a 216-case const-array-typedef matrix, and 14 exact bounds/const/root/type/lifetime diagnostics passed without production changes. The RED was an independent coverage-oracle arithmetic error (2,592 expected versus the actual exhaustive 1,296 cases), not a Cust behavior failure.
+- The warning-free fixture `adjusted_aggregate_parameter_post_wrapper_reforwarded_direct_compound_literal_routes.c` returns 49 under Cust, GCC, and Clang. See `references/cust-post-wrapper-reforwarded-direct-compound-literal-adjusted-parameters.md`.
+- The next qualification seam is promotion of mutable direct literal roots through const-returning helpers between wrapper/offset stages; this should preserve identity while preventing later mutable conversions and writes.
+
 ## 2026-07-20 — Post-wrapper re-forwarding of captured aggregate-compound-literal fields
 
 - No external documentation was needed. Each mutable/const pointer helper copies only the interpreter-owned pointer slot. Re-forwarding a conditional/comma-selected helper result before or after `+ 1`, reverse `1 +`, or indexed address formation must retain the hidden containing root, recursive field path, absolute base, concrete aggregate pointee type, and qualification.

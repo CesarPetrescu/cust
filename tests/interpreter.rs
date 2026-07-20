@@ -9148,6 +9148,16 @@ fn adjusted_aggregate_parameter_post_forward_wrapped_direct_compound_literal_rou
 }
 
 #[test]
+fn adjusted_aggregate_parameter_post_wrapper_reforwarded_direct_compound_literal_routes_match_fixture()
+ {
+    let program = include_str!(
+        "fixtures/valid/adjusted_aggregate_parameter_post_wrapper_reforwarded_direct_compound_literal_routes.c",
+    );
+
+    assert_eq!(interpret(program).unwrap(), 49);
+}
+
+#[test]
 fn adjusted_aggregate_parameter_compound_literal_field_offset_routes_match_fixture() {
     let program = include_str!(
         "fixtures/valid/adjusted_aggregate_parameter_compound_literal_field_offset_routes.c",
