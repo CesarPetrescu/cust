@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-20 outer-pointer-forwarded wrapped captured field-offset adjusted-parameter run after 144 generated two-writer/const-reader cases, all four before/after one/two-hop mutable/const outer-helper routes, six captured roots, 14 targeted diagnostics, warning-free Cust/GCC/Clang exit 44, 50 passing fuzz-safety tests, 841 passing interpreter tests, and the full required local and Docker gates. Direct-literal outer forwarding is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-20 outer-pointer-forwarded wrapped direct aggregate-array literal adjusted-parameter run after 216 generated two-writer/const-reader alias cases, a 36-case const-helper matrix, all four before/after one/two-hop routes, 14 targeted diagnostics, warning-free Cust/GCC/Clang exit 49, 51 passing fuzz-safety tests, 842 passing interpreter tests, and the full required local and Docker gates. Post-forward pointer wrappers are a scoped follow-up, not an external blocker.
 
 ## Blocker template
 

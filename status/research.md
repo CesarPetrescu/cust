@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-20 — Outer-pointer helpers around wrapped direct aggregate-array literals
+
+- No external documentation was needed. A direct aggregate-array compound literal decays to a pointer to its hidden root; copying that pointer through one/two `struct Item *` or `const struct Item *` return helpers before or after `+ 1`, reverse `1 +`, or `&literal[1]` must preserve root identity, absolute base, concrete pointee type, and qualification.
+- Two hundred sixteen generated alias cases, a 36-case const-array-typedef matrix, and 14 exact bounds/const/root/type/lifetime diagnostics passed without production changes. The warning-free fixture returns 49 under Cust, GCC, and Clang. See `references/cust-outer-forwarded-wrapped-direct-compound-literal-adjusted-parameters.md`.
+- The next distinct seam is post-forward wrapping: conditional/comma expressions whose operands are helper-returned pointers, composed before and after the nonzero offset.
+
 ## 2026-07-20 — Outer-pointer helpers around wrapped captured field offsets
 
 - No external documentation was needed. A function call returning `struct Item *` or `const struct Item *` copies the pointer value; whether the call occurs before or after `field + 1`, reverse `1 + field`, or `&field[1]`, Cust must preserve the same hidden containing root, recursive path, absolute base, and qualification.
