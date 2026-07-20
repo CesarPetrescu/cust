@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-20 — Post-wrapper re-forwarding of captured aggregate-compound-literal fields
+
+- No external documentation was needed. Each mutable/const pointer helper copies only the interpreter-owned pointer slot. Re-forwarding a conditional/comma-selected helper result before or after `+ 1`, reverse `1 +`, or indexed address formation must retain the hidden containing root, recursive field path, absolute base, concrete aggregate pointee type, and qualification.
+- Five thousand one hundred eighty-four generated alias cases and 14 exact bounds/const/root/type/lifetime diagnostics passed without production changes. The initial RED was an independent coverage-oracle arithmetic error (10,368 expected versus the actual exhaustive 5,184 cases), not a Cust behavior failure.
+- The warning-free fixture `adjusted_aggregate_parameter_post_wrapper_reforwarded_compound_literal_field_routes.c` returns 45 under Cust, GCC, and Clang. See `references/cust-post-wrapper-reforwarded-captured-field-adjusted-parameters.md`.
+- The next analogous seam is post-wrapper re-forwarding over direct aggregate-array compound-literal roots, including a const-array-typedef matrix.
+
 ## 2026-07-20 — Post-forward wrappers around captured aggregate-compound-literal fields
 
 - No external documentation was needed. A conditional or comma expression over a helper-returned field pointer copies one pointer value; placing that expression before or after `+ 1`, reverse `1 +`, or indexed address formation must retain the hidden containing root, recursive field path, absolute base, concrete aggregate pointee type, and qualification.
