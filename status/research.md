@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-20 — Nonzero offsets on captured compound-literal array fields
+
+- Aggregate compound literals captured once by address retain stable hidden containing storage. Applying `field + 1`, reverse `1 + field`, or `&field[1]` must advance the selected embedded aggregate-array field pointer without rebasing its owner/path metadata when C array-parameter adjustment copies the pointer slot.
+- A callee based at field element one can legally use `items[-1]` to reach the preceding element. Exact Cust upper/lower diagnostics report absolute field indexes 3 and -1 for a length-three embedded field; subtraction across named versus anonymous captured paths remains interpreter-only because native C unrelated-array subtraction is undefined.
+- Fifty-four generated alias cases and 13 exact diagnostics pass without production changes. The warning-free fixture `adjusted_aggregate_parameter_compound_literal_field_offset_routes.c` returns 34 under Cust, GCC, and Clang.
+
 ## 2026-07-20 — Nonzero offsets on wrapped direct literals through adjusted parameters
 
 - Array compound literals decay before `+ 1`, reverse `1 + literal`, or `&literal[1]`; passing that pointer to an adjusted aggregate parameter must retain the hidden root's original length and current outer index rather than rebasing storage at zero.

@@ -3131,6 +3131,135 @@ fn generated_wrapped_offset_direct_aggregate_array_literal_adjusted_parameter_al
 }
 
 #[test]
+fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
+    const PATHS: [AdjustedParameterStorage; 3] = [
+        AdjustedParameterStorage::NamedLeftPrimary,
+        AdjustedParameterStorage::AnonymousLeftPrimary,
+        AdjustedParameterStorage::UnionLeftPrimary,
+    ];
+    const RELATIONS: [LiteralAdjustedParameterRelation; 3] = [
+        LiteralAdjustedParameterRelation::SameElement,
+        LiteralAdjustedParameterRelation::SameArrayDistinctElement,
+        LiteralAdjustedParameterRelation::DifferentField,
+    ];
+
+    let mut path_counts = [0; 3];
+    let mut relation_counts = [0; 3];
+    let mut offset_counts = [0; 3];
+    let mut one_hop_routes = 0;
+    let mut two_hop_routes = 0;
+
+    for kind in AdjustedParameterFieldKind::ALL {
+        for (path_index, storage) in PATHS.into_iter().enumerate() {
+            for (relation_index, relation) in RELATIONS.into_iter().enumerate() {
+                for offset in WrappedDirectLiteralOffsetRoute::ALL {
+                    path_counts[path_index] += 1;
+                    relation_counts[relation_index] += 1;
+                    offset_counts[offset.index()] += 1;
+                    let case_index = path_index * 9 + relation_index * 3 + offset.index();
+                    let first = AdjustedParameterPointer {
+                        kind,
+                        storage,
+                        outer: ((path_index + relation_index) % 2) as i64,
+                        inner: ((path_index * 2 + offset.index()) % 3) as i64,
+                        route: if case_index & 1 == 0 {
+                            AdjustedParameterRoute::Direct
+                        } else {
+                            AdjustedParameterRoute::Reverse
+                        },
+                    };
+                    let second = literal_adjusted_parameter_related_pointer(first, relation);
+                    let reader = if case_index & 2 == 0 { first } else { second };
+                    let two_hop = [
+                        case_index & 1 == 0,
+                        case_index & 2 == 0,
+                        case_index & 4 == 0,
+                    ];
+                    one_hop_routes += two_hop.iter().filter(|twice| !**twice).count();
+                    two_hop_routes += two_hop.iter().filter(|twice| **twice).count();
+                    let replacement = 701 + case_index as i64;
+                    let delta = 1 + (case_index % 7) as i64;
+                    let source = captured_literal_field_offset_alias_program(
+                        first,
+                        second,
+                        reader,
+                        replacement,
+                        delta,
+                        two_hop,
+                        offset,
+                    );
+                    let expected = adjusted_parameter_alias_mutation_expected(
+                        first,
+                        second,
+                        reader,
+                        replacement,
+                        delta,
+                    ) + 19;
+
+                    assert_interpretation(
+                        &source,
+                        ExpectedInterpretation::Value(expected),
+                        &format!(
+                            "captured literal field offset case {case_index}, kind {kind:?}, path {storage:?}, relation {relation:?}, offset {offset:?}"
+                        ),
+                    );
+                }
+            }
+        }
+
+        assert_interpretation(
+            &captured_literal_field_offset_inner_bounds_program(kind),
+            ExpectedInterpretation::Error(kind.inner_bounds_error()),
+            &format!("captured literal field offset inner bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &captured_literal_field_offset_outer_bounds_program(kind, 2),
+            ExpectedInterpretation::Error(
+                "struct array field pointer index 3 out of bounds for length 3",
+            ),
+            &format!("captured literal field offset upper bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &captured_literal_field_offset_outer_bounds_program(kind, -2),
+            ExpectedInterpretation::Error(
+                "struct array field pointer index -1 out of bounds for length 3",
+            ),
+            &format!("captured literal field offset lower bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &captured_literal_field_offset_const_discard_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("captured literal field offset const discard, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &captured_literal_field_offset_const_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("captured literal field offset const write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &captured_literal_field_offset_cross_path_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("captured literal field offset cross-path identity, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &captured_literal_field_offset_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "captured literal field offset aggregate type mismatch",
+    );
+
+    assert_eq!(path_counts, [18; 3]);
+    assert_eq!(relation_counts, [18; 3]);
+    assert_eq!(offset_counts, [18; 3]);
+    assert_eq!(one_hop_routes + two_hop_routes, 162);
+    assert!(one_hop_routes >= 70);
+    assert!(two_hop_routes >= 70);
+}
+
+#[test]
 fn generated_nested_anonymous_aggregate_compound_literal_field_pointer_alias_mutations_match_model_without_panics()
  {
     let mut state = 0xC057_117E_AA55_u64;
@@ -12018,6 +12147,172 @@ fn wrapped_offset_direct_literal_type_mismatch_program() -> String {
          int probe(struct Item items[]) {{ struct Other *slot = &items[0].nested.points[0]; return slot->value; }}\n\
          int main(void) {{ return probe({argument}); }}\n",
         prelude = adjusted_parameter_prelude(),
+    )
+}
+
+fn captured_literal_field_offset_prelude() -> &'static str {
+    "struct Point { int value; };\n\
+     struct Inner { int values[3]; struct Point points[3]; };\n\
+     struct Item { struct Inner nested; };\n\
+     struct Wrapper { struct Item primary[3]; struct Item secondary[3]; };\n\
+     struct NamedHolder { struct Wrapper nested; };\n\
+     struct AnonymousHolder { struct { struct Item primary[3]; struct Item secondary[3]; } nested; };\n\
+     union Choice { struct Wrapper nested; int marker; };"
+}
+
+fn captured_literal_field_offset_declarations() -> &'static str {
+    "int marker = 0;\n\
+     struct NamedHolder *named_left = &(struct NamedHolder){ .nested = { .primary = {{}, { .nested = { .values = {++marker} } }, {} } } };\n\
+     struct NamedHolder *named_right = &(struct NamedHolder){ .nested = { .primary = {{}, { .nested = { .values = {++marker} } }, {} } } };\n\
+     struct AnonymousHolder *anonymous_left = &(struct AnonymousHolder){ .nested = { .primary = {{}, { .nested = { .values = {++marker} } }, {} } } };\
+     struct AnonymousHolder *anonymous_right = &(struct AnonymousHolder){ .nested = { .primary = {{}, { .nested = { .values = {++marker} } }, {} } } };\
+     union Choice *choice_left = &(union Choice){ .nested = { .primary = {{}, { .nested = { .values = {++marker} } }, {} } } };\
+     union Choice *choice_right = &(union Choice){ .nested = { .primary = {{}, { .nested = { .values = {++marker} } }, {} } } };"
+}
+
+fn captured_literal_field_offset_argument(
+    storage: AdjustedParameterStorage,
+    offset: WrappedDirectLiteralOffsetRoute,
+) -> String {
+    offset.render(storage.literal_expression())
+}
+
+fn captured_literal_field_offset_alias_program(
+    first: AdjustedParameterPointer,
+    second: AdjustedParameterPointer,
+    reader: AdjustedParameterPointer,
+    replacement: i64,
+    delta: i64,
+    two_hop: [bool; 3],
+    offset: WrappedDirectLiteralOffsetRoute,
+) -> String {
+    let kind = first.kind;
+    let first_address = first.render_static_address("first_items");
+    let second_address = second.render_static_address("second_items");
+    let reader_address = reader.render_static_address("reader_items");
+    let first_forward = adjusted_parameter_forward_expr(first, &first_address, two_hop[0], false);
+    let second_forward =
+        adjusted_parameter_forward_expr(second, &second_address, two_hop[1], false);
+    let reader_forward = adjusted_parameter_forward_expr(reader, &reader_address, two_hop[2], true);
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+
+    format!(
+        "{prelude}\n\
+         {pointer_type}forward_alias_{suffix}({pointer_type}value) {{ return value; }}\n\
+         {pointer_type}forward_alias_{suffix}_twice({pointer_type}value) {{ return forward_alias_{suffix}(value); }}\n\
+         {const_pointer_type}forward_const_alias_{suffix}({const_pointer_type}value) {{ return value; }}\n\
+         {const_pointer_type}forward_const_alias_{suffix}_twice({const_pointer_type}value) {{ return forward_const_alias_{suffix}(value); }}\n\
+         int mutate_alias_{suffix}({pointer_type}first, {pointer_type}second, {const_pointer_type}reader, {pointer_type}fallback) {{\n\
+             {write_first}; int before = {read_reader}; {compound_second}; int after = {read_reader};\n\
+             first = fallback; second = fallback; reader = fallback;\n\
+             return before * 3 + after * 5 + (first == fallback) + (second == fallback) + (reader == fallback);\n\
+         }}\n\
+         int probe(struct Item first_items[], struct Item second_items[], struct Item reader_items[]) {{\n\
+             {pointer_type}a = {first_forward}; {pointer_type}b = {second_forward}; {const_pointer_type}r = {reader_forward};\n\
+             {initialize_first}; {initialize_second};\n\
+             int observed = mutate_alias_{suffix}(a, b, r, a);\n\
+             int caller_identity = (a == {first_address}) + (b == {second_address}) + (r == {reader_address});\n\
+             return observed + {read_a} * 7 + {read_b} * 11 + {read_r} * 13 + caller_identity * 17;\n\
+         }}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             int result = probe({first_storage}, {second_storage}, {reader_storage});\n\
+             return result + (marker == 6) * 19;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        declarations = captured_literal_field_offset_declarations(),
+        write_first = kind.write("first", replacement),
+        read_reader = kind.read("reader"),
+        compound_second = kind.compound_add("second", delta),
+        initialize_first = kind.write("a", first.model_value()),
+        initialize_second = kind.write("b", second.model_value()),
+        read_a = kind.read("a"),
+        read_b = kind.read("b"),
+        read_r = kind.read("r"),
+        first_storage = captured_literal_field_offset_argument(first.storage, offset),
+        second_storage = captured_literal_field_offset_argument(second.storage, offset),
+        reader_storage = captured_literal_field_offset_argument(reader.storage, offset),
+    )
+}
+
+fn captured_literal_field_offset_inner_bounds_program(kind: AdjustedParameterFieldKind) -> String {
+    format!(
+        "{prelude}\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[3]; return {read}; }}\n\
+         int main(void) {{ {declarations} return probe(named_left->nested.primary + 1); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        declarations = captured_literal_field_offset_declarations(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn captured_literal_field_offset_outer_bounds_program(
+    kind: AdjustedParameterFieldKind,
+    outer: i64,
+) -> String {
+    format!(
+        "{prelude}\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[{outer}].nested.{field}[0]; return {read}; }}\n\
+         int main(void) {{ {declarations} return probe(&anonymous_left->nested.primary[1]); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        declarations = captured_literal_field_offset_declarations(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn captured_literal_field_offset_const_discard_program(kind: AdjustedParameterFieldKind) -> String {
+    format!(
+        "{prelude}\n\
+         int probe(struct Item items[]) {{ {pointer_type}slot = &items[0].nested.{field}[0]; return {read}; }}\n\
+         int main(void) {{ const struct NamedHolder *locked = &(const struct NamedHolder){{}}; return probe(1 + locked->nested.primary); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("slot"),
+    )
+}
+
+fn captured_literal_field_offset_const_write_program(kind: AdjustedParameterFieldKind) -> String {
+    format!(
+        "{prelude}\n\
+         int probe(const struct Item items[]) {{ {const_pointer_type}slot = &items[0].nested.{field}[0]; {write}; return {read}; }}\n\
+         int main(void) {{ const struct NamedHolder *locked = &(const struct NamedHolder){{}}; return probe(&locked->nested.primary[1]); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        const_pointer_type = kind.const_pointer_type(),
+        field = kind.field_name(),
+        write = kind.write("slot", 7),
+        read = kind.read("slot"),
+    )
+}
+
+fn captured_literal_field_offset_cross_path_program(kind: AdjustedParameterFieldKind) -> String {
+    format!(
+        "{prelude}\n\
+         int probe(struct Item first[], struct Item second[]) {{\n\
+             {pointer_type}a = &first[0].nested.{field}[0]; {pointer_type}b = &second[0].nested.{field}[0]; return a - b;\n\
+         }}\n\
+         int main(void) {{ {declarations} return probe(named_left->nested.primary + 1, &anonymous_left->nested.primary[1]); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        declarations = captured_literal_field_offset_declarations(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+    )
+}
+
+fn captured_literal_field_offset_type_mismatch_program() -> String {
+    format!(
+        "{prelude}\n\
+         struct Other {{ int value; }};\n\
+         int probe(struct Item items[]) {{ struct Other *slot = &items[0].nested.points[0]; return slot->value; }}\n\
+         int main(void) {{ {declarations} return probe(1 + choice_left->nested.primary); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        declarations = captured_literal_field_offset_declarations(),
     )
 }
 

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-20 wrapped nonzero-offset direct aggregate-array literal adjusted-parameter run after 54 generated two-writer/const-reader cases, nine const-typedef wrapper combinations, 13 targeted diagnostics, warning-free Cust/GCC/Clang exit 37, 47 passing fuzz-safety tests, 838 passing interpreter tests, and the full required local and Docker gates. Applying the offset matrix to captured aggregate-compound-literal array fields is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-20 captured aggregate-compound-literal field-offset adjusted-parameter run after 54 generated two-writer/const-reader cases, six one-time enclosing-root markers, 13 targeted diagnostics, warning-free Cust/GCC/Clang exit 34, 48 passing fuzz-safety tests, 839 passing interpreter tests, and the full required local and Docker gates. Conditional/comma wrapping of nonzero-offset captured field expressions is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 
