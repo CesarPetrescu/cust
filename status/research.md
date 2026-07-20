@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-20 — Outer-pointer helpers around wrapped captured field offsets
+
+- No external documentation was needed. A function call returning `struct Item *` or `const struct Item *` copies the pointer value; whether the call occurs before or after `field + 1`, reverse `1 + field`, or `&field[1]`, Cust must preserve the same hidden containing root, recursive path, absolute base, and qualification.
+- One hundred forty-four generated alias cases plus 14 exact bounds/const/root/type/lifetime diagnostics passed without production changes. Mutable and const one/two-hop outer helpers compose with the existing inner-pointer forwarding model; out-of-scope captured compound-literal storage remains diagnosed as `pointer to out-of-scope variable '__cust_compound_aggregate#0'`.
+- The warning-free fixture `adjusted_aggregate_parameter_wrapped_compound_literal_field_outer_forwarding_routes.c` returns 44 under Cust, GCC, and Clang. See `references/cust-outer-forwarded-wrapped-captured-field-offset-adjusted-parameters.md`.
+
 ## 2026-07-20 — Conditional/comma wrappers around captured field offsets
 
 - No external documentation was needed. Existing C conditional and comma semantics imply that only the selected conditional branch executes and the comma left operand executes before the selected field pointer; the warning-free fixture keeps each marker in a separate full expression.
