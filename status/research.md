@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-21 — Mutable-to-const re-forwarding of direct aggregate-array literals
+
+- No external documentation was needed. Promoting a mutable direct literal pointer to `const struct Item *` changes expression qualification without changing the hidden literal root or absolute base; subsequent conditionals, comma expressions, offsets, adjusted parameters, and copied const pointer slots must retain that identity.
+- Four hundred thirty-two generated routes cross qualification before/after the post wrapper, every inner/post wrapper, offset spelling, initial/const-helper depth, and re-forward placement. Four exact mutable-rebinding/write diagnostics pass; existing Cust behavior was immediately GREEN as deliberate conformance/property closure.
+- The warning-free fixture `adjusted_aggregate_parameter_mutable_to_const_reforwarded_direct_compound_literal_routes.c` returns 37 under Cust, GCC, and Clang. See `references/cust-mutable-to-const-reforwarded-direct-compound-literal-adjusted-parameters.md`.
+- The analogous next seam is mutable-to-const promotion of captured named/anonymous/union aggregate-compound-literal array fields, where containing-root and recursive field-path identity must survive in addition to base/index identity.
+
 ## 2026-07-21 — Post-wrapper re-forwarding of direct aggregate-array literals
 
 - No external documentation was needed. Each helper boundary copies one interpreter-owned aggregate pointer slot; applying a second one/two-hop helper before or after `+ 1`, reverse `1 +`, or indexed address formation must retain the direct literal's hidden root, absolute base, concrete aggregate pointee type, and qualification.
