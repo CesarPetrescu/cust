@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-21 — Post-promotion const re-forwarding of direct-literal derived inner pointers
+
+- No external documentation was needed. Once a mutable scalar or named-aggregate inner pointer has been promoted to `const T *`, subsequent const-preserving helper calls, conditional/comma selection, and same-array offsets must preserve the direct aggregate-array compound literal's hidden root, adjusted nonzero outer base, and derived inner index; only write qualification changes.
+- The exhaustive matrix composes all three initial promotion placements with all three second const re-forwarding placements, two wrapper/offset stages, and one/two-hop helpers for 5,832 valid routes. Thirty-six exact negative checks retain mutable-rebinding and write diagnostics. Existing behavior passed immediately, so this is deliberate conformance/property coverage rather than a production fix. The warning-free fixture returns 39 under Cust, GCC, and Clang.
+- Next distinct seam: apply the same post-promotion inner-pointer re-forwarding matrix to captured named/anonymous/union aggregate-compound-literal array fields, preserving containing-root and recursive field-path metadata in addition to outer/inner indexes.
+
 ## 2026-07-21 — Derived inner-pointer const promotion from direct literal arguments
 
 - No external documentation was needed. Once a mutable direct aggregate-array compound literal has decayed into an adjusted `struct Item *` parameter at a nonzero base, promoting a derived `int *` or `struct Point *` changes write qualification only; it must not change the hidden literal root, outer base, or inner index.
