@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-22 — Callee-internal const re-forwarding before derived inner-pointer returns
+
+- No external documentation was needed. A const-preserving helper call, conditional/comma selection, and same-array offset copy or transform an already promoted inner pointer without changing its caller-owned direct hidden root or captured containing root/path/base/index; the later return-value copy must preserve the same metadata.
+- A 2,592-route balanced matrix composes both pointee kinds, four direct/captured roots, every initial promotion and second re-forward placement, one/two-hop promotion/re-forward helpers, first/second wrapper and offset spellings, one/two return boundaries, and all caller wrappers/offsets. Existing behavior passed immediately, so this is deliberate conformance/property closure. The warning-free fixture returns 24 under Cust, GCC, and Clang.
+- See `references/cust-callee-internal-reforwarded-derived-inner-pointer-returns.md`. The next seam is caller-side const-preserving re-forwarding after the return boundary.
+
 ## 2026-07-21 — Callee-internal promotion/wrappers before derived inner-pointer returns
 
 - No external documentation was needed. Promotion to `const T *`, conditional/comma selection, and same-array offset formation copy or transform the pointer value without changing its caller-owned direct hidden root or captured containing root/path/base/index identity; crossing a return boundary must preserve the same metadata.

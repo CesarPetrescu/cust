@@ -9273,6 +9273,16 @@ fn adjusted_aggregate_parameter_callee_internal_derived_inner_pointer_returns_ma
 }
 
 #[test]
+fn adjusted_aggregate_parameter_callee_internal_reforwarded_derived_inner_pointer_returns_match_fixture()
+ {
+    let program = include_str!(
+        "fixtures/valid/adjusted_aggregate_parameter_callee_internal_reforwarded_derived_inner_pointer_returns.c",
+    );
+
+    assert_eq!(interpret(program).unwrap(), 24);
+}
+
+#[test]
 fn aggregate_array_field_elements_decay_embedded_arrays_for_direct_access() {
     let program = r#"
         struct Point { int value; };

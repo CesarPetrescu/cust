@@ -4349,6 +4349,103 @@ fn generated_callee_internal_promoted_inner_pointer_returns_preserve_adjusted_pa
 }
 
 #[test]
+fn generated_callee_internal_reforwarded_inner_pointer_returns_preserve_adjusted_parameter_identity_without_panics()
+ {
+    let mut kind_counts = [0; 2];
+    let mut root_counts = [0; 4];
+    let mut promotion_placement_counts = [0; 3];
+    let mut promotion_wrapper_counts = [0; 3];
+    let mut promotion_offset_counts = [0; 3];
+    let mut promotion_hop_counts = [0; 2];
+    let mut reforward_placement_counts = [0; 3];
+    let mut reforward_wrapper_counts = [0; 3];
+    let mut reforward_offset_counts = [0; 3];
+    let mut reforward_hop_counts = [0; 2];
+    let mut return_hop_counts = [0; 2];
+    let mut caller_wrapper_counts = [0; 3];
+    let mut caller_offset_counts = [0; 3];
+    let mut case_index = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for root in DerivedInnerReturnRoot::ALL {
+            for promotion_placement in InnerConstPromotionPlacement::ALL {
+                for reforward_placement in InnerConstPromotionPlacement::ALL {
+                    for reforward_two_hop in [false, true] {
+                        for two_return_hops in [false, true] {
+                            for caller_wrapper in WrappedDirectLiteralRoute::ALL {
+                                for caller_offset in WrappedDirectLiteralOffsetRoute::ALL {
+                                    let promotion_wrapper =
+                                        WrappedDirectLiteralRoute::ALL[case_index % 3];
+                                    let promotion_offset =
+                                        WrappedDirectLiteralOffsetRoute::ALL[(case_index / 3) % 3];
+                                    let reforward_wrapper =
+                                        WrappedDirectLiteralRoute::ALL[(case_index / 9) % 3];
+                                    let reforward_offset =
+                                        WrappedDirectLiteralOffsetRoute::ALL[(case_index / 27) % 3];
+                                    let promotion_two_hop = case_index & 1 == 0;
+
+                                    kind_counts[kind_index] += 1;
+                                    root_counts[root.index()] += 1;
+                                    promotion_placement_counts[promotion_placement.index()] += 1;
+                                    promotion_wrapper_counts[promotion_wrapper.index()] += 1;
+                                    promotion_offset_counts[promotion_offset.index()] += 1;
+                                    promotion_hop_counts[usize::from(promotion_two_hop)] += 1;
+                                    reforward_placement_counts[reforward_placement.index()] += 1;
+                                    reforward_wrapper_counts[reforward_wrapper.index()] += 1;
+                                    reforward_offset_counts[reforward_offset.index()] += 1;
+                                    reforward_hop_counts[usize::from(reforward_two_hop)] += 1;
+                                    return_hop_counts[usize::from(two_return_hops)] += 1;
+                                    caller_wrapper_counts[caller_wrapper.index()] += 1;
+                                    caller_offset_counts[caller_offset.index()] += 1;
+
+                                    assert_interpretation(
+                                        &callee_internal_reforwarded_inner_pointer_return_program(
+                                            kind,
+                                            root,
+                                            promotion_placement,
+                                            promotion_wrapper,
+                                            promotion_offset,
+                                            promotion_two_hop,
+                                            reforward_placement,
+                                            reforward_wrapper,
+                                            reforward_offset,
+                                            reforward_two_hop,
+                                            two_return_hops,
+                                            caller_wrapper,
+                                            caller_offset,
+                                        ),
+                                        ExpectedInterpretation::Value(10),
+                                        &format!(
+                                            "callee-internal re-forwarded inner-pointer return case {case_index}, kind {kind:?}, root {root:?}, promotion placement {promotion_placement:?}, promotion wrapper {promotion_wrapper:?}, promotion offset {promotion_offset:?}, promotion two hop {promotion_two_hop}, re-forward placement {reforward_placement:?}, re-forward wrapper {reforward_wrapper:?}, re-forward offset {reforward_offset:?}, re-forward two hop {reforward_two_hop}, two return hops {two_return_hops}, caller wrapper {caller_wrapper:?}, caller offset {caller_offset:?}"
+                                        ),
+                                    );
+                                    case_index += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    assert_eq!(case_index, 2592);
+    assert_eq!(kind_counts, [1296; 2]);
+    assert_eq!(root_counts, [648; 4]);
+    assert_eq!(promotion_placement_counts, [864; 3]);
+    assert_eq!(promotion_wrapper_counts, [864; 3]);
+    assert_eq!(promotion_offset_counts, [864; 3]);
+    assert_eq!(promotion_hop_counts, [1296; 2]);
+    assert_eq!(reforward_placement_counts, [864; 3]);
+    assert_eq!(reforward_wrapper_counts, [864; 3]);
+    assert_eq!(reforward_offset_counts, [864; 3]);
+    assert_eq!(reforward_hop_counts, [1296; 2]);
+    assert_eq!(return_hop_counts, [1296; 2]);
+    assert_eq!(caller_wrapper_counts, [864; 3]);
+    assert_eq!(caller_offset_counts, [864; 3]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -17691,6 +17788,100 @@ fn callee_internal_promoted_inner_pointer_return_program(
          }}\n",
         prelude = captured_literal_field_offset_prelude(),
         promotion_helpers = derived_inner_pointer_const_promotion_helpers(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn callee_internal_reforwarded_inner_pointer_return_program(
+    kind: AdjustedParameterFieldKind,
+    root: DerivedInnerReturnRoot,
+    promotion_placement: InnerConstPromotionPlacement,
+    promotion_wrapper: WrappedDirectLiteralRoute,
+    promotion_offset: WrappedDirectLiteralOffsetRoute,
+    promotion_two_hop: bool,
+    reforward_placement: InnerConstPromotionPlacement,
+    reforward_wrapper: WrappedDirectLiteralRoute,
+    reforward_offset: WrappedDirectLiteralOffsetRoute,
+    reforward_two_hop: bool,
+    two_return_hops: bool,
+    caller_wrapper: WrappedDirectLiteralRoute,
+    caller_offset: WrappedDirectLiteralOffsetRoute,
+) -> String {
+    let (declarations, argument, root_marker_check) =
+        derived_inner_const_pointer_callee_return_root(root);
+    let promoted_expression = derived_inner_pointer_const_promotion_expression(
+        kind,
+        promotion_placement,
+        promotion_wrapper,
+        promotion_offset,
+        promotion_two_hop,
+    );
+    let reforwarded_expression = derived_inner_pointer_const_reforward_expression(
+        kind,
+        reforward_placement,
+        reforward_wrapper,
+        reforward_offset,
+        reforward_two_hop,
+    );
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let field = kind.field_name();
+    let initialize_raw = kind.write("raw", 5);
+    let initialize_first = kind.write("(raw + 1)", 7);
+    let initialize_second = kind.write("(raw + 2)", 9);
+    let initialize_third = kind.write("(raw + 3)", 11);
+    let helper = format!(
+        "return_reforwarded_inner_{suffix}{}",
+        if two_return_hops { "_twice" } else { "" },
+    );
+    let caller_wrapped = post_forward_pointer_wrapper(
+        caller_wrapper,
+        "base",
+        &format!("({const_pointer_type})0"),
+        "caller",
+    );
+    let returned = caller_offset.render(&caller_wrapped);
+    let read_returned = kind.read("returned");
+    let read_base = kind.read("base");
+    let read_promoted = kind.read("promoted_copy");
+    let promotion_marker_check = promotion_wrapper.marker_check("inner");
+    let reforward_marker_check = reforward_wrapper.marker_check("post");
+    let caller_marker_check = caller_wrapper.marker_check("caller");
+    let prelude = captured_literal_field_offset_prelude().replace(
+        "int values[3]; struct Point points[3];",
+        "int values[4]; struct Point points[4];",
+    );
+
+    format!(
+        "{prelude}\n{promotion_helpers}\n{reforward_helpers}\n\
+         int inner_selected; int inner_unselected; int inner_comma;\n\
+         int post_selected; int post_unselected; int post_comma;\n\
+         {const_pointer_type}return_reforwarded_inner_{suffix}(struct Item items[]) {{\n\
+             {pointer_type}raw = &items[0].nested.{field}[0];\n\
+             {pointer_type}fallback_raw = raw;\n\
+             {initialize_raw}; {initialize_first}; {initialize_second}; {initialize_third};\n\
+             {const_pointer_type}promoted = {promoted_expression};\n\
+             return {reforwarded_expression};\n\
+         }}\n\
+         {const_pointer_type}return_reforwarded_inner_{suffix}_twice(struct Item items[]) {{\n\
+             return return_reforwarded_inner_{suffix}(items);\n\
+         }}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             int caller_selected = 0; int caller_unselected = 0; int caller_comma = 0;\n\
+             {const_pointer_type}base = {helper}({argument});\n\
+             {const_pointer_type}promoted_copy = base - 1;\n\
+             {const_pointer_type}returned = {returned};\n\
+             {const_pointer_type}slot = returned;\n\
+             return ({read_returned} == 11) + (returned == base + 1)\n\
+                 + ({read_base} == 9) + ({read_promoted} == 7)\n\
+                 + (base == promoted_copy + 1) + ({promotion_marker_check})\n\
+                 + ({reforward_marker_check}) + ({caller_marker_check})\n\
+                 + (slot == returned) + ({root_marker_check});\n\
+         }}\n",
+        promotion_helpers = derived_inner_pointer_const_promotion_helpers(),
+        reforward_helpers = derived_inner_pointer_const_reforward_helpers(),
     )
 }
 
