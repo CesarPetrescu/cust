@@ -180,6 +180,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_wrapped_compound_literal_field_outer_forwarding_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_post_forward_wrapped_compound_literal_field_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_post_wrapper_reforwarded_compound_literal_field_routes.c",
+    "tests/fixtures/compat/valid/adjusted_aggregate_parameter_mutable_to_const_reforwarded_compound_literal_field_routes.c",
     "tests/fixtures/compat/valid/inferred_aggregate_array_declarations.c",
     "tests/fixtures/compat/valid/integer_literal_bases.c",
     "tests/fixtures/compat/valid/integer_literal_suffixes.c",

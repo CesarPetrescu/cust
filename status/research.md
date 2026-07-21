@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-21 — Mutable-to-const re-forwarding of captured aggregate-compound-literal fields
+
+- No external documentation was needed. Promoting a mutable field-decayed `struct Item *` to `const struct Item *` changes write qualification without changing the captured aggregate compound literal's containing root, recursive field path, absolute nonzero base, or derived scalar/named-aggregate inner-pointer identity.
+- Two thousand five hundred ninety-two generated routes cross both promotion stages, scalar/aggregate inner pointees, named/anonymous/union paths, every inner/post wrapper, offset spelling, helper depth, and re-forward placement. Twelve exact mutable-rebinding/write diagnostics pass. The initial RED was an independent expected-score error (51 versus the actual six identity/read points plus 19/23 marker bonuses = 48), not a Cust behavior failure.
+- The warning-free fixture `adjusted_aggregate_parameter_mutable_to_const_reforwarded_compound_literal_field_routes.c` returns 29 under Cust, GCC, and Clang. Existing Cust behavior was immediately GREEN after the model-oracle correction, so this is deliberate conformance/property closure.
+- The next distinct seam is promotion of scalar and named-aggregate inner pointers derived after adjusted-parameter binding, composed with inner wrappers and nonzero inner offsets while retaining outer owner/path/base metadata.
+
 ## 2026-07-21 — Mutable-to-const re-forwarding of direct aggregate-array literals
 
 - No external documentation was needed. Promoting a mutable direct literal pointer to `const struct Item *` changes expression qualification without changing the hidden literal root or absolute base; subsequent conditionals, comma expressions, offsets, adjusted parameters, and copied const pointer slots must retain that identity.

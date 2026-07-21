@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-21 mutable-to-const re-forwarded direct aggregate-array compound-literal adjusted-parameter run after 432 generated identity/read cases across every promotion-stage/wrapper/offset/helper-depth/re-forward-placement route, four exact mutable-rebinding/write diagnostics, warning-free Cust/GCC/Clang exit 37, 56 passing fuzz-safety tests, and 847 passing interpreter tests. Captured aggregate-compound-literal field-root qualification transitions are a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-21 mutable-to-const re-forwarded captured aggregate-compound-literal field adjusted-parameter run after 2,592 generated identity/read cases across every pointee-kind/path/promotion-stage/wrapper/offset/helper-depth/re-forward-placement route, twelve exact mutable-rebinding/write diagnostics, warning-free Cust/GCC/Clang exit 29, 57 passing fuzz-safety tests, 848 passing interpreter tests, and all required local/Docker gates. Derived inner-pointer qualification transitions are a scoped follow-up, not an external blocker.
 
 ## Blocker template
 

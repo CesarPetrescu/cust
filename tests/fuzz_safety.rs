@@ -3715,6 +3715,108 @@ fn generated_mutable_to_const_reforwarded_direct_aggregate_array_literal_adjuste
 }
 
 #[test]
+fn generated_mutable_to_const_reforwarded_captured_literal_field_adjusted_parameters_preserve_identity_without_panics()
+ {
+    const PATHS: [AdjustedParameterStorage; 3] = [
+        AdjustedParameterStorage::NamedLeftPrimary,
+        AdjustedParameterStorage::AnonymousLeftPrimary,
+        AdjustedParameterStorage::UnionLeftPrimary,
+    ];
+
+    let mut transition_counts = [0; 2];
+    let mut path_counts = [0; 3];
+    let mut inner_wrapper_counts = [0; 3];
+    let mut post_wrapper_counts = [0; 3];
+    let mut offset_counts = [0; 3];
+    let mut outer_hop_counts = [0; 2];
+    let mut reforward_hop_counts = [0; 2];
+    let mut reforward_placement_counts = [0; 2];
+    let mut case_index = 0;
+
+    for kind in AdjustedParameterFieldKind::ALL {
+        for (path_index, storage) in PATHS.into_iter().enumerate() {
+            for transition_before_post_wrapper in [false, true] {
+                for inner_wrapper in WrappedDirectLiteralRoute::ALL {
+                    for post_wrapper in WrappedDirectLiteralRoute::ALL {
+                        for offset in WrappedDirectLiteralOffsetRoute::ALL {
+                            for outer_two_hop in [false, true] {
+                                for reforward_two_hop in [false, true] {
+                                    for reforward_placement in PostForwardWrapperPlacement::ALL {
+                                        transition_counts
+                                            [usize::from(transition_before_post_wrapper)] += 1;
+                                        path_counts[path_index] += 1;
+                                        inner_wrapper_counts[inner_wrapper.index()] += 1;
+                                        post_wrapper_counts[post_wrapper.index()] += 1;
+                                        offset_counts[offset.index()] += 1;
+                                        outer_hop_counts[usize::from(outer_two_hop)] += 1;
+                                        reforward_hop_counts[usize::from(reforward_two_hop)] += 1;
+                                        reforward_placement_counts[reforward_placement.index()] +=
+                                            1;
+
+                                        let source = mutable_to_const_reforwarded_captured_literal_field_adjusted_parameter_program(
+                                            kind,
+                                            storage,
+                                            transition_before_post_wrapper,
+                                            inner_wrapper,
+                                            post_wrapper,
+                                            offset,
+                                            outer_two_hop,
+                                            reforward_two_hop,
+                                            reforward_placement,
+                                        );
+                                        assert_interpretation(
+                                            &source,
+                                            ExpectedInterpretation::Value(48),
+                                            &format!(
+                                                "mutable-to-const captured field case {case_index}, kind {kind:?}, path {storage:?}, transition before post wrapper {transition_before_post_wrapper}, inner wrapper {inner_wrapper:?}, post wrapper {post_wrapper:?}, offset {offset:?}, outer two hop {outer_two_hop}, re-forward two hop {reforward_two_hop}, re-forward placement {reforward_placement:?}"
+                                            ),
+                                        );
+                                        case_index += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                assert_interpretation(
+                    &mutable_to_const_reforwarded_captured_literal_field_const_discard_program(
+                        storage,
+                        transition_before_post_wrapper,
+                    ),
+                    ExpectedInterpretation::Error(
+                        "cannot discard const qualifier from pointer target",
+                    ),
+                    &format!(
+                        "mutable-to-const captured field mutable rebinding, path {storage:?}, transition before post wrapper {transition_before_post_wrapper}"
+                    ),
+                );
+                assert_interpretation(
+                    &mutable_to_const_reforwarded_captured_literal_field_const_write_program(
+                        storage,
+                        transition_before_post_wrapper,
+                    ),
+                    ExpectedInterpretation::Error("cannot assign through pointer to const"),
+                    &format!(
+                        "mutable-to-const captured field write, path {storage:?}, transition before post wrapper {transition_before_post_wrapper}"
+                    ),
+                );
+            }
+        }
+    }
+
+    assert_eq!(case_index, 2592);
+    assert_eq!(transition_counts, [1296; 2]);
+    assert_eq!(path_counts, [864; 3]);
+    assert_eq!(inner_wrapper_counts, [864; 3]);
+    assert_eq!(post_wrapper_counts, [864; 3]);
+    assert_eq!(offset_counts, [864; 3]);
+    assert_eq!(outer_hop_counts, [1296; 2]);
+    assert_eq!(reforward_hop_counts, [1296; 2]);
+    assert_eq!(reforward_placement_counts, [1296; 2]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -15250,6 +15352,146 @@ fn post_wrapper_reforwarded_captured_literal_field_offset_argument(
         reforward_two_hop,
         reforward_placement,
         points_to_const,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn mutable_to_const_reforwarded_captured_literal_field_argument(
+    storage: AdjustedParameterStorage,
+    transition_before_post_wrapper: bool,
+    inner_wrapper: WrappedDirectLiteralRoute,
+    post_wrapper: WrappedDirectLiteralRoute,
+    offset: WrappedDirectLiteralOffsetRoute,
+    prefix: &str,
+    outer_two_hop: bool,
+    reforward_two_hop: bool,
+    reforward_placement: PostForwardWrapperPlacement,
+) -> String {
+    let selected = storage.literal_expression();
+    let unselected = storage.other_owner().literal_expression();
+    let inner_prefix = format!("{prefix}_inner");
+    let post_prefix = format!("{prefix}_post");
+    let inner = post_forward_pointer_wrapper(inner_wrapper, selected, unselected, &inner_prefix);
+    let outer_helper = match (transition_before_post_wrapper, outer_two_hop) {
+        (false, false) => "forward_outer",
+        (false, true) => "forward_outer_twice",
+        (true, false) => "forward_const_outer",
+        (true, true) => "forward_const_outer_twice",
+    };
+    let reforward_helper = if reforward_two_hop {
+        "forward_const_outer_twice"
+    } else {
+        "forward_const_outer"
+    };
+    let forwarded = format!("{outer_helper}({inner})");
+    let post_unselected = format!("{outer_helper}({unselected})");
+    let wrapped =
+        post_forward_pointer_wrapper(post_wrapper, &forwarded, &post_unselected, &post_prefix);
+
+    match reforward_placement {
+        PostForwardWrapperPlacement::BeforeOffset => {
+            offset.render(&format!("{reforward_helper}({wrapped})"))
+        }
+        PostForwardWrapperPlacement::AfterOffset => {
+            format!("{reforward_helper}({})", offset.render(&wrapped))
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn mutable_to_const_reforwarded_captured_literal_field_adjusted_parameter_program(
+    kind: AdjustedParameterFieldKind,
+    storage: AdjustedParameterStorage,
+    transition_before_post_wrapper: bool,
+    inner_wrapper: WrappedDirectLiteralRoute,
+    post_wrapper: WrappedDirectLiteralRoute,
+    offset: WrappedDirectLiteralOffsetRoute,
+    outer_two_hop: bool,
+    reforward_two_hop: bool,
+    reforward_placement: PostForwardWrapperPlacement,
+) -> String {
+    let argument = mutable_to_const_reforwarded_captured_literal_field_argument(
+        storage,
+        transition_before_post_wrapper,
+        inner_wrapper,
+        post_wrapper,
+        offset,
+        "root",
+        outer_two_hop,
+        reforward_two_hop,
+        reforward_placement,
+    );
+    let marker_check = post_forward_marker_check(inner_wrapper, post_wrapper, "root");
+    let field = kind.field_name();
+    let pointer_type = kind.const_pointer_type();
+    let read = kind.read("inner");
+    format!(
+        "{prelude}\n{helpers}\n\
+         int read_promoted(const struct Item items[]) {{\n\
+             const struct Item *original = items;\n\
+             {pointer_type}inner = &items[0].nested.{field}[1];\n\
+             int score = ({read} == {read}) + (inner == &items[0].nested.{field}[1])\n\
+                 + (original == items) + (items[-1].nested.values[0] == items[-1].nested.values[0]);\n\
+             const struct Item *fallback = items - 1;\n\
+             items = fallback; inner = &fallback[0].nested.{field}[0];\n\
+             return score + (items == fallback) + (inner == &fallback[0].nested.{field}[0]);\n\
+         }}\n\
+         int main(void) {{ {declarations} {markers} return read_promoted({argument}) + (marker == 6) * 19 + ({marker_check}) * 23; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        helpers = captured_outer_forwarding_helpers(),
+        declarations = captured_literal_field_offset_declarations(),
+        markers = post_forward_captured_marker_declarations("root"),
+    )
+}
+
+fn mutable_to_const_reforwarded_captured_literal_field_const_discard_program(
+    storage: AdjustedParameterStorage,
+    transition_before_post_wrapper: bool,
+) -> String {
+    let argument = mutable_to_const_reforwarded_captured_literal_field_argument(
+        storage,
+        transition_before_post_wrapper,
+        WrappedDirectLiteralRoute::ConditionalTrue,
+        WrappedDirectLiteralRoute::Comma,
+        WrappedDirectLiteralOffsetRoute::PointerPlusOne,
+        "root",
+        false,
+        true,
+        PostForwardWrapperPlacement::BeforeOffset,
+    );
+    format!(
+        "{prelude}\n{helpers}\n\
+         int main(void) {{ {declarations} {markers} struct Item *slot = {argument}; return slot[0].nested.values[0]; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        helpers = captured_outer_forwarding_helpers(),
+        declarations = captured_literal_field_offset_declarations(),
+        markers = post_forward_captured_marker_declarations("root"),
+    )
+}
+
+fn mutable_to_const_reforwarded_captured_literal_field_const_write_program(
+    storage: AdjustedParameterStorage,
+    transition_before_post_wrapper: bool,
+) -> String {
+    let argument = mutable_to_const_reforwarded_captured_literal_field_argument(
+        storage,
+        transition_before_post_wrapper,
+        WrappedDirectLiteralRoute::Comma,
+        WrappedDirectLiteralRoute::ConditionalFalse,
+        WrappedDirectLiteralOffsetRoute::IndexedAddress,
+        "root",
+        true,
+        false,
+        PostForwardWrapperPlacement::AfterOffset,
+    );
+    format!(
+        "{prelude}\n{helpers}\n\
+         int probe(const struct Item items[]) {{ const int *slot = &items[0].nested.values[0]; *slot = 7; return *slot; }}\n\
+         int main(void) {{ {declarations} {markers} return probe({argument}); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        helpers = captured_outer_forwarding_helpers(),
+        declarations = captured_literal_field_offset_declarations(),
+        markers = post_forward_captured_marker_declarations("root"),
     )
 }
 
