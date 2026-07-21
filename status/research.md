@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-21 — Post-promotion const re-forwarding of captured-field derived inner pointers
+
+- No external documentation was needed. Once a mutable scalar or named-aggregate inner pointer derived from a captured field adjusted parameter has been promoted to `const T *`, subsequent const-preserving helper calls, conditional/comma selection, and same-array offsets must preserve the containing compound literal's hidden root, recursive field path, adjusted nonzero outer base, and inner index; only write qualification changes.
+- The exhaustive matrix composes three captured path families, both pointee kinds, all three initial promotion placements, all three second const re-forwarding placements, two wrapper/offset stages, and one/two-hop helpers for 17,496 valid routes. One hundred eight exact negative checks retain mutable-rebinding and write diagnostics. Existing behavior passed immediately, so this is deliberate conformance/property coverage rather than a production fix. The warning-free fixture returns 58 under Cust, GCC, and Clang.
+- Next distinct seam: return these promoted derived inner pointers from adjusted-parameter callees to callers, preserving direct/captured compound-literal identity and const qualification across the function-return boundary.
+
 ## 2026-07-21 — Post-promotion const re-forwarding of direct-literal derived inner pointers
 
 - No external documentation was needed. Once a mutable scalar or named-aggregate inner pointer has been promoted to `const T *`, subsequent const-preserving helper calls, conditional/comma selection, and same-array offsets must preserve the direct aggregate-array compound literal's hidden root, adjusted nonzero outer base, and derived inner index; only write qualification changes.

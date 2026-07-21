@@ -4063,6 +4063,125 @@ fn generated_post_promotion_inner_const_reforwarding_preserves_direct_literal_ad
 }
 
 #[test]
+fn generated_post_promotion_inner_const_reforwarding_preserves_captured_field_adjusted_parameter_identity_without_panics()
+ {
+    const PATHS: [AdjustedParameterStorage; 3] = [
+        AdjustedParameterStorage::NamedLeftPrimary,
+        AdjustedParameterStorage::AnonymousLeftPrimary,
+        AdjustedParameterStorage::UnionLeftPrimary,
+    ];
+
+    let mut kind_counts = [0; 2];
+    let mut path_counts = [0; 3];
+    let mut promotion_placement_counts = [0; 3];
+    let mut inner_wrapper_counts = [0; 3];
+    let mut inner_offset_counts = [0; 3];
+    let mut promotion_hop_counts = [0; 2];
+    let mut reforward_placement_counts = [0; 3];
+    let mut post_wrapper_counts = [0; 3];
+    let mut post_offset_counts = [0; 3];
+    let mut reforward_hop_counts = [0; 2];
+    let mut case_index = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for (path_index, storage) in PATHS.into_iter().enumerate() {
+            for promotion_placement in InnerConstPromotionPlacement::ALL {
+                for inner_wrapper in WrappedDirectLiteralRoute::ALL {
+                    for inner_offset in WrappedDirectLiteralOffsetRoute::ALL {
+                        for promotion_two_hop in [false, true] {
+                            for reforward_placement in InnerConstPromotionPlacement::ALL {
+                                for post_wrapper in WrappedDirectLiteralRoute::ALL {
+                                    for post_offset in WrappedDirectLiteralOffsetRoute::ALL {
+                                        for reforward_two_hop in [false, true] {
+                                            kind_counts[kind_index] += 1;
+                                            path_counts[path_index] += 1;
+                                            promotion_placement_counts
+                                                [promotion_placement.index()] += 1;
+                                            inner_wrapper_counts[inner_wrapper.index()] += 1;
+                                            inner_offset_counts[inner_offset.index()] += 1;
+                                            promotion_hop_counts[usize::from(promotion_two_hop)] +=
+                                                1;
+                                            reforward_placement_counts
+                                                [reforward_placement.index()] += 1;
+                                            post_wrapper_counts[post_wrapper.index()] += 1;
+                                            post_offset_counts[post_offset.index()] += 1;
+                                            reforward_hop_counts[usize::from(reforward_two_hop)] +=
+                                                1;
+
+                                            let source = captured_derived_inner_pointer_const_reforward_program(
+                                                kind,
+                                                storage,
+                                                promotion_placement,
+                                                inner_wrapper,
+                                                inner_offset,
+                                                promotion_two_hop,
+                                                reforward_placement,
+                                                post_wrapper,
+                                                post_offset,
+                                                reforward_two_hop,
+                                            );
+                                            assert_interpretation(
+                                                &source,
+                                                ExpectedInterpretation::Value(28),
+                                                &format!(
+                                                    "captured-field post-promotion inner const re-forward case {case_index}, kind {kind:?}, path {storage:?}, promotion placement {promotion_placement:?}, inner wrapper {inner_wrapper:?}, inner offset {inner_offset:?}, promotion two hop {promotion_two_hop}, re-forward placement {reforward_placement:?}, post wrapper {post_wrapper:?}, post offset {post_offset:?}, re-forward two hop {reforward_two_hop}"
+                                                ),
+                                            );
+                                            case_index += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for reforward_placement in InnerConstPromotionPlacement::ALL {
+                    assert_interpretation(
+                        &captured_derived_inner_pointer_const_reforward_discard_program(
+                            kind,
+                            storage,
+                            promotion_placement,
+                            reforward_placement,
+                        ),
+                        ExpectedInterpretation::Error(
+                            "cannot discard const qualifier from pointer target",
+                        ),
+                        &format!(
+                            "captured-field post-promotion inner mutable rebinding, kind {kind:?}, path {storage:?}, promotion placement {promotion_placement:?}, re-forward placement {reforward_placement:?}"
+                        ),
+                    );
+                    assert_interpretation(
+                        &captured_derived_inner_pointer_const_reforward_write_program(
+                            kind,
+                            storage,
+                            promotion_placement,
+                            reforward_placement,
+                        ),
+                        ExpectedInterpretation::Error("cannot assign through pointer to const"),
+                        &format!(
+                            "captured-field post-promotion inner const write, kind {kind:?}, path {storage:?}, promotion placement {promotion_placement:?}, re-forward placement {reforward_placement:?}"
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    assert_eq!(case_index, 17496);
+    assert_eq!(kind_counts, [8748; 2]);
+    assert_eq!(path_counts, [5832; 3]);
+    assert_eq!(promotion_placement_counts, [5832; 3]);
+    assert_eq!(inner_wrapper_counts, [5832; 3]);
+    assert_eq!(inner_offset_counts, [5832; 3]);
+    assert_eq!(promotion_hop_counts, [8748; 2]);
+    assert_eq!(reforward_placement_counts, [5832; 3]);
+    assert_eq!(post_wrapper_counts, [5832; 3]);
+    assert_eq!(post_offset_counts, [5832; 3]);
+    assert_eq!(reforward_hop_counts, [8748; 2]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -17075,5 +17194,169 @@ fn direct_derived_inner_pointer_const_reforward_write_program(
         write = kind.write("slot", 11),
         read = kind.read("slot"),
         argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn captured_derived_inner_pointer_const_reforward_program(
+    kind: AdjustedParameterFieldKind,
+    storage: AdjustedParameterStorage,
+    promotion_placement: InnerConstPromotionPlacement,
+    inner_wrapper: WrappedDirectLiteralRoute,
+    inner_offset: WrappedDirectLiteralOffsetRoute,
+    promotion_two_hop: bool,
+    reforward_placement: InnerConstPromotionPlacement,
+    post_wrapper: WrappedDirectLiteralRoute,
+    post_offset: WrappedDirectLiteralOffsetRoute,
+    reforward_two_hop: bool,
+) -> String {
+    let promoted_expression = derived_inner_pointer_const_promotion_expression(
+        kind,
+        promotion_placement,
+        inner_wrapper,
+        inner_offset,
+        promotion_two_hop,
+    );
+    let reforwarded_expression = derived_inner_pointer_const_reforward_expression(
+        kind,
+        reforward_placement,
+        post_wrapper,
+        post_offset,
+        reforward_two_hop,
+    );
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let field = kind.field_name();
+    let initialize_raw = kind.write("raw", 5);
+    let initialize_first = kind.write("(raw + 1)", 7);
+    let initialize_second = kind.write("(raw + 2)", 9);
+    let initialize_fallback = kind.write("fallback_raw", 3);
+    let read_inner = kind.read("inner");
+    let read_fallback = kind.read("inner");
+    let inner_marker_check = inner_wrapper.marker_check("inner");
+    let post_marker_check = post_wrapper.marker_check("post");
+    let argument = captured_literal_field_offset_argument(
+        storage,
+        WrappedDirectLiteralOffsetRoute::PointerPlusOne,
+    );
+
+    format!(
+        "{prelude}\n{promotion_helpers}\n{reforward_helpers}\n\
+         int probe(struct Item items[]) {{\n\
+             struct Item *outer_original = items;\n\
+             {pointer_type}raw = &items[0].nested.{field}[0];\n\
+             {pointer_type}fallback_raw = &items[-1].nested.{field}[0];\n\
+             {initialize_raw}; {initialize_first}; {initialize_second}; {initialize_fallback};\n\
+             int inner_selected = 0; int inner_unselected = 0; int inner_comma = 0;\n\
+             int post_selected = 0; int post_unselected = 0; int post_comma = 0;\n\
+             {const_pointer_type}promoted = {promoted_expression};\n\
+             {const_pointer_type}inner = {reforwarded_expression};\n\
+             {const_pointer_type}original = inner;\n\
+             int score = ({read_inner} == 9) + (inner == raw + 2)\n\
+                 + (original == inner) + (outer_original == items) + (promoted == raw + 1);\n\
+             inner = fallback_raw;\n\
+             return score + ({read_fallback} == 3) + (inner == fallback_raw)\n\
+                 + ({inner_marker_check}) + ({post_marker_check});\n\
+         }}\n\
+         int main(void) {{ {declarations} return probe({argument}) + (marker == 6) * 19; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        promotion_helpers = derived_inner_pointer_const_promotion_helpers(),
+        reforward_helpers = derived_inner_pointer_const_reforward_helpers(),
+        declarations = captured_literal_field_offset_declarations(),
+    )
+}
+
+fn captured_derived_inner_pointer_const_reforward_discard_program(
+    kind: AdjustedParameterFieldKind,
+    storage: AdjustedParameterStorage,
+    promotion_placement: InnerConstPromotionPlacement,
+    reforward_placement: InnerConstPromotionPlacement,
+) -> String {
+    let promoted_expression = derived_inner_pointer_const_promotion_expression(
+        kind,
+        promotion_placement,
+        WrappedDirectLiteralRoute::ConditionalTrue,
+        WrappedDirectLiteralOffsetRoute::PointerPlusOne,
+        false,
+    );
+    let reforwarded_expression = derived_inner_pointer_const_reforward_expression(
+        kind,
+        reforward_placement,
+        WrappedDirectLiteralRoute::ConditionalFalse,
+        WrappedDirectLiteralOffsetRoute::OnePlusPointer,
+        true,
+    );
+    let argument = captured_literal_field_offset_argument(
+        storage,
+        WrappedDirectLiteralOffsetRoute::PointerPlusOne,
+    );
+    format!(
+        "{prelude}\n{promotion_helpers}\n{reforward_helpers}\n\
+         int probe(struct Item items[]) {{\n\
+             {pointer_type}raw = &items[0].nested.{field}[0];\n\
+             {pointer_type}fallback_raw = &items[-1].nested.{field}[0];\n\
+             int inner_selected = 0; int inner_unselected = 0; int inner_comma = 0;\n\
+             int post_selected = 0; int post_unselected = 0; int post_comma = 0;\n\
+             {const_pointer_type}promoted = {promoted_expression};\n\
+             {pointer_type}mutable_slot = {reforwarded_expression};\n\
+             return {read};\n\
+         }}\n\
+         int main(void) {{ {declarations} return probe({argument}); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        promotion_helpers = derived_inner_pointer_const_promotion_helpers(),
+        reforward_helpers = derived_inner_pointer_const_reforward_helpers(),
+        pointer_type = kind.pointer_type(),
+        const_pointer_type = kind.const_pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("mutable_slot"),
+        declarations = captured_literal_field_offset_declarations(),
+    )
+}
+
+fn captured_derived_inner_pointer_const_reforward_write_program(
+    kind: AdjustedParameterFieldKind,
+    storage: AdjustedParameterStorage,
+    promotion_placement: InnerConstPromotionPlacement,
+    reforward_placement: InnerConstPromotionPlacement,
+) -> String {
+    let promoted_expression = derived_inner_pointer_const_promotion_expression(
+        kind,
+        promotion_placement,
+        WrappedDirectLiteralRoute::Comma,
+        WrappedDirectLiteralOffsetRoute::IndexedAddress,
+        true,
+    );
+    let reforwarded_expression = derived_inner_pointer_const_reforward_expression(
+        kind,
+        reforward_placement,
+        WrappedDirectLiteralRoute::ConditionalTrue,
+        WrappedDirectLiteralOffsetRoute::IndexedAddress,
+        false,
+    );
+    let argument = captured_literal_field_offset_argument(
+        storage,
+        WrappedDirectLiteralOffsetRoute::PointerPlusOne,
+    );
+    format!(
+        "{prelude}\n{promotion_helpers}\n{reforward_helpers}\n\
+         int probe(struct Item items[]) {{\n\
+             {pointer_type}raw = &items[0].nested.{field}[0];\n\
+             {pointer_type}fallback_raw = &items[-1].nested.{field}[0];\n\
+             int inner_selected = 0; int inner_unselected = 0; int inner_comma = 0;\n\
+             int post_selected = 0; int post_unselected = 0; int post_comma = 0;\n\
+             {const_pointer_type}promoted = {promoted_expression};\n\
+             {const_pointer_type}slot = {reforwarded_expression};\n\
+             {write}; return {read};\n\
+         }}\n\
+         int main(void) {{ {declarations} return probe({argument}); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        promotion_helpers = derived_inner_pointer_const_promotion_helpers(),
+        reforward_helpers = derived_inner_pointer_const_reforward_helpers(),
+        pointer_type = kind.pointer_type(),
+        const_pointer_type = kind.const_pointer_type(),
+        field = kind.field_name(),
+        write = kind.write("slot", 11),
+        read = kind.read("slot"),
+        declarations = captured_literal_field_offset_declarations(),
     )
 }
