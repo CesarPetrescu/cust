@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-21 — Derived inner-pointer const promotion after adjusted-parameter binding
+
+- No external documentation was needed. A mutable `int *` or `struct Point *` derived after a captured aggregate-array field decays into an adjusted `struct Item *` parameter may be converted to its const-pointee form before an inner conditional/comma wrapper, after that wrapper, or after a nonzero inner offset. The conversion changes write qualification without changing the captured containing root, recursive field path, nonzero outer base, or inner index.
+- Three hundred twenty-four generated routes cover scalar/aggregate pointees, named/anonymous/union paths, all three promotion stages, all wrappers/offset spellings, and one/two-hop helpers. Thirty-six exact negative checks retain mutable-rebinding and write diagnostics. Immediate focused GREEN established deliberate conformance/property closure; the warning-free static fixture returns 31 under Cust, GCC, and Clang.
+- Implementation decision: keep this coverage metadata-only and test-side because no production change was needed. The next distinct seam is the same derived-inner qualification transition over direct aggregate-array compound-literal adjusted arguments.
+
 ## 2026-07-21 — Mutable-to-const re-forwarding of captured aggregate-compound-literal fields
 
 - No external documentation was needed. Promoting a mutable field-decayed `struct Item *` to `const struct Item *` changes write qualification without changing the captured aggregate compound literal's containing root, recursive field path, absolute nonzero base, or derived scalar/named-aggregate inner-pointer identity.
