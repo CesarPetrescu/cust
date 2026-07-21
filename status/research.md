@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-21 — Derived inner-pointer const promotion from direct literal arguments
+
+- No external documentation was needed. Once a mutable direct aggregate-array compound literal has decayed into an adjusted `struct Item *` parameter at a nonzero base, promoting a derived `int *` or `struct Point *` changes write qualification only; it must not change the hidden literal root, outer base, or inner index.
+- The focused matrix places promotion before an inner conditional/comma wrapper, after that wrapper, or after a nonzero inner offset; one/two-hop helpers, distinct initializer/wrapper markers, local pointer-slot reassignment, and exact const diagnostics cover 108 valid plus 12 invalid routes. Existing behavior passed immediately, so the change is conformance/property coverage rather than a production fix. The warning-free fixture returns 21 under Cust, GCC, and Clang.
+- Next distinct seam: re-forward the already promoted inner pointer through `const T *` helpers around a second wrapper/offset, keeping post-promotion qualification and hidden-root identity separate.
+
 ## 2026-07-21 — Derived inner-pointer const promotion after adjusted-parameter binding
 
 - No external documentation was needed. A mutable `int *` or `struct Point *` derived after a captured aggregate-array field decays into an adjusted `struct Item *` parameter may be converted to its const-pointee form before an inner conditional/comma wrapper, after that wrapper, or after a nonzero inner offset. The conversion changes write qualification without changing the captured containing root, recursive field path, nonzero outer base, or inner index.

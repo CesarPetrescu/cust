@@ -3898,6 +3898,67 @@ fn generated_derived_inner_pointer_const_promotions_preserve_captured_adjusted_p
 }
 
 #[test]
+fn generated_derived_inner_pointer_const_promotions_preserve_direct_literal_adjusted_parameter_identity_without_panics()
+ {
+    let mut kind_counts = [0; 2];
+    let mut placement_counts = [0; 3];
+    let mut wrapper_counts = [0; 3];
+    let mut offset_counts = [0; 3];
+    let mut helper_hop_counts = [0; 2];
+    let mut case_index = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for placement in InnerConstPromotionPlacement::ALL {
+            for wrapper in WrappedDirectLiteralRoute::ALL {
+                for offset in WrappedDirectLiteralOffsetRoute::ALL {
+                    for two_hop in [false, true] {
+                        kind_counts[kind_index] += 1;
+                        placement_counts[placement.index()] += 1;
+                        wrapper_counts[wrapper.index()] += 1;
+                        offset_counts[offset.index()] += 1;
+                        helper_hop_counts[usize::from(two_hop)] += 1;
+
+                        let source = direct_derived_inner_pointer_const_promotion_program(
+                            kind, placement, wrapper, offset, two_hop,
+                        );
+                        assert_interpretation(
+                            &source,
+                            ExpectedInterpretation::Value(26),
+                            &format!(
+                                "direct literal derived inner const promotion case {case_index}, kind {kind:?}, placement {placement:?}, wrapper {wrapper:?}, offset {offset:?}, two hop {two_hop}"
+                            ),
+                        );
+                        case_index += 1;
+                    }
+                }
+            }
+
+            assert_interpretation(
+                &direct_derived_inner_pointer_const_discard_program(kind, placement),
+                ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+                &format!(
+                    "direct literal derived inner mutable rebinding, kind {kind:?}, placement {placement:?}"
+                ),
+            );
+            assert_interpretation(
+                &direct_derived_inner_pointer_const_write_program(kind, placement),
+                ExpectedInterpretation::Error("cannot assign through pointer to const"),
+                &format!(
+                    "direct literal derived inner const write, kind {kind:?}, placement {placement:?}"
+                ),
+            );
+        }
+    }
+
+    assert_eq!(case_index, 108);
+    assert_eq!(kind_counts, [54; 2]);
+    assert_eq!(placement_counts, [36; 3]);
+    assert_eq!(wrapper_counts, [36; 3]);
+    assert_eq!(offset_counts, [36; 3]);
+    assert_eq!(helper_hop_counts, [54; 2]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -16623,5 +16684,100 @@ fn derived_inner_pointer_const_write_program(
         write = kind.write("slot", 9),
         read = kind.read("slot"),
         declarations = captured_literal_field_offset_declarations(),
+    )
+}
+
+fn direct_derived_inner_pointer_const_promotion_argument() -> &'static str {
+    "((struct Item[3]){{}, { .nested = { .values = {++root_marker} } }, {}} + 1)"
+}
+
+fn direct_derived_inner_pointer_const_promotion_program(
+    kind: AdjustedParameterFieldKind,
+    placement: InnerConstPromotionPlacement,
+    wrapper: WrappedDirectLiteralRoute,
+    offset: WrappedDirectLiteralOffsetRoute,
+    two_hop: bool,
+) -> String {
+    let expression =
+        derived_inner_pointer_const_promotion_expression(kind, placement, wrapper, offset, two_hop);
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let field = kind.field_name();
+    let read_inner = kind.read("inner");
+    let read_fallback = kind.read("inner");
+    let initialize_raw = kind.write("raw", 5);
+    let initialize_next = kind.write("(raw + 1)", 7);
+    let initialize_fallback = kind.write("fallback_raw", 3);
+    let marker_check = wrapper.marker_check("inner");
+
+    format!(
+        "{prelude}\n{helpers}\n\
+         int probe(struct Item items[]) {{\n\
+             struct Item *outer_original = items;\n\
+             {pointer_type}raw = &items[0].nested.{field}[0];\n\
+             {pointer_type}fallback_raw = &items[-1].nested.{field}[0];\n\
+             {initialize_raw}; {initialize_next}; {initialize_fallback};\n\
+             int inner_selected = 0; int inner_unselected = 0; int inner_comma = 0;\n\
+             {const_pointer_type}inner = {expression};\n\
+             {const_pointer_type}original = inner;\n\
+             int score = ({read_inner} == 7) + (inner == raw + 1)\n\
+                 + (original == inner) + (outer_original == items);\n\
+             inner = fallback_raw;\n\
+             return score + ({read_fallback} == 3) + (inner == fallback_raw) + ({marker_check});\n\
+         }}\n\
+         int main(void) {{ int root_marker = 0; return probe({argument}) + (root_marker == 1) * 19; }}\n",
+        prelude = adjusted_parameter_prelude(),
+        helpers = derived_inner_pointer_const_promotion_helpers(),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn direct_derived_inner_pointer_const_discard_program(
+    kind: AdjustedParameterFieldKind,
+    placement: InnerConstPromotionPlacement,
+) -> String {
+    let expression = derived_inner_pointer_const_promotion_expression(
+        kind,
+        placement,
+        WrappedDirectLiteralRoute::ConditionalTrue,
+        WrappedDirectLiteralOffsetRoute::PointerPlusOne,
+        false,
+    );
+    format!(
+        "{prelude}\n{helpers}\n\
+         int probe(struct Item items[]) {{ {pointer_type}raw = &items[0].nested.{field}[0]; int inner_selected = 0; int inner_unselected = 0; int inner_comma = 0; {pointer_type}mutable_slot = {expression}; return {read}; }}\n\
+         int main(void) {{ int root_marker = 0; return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        helpers = derived_inner_pointer_const_promotion_helpers(),
+        pointer_type = kind.pointer_type(),
+        field = kind.field_name(),
+        read = kind.read("mutable_slot"),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn direct_derived_inner_pointer_const_write_program(
+    kind: AdjustedParameterFieldKind,
+    placement: InnerConstPromotionPlacement,
+) -> String {
+    let expression = derived_inner_pointer_const_promotion_expression(
+        kind,
+        placement,
+        WrappedDirectLiteralRoute::Comma,
+        WrappedDirectLiteralOffsetRoute::IndexedAddress,
+        true,
+    );
+    format!(
+        "{prelude}\n{helpers}\n\
+         int probe(struct Item items[]) {{ {pointer_type}raw = &items[0].nested.{field}[0]; int inner_selected = 0; int inner_unselected = 0; int inner_comma = 0; {const_pointer_type}slot = {expression}; {write}; return {read}; }}\n\
+         int main(void) {{ int root_marker = 0; return probe({argument}); }}\n",
+        prelude = adjusted_parameter_prelude(),
+        helpers = derived_inner_pointer_const_promotion_helpers(),
+        pointer_type = kind.pointer_type(),
+        const_pointer_type = kind.const_pointer_type(),
+        field = kind.field_name(),
+        write = kind.write("slot", 9),
+        read = kind.read("slot"),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
     )
 }

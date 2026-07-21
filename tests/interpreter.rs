@@ -9234,6 +9234,16 @@ fn adjusted_aggregate_parameter_derived_inner_pointer_const_promotion_routes_mat
 }
 
 #[test]
+fn adjusted_aggregate_parameter_direct_literal_derived_inner_pointer_const_promotion_routes_match_fixture()
+ {
+    let program = include_str!(
+        "fixtures/valid/adjusted_aggregate_parameter_direct_literal_derived_inner_pointer_const_promotion_routes.c",
+    );
+
+    assert_eq!(interpret(program).unwrap(), 21);
+}
+
+#[test]
 fn aggregate_array_field_elements_decay_embedded_arrays_for_direct_access() {
     let program = r#"
         struct Point { int value; };
