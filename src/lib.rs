@@ -10605,13 +10605,28 @@ enum PointerValue {
     ArrayBase {
         array: Rc<RefCell<ArrayValue>>,
         source_name: Option<String>,
+        owner: Option<ArrayPointerOwner>,
     },
     ArrayElement {
         array: Rc<RefCell<ArrayValue>>,
         source_name: Option<String>,
         index: usize,
+        owner: Option<ArrayPointerOwner>,
     },
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArrayPointerOwner {
+    scope_id: usize,
+    name: String,
+}
+
+type CheckedArrayPointerIndex = (
+    Rc<RefCell<ArrayValue>>,
+    Option<String>,
+    usize,
+    Option<ArrayPointerOwner>,
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ArrayValue {
@@ -11808,6 +11823,96 @@ impl Interpreter {
         }
     }
 
+    fn fields_contain_array(
+        fields: &HashMap<String, StructFieldValue>,
+        target: &Rc<RefCell<ArrayValue>>,
+    ) -> bool {
+        fields.values().any(|field| match field {
+            StructFieldValue::Array { value, .. } => Rc::ptr_eq(value, target),
+            StructFieldValue::Struct { fields, .. } => Self::fields_contain_array(fields, target),
+            StructFieldValue::StructArray { elements, .. } => elements
+                .iter()
+                .any(|fields| Self::fields_contain_array(fields, target)),
+            StructFieldValue::Scalar { .. } | StructFieldValue::Pointer { .. } => false,
+        })
+    }
+
+    fn value_contains_array(value: &Value, target: &Rc<RefCell<ArrayValue>>) -> bool {
+        match value {
+            Value::Array(array) => Rc::ptr_eq(array, target),
+            Value::Struct { fields, .. } => Self::fields_contain_array(fields, target),
+            Value::StructArray { elements, .. } => elements
+                .iter()
+                .any(|fields| Self::fields_contain_array(fields, target)),
+            Value::Scalar { .. } | Value::Pointer { .. } => false,
+        }
+    }
+
+    fn find_array_pointer_owner(
+        &self,
+        array: &Rc<RefCell<ArrayValue>>,
+    ) -> Option<ArrayPointerOwner> {
+        for scope in self.scopes.iter().rev() {
+            if let Some((name, _)) = scope
+                .values
+                .iter()
+                .find(|(_, value)| Self::value_contains_array(value, array))
+            {
+                return Some(ArrayPointerOwner {
+                    scope_id: scope.id,
+                    name: name.clone(),
+                });
+            }
+        }
+        self.static_locals.values().find_map(|storage| {
+            Self::value_contains_array(&storage.value, array).then(|| ArrayPointerOwner {
+                scope_id: storage.scope_id,
+                name: storage.name.clone(),
+            })
+        })
+    }
+
+    fn attach_array_pointer_owner(&self, pointer: PointerValue) -> PointerValue {
+        match pointer {
+            PointerValue::ArrayBase {
+                array,
+                source_name,
+                owner: None,
+            } => {
+                let owner = self.find_array_pointer_owner(&array);
+                PointerValue::ArrayBase {
+                    array,
+                    source_name,
+                    owner,
+                }
+            }
+            PointerValue::ArrayElement {
+                array,
+                source_name,
+                index,
+                owner: None,
+            } => {
+                let owner = self.find_array_pointer_owner(&array);
+                PointerValue::ArrayElement {
+                    array,
+                    source_name,
+                    index,
+                    owner,
+                }
+            }
+            pointer => pointer,
+        }
+    }
+
+    fn ensure_array_pointer_owner_live(&self, owner: Option<&ArrayPointerOwner>) -> CustResult<()> {
+        match owner {
+            Some(owner) if !self.live_scope_ids.contains(&owner.scope_id) => Err(CustError::new(
+                format!("pointer to out-of-scope variable '{}'", owner.name),
+            )),
+            Some(_) | None => Ok(()),
+        }
+    }
+
     fn pointer_value_type(&self, pointer: &PointerValue) -> CustResult<Option<PointeeType>> {
         match pointer {
             PointerValue::Null => Ok(None),
@@ -11825,7 +11930,9 @@ impl Interpreter {
                     ))),
                 }
             }
-            PointerValue::ArrayBase { array, .. } | PointerValue::ArrayElement { array, .. } => {
+            PointerValue::ArrayBase { array, owner, .. }
+            | PointerValue::ArrayElement { array, owner, .. } => {
+                self.ensure_array_pointer_owner_live(owner.as_ref())?;
                 Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
             }
             PointerValue::Struct { scope_id, name } => {
@@ -12414,6 +12521,7 @@ impl Interpreter {
                     StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
                         array: Rc::clone(value),
                         source_name: Some(Self::field_path_label(fields).to_string()),
+                        owner: None,
                     }),
                     StructFieldValue::StructArray { .. } => Err(CustError::new(format!(
                         "struct field '{}' requires indexed field access",
@@ -13215,12 +13323,13 @@ impl Interpreter {
         ) {
             return self.offset_array_pointer(&field_pointer, index_value);
         }
-        let (array, source_name, index) =
+        let (array, source_name, index, owner) =
             self.checked_pointer_value_index(&field_pointer, index_value)?;
         Ok(PointerValue::ArrayElement {
             array,
             source_name,
             index,
+            owner,
         })
     }
 
@@ -13547,6 +13656,7 @@ impl Interpreter {
         Ok(PointerValue::ArrayElement {
             array,
             source_name: Some(Self::field_path_label(fields).to_string()),
+            owner: None,
             index,
         })
     }
@@ -13575,6 +13685,7 @@ impl Interpreter {
         Ok(PointerValue::ArrayBase {
             array,
             source_name: Some(Self::field_path_label(fields).to_string()),
+            owner: None,
         })
     }
 
@@ -13903,6 +14014,7 @@ impl Interpreter {
         Ok(PointerValue::ArrayElement {
             array,
             source_name: Some(Self::field_path_label(fields).to_string()),
+            owner: None,
             index,
         })
     }
@@ -13921,6 +14033,7 @@ impl Interpreter {
         Ok(PointerValue::ArrayBase {
             array,
             source_name: Some(Self::field_path_label(fields).to_string()),
+            owner: None,
         })
     }
 
@@ -14098,6 +14211,7 @@ impl Interpreter {
             StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
                 array: Rc::clone(value),
                 source_name: Some(Self::field_path_label(fields).to_string()),
+                owner: None,
             }),
             StructFieldValue::Struct { .. } => Err(CustError::new(format!(
                 "struct field '{}' requires field access",
@@ -14139,6 +14253,7 @@ impl Interpreter {
             StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
                 array: Rc::clone(value),
                 source_name: Some(Self::field_path_label(fields).to_string()),
+                owner: None,
             }),
             StructFieldValue::StructArray { .. } => Err(CustError::new(format!(
                 "struct field '{}' requires indexed field access",
@@ -14212,6 +14327,7 @@ impl Interpreter {
                         return Ok(PointerValue::ArrayBase {
                             array: Rc::clone(value),
                             source_name: Some(Self::field_path_label(fields).to_string()),
+                            owner: None,
                         });
                     }
                     StructFieldValue::StructArray { .. } => {
@@ -14244,6 +14360,7 @@ impl Interpreter {
             StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
                 array: Rc::clone(value),
                 source_name: Some(Self::field_path_label(&field_path).to_string()),
+                owner: None,
             }),
             StructFieldValue::StructArray { .. } => Err(CustError::new(format!(
                 "struct field '{}' requires indexed field access",
@@ -15030,12 +15147,13 @@ impl Interpreter {
         ) {
             return self.offset_array_pointer(&field_pointer, index_value);
         }
-        let (array, source_name, index) =
+        let (array, source_name, index, owner) =
             self.checked_pointer_value_index(&field_pointer, index_value)?;
         Ok(PointerValue::ArrayElement {
             array,
             source_name,
             index,
+            owner,
         })
     }
 
@@ -15601,18 +15719,20 @@ impl Interpreter {
                     self.find_variable(name).cloned()
                 {
                     let index_value = self.eval(index)?;
-                    let (array, source_name, index) =
+                    let (array, source_name, index, owner) =
                         self.checked_pointer_value_index(&pointer, index_value)?;
                     Ok(PointerValue::ArrayElement {
                         array,
                         source_name,
                         index,
+                        owner,
                     })
                 } else {
                     let (array, index) = self.checked_array_index(name, index)?;
                     Ok(PointerValue::ArrayElement {
                         array,
                         source_name: Some(name.clone()),
+                        owner: None,
                         index,
                     })
                 }
@@ -15693,6 +15813,7 @@ impl Interpreter {
             Expr::StringLiteral(values) => Ok(PointerValue::ArrayBase {
                 array: Rc::new(RefCell::new(ArrayValue::read_only(values.clone()))),
                 source_name: None,
+                owner: None,
             }),
             Expr::ArrayLiteral {
                 elem_type,
@@ -15702,6 +15823,7 @@ impl Interpreter {
             } => Ok(PointerValue::ArrayBase {
                 array: self.make_array_compound_literal(*len, *elem_type, init, *read_only)?,
                 source_name: None,
+                owner: None,
             }),
             Expr::AggregateArrayLiteral {
                 type_name,
@@ -15805,6 +15927,7 @@ impl Interpreter {
                 Some(Value::Array(array)) => Ok(PointerValue::ArrayBase {
                     array: Rc::clone(array),
                     source_name: Some(name.clone()),
+                    owner: None,
                 }),
                 Some(Value::StructArray { .. }) => {
                     let scope_id = self
@@ -16305,14 +16428,22 @@ impl Interpreter {
                 fields,
                 index,
             } => self.nested_struct_array_pointer_at(pointer, fields, *index as i64 + offset),
-            PointerValue::ArrayBase { array, source_name } => {
-                self.array_pointer_at(array, source_name.clone(), offset)
-            }
+            PointerValue::ArrayBase {
+                array,
+                source_name,
+                owner,
+            } => self.array_pointer_at(array, source_name.clone(), owner.clone(), offset),
             PointerValue::ArrayElement {
                 array,
                 source_name,
                 index,
-            } => self.array_pointer_at(array, source_name.clone(), *index as i64 + offset),
+                owner,
+            } => self.array_pointer_at(
+                array,
+                source_name.clone(),
+                owner.clone(),
+                *index as i64 + offset,
+            ),
         }
     }
 
@@ -16390,8 +16521,10 @@ impl Interpreter {
         &self,
         array: &Rc<RefCell<ArrayValue>>,
         source_name: Option<String>,
+        owner: Option<ArrayPointerOwner>,
         index: i64,
     ) -> CustResult<PointerValue> {
+        self.ensure_array_pointer_owner_live(owner.as_ref())?;
         let len = array.borrow().elements.len();
         let Ok(index_usize) = usize::try_from(index) else {
             return Err(CustError::new(format!(
@@ -16407,6 +16540,7 @@ impl Interpreter {
             array: Rc::clone(array),
             source_name,
             index: index_usize,
+            owner,
         })
     }
 
@@ -16459,13 +16593,22 @@ impl Interpreter {
                 element_index,
                 fields,
             } => self.read_struct_field_pointer(*scope_id, name, *element_index, fields),
-            PointerValue::ArrayBase { array, .. } => {
+            PointerValue::ArrayBase { array, owner, .. } => {
+                self.ensure_array_pointer_owner_live(owner.as_ref())?;
                 let array = array.borrow();
                 array.elements.first().copied().ok_or_else(|| {
                     CustError::new("array pointer index 0 out of bounds for length 0")
                 })
             }
-            PointerValue::ArrayElement { array, index, .. } => Ok(array.borrow().elements[*index]),
+            PointerValue::ArrayElement {
+                array,
+                index,
+                owner,
+                ..
+            } => {
+                self.ensure_array_pointer_owner_live(owner.as_ref())?;
+                Ok(array.borrow().elements[*index])
+            }
         }
     }
 
@@ -16559,7 +16702,9 @@ impl Interpreter {
             }
             None => return Err(CustError::new(format!("undefined variable '{name}'"))),
         };
-        self.checked_pointer_value_index(&pointer, index_value)
+        let (array, source_name, index, _) =
+            self.checked_pointer_value_index(&pointer, index_value)?;
+        Ok((array, source_name, index))
     }
 
     fn scalar_variable_reverse_subscript_pointer(
@@ -16619,6 +16764,7 @@ impl Interpreter {
                     return Ok(PointerValue::ArrayElement {
                         array,
                         source_name: Some(pointer_name.clone()),
+                        owner: None,
                         index,
                     });
                 }
@@ -16656,7 +16802,7 @@ impl Interpreter {
         &self,
         pointer: &PointerValue,
         index_value: i64,
-    ) -> CustResult<(Rc<RefCell<ArrayValue>>, Option<String>, usize)> {
+    ) -> CustResult<CheckedArrayPointerIndex> {
         match pointer {
             PointerValue::Null => Err(CustError::new("null pointer dereference")),
             PointerValue::Scalar { .. }
@@ -16670,7 +16816,12 @@ impl Interpreter {
             | PointerValue::NestedStructArrayElement { .. } => {
                 Err(CustError::new("struct pointer is not indexable"))
             }
-            PointerValue::ArrayBase { array, source_name } => {
+            PointerValue::ArrayBase {
+                array,
+                source_name,
+                owner,
+            } => {
+                self.ensure_array_pointer_owner_live(owner.as_ref())?;
                 let len = array.borrow().elements.len();
                 let Ok(index) = usize::try_from(index_value) else {
                     return Err(CustError::new(format!(
@@ -16682,13 +16833,15 @@ impl Interpreter {
                         "array pointer index {index_value} out of bounds for length {len}"
                     )));
                 }
-                Ok((Rc::clone(array), source_name.clone(), index))
+                Ok((Rc::clone(array), source_name.clone(), index, owner.clone()))
             }
             PointerValue::ArrayElement {
                 array,
                 source_name,
                 index: base_index,
+                owner,
             } => {
+                self.ensure_array_pointer_owner_live(owner.as_ref())?;
                 let len = array.borrow().elements.len();
                 let candidate = *base_index as i64 + index_value;
                 let Ok(index) = usize::try_from(candidate) else {
@@ -16701,7 +16854,7 @@ impl Interpreter {
                         "array pointer index {candidate} out of bounds for length {len}"
                     )));
                 }
-                Ok((Rc::clone(array), source_name.clone(), index))
+                Ok((Rc::clone(array), source_name.clone(), index, owner.clone()))
             }
         }
     }
@@ -16712,7 +16865,8 @@ impl Interpreter {
         index_value: i64,
         value: i64,
     ) -> CustResult<()> {
-        let (array, source_name, index) = self.checked_pointer_value_index(pointer, index_value)?;
+        let (array, source_name, index, _) =
+            self.checked_pointer_value_index(pointer, index_value)?;
         let mut array = array.borrow_mut();
         if array.read_only {
             return Err(CustError::new(match source_name {
@@ -17583,6 +17737,7 @@ impl Interpreter {
                     StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
                         array: Rc::clone(value),
                         source_name: None,
+                        owner: None,
                     }),
                     StructFieldValue::StructArray {
                         type_name,
@@ -18558,7 +18713,7 @@ impl Interpreter {
                     Some(Value::Pointer { pointer, .. }) => {
                         self.ensure_pointer_variable_pointee_mutable(name)?;
                         let index_value = self.eval(index)?;
-                        let (array, _, index) =
+                        let (array, _, index, _) =
                             self.checked_pointer_value_index(&pointer, index_value)?;
                         (array, index)
                     }
@@ -18727,7 +18882,8 @@ impl Interpreter {
             Some(Value::Pointer { pointer, .. }) => {
                 self.ensure_pointer_variable_pointee_mutable(name)?;
                 let index_value = self.eval(index)?;
-                let (array, _, index) = self.checked_pointer_value_index(&pointer, index_value)?;
+                let (array, _, index, _) =
+                    self.checked_pointer_value_index(&pointer, index_value)?;
                 (array, index)
             }
             Some(_) | None => self.checked_array_index(name, index)?,
@@ -19008,6 +19164,7 @@ impl Interpreter {
             }) => {
                 self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
+                let pointer = self.attach_array_pointer_owner(pointer);
                 self.ensure_pointer_type_matches(&ty, &pointer)?;
                 Ok(Some(ReturnValue::Pointer {
                     pointer,

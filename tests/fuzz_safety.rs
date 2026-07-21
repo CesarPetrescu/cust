@@ -2479,6 +2479,27 @@ enum InnerConstPromotionPlacement {
     AfterOffset,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DerivedInnerReturnRoot {
+    Direct,
+    Named,
+    Anonymous,
+    Union,
+}
+
+impl DerivedInnerReturnRoot {
+    const ALL: [Self; 4] = [Self::Direct, Self::Named, Self::Anonymous, Self::Union];
+
+    fn index(self) -> usize {
+        match self {
+            Self::Direct => 0,
+            Self::Named => 1,
+            Self::Anonymous => 2,
+            Self::Union => 3,
+        }
+    }
+}
+
 #[test]
 fn generated_adjusted_aggregate_parameter_embedded_field_pointers_match_model_without_panics() {
     let mut relation_counts = [0; 6];
@@ -4179,6 +4200,85 @@ fn generated_post_promotion_inner_const_reforwarding_preserves_captured_field_ad
     assert_eq!(post_wrapper_counts, [5832; 3]);
     assert_eq!(post_offset_counts, [5832; 3]);
     assert_eq!(reforward_hop_counts, [8748; 2]);
+}
+
+#[test]
+fn generated_derived_inner_const_pointer_callee_returns_preserve_adjusted_parameter_identity_without_panics()
+ {
+    let mut kind_counts = [0; 2];
+    let mut root_counts = [0; 4];
+    let mut wrapper_counts = [0; 3];
+    let mut offset_counts = [0; 3];
+    let mut hop_counts = [0; 2];
+    let mut case_index = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for root in DerivedInnerReturnRoot::ALL {
+            for wrapper in WrappedDirectLiteralRoute::ALL {
+                for offset in WrappedDirectLiteralOffsetRoute::ALL {
+                    for two_hop in [false, true] {
+                        kind_counts[kind_index] += 1;
+                        root_counts[root.index()] += 1;
+                        wrapper_counts[wrapper.index()] += 1;
+                        offset_counts[offset.index()] += 1;
+                        hop_counts[usize::from(two_hop)] += 1;
+
+                        assert_interpretation(
+                            &derived_inner_const_pointer_callee_return_program(
+                                kind, root, wrapper, offset, two_hop,
+                            ),
+                            ExpectedInterpretation::Value(6),
+                            &format!(
+                                "derived inner const-pointer callee return case {case_index}, kind {kind:?}, root {root:?}, caller wrapper {wrapper:?}, caller offset {offset:?}, two hop {two_hop}"
+                            ),
+                        );
+                        case_index += 1;
+                    }
+                }
+            }
+        }
+
+        assert_interpretation(
+            &derived_inner_const_pointer_callee_return_discard_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("derived inner callee return mutable rebinding, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &derived_inner_const_pointer_callee_return_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("derived inner callee return const write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &derived_inner_const_pointer_callee_return_bounds_program(kind),
+            ExpectedInterpretation::Error(kind.inner_pointer_bounds_error()),
+            &format!("derived inner callee return bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &derived_inner_const_pointer_callee_return_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("derived inner callee return cross-root identity, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &derived_inner_const_pointer_callee_return_lifetime_program(kind),
+            ExpectedInterpretation::Error("pointer to out-of-scope variable 'local'"),
+            &format!("derived inner callee return lifetime, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &derived_inner_const_pointer_callee_return_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "derived inner aggregate callee return type mismatch",
+    );
+
+    assert_eq!(case_index, 144);
+    assert_eq!(kind_counts, [72; 2]);
+    assert_eq!(root_counts, [36; 4]);
+    assert_eq!(wrapper_counts, [48; 3]);
+    assert_eq!(offset_counts, [48; 3]);
+    assert_eq!(hop_counts, [72; 2]);
 }
 
 #[test]
@@ -12303,6 +12403,13 @@ impl AdjustedParameterFieldKind {
             Self::Aggregate => "struct array field 'points' index 3 out of bounds for length 3",
         }
     }
+
+    fn inner_pointer_bounds_error(self) -> &'static str {
+        match self {
+            Self::Scalar => "array pointer index 3 out of bounds for length 3",
+            Self::Aggregate => "struct array field pointer index 3 out of bounds for length 3",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -17358,5 +17465,187 @@ fn captured_derived_inner_pointer_const_reforward_write_program(
         write = kind.write("slot", 11),
         read = kind.read("slot"),
         declarations = captured_literal_field_offset_declarations(),
+    )
+}
+
+fn derived_inner_const_pointer_callee_return_helpers(kind: AdjustedParameterFieldKind) -> String {
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let field = kind.field_name();
+    let initialize_raw = kind.write("raw", 5);
+    let initialize_first = kind.write("(raw + 1)", 7);
+    let initialize_second = kind.write("(raw + 2)", 9);
+    format!(
+        "{const_pointer_type}return_inner_{suffix}(struct Item items[]) {{\n\
+             {pointer_type}raw = &items[0].nested.{field}[0];\n\
+             {initialize_raw}; {initialize_first}; {initialize_second};\n\
+             return raw + 1;\n\
+         }}\n\
+         {const_pointer_type}return_inner_{suffix}_twice(struct Item items[]) {{\n\
+             return return_inner_{suffix}(items);\n\
+         }}"
+    )
+}
+
+fn derived_inner_const_pointer_callee_return_root(
+    root: DerivedInnerReturnRoot,
+) -> (&'static str, &'static str, &'static str) {
+    match root {
+        DerivedInnerReturnRoot::Direct => (
+            "int root_marker = 0;",
+            "((struct Item[3]){{}, { .nested = { .values = {++root_marker} } }, {}} + 1)",
+            "root_marker == 1",
+        ),
+        DerivedInnerReturnRoot::Named => (
+            captured_literal_field_offset_declarations(),
+            "named_left->nested.primary + 1",
+            "marker == 6",
+        ),
+        DerivedInnerReturnRoot::Anonymous => (
+            captured_literal_field_offset_declarations(),
+            "&anonymous_left->nested.primary[1]",
+            "marker == 6",
+        ),
+        DerivedInnerReturnRoot::Union => (
+            captured_literal_field_offset_declarations(),
+            "1 + choice_left->nested.primary",
+            "marker == 6",
+        ),
+    }
+}
+
+fn derived_inner_const_pointer_callee_return_program(
+    kind: AdjustedParameterFieldKind,
+    root: DerivedInnerReturnRoot,
+    wrapper: WrappedDirectLiteralRoute,
+    offset: WrappedDirectLiteralOffsetRoute,
+    two_hop: bool,
+) -> String {
+    let (declarations, argument, root_marker_check) =
+        derived_inner_const_pointer_callee_return_root(root);
+    let helper = format!(
+        "return_inner_{}{}",
+        kind.suffix(),
+        if two_hop { "_twice" } else { "" },
+    );
+    let const_pointer_type = kind.const_pointer_type();
+    let wrapped = post_forward_pointer_wrapper(
+        wrapper,
+        "base",
+        &format!("({const_pointer_type})0"),
+        "caller",
+    );
+    let returned = offset.render(&wrapped);
+    let read_returned = kind.read("returned");
+    let read_base = kind.read("base");
+    let caller_marker_check = wrapper.marker_check("caller");
+
+    format!(
+        "{prelude}\n{helpers}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             int caller_selected = 0; int caller_unselected = 0; int caller_comma = 0;\n\
+             {const_pointer_type}base = {helper}({argument});\n\
+             {const_pointer_type}returned = {returned};\n\
+             {const_pointer_type}slot = returned;\n\
+             return ({read_returned} == 9) + (returned == base + 1)\n\
+                 + ({read_base} == 7) + ({caller_marker_check})\n\
+                 + (slot == returned) + ({root_marker_check});\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+    )
+}
+
+fn derived_inner_const_pointer_callee_return_discard_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let pointer_type = kind.pointer_type();
+    let read = kind.read("mutable_slot");
+    format!(
+        "{prelude}\n{helpers}\n\
+         int main(void) {{ int root_marker = 0; {pointer_type}mutable_slot = return_inner_{suffix}({argument}); return {read}; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        suffix = kind.suffix(),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn derived_inner_const_pointer_callee_return_write_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let write = kind.write("slot", 11);
+    let read = kind.read("slot");
+    format!(
+        "{prelude}\n{helpers}\n\
+         int main(void) {{ int root_marker = 0; {const_pointer_type}slot = return_inner_{suffix}_twice({argument}); {write}; return {read}; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        suffix = kind.suffix(),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn derived_inner_const_pointer_callee_return_bounds_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let read = kind.read("slot");
+    format!(
+        "{prelude}\n{helpers}\n\
+         int main(void) {{ int root_marker = 0; {const_pointer_type}slot = return_inner_{suffix}({argument}) + 2; return {read}; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        suffix = kind.suffix(),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn derived_inner_const_pointer_callee_return_cross_root_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    format!(
+        "{prelude}\n{helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}left = return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}right = return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             return left - right;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        suffix = kind.suffix(),
+    )
+}
+
+fn derived_inner_const_pointer_callee_return_lifetime_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let read = kind.read("slot");
+    format!(
+        "{prelude}\n{helpers}\n\
+         {const_pointer_type}dangling(void) {{ struct Item local[1]; return return_inner_{suffix}(local); }}\n\
+         int main(void) {{ {const_pointer_type}slot = dangling(); return {read}; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        suffix = kind.suffix(),
+    )
+}
+
+fn derived_inner_const_pointer_callee_return_type_mismatch_program() -> String {
+    format!(
+        "{prelude}\n{helpers}\n\
+         struct Other {{ int value; }};\n\
+         int main(void) {{ int root_marker = 0; const struct Other *slot = return_inner_point({argument}); return slot->value; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        helpers = derived_inner_const_pointer_callee_return_helpers(
+            AdjustedParameterFieldKind::Aggregate,
+        ),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
     )
 }

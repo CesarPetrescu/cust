@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-21 captured-field derived inner-pointer post-promotion const re-forwarding run after 17,496 generated identity/read cases across every pointee/path/promotion/first-wrapper/first-offset/second-wrapper/second-offset/helper-depth/re-forward-placement route, 108 exact mutable-rebinding/write diagnostics, warning-free Cust/GCC/Clang exit 58, 61 passing fuzz-safety tests, 852 passing interpreter tests, and all required local/Docker gates. Derived inner-pointer callee-return boundaries are a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-21 derived inner const-pointer callee-return run after 144 valid direct/captured root routes, eleven exact const/bounds/cross-root/type/lifetime diagnostics, the scalar embedded-array owner-lifetime RED/GREEN fix, 62 passing fuzz-safety tests, 852 passing interpreter tests, and all required local/Docker gates. Callee-internal promotion/wrapper/offset placement is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 

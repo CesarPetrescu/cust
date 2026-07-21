@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-21 — Derived inner const pointers across adjusted-parameter callee returns
+
+- No external documentation was needed. A C parameter declared `struct Item items[]` is adjusted to a copied pointer slot; returning a derived `const T *` must preserve the caller-owned aggregate-array root, recursive field path, outer base, inner index, concrete type, and qualification through the return-value copy.
+- One hundred forty-four generated valid routes compose both inner pointee kinds, direct plus named/anonymous/union captured roots, every caller conditional/comma wrapper and nonzero offset, and one/two-hop returning callees. Eleven exact invalid programs cover const discard/write, bounds, cross-root subtraction, concrete aggregate type, and local-owner lifetime.
+- RED exposed a Rust-storage/model mismatch rather than a C-semantics ambiguity: `PointerValue::ArrayBase`/`ArrayElement` held an `Rc<ArrayValue>` but no lexical owner, so a scalar embedded-array pointer returned from a local containing aggregate remained readable after scope exit. `eval_return_value()` now discovers owned array storage recursively, attaches `(scope_id, root name)`, propagates it through array pointer operations, and checks liveness before type/index/arithmetic/dereference use. Pointer parameters are deliberately excluded from owner discovery because they borrow rather than own storage.
+- See `references/cust-derived-inner-const-pointer-callee-return-boundaries.md`. The next seam is callee-internal const-promotion and wrapper/offset placement before the return boundary.
+
 ## 2026-07-21 — Post-promotion const re-forwarding of captured-field derived inner pointers
 
 - No external documentation was needed. Once a mutable scalar or named-aggregate inner pointer derived from a captured field adjusted parameter has been promoted to `const T *`, subsequent const-preserving helper calls, conditional/comma selection, and same-array offsets must preserve the containing compound literal's hidden root, recursive field path, adjusted nonzero outer base, and inner index; only write qualification changes.
