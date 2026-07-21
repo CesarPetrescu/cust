@@ -4282,6 +4282,73 @@ fn generated_derived_inner_const_pointer_callee_returns_preserve_adjusted_parame
 }
 
 #[test]
+fn generated_callee_internal_promoted_inner_pointer_returns_preserve_adjusted_parameter_identity_without_panics()
+ {
+    let mut kind_counts = [0; 2];
+    let mut root_counts = [0; 4];
+    let mut callee_placement_counts = [0; 3];
+    let mut callee_wrapper_counts = [0; 3];
+    let mut callee_offset_counts = [0; 3];
+    let mut return_hop_counts = [0; 2];
+    let mut caller_wrapper_counts = [0; 3];
+    let mut caller_offset_counts = [0; 3];
+    let mut case_index = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for root in DerivedInnerReturnRoot::ALL {
+            for callee_placement in InnerConstPromotionPlacement::ALL {
+                for callee_wrapper in WrappedDirectLiteralRoute::ALL {
+                    for callee_offset in WrappedDirectLiteralOffsetRoute::ALL {
+                        for two_return_hops in [false, true] {
+                            for caller_wrapper in WrappedDirectLiteralRoute::ALL {
+                                for caller_offset in WrappedDirectLiteralOffsetRoute::ALL {
+                                    kind_counts[kind_index] += 1;
+                                    root_counts[root.index()] += 1;
+                                    callee_placement_counts[callee_placement.index()] += 1;
+                                    callee_wrapper_counts[callee_wrapper.index()] += 1;
+                                    callee_offset_counts[callee_offset.index()] += 1;
+                                    return_hop_counts[usize::from(two_return_hops)] += 1;
+                                    caller_wrapper_counts[caller_wrapper.index()] += 1;
+                                    caller_offset_counts[caller_offset.index()] += 1;
+
+                                    assert_interpretation(
+                                        &callee_internal_promoted_inner_pointer_return_program(
+                                            kind,
+                                            root,
+                                            callee_placement,
+                                            callee_wrapper,
+                                            callee_offset,
+                                            two_return_hops,
+                                            caller_wrapper,
+                                            caller_offset,
+                                        ),
+                                        ExpectedInterpretation::Value(7),
+                                        &format!(
+                                            "callee-internal promoted inner-pointer return case {case_index}, kind {kind:?}, root {root:?}, callee placement {callee_placement:?}, callee wrapper {callee_wrapper:?}, callee offset {callee_offset:?}, two return hops {two_return_hops}, caller wrapper {caller_wrapper:?}, caller offset {caller_offset:?}"
+                                        ),
+                                    );
+                                    case_index += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    assert_eq!(case_index, 3888);
+    assert_eq!(kind_counts, [1944; 2]);
+    assert_eq!(root_counts, [972; 4]);
+    assert_eq!(callee_placement_counts, [1296; 3]);
+    assert_eq!(callee_wrapper_counts, [1296; 3]);
+    assert_eq!(callee_offset_counts, [1296; 3]);
+    assert_eq!(return_hop_counts, [1944; 2]);
+    assert_eq!(caller_wrapper_counts, [1296; 3]);
+    assert_eq!(caller_offset_counts, [1296; 3]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -17555,6 +17622,75 @@ fn derived_inner_const_pointer_callee_return_program(
          }}\n",
         prelude = captured_literal_field_offset_prelude(),
         helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn callee_internal_promoted_inner_pointer_return_program(
+    kind: AdjustedParameterFieldKind,
+    root: DerivedInnerReturnRoot,
+    callee_placement: InnerConstPromotionPlacement,
+    callee_wrapper: WrappedDirectLiteralRoute,
+    callee_offset: WrappedDirectLiteralOffsetRoute,
+    two_return_hops: bool,
+    caller_wrapper: WrappedDirectLiteralRoute,
+    caller_offset: WrappedDirectLiteralOffsetRoute,
+) -> String {
+    let (declarations, argument, root_marker_check) =
+        derived_inner_const_pointer_callee_return_root(root);
+    let expression = derived_inner_pointer_const_promotion_expression(
+        kind,
+        callee_placement,
+        callee_wrapper,
+        callee_offset,
+        false,
+    );
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let field = kind.field_name();
+    let initialize_raw = kind.write("raw", 5);
+    let initialize_first = kind.write("(raw + 1)", 7);
+    let initialize_second = kind.write("(raw + 2)", 9);
+    let helper = format!(
+        "return_promoted_inner_{suffix}{}",
+        if two_return_hops { "_twice" } else { "" },
+    );
+    let caller_wrapped = post_forward_pointer_wrapper(
+        caller_wrapper,
+        "base",
+        &format!("({const_pointer_type})0"),
+        "caller",
+    );
+    let returned = caller_offset.render(&caller_wrapped);
+    let read_returned = kind.read("returned");
+    let read_base = kind.read("base");
+    let callee_marker_check = callee_wrapper.marker_check("inner");
+    let caller_marker_check = caller_wrapper.marker_check("caller");
+
+    format!(
+        "{prelude}\n{promotion_helpers}\n\
+         int inner_selected; int inner_unselected; int inner_comma;\n\
+         {const_pointer_type}return_promoted_inner_{suffix}(struct Item items[]) {{\n\
+             {pointer_type}raw = &items[0].nested.{field}[0];\n\
+             {initialize_raw}; {initialize_first}; {initialize_second};\n\
+             return {expression};\n\
+         }}\n\
+         {const_pointer_type}return_promoted_inner_{suffix}_twice(struct Item items[]) {{\n\
+             return return_promoted_inner_{suffix}(items);\n\
+         }}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             int caller_selected = 0; int caller_unselected = 0; int caller_comma = 0;\n\
+             {const_pointer_type}base = {helper}({argument});\n\
+             {const_pointer_type}returned = {returned};\n\
+             {const_pointer_type}slot = returned;\n\
+             return ({read_returned} == 9) + (returned == base + 1)\n\
+                 + ({read_base} == 7) + ({callee_marker_check})\n\
+                 + ({caller_marker_check}) + (slot == returned) + ({root_marker_check});\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        promotion_helpers = derived_inner_pointer_const_promotion_helpers(),
     )
 }
 

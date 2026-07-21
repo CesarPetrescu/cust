@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-21 derived inner const-pointer callee-return run after 144 valid direct/captured root routes, eleven exact const/bounds/cross-root/type/lifetime diagnostics, the scalar embedded-array owner-lifetime RED/GREEN fix, 62 passing fuzz-safety tests, 852 passing interpreter tests, and all required local/Docker gates. Callee-internal promotion/wrapper/offset placement is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-21 callee-internal derived inner-pointer promotion/return run after 3,888 generated direct/captured routes, the adjacent eleven exact const/bounds/cross-root/type/lifetime diagnostics, a warning-free Cust/GCC/Clang fixture, 63 passing fuzz-safety tests, 853 passing interpreter tests, and all required local/Docker gates. Callee-internal post-promotion re-forwarding is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 

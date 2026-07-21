@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-21 — Callee-internal promotion/wrappers before derived inner-pointer returns
+
+- No external documentation was needed. Promotion to `const T *`, conditional/comma selection, and same-array offset formation copy or transform the pointer value without changing its caller-owned direct hidden root or captured containing root/path/base/index identity; crossing a return boundary must preserve the same metadata.
+- A 3,888-case matrix composes both inner pointee kinds, four direct/captured root families, all three promotion placements, every callee wrapper/offset, one/two return boundaries, and every caller wrapper/offset. Existing behavior passed immediately, so this is deliberate conformance/property closure rather than a production fix. The warning-free direct/captured fixture returns 20 under Cust, GCC, and Clang.
+- See `references/cust-callee-internal-derived-inner-pointer-returns.md`. The next seam is a second const-preserving re-forward wrapper/offset stage inside the returning callee.
+
 ## 2026-07-21 — Derived inner const pointers across adjusted-parameter callee returns
 
 - No external documentation was needed. A C parameter declared `struct Item items[]` is adjusted to a copied pointer slot; returning a derived `const T *` must preserve the caller-owned aggregate-array root, recursive field path, outer base, inner index, concrete type, and qualification through the return-value copy.
