@@ -9311,6 +9311,15 @@ fn adjusted_aggregate_parameter_final_receiving_caller_reforwarded_derived_inner
 }
 
 #[test]
+fn adjusted_aggregate_parameter_final_received_const_parameter_reentry_matches_fixture() {
+    let program = include_str!(
+        "fixtures/valid/adjusted_aggregate_parameter_final_received_const_parameter_reentry.c",
+    );
+
+    assert_eq!(interpret(program).unwrap(), 33);
+}
+
+#[test]
 fn aggregate_array_field_elements_decay_embedded_arrays_for_direct_access() {
     let program = r#"
         struct Point { int value; };

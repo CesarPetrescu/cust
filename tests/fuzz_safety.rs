@@ -4884,6 +4884,64 @@ fn generated_final_receiving_caller_reforwarded_inner_pointers_preserve_adjusted
 }
 
 #[test]
+fn generated_final_received_inner_pointers_preserve_identity_through_const_parameter_reentry_without_panics()
+ {
+    let mut kind_counts = [0; 2];
+    let mut root_counts = [0; 4];
+    let mut helper_hop_counts = [0; 2];
+    let mut case_count = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for root in DerivedInnerReturnRoot::ALL {
+            for two_hop in [false, true] {
+                assert_interpretation(
+                    &final_received_inner_pointer_const_parameter_reentry_program(
+                        kind, root, two_hop,
+                    ),
+                    ExpectedInterpretation::Value(14),
+                    &format!(
+                        "final received const-parameter re-entry, kind {kind:?}, root {root:?}, two hop {two_hop}"
+                    ),
+                );
+                kind_counts[kind_index] += 1;
+                root_counts[root.index()] += 1;
+                helper_hop_counts[usize::from(two_hop)] += 1;
+                case_count += 1;
+            }
+        }
+
+        assert_interpretation(
+            &final_received_inner_pointer_const_parameter_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("final received const-parameter write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &final_received_inner_pointer_const_parameter_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("final received const-parameter cross-root, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &final_received_inner_pointer_const_parameter_lifetime_program(kind),
+            ExpectedInterpretation::Error("pointer to out-of-scope variable 'local'"),
+            &format!("final received const-parameter lifetime, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &final_received_inner_pointer_const_parameter_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "final received const-parameter aggregate type mismatch",
+    );
+
+    assert_eq!(case_count, 16);
+    assert_eq!(kind_counts, [8; 2]);
+    assert_eq!(root_counts, [4; 4]);
+    assert_eq!(helper_hop_counts, [8; 2]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -18984,6 +19042,141 @@ fn final_receiving_caller_inner_pointer_type_mismatch_program() -> String {
         caller_helpers = caller_inner_pointer_const_reforward_helpers(),
         outer_helpers = outer_caller_return_helpers(kind),
         final_helpers = final_receiving_caller_reforward_helpers(),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn final_received_inner_pointer_const_parameter_helpers(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read_final = kind.read("final_copy");
+    let read_base = kind.read("base_copy");
+    format!(
+        "int parameter_reentry_calls;\n\
+         int reenter_final_{suffix}({const_pointer_type}final, {const_pointer_type}base) {{\n\
+             parameter_reentry_calls = parameter_reentry_calls + 1;\n\
+             {const_pointer_type}final_copy = final;\n\
+             {const_pointer_type}base_copy = base;\n\
+             final = base_copy;\n\
+             base = final_copy;\n\
+             return ({read_final} == 9) + ({read_base} == 7)\n\
+                 + (final_copy == base_copy + 1) + (final_copy - base_copy == 1)\n\
+                 + (final_copy > base_copy) + (base_copy < final_copy)\n\
+                 + (final == base_copy) + (base == final_copy);\n\
+         }}\n\
+         int reenter_final_{suffix}_twice({const_pointer_type}final, {const_pointer_type}base) {{\n\
+             parameter_reentry_calls = parameter_reentry_calls + 1;\n\
+             return reenter_final_{suffix}(final, base);\n\
+         }}"
+    )
+}
+
+fn final_received_inner_pointer_const_parameter_reentry_program(
+    kind: AdjustedParameterFieldKind,
+    root: DerivedInnerReturnRoot,
+    two_hop: bool,
+) -> String {
+    let (declarations, argument, root_marker_check) =
+        derived_inner_const_pointer_callee_return_root(root);
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let helper = format!(
+        "reenter_final_{suffix}{}",
+        if two_hop { "_twice" } else { "" },
+    );
+    let helper_calls = if two_hop { 2 } else { 1 };
+    let read_final = kind.read("final");
+    let read_base = kind.read("base");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{final_helpers}\n{parameter_helpers}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}_twice({argument});\n\
+             {const_pointer_type}final = final_reforward_inner_{suffix}_twice(base) + 1;\n\
+             int score = {helper}(final, base);\n\
+             return score + (parameter_reentry_calls == {helper_calls})\n\
+                 + ({root_marker_check}) + ({read_final} == 9) + ({read_base} == 7)\n\
+                 + (final == base + 1) + (final - base == 1);\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        final_helpers = final_receiving_caller_reforward_helpers(),
+        parameter_helpers = final_received_inner_pointer_const_parameter_helpers(kind),
+    )
+}
+
+fn final_received_inner_pointer_const_parameter_write_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let write = kind.write("final", 11);
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n\
+         int write_final_{suffix}({const_pointer_type}final, {const_pointer_type}base) {{ {write}; return final - base; }}\n\
+         int main(void) {{ int root_marker = 0; {const_pointer_type}base = outer_return_inner_{suffix}({argument}); return write_final_{suffix}(base + 1, base); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn final_received_inner_pointer_const_parameter_cross_root_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n\
+         int compare_final_{suffix}({const_pointer_type}final, {const_pointer_type}base) {{ return final - base; }}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}left = outer_return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}right = outer_return_inner_{suffix}_twice((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             return compare_final_{suffix}(left, right);\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+    )
+}
+
+fn final_received_inner_pointer_const_parameter_lifetime_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read = kind.read("final");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n\
+         {const_pointer_type}dangling_final_{suffix}(void) {{ struct Item local[1]; return outer_return_inner_{suffix}_twice(local); }}\n\
+         int read_final_{suffix}({const_pointer_type}final) {{ return {read}; }}\n\
+         int main(void) {{ return read_final_{suffix}(dangling_final_{suffix}()); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+    )
+}
+
+fn final_received_inner_pointer_const_parameter_type_mismatch_program() -> String {
+    let kind = AdjustedParameterFieldKind::Aggregate;
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n\
+         struct Other {{ int value; }};\n\
+         int read_other(const struct Other *final, const struct Other *base) {{ return final->value + base->value; }}\n\
+         int main(void) {{ int root_marker = 0; const struct Point *base = outer_return_inner_point_twice({argument}); return read_other(base + 1, base); }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
         argument = direct_derived_inner_pointer_const_promotion_argument(),
     )
 }

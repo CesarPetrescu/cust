@@ -186,6 +186,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_caller_reforwarded_derived_inner_pointer_returns.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_outer_caller_returned_derived_inner_pointers.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_final_receiving_caller_reforwarded_derived_inner_pointers.c",
+    "tests/fixtures/compat/valid/adjusted_aggregate_parameter_final_received_const_parameter_reentry.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_derived_inner_pointer_const_promotion_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_direct_literal_derived_inner_pointer_const_promotion_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_direct_literal_derived_inner_pointer_const_reforward_routes.c",

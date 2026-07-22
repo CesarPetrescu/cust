@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-22 — Copied const-parameter re-entry after final receipt
+
+- No external documentation was needed. Function parameters copy pointer slots while retaining interpreter-owned storage owner/path/index, concrete pointee type, qualification, and lexical lifetime provenance; reassigning those parameter slots must not alter the caller's final pointer or pre-final base.
+- Sixteen generated scalar/aggregate direct/captured routes verify reads, equality, difference, ordering, and local slot reassignment through one/two-hop helpers. Seven exact const-write/cross-root/type/lifetime diagnostics and a warning-free direct/captured fixture returning 33 under Cust/GCC/Clang pass immediately, so no production runtime change was needed.
+- See `references/cust-final-received-derived-inner-pointer-const-parameter-reentry.md`. The next seam is selecting and returning one of the copied parameters across another one/two helper boundaries.
+
 ## 2026-07-22 — Final receiving-caller re-forwarding after outer returns
 
 - No external documentation was needed. A final const-preserving helper/wrapper/offset stage copies or advances the already outer-returned interpreter pointer without changing its direct hidden root or captured containing root/path/base/index, concrete pointee type, qualification, or lexical owner provenance.
