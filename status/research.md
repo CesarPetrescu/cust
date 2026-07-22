@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-22 — Outer caller return boundaries after caller-side const re-forwarding
+
+- No external documentation was needed. Returning an already caller-re-forwarded interpreter pointer through one/two additional functions must copy its storage identity, recursive path/base/index, concrete pointee type, const qualification, and lexical owner provenance unchanged.
+- A 2,592-route matrix balances both pointee kinds, four direct/captured roots, one/two initial and outer return boundaries, and caller helper/wrapper/offset routes. Eleven exact diagnostics and a warning-free direct/captured fixture returning 20 under Cust/GCC/Clang passed immediately, so no production runtime change was needed.
+- See `references/cust-outer-caller-returned-derived-inner-pointers.md`. The next seam is a final receiving caller that re-forwards and wraps the already outer-returned pointer.
+
 ## 2026-07-22 — Caller-side const re-forwarding after derived inner-pointer returns
 
 - No external documentation was needed. A const-preserving helper call in the receiving caller copies an already returned interpreter pointer; placing it before/after a conditional/comma wrapper or after a same-array offset must retain the callee result's direct hidden root or captured containing root/path/base/index, concrete pointee type, const qualification, and lifetime provenance.

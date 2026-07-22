@@ -4598,6 +4598,144 @@ fn generated_caller_reforwarded_inner_pointer_returns_preserve_adjusted_paramete
 }
 
 #[test]
+fn generated_outer_caller_returned_inner_pointers_preserve_adjusted_parameter_identity_without_panics()
+ {
+    let mut kind_counts = [0; 2];
+    let mut root_counts = [0; 4];
+    let mut promotion_placement_counts = [0; 3];
+    let mut callee_reforward_placement_counts = [0; 3];
+    let mut callee_return_hop_counts = [0; 2];
+    let mut caller_reforward_placement_counts = [0; 3];
+    let mut caller_wrapper_counts = [0; 3];
+    let mut caller_offset_counts = [0; 3];
+    let mut caller_reforward_hop_counts = [0; 2];
+    let mut outer_return_hop_counts = [0; 2];
+    let mut case_index = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for root in DerivedInnerReturnRoot::ALL {
+            for promotion_placement in InnerConstPromotionPlacement::ALL {
+                for caller_reforward_placement in InnerConstPromotionPlacement::ALL {
+                    for caller_reforward_two_hop in [false, true] {
+                        for two_callee_return_hops in [false, true] {
+                            for caller_wrapper in WrappedDirectLiteralRoute::ALL {
+                                for caller_offset in WrappedDirectLiteralOffsetRoute::ALL {
+                                    let promotion_wrapper =
+                                        WrappedDirectLiteralRoute::ALL[case_index % 3];
+                                    let promotion_offset =
+                                        WrappedDirectLiteralOffsetRoute::ALL[(case_index / 3) % 3];
+                                    let callee_reforward_placement =
+                                        InnerConstPromotionPlacement::ALL[(case_index / 9) % 3];
+                                    let callee_reforward_wrapper =
+                                        WrappedDirectLiteralRoute::ALL[(case_index / 27) % 3];
+                                    let callee_reforward_offset =
+                                        WrappedDirectLiteralOffsetRoute::ALL[(promotion_placement
+                                            .index()
+                                            + caller_reforward_placement.index()
+                                            + caller_wrapper.index())
+                                            % 3];
+                                    let promotion_two_hop = case_index & 1 == 0;
+                                    let callee_reforward_two_hop = case_index & 2 == 0;
+                                    let two_outer_return_hops = case_index & 4 == 0;
+
+                                    kind_counts[kind_index] += 1;
+                                    root_counts[root.index()] += 1;
+                                    promotion_placement_counts[promotion_placement.index()] += 1;
+                                    callee_reforward_placement_counts
+                                        [callee_reforward_placement.index()] += 1;
+                                    callee_return_hop_counts
+                                        [usize::from(two_callee_return_hops)] += 1;
+                                    caller_reforward_placement_counts
+                                        [caller_reforward_placement.index()] += 1;
+                                    caller_wrapper_counts[caller_wrapper.index()] += 1;
+                                    caller_offset_counts[caller_offset.index()] += 1;
+                                    caller_reforward_hop_counts
+                                        [usize::from(caller_reforward_two_hop)] += 1;
+                                    outer_return_hop_counts[usize::from(two_outer_return_hops)] +=
+                                        1;
+
+                                    assert_interpretation(
+                                        &outer_caller_returned_inner_pointer_program(
+                                            kind,
+                                            root,
+                                            promotion_placement,
+                                            promotion_wrapper,
+                                            promotion_offset,
+                                            promotion_two_hop,
+                                            callee_reforward_placement,
+                                            callee_reforward_wrapper,
+                                            callee_reforward_offset,
+                                            callee_reforward_two_hop,
+                                            two_callee_return_hops,
+                                            caller_reforward_placement,
+                                            caller_wrapper,
+                                            caller_offset,
+                                            caller_reforward_two_hop,
+                                            two_outer_return_hops,
+                                        ),
+                                        ExpectedInterpretation::Value(12),
+                                        &format!(
+                                            "outer caller returned inner-pointer case {case_index}, kind {kind:?}, root {root:?}, promotion placement {promotion_placement:?}, callee re-forward placement {callee_reforward_placement:?}, two callee return hops {two_callee_return_hops}, caller re-forward placement {caller_reforward_placement:?}, caller wrapper {caller_wrapper:?}, caller offset {caller_offset:?}, caller re-forward two hop {caller_reforward_two_hop}, two outer return hops {two_outer_return_hops}"
+                                        ),
+                                    );
+                                    case_index += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assert_interpretation(
+            &outer_caller_returned_inner_pointer_discard_program(kind),
+            ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+            &format!("outer caller returned inner mutable rebinding, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &outer_caller_returned_inner_pointer_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("outer caller returned inner const write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &outer_caller_returned_inner_pointer_bounds_program(kind),
+            ExpectedInterpretation::Error(kind.inner_pointer_bounds_error()),
+            &format!("outer caller returned inner bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &outer_caller_returned_inner_pointer_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("outer caller returned inner cross-root identity, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &outer_caller_returned_inner_pointer_lifetime_program(kind),
+            ExpectedInterpretation::Error("pointer to out-of-scope variable 'local'"),
+            &format!("outer caller returned inner lifetime, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &outer_caller_returned_inner_pointer_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "outer caller returned inner aggregate type mismatch",
+    );
+
+    assert_eq!(case_index, 2592);
+    assert_eq!(kind_counts, [1296; 2]);
+    assert_eq!(root_counts, [648; 4]);
+    assert_eq!(promotion_placement_counts, [864; 3]);
+    assert_eq!(callee_reforward_placement_counts, [864; 3]);
+    assert_eq!(callee_return_hop_counts, [1296; 2]);
+    assert_eq!(caller_reforward_placement_counts, [864; 3]);
+    assert_eq!(caller_wrapper_counts, [864; 3]);
+    assert_eq!(caller_offset_counts, [864; 3]);
+    assert_eq!(caller_reforward_hop_counts, [1296; 2]);
+    assert_eq!(outer_return_hop_counts, [1296; 2]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -18277,6 +18415,234 @@ fn caller_reforwarded_inner_pointer_return_type_mismatch_program() -> String {
             AdjustedParameterFieldKind::Aggregate,
         ),
         caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn outer_caller_return_helpers(kind: AdjustedParameterFieldKind) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    format!(
+        "{const_pointer_type}outer_return_inner_{suffix}(struct Item items[]) {{\n\
+             return caller_reforward_inner_{suffix}(return_inner_{suffix}_twice(items));\n\
+         }}\n\
+         {const_pointer_type}outer_return_inner_{suffix}_twice(struct Item items[]) {{\n\
+             return outer_return_inner_{suffix}(items);\n\
+         }}"
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn outer_caller_returned_inner_pointer_program(
+    kind: AdjustedParameterFieldKind,
+    root: DerivedInnerReturnRoot,
+    promotion_placement: InnerConstPromotionPlacement,
+    promotion_wrapper: WrappedDirectLiteralRoute,
+    promotion_offset: WrappedDirectLiteralOffsetRoute,
+    promotion_two_hop: bool,
+    callee_reforward_placement: InnerConstPromotionPlacement,
+    callee_reforward_wrapper: WrappedDirectLiteralRoute,
+    callee_reforward_offset: WrappedDirectLiteralOffsetRoute,
+    callee_reforward_two_hop: bool,
+    two_callee_return_hops: bool,
+    caller_reforward_placement: InnerConstPromotionPlacement,
+    caller_wrapper: WrappedDirectLiteralRoute,
+    caller_offset: WrappedDirectLiteralOffsetRoute,
+    caller_reforward_two_hop: bool,
+    two_outer_return_hops: bool,
+) -> String {
+    let (declarations, argument, root_marker_check) =
+        derived_inner_const_pointer_callee_return_root(root);
+    let promoted_expression = derived_inner_pointer_const_promotion_expression(
+        kind,
+        promotion_placement,
+        promotion_wrapper,
+        promotion_offset,
+        promotion_two_hop,
+    );
+    let callee_reforwarded_expression = derived_inner_pointer_const_reforward_expression(
+        kind,
+        callee_reforward_placement,
+        callee_reforward_wrapper,
+        callee_reforward_offset,
+        callee_reforward_two_hop,
+    );
+    let caller_reforwarded_expression = caller_inner_pointer_const_reforward_expression(
+        kind,
+        caller_reforward_placement,
+        caller_wrapper,
+        caller_offset,
+        caller_reforward_two_hop,
+    );
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let field = kind.field_name();
+    let initialize_raw = kind.write("raw", 5);
+    let initialize_first = kind.write("(raw + 1)", 7);
+    let initialize_second = kind.write("(raw + 2)", 9);
+    let initialize_third = kind.write("(raw + 3)", 11);
+    let callee_return_helper = format!(
+        "return_for_outer_caller_{suffix}{}",
+        if two_callee_return_hops { "_twice" } else { "" },
+    );
+    let outer_return_helper = format!(
+        "outer_caller_return_{suffix}{}",
+        if two_outer_return_hops { "_twice" } else { "" },
+    );
+    let read_returned = kind.read("returned");
+    let read_base = kind.read("base");
+    let read_promoted = kind.read("promoted_copy");
+    let promotion_marker_check = promotion_wrapper.marker_check("inner");
+    let callee_reforward_marker_check = callee_reforward_wrapper.marker_check("post");
+    let caller_marker_check = caller_wrapper.marker_check("caller");
+    let caller_reforward_call_count = if caller_reforward_two_hop { 2 } else { 1 };
+    let prelude = captured_literal_field_offset_prelude().replace(
+        "int values[3]; struct Point points[3];",
+        "int values[4]; struct Point points[4];",
+    );
+
+    format!(
+        "{prelude}\n{promotion_helpers}\n{callee_reforward_helpers}\n{caller_reforward_helpers}\n\
+         int inner_selected; int inner_unselected; int inner_comma;\n\
+         int post_selected; int post_unselected; int post_comma;\n\
+         int caller_selected; int caller_unselected; int caller_comma;\n\
+         int outer_score;\n\
+         {const_pointer_type}return_for_outer_caller_{suffix}(struct Item items[]) {{\n\
+             {pointer_type}raw = &items[0].nested.{field}[0];\n\
+             {pointer_type}fallback_raw = raw;\n\
+             {initialize_raw}; {initialize_first}; {initialize_second}; {initialize_third};\n\
+             {const_pointer_type}promoted = {promoted_expression};\n\
+             return {callee_reforwarded_expression};\n\
+         }}\n\
+         {const_pointer_type}return_for_outer_caller_{suffix}_twice(struct Item items[]) {{\n\
+             return return_for_outer_caller_{suffix}(items);\n\
+         }}\n\
+         {const_pointer_type}outer_caller_return_{suffix}({const_pointer_type}base) {{\n\
+             {const_pointer_type}base_copy = base;\n\
+             {const_pointer_type}fallback = base - 1;\n\
+             {const_pointer_type}returned = {caller_reforwarded_expression};\n\
+             {const_pointer_type}slot = returned;\n\
+             slot = base;\n\
+             outer_score = (base_copy == base) + (slot == base);\n\
+             return returned;\n\
+         }}\n\
+         {const_pointer_type}outer_caller_return_{suffix}_twice({const_pointer_type}base) {{\n\
+             return outer_caller_return_{suffix}(base);\n\
+         }}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             {const_pointer_type}base = {callee_return_helper}({argument});\n\
+             {const_pointer_type}returned = {outer_return_helper}(base);\n\
+             {const_pointer_type}promoted_copy = returned - 2;\n\
+             {const_pointer_type}slot = returned;\n\
+             slot = base;\n\
+             return ({read_returned} == 11) + (returned == base + 1)\n\
+                 + ({read_base} == 9) + ({read_promoted} == 7)\n\
+                 + (base == promoted_copy + 1) + ({promotion_marker_check})\n\
+                 + ({callee_reforward_marker_check}) + ({caller_marker_check})\n\
+                 + (caller_reforward_calls == {caller_reforward_call_count})\n\
+                 + (outer_score == 2) + (slot == base) + ({root_marker_check});\n\
+         }}\n",
+        promotion_helpers = derived_inner_pointer_const_promotion_helpers(),
+        callee_reforward_helpers = derived_inner_pointer_const_reforward_helpers(),
+        caller_reforward_helpers = caller_inner_pointer_const_reforward_helpers(),
+    )
+}
+
+fn outer_caller_returned_inner_pointer_discard_program(kind: AdjustedParameterFieldKind) -> String {
+    let pointer_type = kind.pointer_type();
+    let read = kind.read("mutable_slot");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n\
+         int main(void) {{ int root_marker = 0; {pointer_type}mutable_slot = outer_return_inner_{suffix}_twice({argument}); return {read}; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        suffix = kind.suffix(),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn outer_caller_returned_inner_pointer_write_program(kind: AdjustedParameterFieldKind) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let write = kind.write("slot", 11);
+    let read = kind.read("slot");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n\
+         int main(void) {{ int root_marker = 0; {const_pointer_type}slot = outer_return_inner_{suffix}_twice({argument}); {write}; return {read}; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        suffix = kind.suffix(),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn outer_caller_returned_inner_pointer_bounds_program(kind: AdjustedParameterFieldKind) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let read = kind.read("slot");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n\
+         int main(void) {{ int root_marker = 0; {const_pointer_type}slot = outer_return_inner_{suffix}_twice({argument}) + 2; return {read}; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        suffix = kind.suffix(),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn outer_caller_returned_inner_pointer_cross_root_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}left = outer_return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}right = outer_return_inner_{suffix}_twice((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             return left - right;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        suffix = kind.suffix(),
+    )
+}
+
+fn outer_caller_returned_inner_pointer_lifetime_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let read = kind.read("slot");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n\
+         {const_pointer_type}dangling(void) {{ struct Item local[1]; return outer_return_inner_{suffix}_twice(local); }}\n\
+         int main(void) {{ {const_pointer_type}slot = dangling(); return {read}; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        suffix = kind.suffix(),
+    )
+}
+
+fn outer_caller_returned_inner_pointer_type_mismatch_program() -> String {
+    let kind = AdjustedParameterFieldKind::Aggregate;
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n\
+         struct Other {{ int value; }};\n\
+         int main(void) {{ int root_marker = 0; const struct Other *slot = outer_return_inner_point_twice({argument}); return slot->value; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
         argument = direct_derived_inner_pointer_const_promotion_argument(),
     )
 }
