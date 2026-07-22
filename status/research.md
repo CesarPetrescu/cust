@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-22 — Post-selection re-forwarding and final return boundaries
+
+- No external documentation was needed. Const-preserving parameter copies and function returns must retain the composed interpreter pointer's owner/path/base/index, concrete pointee type, qualification, and lexical lifetime provenance while leaving the pre-composition selected slot unchanged.
+- Eighteen thousand four hundred thirty-two generated routes balance both pointee kinds, four roots, both selector stages, every wrapper/offset/placement, one/two-hop re-forwarding, and one/two final returns. Nine exact diagnostics and a warning-free fixture returning 38 under Cust/GCC/Clang pass. The two REDs were test-side insertion and bounds-index oracle errors; no runtime change was required.
+- See `references/cust-post-selection-reforward-return-boundaries.md`. The next seam is another copied-parameter selector over the final returned pointer and preserved pre-composition selected pointer.
+
 ## 2026-07-22 — Post-selection wrappers and offsets after nested const-parameter selection
 
 - No external documentation was needed. Conditional/comma pointer wrappers and nonzero same-array offsets must preserve the selected interpreter pointer's owner/path/base/index, concrete pointee type, const qualification, and lexical lifetime provenance; wrapper placement changes expression shape but not pointer identity semantics.

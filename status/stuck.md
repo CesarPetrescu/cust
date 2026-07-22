@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-22 post-selection wrapper/offset conformance run after 4,608 scalar/aggregate direct/captured routes, seven exact bounds/cross-root/type/lifetime diagnostics, two const-write diagnostics, a warning-free Cust/GCC/Clang fixture returning 40, 71 passing fuzz-safety tests, and 861 passing interpreter tests. Re-forwarding the composed pointer through another helper/return boundary is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-22 post-selection re-forward/final-return conformance run after 18,432 scalar/aggregate direct/captured routes, seven exact bounds/cross-root/type/lifetime diagnostics, two const-write diagnostics, a warning-free Cust/GCC/Clang fixture returning 38, 72 passing fuzz-safety tests, and 862 passing interpreter tests. Re-entering the final returned and preserved selected pointers through another selector is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 

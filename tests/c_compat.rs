@@ -190,6 +190,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_const_parameter_return_selection.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_nested_const_parameter_return_selection.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_post_selection_wrappers_and_offsets.c",
+    "tests/fixtures/compat/valid/adjusted_aggregate_parameter_post_selection_reforward_return_boundaries.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_derived_inner_pointer_const_promotion_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_direct_literal_derived_inner_pointer_const_promotion_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_direct_literal_derived_inner_pointer_const_reforward_routes.c",
