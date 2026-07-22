@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-22 callee-internal derived inner-pointer const re-forward/return run after 2,592 generated direct/captured routes, the adjacent eleven exact const/bounds/cross-root/type/lifetime diagnostics, a warning-free Cust/GCC/Clang fixture, 64 passing fuzz-safety tests, 854 passing interpreter tests, and all required local/Docker gates. Caller-side post-return const re-forwarding is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-22 caller-side derived inner-pointer const re-forward/return run after 2,592 balanced direct/captured routes, eleven exact caller-helper const/bounds/cross-root/type/lifetime diagnostics, a warning-free Cust/GCC/Clang fixture, 65 passing fuzz-safety tests, 855 passing interpreter tests, and all required local/Docker gates. An outer caller return boundary is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 

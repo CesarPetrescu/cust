@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-22 — Caller-side const re-forwarding after derived inner-pointer returns
+
+- No external documentation was needed. A const-preserving helper call in the receiving caller copies an already returned interpreter pointer; placing it before/after a conditional/comma wrapper or after a same-array offset must retain the callee result's direct hidden root or captured containing root/path/base/index, concrete pointee type, const qualification, and lifetime provenance.
+- The first 2,592-case run was RED only because a base-3 rotating coverage dimension used a period that did not divide the matrix, producing `[891, 891, 810]`. Deriving that route from balanced loop indexes restored `[864, 864, 864]`; all runtime routes and eleven exact diagnostics then passed without production changes. The warning-free fixture returns 28 under Cust, GCC, and Clang.
+- See `references/cust-caller-reforwarded-derived-inner-pointer-returns.md`. The next seam is an outer caller function returning the caller-re-forwarded result across another one/two boundaries.
+
 ## 2026-07-22 — Callee-internal const re-forwarding before derived inner-pointer returns
 
 - No external documentation was needed. A const-preserving helper call, conditional/comma selection, and same-array offset copy or transform an already promoted inner pointer without changing its caller-owned direct hidden root or captured containing root/path/base/index; the later return-value copy must preserve the same metadata.
