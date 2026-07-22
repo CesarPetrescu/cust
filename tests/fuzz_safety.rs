@@ -2473,6 +2473,13 @@ enum PostForwardWrapperPlacement {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PostSelectionOffsetRoute {
+    PointerPlusDelta,
+    DeltaPlusPointer,
+    IndexedAddress,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum InnerConstPromotionPlacement {
     BeforeWrapper,
     AfterWrapper,
@@ -5097,6 +5104,111 @@ fn generated_nested_const_parameter_return_selection_preserves_final_received_in
     assert_eq!(second_selection_counts, [128; 2]);
     assert_eq!(second_helper_hop_counts, [128; 2]);
     assert_eq!(ultimate_identity_counts, [128; 2]);
+}
+
+#[test]
+fn generated_post_selection_wrappers_and_offsets_preserve_nested_const_parameter_return_identity_without_panics()
+ {
+    let mut kind_counts = [0; 2];
+    let mut root_counts = [0; 4];
+    let mut wrapper_counts = [0; 3];
+    let mut offset_counts = [0; 3];
+    let mut placement_counts = [0; 2];
+    let mut selected_identity_counts = [0; 2];
+    let mut composed_identity_counts = [0; 2];
+    let mut case_count = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for root in DerivedInnerReturnRoot::ALL {
+            for first_select_final in [false, true] {
+                for first_two_hop in [false, true] {
+                    for swap_second_args in [false, true] {
+                        for second_select_first in [false, true] {
+                            for second_two_hop in [false, true] {
+                                for wrapper in WrappedDirectLiteralRoute::ALL {
+                                    for offset in PostSelectionOffsetRoute::ALL {
+                                        for placement in PostForwardWrapperPlacement::ALL {
+                                            let selected_is_final = if second_select_first {
+                                                first_select_final != swap_second_args
+                                            } else {
+                                                first_select_final == swap_second_args
+                                            };
+                                            assert_interpretation(
+                                                &post_selection_wrapped_nested_const_parameter_return_program(
+                                                    kind,
+                                                    root,
+                                                    first_select_final,
+                                                    first_two_hop,
+                                                    swap_second_args,
+                                                    second_select_first,
+                                                    second_two_hop,
+                                                    wrapper,
+                                                    offset,
+                                                    placement,
+                                                ),
+                                                ExpectedInterpretation::Value(20),
+                                                &format!(
+                                                    "post-selection nested return, kind {kind:?}, root {root:?}, first final {first_select_final}, first two hop {first_two_hop}, swap second {swap_second_args}, second first {second_select_first}, second two hop {second_two_hop}, wrapper {wrapper:?}, offset {offset:?}, placement {placement:?}"
+                                                ),
+                                            );
+                                            kind_counts[kind_index] += 1;
+                                            root_counts[root.index()] += 1;
+                                            wrapper_counts[wrapper.index()] += 1;
+                                            offset_counts[offset.index()] += 1;
+                                            placement_counts[placement.index()] += 1;
+                                            selected_identity_counts
+                                                [usize::from(selected_is_final)] += 1;
+                                            composed_identity_counts
+                                                [usize::from(!selected_is_final)] += 1;
+                                            case_count += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assert_interpretation(
+            &post_selection_wrapped_nested_return_bounds_program(kind),
+            ExpectedInterpretation::Error(kind.inner_pointer_bounds_error()),
+            &format!("post-selection nested return bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &post_selection_wrapped_nested_return_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("post-selection nested return cross-root, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &post_selection_wrapped_nested_return_lifetime_program(kind),
+            ExpectedInterpretation::Error("pointer to out-of-scope variable 'local'"),
+            &format!("post-selection nested return lifetime, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &post_selection_wrapped_nested_return_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("post-selection nested return const write, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &post_selection_wrapped_nested_return_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "post-selection nested return aggregate type mismatch",
+    );
+
+    assert_eq!(case_count, 4608);
+    assert_eq!(kind_counts, [2304; 2]);
+    assert_eq!(root_counts, [1152; 4]);
+    assert_eq!(wrapper_counts, [1536; 3]);
+    assert_eq!(offset_counts, [1536; 3]);
+    assert_eq!(placement_counts, [2304; 2]);
+    assert_eq!(selected_identity_counts, [2304; 2]);
+    assert_eq!(composed_identity_counts, [2304; 2]);
 }
 
 #[test]
@@ -14485,6 +14597,30 @@ impl PostForwardWrapperPlacement {
     }
 }
 
+impl PostSelectionOffsetRoute {
+    const ALL: [Self; 3] = [
+        Self::PointerPlusDelta,
+        Self::DeltaPlusPointer,
+        Self::IndexedAddress,
+    ];
+
+    fn index(self) -> usize {
+        match self {
+            Self::PointerPlusDelta => 0,
+            Self::DeltaPlusPointer => 1,
+            Self::IndexedAddress => 2,
+        }
+    }
+
+    fn render(self, pointer: &str, delta: i64) -> String {
+        match self {
+            Self::PointerPlusDelta => format!("({pointer} + ({delta}))"),
+            Self::DeltaPlusPointer => format!("(({delta}) + {pointer})"),
+            Self::IndexedAddress => format!("&({pointer})[{delta}]"),
+        }
+    }
+}
+
 fn post_forward_pointer_wrapper(
     wrapper: WrappedDirectLiteralRoute,
     selected: &str,
@@ -19574,6 +19710,231 @@ fn nested_const_parameter_return_selection_program(
         final_helpers = final_receiving_caller_reforward_helpers(),
         selection_helpers = const_parameter_return_selection_helpers(kind),
         reverse_offset = 1 - ultimate_offset,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn post_selection_wrapped_nested_const_parameter_return_program(
+    kind: AdjustedParameterFieldKind,
+    root: DerivedInnerReturnRoot,
+    first_select_final: bool,
+    first_two_hop: bool,
+    swap_second_args: bool,
+    second_select_first: bool,
+    second_two_hop: bool,
+    wrapper: WrappedDirectLiteralRoute,
+    offset: PostSelectionOffsetRoute,
+    placement: PostForwardWrapperPlacement,
+) -> String {
+    let (declarations, argument, root_marker_check) =
+        derived_inner_const_pointer_callee_return_root(root);
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let first_helper = format!(
+        "select_received_{suffix}{}",
+        if first_two_hop { "_twice" } else { "" },
+    );
+    let second_helper = format!(
+        "select_received_{suffix}{}",
+        if second_two_hop { "_twice" } else { "" },
+    );
+    let first_selection = i64::from(first_select_final);
+    let second_selection = i64::from(second_select_first);
+    let first_expected_pointer = if first_select_final { "final" } else { "base" };
+    let alternate_expected_pointer = if first_select_final { "base" } else { "final" };
+    let first_selected_value = if first_select_final { 9 } else { 7 };
+    let alternate_value = if first_select_final { 7 } else { 9 };
+    let (second_first, second_second) = if swap_second_args {
+        ("alternate", "first_selected")
+    } else {
+        ("first_selected", "alternate")
+    };
+    let selected_is_final = if second_select_first {
+        first_select_final != swap_second_args
+    } else {
+        first_select_final == swap_second_args
+    };
+    let selected_expected_pointer = if selected_is_final { "final" } else { "base" };
+    let selected_value = if selected_is_final { 9 } else { 7 };
+    let delta = if selected_is_final { -1 } else { 1 };
+    let composed_is_final = !selected_is_final;
+    let composed_expected_pointer = if composed_is_final { "final" } else { "base" };
+    let composed_value = if composed_is_final { 9 } else { 7 };
+    let composed_offset = i64::from(composed_is_final);
+    let composed_ordering = if composed_is_final {
+        "composed > base"
+    } else {
+        "composed < final"
+    };
+    let selected_ordering = if selected_is_final {
+        "selected > base"
+    } else {
+        "selected < final"
+    };
+    let wrapped = post_forward_pointer_wrapper(wrapper, "selected", "alternate", "post");
+    let composed_expression = match placement {
+        PostForwardWrapperPlacement::BeforeOffset => offset.render(&wrapped, delta),
+        PostForwardWrapperPlacement::AfterOffset => post_forward_pointer_wrapper(
+            wrapper,
+            &offset.render("selected", delta),
+            &offset.render("alternate", delta),
+            "post",
+        ),
+    };
+    let read_composed = kind.read("composed");
+    let read_selected = kind.read("selected");
+    let read_first = kind.read("first_selected");
+    let read_alternate = kind.read("alternate");
+    let read_final = kind.read("final");
+    let read_base = kind.read("base");
+    let helper_calls = if first_two_hop { 2 } else { 1 } + if second_two_hop { 2 } else { 1 };
+    let marker_check = wrapper.marker_check("post");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{final_helpers}\n{selection_helpers}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             int post_selected = 0; int post_unselected = 0; int post_comma = 0;\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}_twice({argument});\n\
+             {const_pointer_type}final = final_reforward_inner_{suffix}_twice(base) + 1;\n\
+             {const_pointer_type}first_selected = {first_helper}(final, base, {first_selection});\n\
+             {const_pointer_type}alternate = {alternate_expected_pointer};\n\
+             {const_pointer_type}selected = {second_helper}({second_first}, {second_second}, {second_selection});\n\
+             {const_pointer_type}composed = {composed_expression};\n\
+             return ({read_composed} == {composed_value}) + (composed == {composed_expected_pointer})\n\
+                 + (composed - base == {composed_offset}) + (final - composed == {reverse_offset})\n\
+                 + ({composed_ordering}) + ({selected_ordering})\n\
+                 + (selected == {selected_expected_pointer}) + ({read_selected} == {selected_value})\n\
+                 + (first_selected == {first_expected_pointer}) + (alternate == {alternate_expected_pointer})\n\
+                 + ({read_first} == {first_selected_value}) + ({read_alternate} == {alternate_value})\n\
+                 + ({root_marker_check}) + ({read_final} == 9) + ({read_base} == 7)\n\
+                 + (final == base + 1) + (final - base == 1)\n\
+                 + (parameter_return_calls == {helper_calls}) + ({marker_check})\n\
+                 + (selected - composed == {selected_delta});\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        final_helpers = final_receiving_caller_reforward_helpers(),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        reverse_offset = 1 - composed_offset,
+        selected_delta = -delta,
+    )
+}
+
+fn post_selection_wrapped_nested_return_bounds_program(kind: AdjustedParameterFieldKind) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read = kind.read("composed");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n\
+         int main(void) {{\n\
+             int root_marker = 0; int post_selected = 0; int post_unselected = 0;\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}({argument});\n\
+             {const_pointer_type}first_selected = select_received_{suffix}_twice(base + 1, base, 1);\n\
+             {const_pointer_type}selected = select_received_{suffix}(base, first_selected, 0);\n\
+             {const_pointer_type}composed = (1 ? (++post_selected, selected + 1) : (++post_unselected, base));\n\
+             return {read};\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn post_selection_wrapped_nested_return_cross_root_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0; int post_comma = 0;\n\
+             {const_pointer_type}left = outer_return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}right = outer_return_inner_{suffix}_twice((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}first_selected = select_received_{suffix}_twice(left + 1, left, 1);\n\
+             {const_pointer_type}selected = select_received_{suffix}(left, first_selected, 0);\n\
+             {const_pointer_type}composed = (++post_comma, &selected[-1]);\n\
+             return composed - right;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+    )
+}
+
+fn post_selection_wrapped_nested_return_lifetime_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read = kind.read("composed");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n\
+         {const_pointer_type}select_wrapped_dangling_{suffix}(void) {{\n\
+             struct Item local[1]; int post_selected = 0; int post_unselected = 0;\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}_twice(local);\n\
+             {const_pointer_type}first_selected = select_received_{suffix}_twice(base + 1, base, 1);\n\
+             {const_pointer_type}selected = select_received_{suffix}(base, first_selected, 0);\n\
+             return 1 ? (++post_selected, selected - 1) : (++post_unselected, base);\n\
+         }}\n\
+         int main(void) {{ {const_pointer_type}composed = select_wrapped_dangling_{suffix}(); return {read}; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+    )
+}
+
+fn post_selection_wrapped_nested_return_write_program(kind: AdjustedParameterFieldKind) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let write = kind.write("composed", 11);
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n\
+         int main(void) {{\n\
+             int root_marker = 0; int post_selected = 0; int post_unselected = 0;\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}({argument});\n\
+             {const_pointer_type}first_selected = select_received_{suffix}_twice(base + 1, base, 1);\n\
+             {const_pointer_type}selected = select_received_{suffix}(base, first_selected, 0);\n\
+             {const_pointer_type}composed = 1 ? (++post_selected, selected - 1) : (++post_unselected, base);\n\
+             {write}; return 0;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn post_selection_wrapped_nested_return_type_mismatch_program() -> String {
+    let kind = AdjustedParameterFieldKind::Aggregate;
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n\
+         struct Other {{ int value; }};\n\
+         int main(void) {{\n\
+             int root_marker = 0; int post_comma = 0;\n\
+             const struct Point *base = outer_return_inner_point_twice({argument});\n\
+             const struct Point *first_selected = select_received_point_twice(base + 1, base, 1);\n\
+             const struct Point *selected = select_received_point(base, first_selected, 0);\n\
+             const struct Other *composed = (++post_comma, selected - 1);\n\
+             return composed->value;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
     )
 }
 

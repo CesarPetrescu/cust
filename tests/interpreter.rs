@@ -9338,6 +9338,15 @@ fn adjusted_aggregate_parameter_nested_const_parameter_return_selection_matches_
 }
 
 #[test]
+fn adjusted_aggregate_parameter_post_selection_wrappers_and_offsets_match_fixture() {
+    let program = include_str!(
+        "fixtures/valid/adjusted_aggregate_parameter_post_selection_wrappers_and_offsets.c",
+    );
+
+    assert_eq!(interpret(program).unwrap(), 40);
+}
+
+#[test]
 fn aggregate_array_field_elements_decay_embedded_arrays_for_direct_access() {
     let program = r#"
         struct Point { int value; };

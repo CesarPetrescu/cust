@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-22 — Post-selection wrappers and offsets after nested const-parameter selection
+
+- No external documentation was needed. Conditional/comma pointer wrappers and nonzero same-array offsets must preserve the selected interpreter pointer's owner/path/base/index, concrete pointee type, const qualification, and lexical lifetime provenance; wrapper placement changes expression shape but not pointer identity semantics.
+- Four thousand six hundred eight generated routes balance both pointee kinds, four roots, both selector stages, three wrappers, three signed offset spellings, and before/after placement. Seven exact bounds/cross-root/type/lifetime diagnostics, two const-write diagnostics, and a warning-free fixture returning 40 under Cust/GCC/Clang pass. The matrix was immediately green; direct execution proved the fixture's initial expected score of 41 was an arithmetic-oracle error.
+- See `references/cust-post-selection-wrapped-nested-const-parameter-returns.md`. The next seam is re-forwarding the composed pointer through another const-preserving helper and return boundary.
+
 ## 2026-07-22 — Nested const-parameter return selection after final receipt
 
 - No external documentation was needed. A second copied-parameter selector must preserve whichever interpreter pointer it ultimately returns, including storage owner/path/index, concrete pointee type, const qualification, and lexical lifetime provenance; swapping same-type arguments changes selection routing but not either caller slot.
