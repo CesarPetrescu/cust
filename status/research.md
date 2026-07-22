@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-22 — Const-parameter return selection after final receipt
+
+- No external documentation was needed. Returning either copied `const T *` parameter conditionally must preserve the selected interpreter pointer's storage owner/path/index, concrete pointee type, qualification, and lexical lifetime provenance while leaving both caller-side input slots unchanged.
+- Thirty-two generated scalar/aggregate direct/captured routes verify both selections and one/two-hop selectors; seven exact diagnostics and a warning-free direct-scalar/captured-aggregate fixture returning 24 under Cust/GCC/Clang pass immediately, so no production runtime change was needed.
+- See `references/cust-final-received-derived-inner-pointer-parameter-return-selection.md`. The next seam is a second nested selector in the receiving caller with swapped argument order and both selection outcomes.
+
 ## 2026-07-22 — Copied const-parameter re-entry after final receipt
 
 - No external documentation was needed. Function parameters copy pointer slots while retaining interpreter-owned storage owner/path/index, concrete pointee type, qualification, and lexical lifetime provenance; reassigning those parameter slots must not alter the caller's final pointer or pre-final base.

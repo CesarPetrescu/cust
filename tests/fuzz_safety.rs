@@ -4942,6 +4942,72 @@ fn generated_final_received_inner_pointers_preserve_identity_through_const_param
 }
 
 #[test]
+fn generated_const_parameter_return_selection_preserves_final_received_inner_pointer_identity_without_panics()
+ {
+    let mut kind_counts = [0; 2];
+    let mut root_counts = [0; 4];
+    let mut selection_counts = [0; 2];
+    let mut helper_hop_counts = [0; 2];
+    let mut case_count = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for root in DerivedInnerReturnRoot::ALL {
+            for select_final in [false, true] {
+                for two_hop in [false, true] {
+                    assert_interpretation(
+                        &const_parameter_return_selection_program(
+                            kind,
+                            root,
+                            select_final,
+                            two_hop,
+                        ),
+                        ExpectedInterpretation::Value(12),
+                        &format!(
+                            "const-parameter return selection, kind {kind:?}, root {root:?}, final {select_final}, two hop {two_hop}"
+                        ),
+                    );
+                    kind_counts[kind_index] += 1;
+                    root_counts[root.index()] += 1;
+                    selection_counts[usize::from(select_final)] += 1;
+                    helper_hop_counts[usize::from(two_hop)] += 1;
+                    case_count += 1;
+                }
+            }
+        }
+
+        assert_interpretation(
+            &const_parameter_return_selection_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("const-parameter return selection write, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &const_parameter_return_selection_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("const-parameter return selection cross-root, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &const_parameter_return_selection_lifetime_program(kind),
+            ExpectedInterpretation::Error("pointer to out-of-scope variable 'local'"),
+            &format!("const-parameter return selection lifetime, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &const_parameter_return_selection_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "const-parameter return selection aggregate type mismatch",
+    );
+
+    assert_eq!(case_count, 32);
+    assert_eq!(kind_counts, [16; 2]);
+    assert_eq!(root_counts, [8; 4]);
+    assert_eq!(selection_counts, [16; 2]);
+    assert_eq!(helper_hop_counts, [16; 2]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -19177,6 +19243,160 @@ fn final_received_inner_pointer_const_parameter_type_mismatch_program() -> Strin
         return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
         caller_helpers = caller_inner_pointer_const_reforward_helpers(),
         outer_helpers = outer_caller_return_helpers(kind),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn const_parameter_return_selection_helpers(kind: AdjustedParameterFieldKind) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    format!(
+        "int parameter_return_calls;\n\
+         {const_pointer_type}select_received_{suffix}({const_pointer_type}final, {const_pointer_type}base, int select_final) {{\n\
+             parameter_return_calls = parameter_return_calls + 1;\n\
+             return select_final ? final : base;\n\
+         }}\n\
+         {const_pointer_type}select_received_{suffix}_twice({const_pointer_type}final, {const_pointer_type}base, int select_final) {{\n\
+             parameter_return_calls = parameter_return_calls + 1;\n\
+             return select_received_{suffix}(final, base, select_final);\n\
+         }}"
+    )
+}
+
+fn const_parameter_return_selection_program(
+    kind: AdjustedParameterFieldKind,
+    root: DerivedInnerReturnRoot,
+    select_final: bool,
+    two_hop: bool,
+) -> String {
+    let (declarations, argument, root_marker_check) =
+        derived_inner_const_pointer_callee_return_root(root);
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let helper = format!(
+        "select_received_{suffix}{}",
+        if two_hop { "_twice" } else { "" },
+    );
+    let helper_calls = if two_hop { 2 } else { 1 };
+    let selection = i64::from(select_final);
+    let selected_value = if select_final { 9 } else { 7 };
+    let selected_offset = i64::from(select_final);
+    let expected_pointer = if select_final { "final" } else { "base" };
+    let first_ordering = if select_final {
+        "selected > base"
+    } else {
+        "selected < final"
+    };
+    let second_ordering = if select_final {
+        "base < selected"
+    } else {
+        "final > selected"
+    };
+    let read_selected = kind.read("selected");
+    let read_final = kind.read("final");
+    let read_base = kind.read("base");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{final_helpers}\n{selection_helpers}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}_twice({argument});\n\
+             {const_pointer_type}final = final_reforward_inner_{suffix}_twice(base) + 1;\n\
+             {const_pointer_type}selected = {helper}(final, base, {selection});\n\
+             return ({read_selected} == {selected_value}) + (selected == {expected_pointer})\n\
+                 + (selected - base == {selected_offset}) + (final - selected == {reverse_offset})\n\
+                 + ({first_ordering}) + ({second_ordering}) + ({root_marker_check})\n\
+                 + ({read_final} == 9) + ({read_base} == 7)\n\
+                 + (final == base + 1) + (final - base == 1)\n\
+                 + (parameter_return_calls == {helper_calls});\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        final_helpers = final_receiving_caller_reforward_helpers(),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        reverse_offset = 1 - selected_offset,
+    )
+}
+
+fn const_parameter_return_selection_write_program(kind: AdjustedParameterFieldKind) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let write = kind.write("selected", 11);
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n\
+         int main(void) {{\n\
+             int root_marker = 0;\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}({argument});\n\
+             {const_pointer_type}selected = select_received_{suffix}_twice(base + 1, base, 1);\n\
+             {write};\n\
+             return 0;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn const_parameter_return_selection_cross_root_program(kind: AdjustedParameterFieldKind) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}left = outer_return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}right = outer_return_inner_{suffix}_twice((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}selected = select_received_{suffix}_twice(left, right, 1);\n\
+             return selected - right;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+    )
+}
+
+fn const_parameter_return_selection_lifetime_program(kind: AdjustedParameterFieldKind) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read = kind.read("selected");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n\
+         {const_pointer_type}select_dangling_{suffix}(void) {{\n\
+             struct Item local[1];\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}_twice(local);\n\
+             return select_received_{suffix}_twice(base + 1, base, 1);\n\
+         }}\n\
+         int main(void) {{ {const_pointer_type}selected = select_dangling_{suffix}(); return {read}; }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+    )
+}
+
+fn const_parameter_return_selection_type_mismatch_program() -> String {
+    let kind = AdjustedParameterFieldKind::Aggregate;
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n\
+         struct Other {{ int value; }};\n\
+         int main(void) {{\n\
+             int root_marker = 0;\n\
+             const struct Point *base = outer_return_inner_point_twice({argument});\n\
+             const struct Other *selected = select_received_point_twice(base + 1, base, 1);\n\
+             return selected->value;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
         argument = direct_derived_inner_pointer_const_promotion_argument(),
     )
 }
