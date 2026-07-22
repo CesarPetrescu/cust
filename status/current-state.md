@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 ## Latest autonomous verification
+
+All required verification passed for the 2026-07-23 distinct-root final pointer reselection run. Sixty-four generated programs pair final returned/composed scalar/named-aggregate inner `const` pointers with same-typed pointers from different direct/captured roots across all four primary root families. Argument order, selection outcome, selector depth, selected-root identity/value, both input slots, owner/path/base/index/type/qualification/lifetime behavior, 17 exact diagnostic/lifetime checks, and balanced dimensions pass. A warning-free direct/captured fixture returns 32 under Cust, GCC, and Clang. Existing runtime behavior matched immediately, so this is deliberate conformance/property closure. The suite now has 74 fuzz-safety tests and 864 interpreter tests.
+
+Verified commands: clean-baseline `cargo test`; focused 64-case distinct-root generated test plus 17 exact diagnostic/lifetime checks; focused interpreter fixture (32); direct warning-free GCC/Clang fixture execution (32); canonical `c_compat`; preceding final-reselection regression; recursion-depth regression; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust`; and `git diff --check`.
 
 All required verification passed for the 2026-07-22 final returned/composed pointer reselection run. Sixty-four generated programs pass the final returned composed scalar/named-aggregate inner `const` pointer and the preserved pre-composition selected pointer through another one/two-hop copied-parameter selector across all four direct/captured roots. Argument order, selection outcome, selector depth, selected-result identity, both caller slots, owner/path/base/index/type/qualification/lifetime metadata, four exact diagnostic families per pointee kind, and aggregate type mismatch pass. A warning-free direct-scalar/captured-aggregate fixture returns 48 under Cust, GCC, and Clang. Existing runtime behavior matched immediately, so this is deliberate conformance/property closure. The suite now has 73 fuzz-safety tests and 863 interpreter tests.
 

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-22 final returned/composed pointer reselection run after 64 balanced scalar/aggregate direct/captured routes, nine exact const-write/bounds/cross-root/type/lifetime diagnostics, a warning-free Cust/GCC/Clang fixture returning 48, 73 passing fuzz-safety tests, and 863 passing interpreter tests. Distinct-root final selector inputs are a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-23 distinct-root final pointer reselection run after 64 balanced scalar/aggregate direct/captured routes, 17 exact bounds/const/cross-root/type/lifetime checks, a warning-free Cust/GCC/Clang fixture returning 32, 74 passing fuzz-safety tests, and 864 passing interpreter tests. Post-selection composition and return of the selected distinct-root result is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 

@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-23 — Distinct-root final pointer reselection
+
+- No external documentation was needed. A copied-parameter selector over pointers from different storage roots must return one complete interpreter pointer value; owner/path/base/index/type/qualification/lifetime provenance comes only from the selected input, while both caller-side slots remain unchanged.
+- Sixty-four generated scalar/aggregate routes balance four primary direct/captured roots, argument order, selection outcome, and one/two-hop depth. Seventeen exact diagnostic/lifetime checks prove selected-root bounds/const/liveness and cross-root subtraction/ordering behavior. A warning-free fixture returns 32 under Cust/GCC/Clang; native coverage uses only defined equality and same-root arithmetic.
+- See `references/cust-distinct-root-final-pointer-reselection.md`. The next seam is post-selection wrapping/offset composition plus another const-preserving helper/return boundary over the selected distinct-root result.
+
 ## 2026-07-22 — Final returned/composed pointer reselection
 
 - No external documentation was needed. A copied `const T *` parameter selector must return exactly one input pointer value; argument order, selection outcome, and one/two-hop helper depth must not merge or rewrite interpreter-owned owner/path/base/index/type/qualification/lifetime metadata, and both caller-side input slots remain unchanged.

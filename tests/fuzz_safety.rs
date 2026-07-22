@@ -5415,6 +5415,106 @@ fn generated_final_returned_composed_pointer_reselection_preserves_identity_with
 }
 
 #[test]
+fn generated_distinct_root_final_reselection_preserves_selected_provenance_without_panics() {
+    let mut kind_counts = [0; 2];
+    let mut primary_root_counts = [0; 4];
+    let mut argument_order_counts = [0; 2];
+    let mut selection_counts = [0; 2];
+    let mut selector_hop_counts = [0; 2];
+    let mut selected_root_counts = [0; 2];
+    let mut case_count = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for primary_root in DerivedInnerReturnRoot::ALL {
+            for swap_final_args in [false, true] {
+                for final_select_first in [false, true] {
+                    for final_two_hop in [false, true] {
+                        let selected_primary = if final_select_first {
+                            !swap_final_args
+                        } else {
+                            swap_final_args
+                        };
+                        assert_interpretation(
+                            &distinct_root_final_reselection_program(
+                                kind,
+                                primary_root,
+                                swap_final_args,
+                                final_select_first,
+                                final_two_hop,
+                            ),
+                            ExpectedInterpretation::Value(17),
+                            &format!(
+                                "distinct-root final reselection, kind {kind:?}, primary root {primary_root:?}, swap final args {swap_final_args}, select first {final_select_first}, two hop {final_two_hop}"
+                            ),
+                        );
+                        kind_counts[kind_index] += 1;
+                        primary_root_counts[primary_root.index()] += 1;
+                        argument_order_counts[usize::from(swap_final_args)] += 1;
+                        selection_counts[usize::from(final_select_first)] += 1;
+                        selector_hop_counts[usize::from(final_two_hop)] += 1;
+                        selected_root_counts[usize::from(selected_primary)] += 1;
+                        case_count += 1;
+                    }
+                }
+            }
+        }
+
+        for select_primary in [false, true] {
+            assert_interpretation(
+                &distinct_root_final_reselection_bounds_program(kind, select_primary),
+                ExpectedInterpretation::Error(kind.inner_pointer_bounds_error()),
+                &format!(
+                    "distinct-root final reselection bounds, kind {kind:?}, select primary {select_primary}"
+                ),
+            );
+            assert_interpretation(
+                &distinct_root_final_reselection_write_program(kind, select_primary),
+                ExpectedInterpretation::Error("cannot assign through pointer to const"),
+                &format!(
+                    "distinct-root final reselection const write, kind {kind:?}, select primary {select_primary}"
+                ),
+            );
+        }
+        assert_interpretation(
+            &distinct_root_final_reselection_cross_root_program(kind, false),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("distinct-root final reselection subtraction, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &distinct_root_final_reselection_cross_root_program(kind, true),
+            ExpectedInterpretation::Error("cannot compare pointers to different arrays"),
+            &format!("distinct-root final reselection ordering, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &distinct_root_final_reselection_lifetime_program(kind, false),
+            ExpectedInterpretation::Value(17),
+            &format!("distinct-root final reselection live lifetime, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &distinct_root_final_reselection_lifetime_program(kind, true),
+            ExpectedInterpretation::Error("pointer to out-of-scope variable 'local'"),
+            &format!("distinct-root final reselection dangling lifetime, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &distinct_root_final_reselection_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "distinct-root final reselection aggregate type mismatch",
+    );
+
+    assert_eq!(case_count, 64);
+    assert_eq!(kind_counts, [32; 2]);
+    assert_eq!(primary_root_counts, [16; 4]);
+    assert_eq!(argument_order_counts, [32; 2]);
+    assert_eq!(selection_counts, [32; 2]);
+    assert_eq!(selector_hop_counts, [32; 2]);
+    assert_eq!(selected_root_counts, [32; 2]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -20344,6 +20444,239 @@ fn final_returned_composed_pointer_reselection_type_mismatch_program() -> String
         selection_helpers = const_parameter_return_selection_helpers(kind),
         boundary_helpers = post_selection_reforward_and_return_helpers(kind),
         argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn distinct_root_final_reselection_arguments(
+    primary_root: DerivedInnerReturnRoot,
+) -> (&'static str, &'static str, i64) {
+    match primary_root {
+        DerivedInnerReturnRoot::Direct => (
+            "((struct Item[3]){{}, { .nested = { .values = {++direct_marker} } }, {}} + 1)",
+            "named_right->nested.primary + 1",
+            1,
+        ),
+        DerivedInnerReturnRoot::Named => (
+            "named_left->nested.primary + 1",
+            "((struct Item[3]){{}, { .nested = { .values = {++direct_marker} } }, {}} + 1)",
+            1,
+        ),
+        DerivedInnerReturnRoot::Anonymous => (
+            "&anonymous_left->nested.primary[1]",
+            "1 + choice_right->nested.primary",
+            0,
+        ),
+        DerivedInnerReturnRoot::Union => (
+            "choice_left->nested.primary + 1",
+            "&anonymous_right->nested.primary[1]",
+            0,
+        ),
+    }
+}
+
+fn distinct_root_return_helpers(kind: AdjustedParameterFieldKind) -> String {
+    let pointer_type = kind.pointer_type();
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let field = kind.field_name();
+    let initialize_raw = kind.write("raw", 15);
+    let initialize_first = kind.write("(raw + 1)", 17);
+    let initialize_second = kind.write("(raw + 2)", 19);
+    format!(
+        "{const_pointer_type}return_distinct_inner_{suffix}(struct Item items[]) {{\n\
+             {pointer_type}raw = &items[0].nested.{field}[0];\n\
+             {initialize_raw}; {initialize_first}; {initialize_second};\n\
+             return raw + 1;\n\
+         }}"
+    )
+}
+
+fn distinct_root_final_reselection_program(
+    kind: AdjustedParameterFieldKind,
+    primary_root: DerivedInnerReturnRoot,
+    swap_final_args: bool,
+    final_select_first: bool,
+    final_two_hop: bool,
+) -> String {
+    let (primary_argument, alternate_argument, direct_marker_expected) =
+        distinct_root_final_reselection_arguments(primary_root);
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let selector = format!(
+        "reselect_composed_{suffix}{}",
+        if final_two_hop { "_twice" } else { "" },
+    );
+    let (first, second) = if swap_final_args {
+        ("alternate", "primary_returned")
+    } else {
+        ("primary_returned", "alternate")
+    };
+    let selected_primary = if final_select_first {
+        !swap_final_args
+    } else {
+        swap_final_args
+    };
+    let (expected, unselected, expected_value, selected_root) = if selected_primary {
+        ("primary_returned", "alternate", 7, "primary_base")
+    } else {
+        ("alternate", "primary_returned", 17, "alternate")
+    };
+    let selected_read = kind.read("reselected");
+    let primary_read = kind.read("primary_returned");
+    let alternate_read = kind.read("alternate");
+    let primary_selected_read = kind.read("primary_selected");
+    let selector_calls = if final_two_hop { 2 } else { 1 };
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{selection_helpers}\n{boundary_helpers}\n\
+         int main(void) {{\n\
+             {declarations}\n\
+             int direct_marker = 0;\n\
+             {const_pointer_type}primary_base = return_inner_{suffix}({primary_argument});\n\
+             {const_pointer_type}primary_selected = select_received_{suffix}_twice(primary_base + 1, primary_base, 1);\n\
+             {const_pointer_type}primary_composed = primary_selected - 1;\n\
+             {const_pointer_type}primary_returned = return_composed_{suffix}_twice(reforward_composed_{suffix}(primary_composed));\n\
+             {const_pointer_type}alternate = return_distinct_inner_{suffix}({alternate_argument});\n\
+             {const_pointer_type}reselected = {selector}({first}, {second}, {selection});\n\
+             return (reselected == {expected}) + ({selected_read} == {expected_value})\n\
+                 + (reselected != {unselected}) + (primary_returned == primary_base)\n\
+                 + ({primary_read} == 7) + ({alternate_read} == 17)\n\
+                 + (primary_selected == primary_base + 1) + ({primary_selected_read} == 9)\n\
+                 + (primary_returned - primary_base == 0) + (reselected - {selected_root} == 0)\n\
+                 + (primary_returned != alternate) + (parameter_return_calls == 2)\n\
+                 + (composed_reforward_calls == 1) + (composed_return_calls == 2)\n\
+                 + (final_selector_calls == {selector_calls}) + (marker == 6)\n\
+                 + (direct_marker == {direct_marker_expected});\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        declarations = captured_literal_field_offset_declarations(),
+        selection = i64::from(final_select_first),
+    )
+}
+
+fn distinct_root_final_reselection_bounds_program(
+    kind: AdjustedParameterFieldKind,
+    select_primary: bool,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read = kind.read("reselected");
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{boundary_helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}primary = return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}alternate = return_distinct_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}reselected = reselect_composed_{suffix}(primary, alternate, {selection}) + 2;\n\
+             return {read};\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        selection = i64::from(select_primary),
+    )
+}
+
+fn distinct_root_final_reselection_write_program(
+    kind: AdjustedParameterFieldKind,
+    select_primary: bool,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let write = kind.write("reselected", 23);
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{boundary_helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}primary = return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}alternate = return_distinct_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}reselected = reselect_composed_{suffix}(primary, alternate, {selection});\n\
+             {write}; return 0;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        selection = i64::from(select_primary),
+    )
+}
+
+fn distinct_root_final_reselection_cross_root_program(
+    kind: AdjustedParameterFieldKind,
+    ordering: bool,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let operation = if ordering {
+        "reselected < alternate"
+    } else {
+        "reselected - alternate"
+    };
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{boundary_helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}primary = return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}alternate = return_distinct_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}reselected = reselect_composed_{suffix}(primary, alternate, 1);\n\
+             return {operation};\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+    )
+}
+
+fn distinct_root_final_reselection_lifetime_program(
+    kind: AdjustedParameterFieldKind,
+    select_dangling: bool,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read = kind.read("reselected");
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{boundary_helpers}\n\
+         struct Item live_items[1];\n\
+         {const_pointer_type}select_lifetime_{suffix}(int select_dangling) {{\n\
+             struct Item local[1];\n\
+             {const_pointer_type}dangling = return_inner_{suffix}(local);\n\
+             {const_pointer_type}live = return_distinct_inner_{suffix}(live_items);\n\
+             return reselect_composed_{suffix}(dangling, live, select_dangling);\n\
+         }}\n\
+         int main(void) {{\n\
+             {const_pointer_type}reselected = select_lifetime_{suffix}({selection});\n\
+             return {read};\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        selection = i64::from(select_dangling),
+    )
+}
+
+fn distinct_root_final_reselection_type_mismatch_program() -> String {
+    let kind = AdjustedParameterFieldKind::Aggregate;
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{boundary_helpers}\n\
+         struct Other {{ int value; }};\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             const struct Point *primary = return_inner_point((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             const struct Point *alternate = return_distinct_inner_point((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             const struct Point *reselected = reselect_composed_point_twice(primary, alternate, 0);\n\
+             const struct Other *mismatch = reselected;\n\
+             return mismatch->value;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
     )
 }
 
