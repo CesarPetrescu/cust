@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-22 — Final returned/composed pointer reselection
+
+- No external documentation was needed. A copied `const T *` parameter selector must return exactly one input pointer value; argument order, selection outcome, and one/two-hop helper depth must not merge or rewrite interpreter-owned owner/path/base/index/type/qualification/lifetime metadata, and both caller-side input slots remain unchanged.
+- Sixty-four generated scalar/aggregate direct/captured routes balance every final selector dimension and selected identity. Nine exact diagnostics and a warning-free fixture returning 48 under Cust/GCC/Clang pass immediately, so this is deliberate conformance/property closure rather than a runtime fix.
+- See `references/cust-final-returned-composed-pointer-reselection.md`. The next distinct seam is selecting between the final returned pointer and a same-typed pointer from a different storage root, proving only the selected root's provenance survives.
+
 ## 2026-07-22 — Post-selection re-forwarding and final return boundaries
 
 - No external documentation was needed. Const-preserving parameter copies and function returns must retain the composed interpreter pointer's owner/path/base/index, concrete pointee type, qualification, and lexical lifetime provenance while leaving the pre-composition selected slot unchanged.

@@ -5331,6 +5331,90 @@ fn generated_post_selection_reforward_and_return_boundaries_preserve_nested_cons
 }
 
 #[test]
+fn generated_final_returned_composed_pointer_reselection_preserves_identity_without_panics() {
+    let mut kind_counts = [0; 2];
+    let mut root_counts = [0; 4];
+    let mut argument_order_counts = [0; 2];
+    let mut selection_counts = [0; 2];
+    let mut selector_hop_counts = [0; 2];
+    let mut selected_result_counts = [0; 2];
+    let mut case_count = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for root in DerivedInnerReturnRoot::ALL {
+            for swap_final_args in [false, true] {
+                for final_select_first in [false, true] {
+                    for final_two_hop in [false, true] {
+                        let reselected_is_returned = if final_select_first {
+                            !swap_final_args
+                        } else {
+                            swap_final_args
+                        };
+                        assert_interpretation(
+                            &final_returned_composed_pointer_reselection_program(
+                                kind,
+                                root,
+                                swap_final_args,
+                                final_select_first,
+                                final_two_hop,
+                            ),
+                            ExpectedInterpretation::Value(34),
+                            &format!(
+                                "final returned/composed reselection, kind {kind:?}, root {root:?}, swap final args {swap_final_args}, select first {final_select_first}, two hop {final_two_hop}"
+                            ),
+                        );
+                        kind_counts[kind_index] += 1;
+                        root_counts[root.index()] += 1;
+                        argument_order_counts[usize::from(swap_final_args)] += 1;
+                        selection_counts[usize::from(final_select_first)] += 1;
+                        selector_hop_counts[usize::from(final_two_hop)] += 1;
+                        selected_result_counts[usize::from(reselected_is_returned)] += 1;
+                        case_count += 1;
+                    }
+                }
+            }
+        }
+
+        assert_interpretation(
+            &final_returned_composed_pointer_reselection_bounds_program(kind),
+            ExpectedInterpretation::Error(kind.inner_pointer_bounds_error()),
+            &format!("final returned/composed reselection bounds, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &final_returned_composed_pointer_reselection_cross_root_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("final returned/composed reselection cross-root, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &final_returned_composed_pointer_reselection_lifetime_program(kind),
+            ExpectedInterpretation::Error("pointer to out-of-scope variable 'local'"),
+            &format!("final returned/composed reselection lifetime, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &final_returned_composed_pointer_reselection_write_program(kind),
+            ExpectedInterpretation::Error("cannot assign through pointer to const"),
+            &format!("final returned/composed reselection const write, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &final_returned_composed_pointer_reselection_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "final returned/composed reselection aggregate type mismatch",
+    );
+
+    assert_eq!(case_count, 64);
+    assert_eq!(kind_counts, [32; 2]);
+    assert_eq!(root_counts, [16; 4]);
+    assert_eq!(argument_order_counts, [32; 2]);
+    assert_eq!(selection_counts, [32; 2]);
+    assert_eq!(selector_hop_counts, [32; 2]);
+    assert_eq!(selected_result_counts, [32; 2]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -20022,11 +20106,244 @@ fn post_selection_reforward_and_return_helpers(kind: AdjustedParameterFieldKind)
     let const_pointer_type = kind.const_pointer_type();
     let suffix = kind.suffix();
     format!(
-        "int composed_reforward_calls; int composed_return_calls;\n\
+        "int composed_reforward_calls; int composed_return_calls; int final_selector_calls;\n\
          {const_pointer_type}reforward_composed_{suffix}({const_pointer_type}value) {{ composed_reforward_calls = composed_reforward_calls + 1; return value; }}\n\
          {const_pointer_type}reforward_composed_{suffix}_twice({const_pointer_type}value) {{ composed_reforward_calls = composed_reforward_calls + 1; return reforward_composed_{suffix}(value); }}\n\
          {const_pointer_type}return_composed_{suffix}({const_pointer_type}value) {{ composed_return_calls = composed_return_calls + 1; return value; }}\n\
-         {const_pointer_type}return_composed_{suffix}_twice({const_pointer_type}value) {{ composed_return_calls = composed_return_calls + 1; return return_composed_{suffix}(value); }}"
+         {const_pointer_type}return_composed_{suffix}_twice({const_pointer_type}value) {{ composed_return_calls = composed_return_calls + 1; return return_composed_{suffix}(value); }}\n\
+         {const_pointer_type}reselect_composed_{suffix}({const_pointer_type}first, {const_pointer_type}second, int select_first) {{ final_selector_calls = final_selector_calls + 1; return select_first ? first : second; }}\n\
+         {const_pointer_type}reselect_composed_{suffix}_twice({const_pointer_type}first, {const_pointer_type}second, int select_first) {{ final_selector_calls = final_selector_calls + 1; return reselect_composed_{suffix}(first, second, select_first); }}"
+    )
+}
+
+fn final_returned_composed_pointer_reselection_program(
+    kind: AdjustedParameterFieldKind,
+    root: DerivedInnerReturnRoot,
+    swap_final_args: bool,
+    final_select_first: bool,
+    final_two_hop: bool,
+) -> String {
+    let root_index = root.index();
+    let first_select_final = root_index & 1 == 0;
+    let swap_second_args = root_index >= 2;
+    let second_select_first = kind == AdjustedParameterFieldKind::Scalar;
+    let selected_is_final = if second_select_first {
+        first_select_final != swap_second_args
+    } else {
+        first_select_final == swap_second_args
+    };
+    let mut program = post_selection_reforwarded_nested_const_parameter_return_program(
+        kind,
+        root,
+        first_select_final,
+        root_index < 2,
+        swap_second_args,
+        second_select_first,
+        root_index & 1 != 0,
+        WrappedDirectLiteralRoute::ALL[root_index % WrappedDirectLiteralRoute::ALL.len()],
+        PostSelectionOffsetRoute::ALL[(root_index
+            + usize::from(kind == AdjustedParameterFieldKind::Aggregate))
+            % PostSelectionOffsetRoute::ALL.len()],
+        PostForwardWrapperPlacement::ALL
+            [usize::from(kind == AdjustedParameterFieldKind::Aggregate)],
+        root_index & 1 != 0,
+        root_index >= 2,
+    );
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let selector = format!(
+        "reselect_composed_{suffix}{}",
+        if final_two_hop { "_twice" } else { "" },
+    );
+    let (first, second) = if swap_final_args {
+        ("selected", "returned")
+    } else {
+        ("returned", "selected")
+    };
+    let reselected_is_returned = if final_select_first {
+        !swap_final_args
+    } else {
+        swap_final_args
+    };
+    let reselected_is_final = if reselected_is_returned {
+        !selected_is_final
+    } else {
+        selected_is_final
+    };
+    let expected_pointer = if reselected_is_returned {
+        "returned"
+    } else {
+        "selected"
+    };
+    let selected_expected_pointer = if selected_is_final { "final" } else { "base" };
+    let expected_value = if reselected_is_final { 9 } else { 7 };
+    let expected_offset = i64::from(reselected_is_final);
+    let selected_offset = i64::from(selected_is_final);
+    let ordering = if reselected_is_final {
+        "reselected > base"
+    } else {
+        "reselected < final"
+    };
+    let selector_calls = if final_two_hop { 2 } else { 1 };
+    let return_start = program
+        .rfind("return (")
+        .expect("generated re-forwarded program should contain its main return");
+    program.insert_str(
+        return_start,
+        &format!(
+            "{const_pointer_type}reselected = {selector}({first}, {second}, {selection});\n\
+             ",
+            selection = i64::from(final_select_first),
+        ),
+    );
+    let reselected_read = kind.read("reselected");
+    let return_end = program
+        .rfind(';')
+        .expect("generated reselected program should end its main return");
+    program.insert_str(
+        return_end,
+        &format!(
+            "\n                 + (reselected == {expected_pointer}) + ({reselected_read} == {expected_value})\n\
+             + (reselected - base == {expected_offset}) + ({ordering})\n\
+             + (reselected - selected == {selected_delta}) + (final_selector_calls == {selector_calls})\n\
+             + (returned == composed) + (selected == {selected_expected_pointer})",
+            selected_delta = expected_offset - selected_offset,
+        ),
+    );
+    program
+}
+
+fn final_returned_composed_pointer_reselection_bounds_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read = kind.read("reselected");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n{boundary_helpers}\n\
+         int main(void) {{\n\
+             int root_marker = 0;\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}({argument});\n\
+             {const_pointer_type}selected = select_received_{suffix}_twice(base + 1, base, 1);\n\
+             {const_pointer_type}composed = selected - 1;\n\
+             {const_pointer_type}returned = return_composed_{suffix}_twice(reforward_composed_{suffix}(composed));\n\
+             {const_pointer_type}reselected = reselect_composed_{suffix}_twice(returned, selected, 1) + 2;\n\
+             return {read};\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn final_returned_composed_pointer_reselection_cross_root_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n{boundary_helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}left = outer_return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}right = outer_return_inner_{suffix}_twice((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}selected = select_received_{suffix}_twice(left + 1, left, 1);\n\
+             {const_pointer_type}composed = selected - 1;\n\
+             {const_pointer_type}returned = return_composed_{suffix}(reforward_composed_{suffix}_twice(composed));\n\
+             {const_pointer_type}reselected = reselect_composed_{suffix}(selected, returned, 0);\n\
+             return reselected - right;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+    )
+}
+
+fn final_returned_composed_pointer_reselection_lifetime_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read = kind.read("reselected");
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n{boundary_helpers}\n\
+         {const_pointer_type}select_dangling_{suffix}(void) {{\n\
+             struct Item local[1];\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}_twice(local);\n\
+             {const_pointer_type}selected = select_received_{suffix}(base + 1, base, 1);\n\
+             {const_pointer_type}composed = selected - 1;\n\
+             {const_pointer_type}returned = return_composed_{suffix}_twice(reforward_composed_{suffix}(composed));\n\
+             return reselect_composed_{suffix}_twice(returned, selected, 1);\n\
+         }}\n\
+         int main(void) {{\n\
+             {const_pointer_type}reselected = select_dangling_{suffix}();\n\
+             return {read};\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+    )
+}
+
+fn final_returned_composed_pointer_reselection_write_program(
+    kind: AdjustedParameterFieldKind,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let write = kind.write("reselected", 11);
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n{boundary_helpers}\n\
+         int main(void) {{\n\
+             int root_marker = 0;\n\
+             {const_pointer_type}base = outer_return_inner_{suffix}({argument});\n\
+             {const_pointer_type}selected = select_received_{suffix}_twice(base + 1, base, 1);\n\
+             {const_pointer_type}composed = selected - 1;\n\
+             {const_pointer_type}returned = return_composed_{suffix}(reforward_composed_{suffix}_twice(composed));\n\
+             {const_pointer_type}reselected = reselect_composed_{suffix}(returned, selected, 0);\n\
+             {write}; return 0;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
+    )
+}
+
+fn final_returned_composed_pointer_reselection_type_mismatch_program() -> String {
+    let kind = AdjustedParameterFieldKind::Aggregate;
+    format!(
+        "{prelude}\n{return_helpers}\n{caller_helpers}\n{outer_helpers}\n{selection_helpers}\n{boundary_helpers}\n\
+         struct Other {{ int value; }};\n\
+         int main(void) {{\n\
+             int root_marker = 0;\n\
+             const struct Point *base = outer_return_inner_point_twice({argument});\n\
+             const struct Point *selected = select_received_point_twice(base + 1, base, 1);\n\
+             const struct Point *composed = selected - 1;\n\
+             const struct Point *returned = return_composed_point_twice(reforward_composed_point(composed));\n\
+             const struct Point *reselected = reselect_composed_point_twice(selected, returned, 0);\n\
+             const struct Other *mismatch = reselected;\n\
+             return mismatch->value;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        return_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        caller_helpers = caller_inner_pointer_const_reforward_helpers(),
+        outer_helpers = outer_caller_return_helpers(kind),
+        selection_helpers = const_parameter_return_selection_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        argument = direct_derived_inner_pointer_const_promotion_argument(),
     )
 }
 
