@@ -18,6 +18,11 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-22 — Nested const-parameter return selection after final receipt
+
+- No external documentation was needed. A second copied-parameter selector must preserve whichever interpreter pointer it ultimately returns, including storage owner/path/index, concrete pointee type, const qualification, and lexical lifetime provenance; swapping same-type arguments changes selection routing but not either caller slot.
+- Two hundred fifty-six generated scalar/aggregate direct/captured routes cover both first selections/helper depths and both second-call argument orders/selections/helper depths. Seven exact diagnostics and a warning-free direct-scalar/captured-aggregate fixture returning 30 under Cust/GCC/Clang pass. The initial RED was a generator count error (five binary dimensions produce 256, not 512, total routes), not a runtime mismatch; see `references/cust-nested-const-parameter-return-selection.md`.
+
 ## 2026-07-22 — Const-parameter return selection after final receipt
 
 - No external documentation was needed. Returning either copied `const T *` parameter conditionally must preserve the selected interpreter pointer's storage owner/path/index, concrete pointee type, qualification, and lexical lifetime provenance while leaving both caller-side input slots unchanged.

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-22 const-parameter return-selection conformance run after 32 direct/captured scalar/aggregate routes, seven exact const-write/cross-root/type/lifetime diagnostics, a warning-free Cust/GCC/Clang fixture returning 24, 69 passing fuzz-safety tests, 859 passing interpreter tests, and all required local/Docker gates. Nested parameter-return selection is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-22 nested const-parameter return-selection conformance run after 256 direct/captured scalar/aggregate routes, seven exact nested const-write/cross-root/type/lifetime diagnostics, a warning-free Cust/GCC/Clang fixture returning 30, 70 passing fuzz-safety tests, and 860 passing interpreter tests. Post-selection wrapper/offset composition is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 
