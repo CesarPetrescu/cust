@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-22 — Final receiving-caller re-forwarding after outer returns
+
+- No external documentation was needed. A final const-preserving helper/wrapper/offset stage copies or advances the already outer-returned interpreter pointer without changing its direct hidden root or captured containing root/path/base/index, concrete pointee type, qualification, or lexical owner provenance.
+- A 2,592-route matrix balances both pointee kinds, four roots, final helper placement/depth, wrappers, offsets, and one/two outer returns. Eleven exact diagnostics and a warning-free direct/captured fixture returning 30 under Cust/GCC/Clang pass. The generated matrix was immediately green; the fixture's initial 28/30 RED exposed only incorrect helper-depth/count modeling, corrected by making the `*_twice` routes call the two-hop helper.
+- See `references/cust-final-receiving-caller-reforwarded-derived-inner-pointers.md`. The next seam is copied const-parameter re-entry of the final pointer and its pre-final base.
+
 ## 2026-07-22 — Outer caller return boundaries after caller-side const re-forwarding
 
 - No external documentation was needed. Returning an already caller-re-forwarded interpreter pointer through one/two additional functions must copy its storage identity, recursive path/base/index, concrete pointee type, const qualification, and lexical owner provenance unchanged.

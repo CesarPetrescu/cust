@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-22 outer-caller return-boundary conformance run after 2,592 balanced direct/captured scalar/aggregate routes, eleven exact const/bounds/cross-root/type/lifetime diagnostics, a warning-free Cust/GCC/Clang fixture returning 20, 66 passing fuzz-safety tests, 856 passing interpreter tests, and all required local/Docker gates. A final receiving-caller re-forward stage is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-22 final receiving-caller re-forward conformance run after 2,592 balanced direct/captured scalar/aggregate routes, eleven exact const/bounds/cross-root/type/lifetime diagnostics, a warning-free Cust/GCC/Clang fixture returning 30, 67 passing fuzz-safety tests, 857 passing interpreter tests, and all required local/Docker gates. Copied const-parameter re-entry is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 
