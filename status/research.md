@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-23 — Returned distinct-root result reselection
+
+- No external documentation was needed. Re-entering a returned/composed pointer and its preserved alternate root through a copied `const T *` parameter selector must choose one complete interpreter pointer value; argument order and helper depth cannot merge owner/path/base/index/type/qualification/lifetime metadata from the unselected input.
+- Thirty-six thousand eight hundred sixty-four generated routes cross both pointee kinds, all four primary direct/captured roots, every prior wrapper/offset/helper/return route, final argument order, final selection outcome, and one/two-hop selector depth. Seventeen exact checks retain selected-root bounds/const/liveness and cross-root/type diagnostics. Existing behavior passed immediately as deliberate conformance/property closure.
+- The warning-free fixture returns 39 under Cust, GCC, and Clang. Native checks use pointer equality, local dereference, and same-root relationships only; cross-root subtraction/ordering and dangling-pointer use remain interpreter-only. See `references/cust-returned-distinct-root-result-reselection.md`.
+
 ## 2026-07-23 — Distinct-root selected-result composition and return
 
 - No external documentation was needed. Conditional/comma pointer wrappers, same-root offsets, const-preserving parameter copies, and return-value copies must transform or copy only the already selected interpreter pointer; the previously unselected root cannot contribute owner/path/base/index/type/qualification/lifetime metadata.

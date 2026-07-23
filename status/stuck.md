@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-23 distinct-root selected-result carry run after 4,608 balanced scalar/aggregate wrapper/offset/helper/return routes, 17 exact bounds/const/cross-root/type/lifetime checks, a warning-free Cust/GCC/Clang fixture returning 31, 75 passing fuzz-safety tests, and 865 passing interpreter tests. Final copied-parameter reselection of the carried result against the preserved alternate root is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-23 returned distinct-root result reselection run after 36,864 balanced scalar/aggregate carry-plus-final-selector routes, 17 exact bounds/const/cross-root/type/lifetime checks, a warning-free Cust/GCC/Clang fixture returning 39, 76 passing fuzz-safety tests, and 866 passing interpreter tests. Fresh wrapper/offset/helper/return composition after final reselection is a scoped follow-up, not an external blocker.
 
 ## Blocker template
 
