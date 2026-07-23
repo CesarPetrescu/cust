@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-23 deterministic lexer/parser robustness run after focused RED/GREEN evidence, 320 panic-guarded family/route cases with source-location invariants, 82 passing fuzz-safety tests, 875 passing interpreter tests (968 total), a warning-free Rust 1.92 Clippy gate, and both Docker gates. Deterministic valid-program token-splice parser robustness is the next bounded tooling slice, not an external blocker.
+None. Last reviewed in the 2026-07-24 deterministic valid-program token-splice robustness run after 761 unique panic-guarded multiline mutants with bounded parser locations, duplicate-source rejection, exact dimension counters, 83 passing fuzz-safety tests, 875 passing interpreter tests (969 total), a warning-free Clippy gate, and both Docker gates. Token-preserving trivia-splice conformance is the next bounded tooling slice, not an external blocker.
 
 ## Blocker template
 

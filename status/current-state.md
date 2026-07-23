@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
 ## Latest autonomous verification
+
+All required verification passed for the 2026-07-24 deterministic valid-program token-splice robustness run. Four verified declaration, expression, initializer, and control-flow bases contribute 107 tokens; delimiter, operator, and keyword families apply insertion at every token boundary and replacement at every token position, while family-neutral deletion runs once per position, for 761 unique multiline mutants. Independent `format_ast` and `interpret` panic guards pass, every non-semantic parser error retains a bounded 1-based source location, and exact counters prove all four bases (108/185/227/241 cases), three mutations (333/107/321), and three insertion/replacement token families (218 each) ran. A duplicate-source assertion RED exposed and removed the initial family-loop duplication of deletion mutants. Existing parser/runtime behavior otherwise matched immediately, so this is deliberate robustness coverage without production changes. The suite now has 83 fuzz-safety tests and 875 interpreter tests (969 total).
+
+Verified commands: clean-baseline `cargo test`; focused token-splice coverage, duplicate-mutant RED, and corrected unique-mutant GREEN; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust` (output 10); and `git diff --check`.
 
 All required verification passed for the 2026-07-23 deterministic lexer/parser robustness expansion. Five fixed-seed input families (integer bases/suffixes, escapes, comment boundaries, punctuator boundaries, and arbitrary bytes decoded lossily) cross four raw/offset/function-body/return-operand routes for 320 total cases. Separate `format_tokens` and `format_ast` panic guards isolate lexer and parser behavior; lexer errors prove exact source-line/caret placement, parser errors prove bounded 1-based line/column locations, and generated counters prove every family and route ran. The focused test's initial RED was a test-oracle mistake that treated the location-free whole-program `missing main() function` semantic validation as a syntax error; it is now counted separately. Rust 1.92 Clippy compatibility cleanup preserved existing generated-test behavior. The suite now has 82 fuzz-safety tests and 875 interpreter tests (968 total).
 

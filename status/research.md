@@ -18,6 +18,11 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-24 — Deterministic valid-program token-splice boundaries
+
+- No external language-semantics research was needed. The implementation decision is to keep four known-valid token-vector bases, verify each baseline AST/result first, then cross delimiter/operator/keyword families with insertion at every boundary and replacement at every token position while running family-neutral deletion only once per position. Reject duplicate rendered sources so dimension counters cannot overstate distinct coverage. Render mutants over multiple lines so parser location bounds exercise nontrivial line numbers.
+- Call public `format_ast()` and `interpret()` independently under `catch_unwind`; count the location-free whole-program `missing main() function` validation separately, require every other parser failure to satisfy bounded 1-based line/column invariants, and assert exact base/mutation/family totals. Mutation keywords deliberately exclude loop forms so a syntactically valid mutation cannot create an unbounded execution path.
+
 ## 2026-07-23 — Deterministic lexer/parser robustness boundaries
 
 - No external language-semantics research was needed. The implementation decision is to call public `format_tokens` and `format_ast` separately: this isolates lexer panics/errors from parser panics/errors without executing runtime behavior. Lexer failures must carry an exact source line plus a caret padded to the reported 1-based column; parser syntax failures must report a 1-based line/column within the generated source. Whole-program semantic validation such as `missing main() function` is counted separately because it intentionally has no offending token location.

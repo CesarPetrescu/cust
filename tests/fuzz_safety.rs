@@ -1,4 +1,4 @@
-use std::panic;
+use std::{collections::HashSet, panic};
 
 use cust::{format_ast, format_tokens, interpret};
 
@@ -313,6 +313,218 @@ fn assert_source_location_invariants(
         assert_eq!(caret, format!("{}^", " ".repeat(column - 1)));
         assert_eq!(lines.next(), None, "{context}: {message:?}");
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TokenSpliceFamily {
+    Delimiter,
+    Operator,
+    Keyword,
+}
+
+impl TokenSpliceFamily {
+    const ALL: [Self; 3] = [Self::Delimiter, Self::Operator, Self::Keyword];
+
+    fn token(self, index: usize, excluded: Option<&str>) -> &'static str {
+        const DELIMITERS: [&str; 8] = ["(", ")", "[", "]", "{", "}", ";", ","];
+        const OPERATORS: [&str; 8] = ["+", "-", "*", "/", "=", "==", "&&", "?"];
+        const KEYWORDS: [&str; 8] = [
+            "int", "return", "if", "else", "const", "struct", "void", "_Bool",
+        ];
+        let tokens = match self {
+            Self::Delimiter => &DELIMITERS,
+            Self::Operator => &OPERATORS,
+            Self::Keyword => &KEYWORDS,
+        };
+        let mut token_index = index % tokens.len();
+        if excluded == Some(tokens[token_index]) {
+            token_index = (token_index + 1) % tokens.len();
+        }
+        tokens[token_index]
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TokenSpliceMutation {
+    Insert,
+    Delete,
+    Replace,
+}
+
+impl TokenSpliceMutation {
+    const ALL: [Self; 3] = [Self::Insert, Self::Delete, Self::Replace];
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TokenSpliceBase {
+    name: &'static str,
+    tokens: &'static [&'static str],
+    expected: i64,
+}
+
+const TOKEN_SPLICE_BASES: [TokenSpliceBase; 4] = [
+    TokenSpliceBase {
+        name: "declaration",
+        tokens: &[
+            "int", "main", "(", "void", ")", "{", "int", "value", "=", "3", ";", "return", "value",
+            ";", "}",
+        ],
+        expected: 3,
+    },
+    TokenSpliceBase {
+        name: "expression",
+        tokens: &[
+            "int", "main", "(", "void", ")", "{", "int", "left", "=", "1", ";", "int", "right",
+            "=", "2", ";", "return", "(", "left", "+", "right", ")", "*", "3", ";", "}",
+        ],
+        expected: 9,
+    },
+    TokenSpliceBase {
+        name: "initializer",
+        tokens: &[
+            "int", "main", "(", "void", ")", "{", "int", "values", "[", "3", "]", "=", "{", "1",
+            ",", "2", ",", "3", "}", ";", "return", "values", "[", "0", "]", "+", "values", "[",
+            "2", "]", ";", "}",
+        ],
+        expected: 4,
+    },
+    TokenSpliceBase {
+        name: "control-flow",
+        tokens: &[
+            "int", "main", "(", "void", ")", "{", "int", "value", "=", "2", ";", "if", "(",
+            "value", ">", "1", ")", "{", "value", "+=", "3", ";", "}", "else", "{", "value", "=",
+            "0", ";", "}", "return", "value", ";", "}",
+        ],
+        expected: 5,
+    },
+];
+
+#[test]
+fn generated_valid_program_token_splices_remain_panic_free_and_source_located() {
+    let total_base_tokens = TOKEN_SPLICE_BASES
+        .iter()
+        .map(|base| base.tokens.len())
+        .sum::<usize>();
+    let expected_per_family = 2 * total_base_tokens + TOKEN_SPLICE_BASES.len();
+    let mut base_counts = [0; TOKEN_SPLICE_BASES.len()];
+    let mut mutation_counts = [0; TokenSpliceMutation::ALL.len()];
+    let mut family_counts = [0; TokenSpliceFamily::ALL.len()];
+    let mut syntax_error_count = 0;
+    let mut semantic_validation_count = 0;
+    let mut parsed_program_count = 0;
+    let mut mutant_sources = HashSet::new();
+
+    for base in TOKEN_SPLICE_BASES {
+        let source = render_token_splice_source(base.tokens);
+        assert!(format_ast(&source).is_ok(), "invalid base {}", base.name);
+        assert_eq!(
+            interpret(&source),
+            Ok(base.expected),
+            "invalid base {}",
+            base.name
+        );
+    }
+
+    for (base_index, base) in TOKEN_SPLICE_BASES.into_iter().enumerate() {
+        for (mutation_index, mutation) in TokenSpliceMutation::ALL.into_iter().enumerate() {
+            let families = if matches!(mutation, TokenSpliceMutation::Delete) {
+                &TokenSpliceFamily::ALL[..1]
+            } else {
+                &TokenSpliceFamily::ALL
+            };
+            for (family_index, family) in families.iter().copied().enumerate() {
+                let boundary_count = match mutation {
+                    TokenSpliceMutation::Insert => base.tokens.len() + 1,
+                    TokenSpliceMutation::Delete | TokenSpliceMutation::Replace => base.tokens.len(),
+                };
+                for boundary in 0..boundary_count {
+                    let source =
+                        mutated_token_splice_source(base.tokens, family, mutation, boundary);
+                    let context = format!(
+                        "base {}, family {family:?}, mutation {mutation:?}, boundary {boundary}, source {source:?}",
+                        base.name
+                    );
+                    assert!(
+                        mutant_sources.insert(source.clone()),
+                        "duplicate token-splice mutant for {context}"
+                    );
+
+                    let ast_result = panic::catch_unwind(|| format_ast(&source))
+                        .unwrap_or_else(|_| panic!("format_ast panicked for {context}"));
+                    match ast_result {
+                        Ok(_) => parsed_program_count += 1,
+                        Err(error) => {
+                            let message = error.to_string();
+                            if message == "missing main() function" {
+                                semantic_validation_count += 1;
+                            } else {
+                                syntax_error_count += 1;
+                                assert_source_location_invariants(
+                                    &source, &message, false, &context,
+                                );
+                            }
+                        }
+                    }
+
+                    let interpret_result = panic::catch_unwind(|| interpret(&source));
+                    assert!(interpret_result.is_ok(), "interpret panicked for {context}");
+
+                    base_counts[base_index] += 1;
+                    mutation_counts[mutation_index] += 1;
+                    if !matches!(mutation, TokenSpliceMutation::Delete) {
+                        family_counts[family_index] += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        base_counts,
+        TOKEN_SPLICE_BASES.map(|base| 7 * base.tokens.len() + 3)
+    );
+    assert_eq!(
+        mutation_counts,
+        [
+            3 * (total_base_tokens + TOKEN_SPLICE_BASES.len()),
+            total_base_tokens,
+            3 * total_base_tokens,
+        ]
+    );
+    assert_eq!(family_counts, [expected_per_family; 3]);
+    assert_eq!(
+        syntax_error_count + semantic_validation_count + parsed_program_count,
+        7 * total_base_tokens + 3 * TOKEN_SPLICE_BASES.len()
+    );
+    assert!(syntax_error_count > 0);
+    assert!(parsed_program_count > 0);
+}
+
+fn render_token_splice_source(tokens: &[&str]) -> String {
+    let lines = tokens
+        .chunks(7)
+        .map(|chunk| chunk.join(" "))
+        .collect::<Vec<_>>();
+    format!("{}\n", lines.join("\n"))
+}
+
+fn mutated_token_splice_source(
+    base: &[&str],
+    family: TokenSpliceFamily,
+    mutation: TokenSpliceMutation,
+    boundary: usize,
+) -> String {
+    let mut tokens = base.to_vec();
+    match mutation {
+        TokenSpliceMutation::Insert => tokens.insert(boundary, family.token(boundary, None)),
+        TokenSpliceMutation::Delete => {
+            tokens.remove(boundary);
+        }
+        TokenSpliceMutation::Replace => {
+            tokens[boundary] = family.token(boundary, Some(tokens[boundary]));
+        }
+    }
+    render_token_splice_source(&tokens)
 }
 
 #[test]
