@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-23 fixed-seed `_Bool` conversion-context run after focused RED/GREEN evidence, a warning-free compiler-oracle fixture returning 27 under Cust/GCC/Clang, 81 passing fuzz-safety tests, 875 passing interpreter tests (967 total), and both Docker gates. Deterministic arbitrary-byte/string lexer/parser robustness expansion is the next bounded tooling slice, not an external blocker.
+None. Last reviewed in the 2026-07-23 deterministic lexer/parser robustness run after focused RED/GREEN evidence, 320 panic-guarded family/route cases with source-location invariants, 82 passing fuzz-safety tests, 875 passing interpreter tests (968 total), a warning-free Rust 1.92 Clippy gate, and both Docker gates. Deterministic valid-program token-splice parser robustness is the next bounded tooling slice, not an external blocker.
 
 ## Blocker template
 

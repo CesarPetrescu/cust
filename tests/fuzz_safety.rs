@@ -1,6 +1,6 @@
 use std::panic;
 
-use cust::interpret;
+use cust::{format_ast, format_tokens, interpret};
 
 #[test]
 fn generated_malformed_programs_do_not_panic() {
@@ -55,6 +55,263 @@ fn arbitrary_byte_inputs_do_not_panic_after_lossy_utf8_decoding() {
             result.is_ok(),
             "interpret panicked for arbitrary byte case {case_index}: {bytes:?}"
         );
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum LexicalRobustnessFamily {
+    IntegerLiteral,
+    EscapeSequence,
+    CommentBoundary,
+    PunctuatorBoundary,
+    ArbitraryBytes,
+}
+
+impl LexicalRobustnessFamily {
+    const ALL: [Self; 5] = [
+        Self::IntegerLiteral,
+        Self::EscapeSequence,
+        Self::CommentBoundary,
+        Self::PunctuatorBoundary,
+        Self::ArbitraryBytes,
+    ];
+
+    fn fragment(self, state: &mut u64, case_index: usize) -> String {
+        const INTEGER_LITERALS: [&str; 16] = [
+            "0",
+            "7u",
+            "052UL",
+            "0x2aLL",
+            "0XffuL",
+            "08",
+            "0x",
+            "999999999999999999999999999999",
+            "1lul",
+            "0XG",
+            "00u",
+            "18446744073709551616",
+            "0LL",
+            "0777llu",
+            "123abc",
+            "0x1z",
+        ];
+        const ESCAPE_SEQUENCES: [&str; 16] = [
+            r#""plain""#,
+            r#""\n\t\\\"""#,
+            r#""\101\x2a""#,
+            r#""\x""#,
+            r#""\q""#,
+            r#"'\101'"#,
+            r#"'\x2a'"#,
+            r#"'\x'"#,
+            "''",
+            "'a",
+            r#""unterminated"#,
+            "\"line\nbreak\"",
+            r#""\777""#,
+            r#"'\?'"#,
+            r#""\\""#,
+            r#"'\v'"#,
+        ];
+        const COMMENT_BOUNDARIES: [&str; 16] = [
+            "/* closed */ 1",
+            "// line\n1",
+            "1/* inline */+2",
+            "1// split\n+2",
+            "/* unterminated",
+            "/",
+            "/=",
+            "/**/",
+            "/***/3",
+            "//",
+            "/*/",
+            "/**/*/",
+            "1/2",
+            "1/* **/2",
+            "// /* not a block\n3",
+            "/* // not a line */4",
+        ];
+        const PUNCTUATOR_BOUNDARIES: [&str; 16] = [
+            "+ ++ += - -- -= ->",
+            "* *= / /= % %=",
+            "& && &= | || |= ^ ^=",
+            "< <= << <<= > >= >> >>=",
+            "= == ! != ~",
+            "( ) [ ] { }",
+            ". .. ... ->",
+            "? : , ;",
+            "+++++",
+            "<<==",
+            ">>>=",
+            "&&&=",
+            "|||=",
+            "--->",
+            "!=!=",
+            "*/*/",
+        ];
+
+        match self {
+            Self::IntegerLiteral => INTEGER_LITERALS[case_index % INTEGER_LITERALS.len()].into(),
+            Self::EscapeSequence => ESCAPE_SEQUENCES[case_index % ESCAPE_SEQUENCES.len()].into(),
+            Self::CommentBoundary => {
+                COMMENT_BOUNDARIES[case_index % COMMENT_BOUNDARIES.len()].into()
+            }
+            Self::PunctuatorBoundary => {
+                PUNCTUATOR_BOUNDARIES[case_index % PUNCTUATOR_BOUNDARIES.len()].into()
+            }
+            Self::ArbitraryBytes => {
+                let len = (next_u64(state) % 32 + 1) as usize;
+                let bytes = (0..len)
+                    .map(|_| (next_u64(state) & 0xff) as u8)
+                    .collect::<Vec<_>>();
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum LexicalRobustnessRoute {
+    Raw,
+    LineAndTabOffset,
+    FunctionBody,
+    ReturnOperand,
+}
+
+impl LexicalRobustnessRoute {
+    const ALL: [Self; 4] = [
+        Self::Raw,
+        Self::LineAndTabOffset,
+        Self::FunctionBody,
+        Self::ReturnOperand,
+    ];
+
+    fn render(self, fragment: &str) -> String {
+        match self {
+            Self::Raw => fragment.to_string(),
+            Self::LineAndTabOffset => format!("\n\t{fragment}\n"),
+            Self::FunctionBody => format!("int main(void) {{\n  {fragment}\n}}\n"),
+            Self::ReturnOperand => format!("int main(void) {{\n  return {fragment};\n}}\n"),
+        }
+    }
+}
+
+#[test]
+fn generated_lexical_input_families_preserve_safety_and_error_locations() {
+    const SEEDS: [u64; 5] = [
+        0xC057_1E01,
+        0xC057_1E02,
+        0xC057_1E03,
+        0xC057_1E04,
+        0xC057_1E05,
+    ];
+    let mut family_counts = [0; 5];
+    let mut route_counts = [0; 4];
+    let mut lexer_error_count = 0;
+    let mut parser_error_count = 0;
+    let mut semantic_validation_count = 0;
+    let mut parsed_program_count = 0;
+
+    for (family_index, family) in LexicalRobustnessFamily::ALL.into_iter().enumerate() {
+        let mut state = SEEDS[family_index];
+        for case_index in 0..16 {
+            let fragment = family.fragment(&mut state, case_index);
+            for (route_index, route) in LexicalRobustnessRoute::ALL.into_iter().enumerate() {
+                let source = route.render(&fragment);
+                let context = format!(
+                    "family {family:?}, route {route:?}, case {case_index}, source {source:?}"
+                );
+
+                let lex_result = panic::catch_unwind(|| format_tokens(&source));
+                let lex_result =
+                    lex_result.unwrap_or_else(|_| panic!("lexer panicked for {context}"));
+                if let Err(error) = lex_result {
+                    lexer_error_count += 1;
+                    assert_source_location_invariants(&source, &error.to_string(), true, &context);
+                } else {
+                    let parse_result = panic::catch_unwind(|| format_ast(&source));
+                    let parse_result =
+                        parse_result.unwrap_or_else(|_| panic!("parser panicked for {context}"));
+                    match parse_result {
+                        Ok(_) => parsed_program_count += 1,
+                        Err(error) => {
+                            let message = error.to_string();
+                            if message == "missing main() function" {
+                                semantic_validation_count += 1;
+                            } else {
+                                parser_error_count += 1;
+                                assert_source_location_invariants(
+                                    &source, &message, false, &context,
+                                );
+                            }
+                        }
+                    }
+                }
+
+                family_counts[family_index] += 1;
+                route_counts[route_index] += 1;
+            }
+        }
+    }
+
+    assert_eq!(family_counts, [64; 5]);
+    assert_eq!(route_counts, [80; 4]);
+    assert!(
+        lexer_error_count >= 80,
+        "only {lexer_error_count} lexer errors"
+    );
+    assert!(
+        parser_error_count >= 100,
+        "only {parser_error_count} parser errors"
+    );
+    assert!(
+        parsed_program_count >= 10,
+        "only {parsed_program_count} parsed programs"
+    );
+    assert!(semantic_validation_count >= 1);
+}
+
+fn assert_source_location_invariants(
+    source: &str,
+    message: &str,
+    expect_caret_context: bool,
+    context: &str,
+) {
+    let first_line = message.lines().next().unwrap_or(message);
+    let (_, location) = first_line
+        .rsplit_once(" at line ")
+        .unwrap_or_else(|| panic!("missing source location for {context}: {message:?}"));
+    let (line, column) = location
+        .split_once(", column ")
+        .unwrap_or_else(|| panic!("malformed source location for {context}: {message:?}"));
+    let line = line
+        .parse::<usize>()
+        .unwrap_or_else(|_| panic!("invalid source line for {context}: {message:?}"));
+    let column = column
+        .parse::<usize>()
+        .unwrap_or_else(|_| panic!("invalid source column for {context}: {message:?}"));
+    let source_lines = source.split('\n').collect::<Vec<_>>();
+    assert!(
+        (1..=source_lines.len()).contains(&line),
+        "{context}: {message:?}"
+    );
+    let source_line = source_lines[line - 1]
+        .strip_suffix('\r')
+        .unwrap_or(source_lines[line - 1]);
+    assert!(
+        (1..=source_line.chars().count() + 1).contains(&column),
+        "{context}: {message:?}"
+    );
+
+    if expect_caret_context {
+        let mut lines = message.lines();
+        let _ = lines.next();
+        assert_eq!(lines.next(), Some(source_line), "{context}: {message:?}");
+        let caret = lines
+            .next()
+            .unwrap_or_else(|| panic!("missing caret for {context}: {message:?}"));
+        assert_eq!(caret, format!("{}^", " ".repeat(column - 1)));
+        assert_eq!(lines.next(), None, "{context}: {message:?}");
     }
 }
 
@@ -2459,6 +2716,7 @@ enum WrappedDirectLiteralOffsetRoute {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 enum CapturedOuterForwardRoute {
     OneHopBeforeOffset,
     TwoHopBeforeOffset,
@@ -7385,14 +7643,14 @@ fn generated_discard_context_classification_matches_model_without_panics() {
     let mut family_counts = [0; 4];
 
     for (route_index, (label, expression, marker_increments)) in routes.iter().enumerate() {
-        for context in 0..3 {
+        for (context, context_count) in context_counts.iter_mut().enumerate() {
             let expected = marker_increments * 10 + i64::from(context == 2);
             assert_interpretation(
                 &discard_context_program(expression, context),
                 ExpectedInterpretation::Value(expected),
                 &format!("discard route {route_index} ({label}), context {context}"),
             );
-            context_counts[context] += 1;
+            *context_count += 1;
         }
         family_counts[match route_index {
             0..=7 => 0,
@@ -13057,7 +13315,7 @@ fn generate_scalar_field_scalar_expr(
     state: &mut u64,
     kind: ScalarFieldKind,
 ) -> ScalarFieldScalarExpr {
-    if next_u64(state) % 3 != 0 {
+    if !next_u64(state).is_multiple_of(3) {
         return ScalarFieldScalarExpr::Literal((next_u64(state) % 7) as i64 - 3);
     }
     let left_route = EmbeddedPointerRoute::STABLE
@@ -13558,7 +13816,7 @@ fn random_embedded_pointer_base(
 }
 
 fn generate_embedded_scalar_expr(state: &mut u64, kind: AggregateKind) -> EmbeddedScalarExpr {
-    if next_u64(state) % 3 != 0 {
+    if !next_u64(state).is_multiple_of(3) {
         return EmbeddedScalarExpr::Literal((next_u64(state) % 7) as i64 - 3);
     }
     let left_route = EmbeddedPointerRoute::STABLE
@@ -14067,7 +14325,7 @@ fn random_aggregate_pointer_base(
 }
 
 fn generate_aggregate_scalar_expr(state: &mut u64, kind: AggregateKind) -> AggregateScalarExpr {
-    if next_u64(state) % 3 != 0 {
+    if !next_u64(state).is_multiple_of(3) {
         return AggregateScalarExpr::Literal((next_u64(state) % 9) as i64 - 4);
     }
     let left_route = AggregatePointerRoute::STABLE
@@ -14747,7 +15005,7 @@ fn adjusted_parameter_first_pointer(
         },
         outer: ((relation_index + operation_index) % 2) as i64,
         inner: ((relation_index * 2 + operation_index) % 3) as i64,
-        route: if (relation_index + operation_index) % 2 == 0 {
+        route: if (relation_index + operation_index).is_multiple_of(2) {
             AdjustedParameterRoute::Direct
         } else {
             AdjustedParameterRoute::Reverse
@@ -15666,6 +15924,7 @@ fn post_forward_pointer_wrapper(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn post_forward_wrapped_direct_literal_argument(
     inner_wrapper: WrappedDirectLiteralRoute,
     post_wrapper: WrappedDirectLiteralRoute,
@@ -16641,6 +16900,7 @@ fn wrapped_direct_literal_adjusted_parameter_alias_program(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn wrapped_offset_direct_literal_adjusted_parameter_alias_program(
     first: AdjustedParameterPointer,
     second: AdjustedParameterPointer,
@@ -16664,6 +16924,7 @@ fn wrapped_offset_direct_literal_adjusted_parameter_alias_program(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn outer_forwarded_wrapped_offset_direct_literal_adjusted_parameter_alias_program(
     first: AdjustedParameterPointer,
     second: AdjustedParameterPointer,
@@ -16688,6 +16949,7 @@ fn outer_forwarded_wrapped_offset_direct_literal_adjusted_parameter_alias_progra
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn wrapped_offset_direct_literal_adjusted_parameter_alias_program_with_outer_forwarding(
     first: AdjustedParameterPointer,
     second: AdjustedParameterPointer,
@@ -17266,6 +17528,7 @@ fn wrapped_captured_literal_field_offset_expression(
     offset.render(&wrapped)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn wrapped_captured_literal_field_offset_alias_program(
     first: AdjustedParameterPointer,
     second: AdjustedParameterPointer,
@@ -18898,7 +19161,7 @@ fn pointer_program(result_type: &str, expression: &str, setup: &str) -> String {
 }
 
 fn generate_pointer_expr(state: &mut u64, depth: usize) -> PointerExpr {
-    if depth == 0 || next_u64(state) % 5 == 0 {
+    if depth == 0 || next_u64(state).is_multiple_of(5) {
         return PointerExpr::Base(ModelPointer {
             root: if next_u64(state) & 1 == 0 {
                 ArrayRoot::Left
@@ -18936,7 +19199,7 @@ fn generate_pointer_expr(state: &mut u64, depth: usize) -> PointerExpr {
 }
 
 fn generate_scalar_expr(state: &mut u64, depth: usize) -> ScalarExpr {
-    if depth == 0 || next_u64(state) % 4 == 0 {
+    if depth == 0 || next_u64(state).is_multiple_of(4) {
         return ScalarExpr::Literal((next_u64(state) % 7) as i64 - 3);
     }
 

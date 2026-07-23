@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-23 — Deterministic lexer/parser robustness boundaries
+
+- No external language-semantics research was needed. The implementation decision is to call public `format_tokens` and `format_ast` separately: this isolates lexer panics/errors from parser panics/errors without executing runtime behavior. Lexer failures must carry an exact source line plus a caret padded to the reported 1-based column; parser syntax failures must report a 1-based line/column within the generated source. Whole-program semantic validation such as `missing main() function` is counted separately because it intentionally has no offending token location.
+- The fixed matrix uses five seeds and five input families (integer bases/suffixes, escapes, comments, punctuator boundaries, arbitrary lossy-byte strings) across raw, line/tab-offset, function-body, and return-operand placements. Exact counters are more reliable than probabilistic minimum family coverage.
+- The current Rust 1.92 Clippy gate recognizes `.is_multiple_of(...)` and newly flags existing generated-test enum names/range loops/high-arity fixture builders. Localized allows are retained only where domain-rich route names or fixture-builder signatures improve model readability; simple modulo and range-loop findings were rewritten without changing generated cases.
+
 ## 2026-07-23 — `_Bool` conversion-context model and aggregate result normalization
 
 - No new external semantics source was needed beyond N1570 §6.3.1.2. The runtime finding is that low-level field writers can normalize stored `_Bool` values while assignment, compound-assignment, and increment/decrement callers still leak raw RHS/arithmetic results. Aggregate-backed mutation paths must return the normalized stored slot; aggregate compound-literal field paths must carry field `CType` metadata and normalize the result directly.

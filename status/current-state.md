@@ -4,6 +4,10 @@ Last updated: 2026-07-23
 
 ## Latest autonomous verification
 
+All required verification passed for the 2026-07-23 deterministic lexer/parser robustness expansion. Five fixed-seed input families (integer bases/suffixes, escapes, comment boundaries, punctuator boundaries, and arbitrary bytes decoded lossily) cross four raw/offset/function-body/return-operand routes for 320 total cases. Separate `format_tokens` and `format_ast` panic guards isolate lexer and parser behavior; lexer errors prove exact source-line/caret placement, parser errors prove bounded 1-based line/column locations, and generated counters prove every family and route ran. The focused test's initial RED was a test-oracle mistake that treated the location-free whole-program `missing main() function` semantic validation as a syntax error; it is now counted separately. Rust 1.92 Clippy compatibility cleanup preserved existing generated-test behavior. The suite now has 82 fuzz-safety tests and 875 interpreter tests (968 total).
+
+Verified commands: clean-baseline `cargo test`; focused robustness RED/GREEN; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust` (output 10); and `git diff --check`.
+
 All required verification passed for the 2026-07-23 fixed-seed `_Bool` conversion-context model and aggregate-backed result-normalization fix. The panic-guarded independent oracle covers 432 scalar/pointer direct/conditional/comma/assignment/call/cast conversions across 18 typed destination contexts, 66 compound/prefix/postfix updates across 11 supported destination contexts, six aggregate compound-literal updates, and five exact shape/const diagnostics. RED exposed struct-pointer field pointer-RHS evaluation and raw aggregate assignment/update result leaks; destination `CType` metadata and normalized post-write reads now cover struct-pointer fields, aggregate-array elements, embedded aggregate-array fields, scalar array fields, aggregate compound-literal fields, and scalar compound literals. The warning-free Cust/GCC/Clang fixture returns 27. The suite now has 81 fuzz-safety tests and 875 interpreter tests (967 total).
 
 Verified commands: clean-baseline `cargo test`; focused three-test RED/GREEN `generated_bool` run; focused interpreter fixture; direct `cc -std=c11 -Wall -Wextra -Werror` fixture execution (27); canonical `c_compat`; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust` (output 10); and `git diff --check`.
@@ -4467,7 +4471,7 @@ Note: an attempted focused command with a substring that did not match any test 
 ## Test/tooling coverage
 
 - Cust is an interpreter. The implementation and runtime path must execute via `cust::interpret`/the `cust` CLI. Native compilers (`$CC`, `gcc`, `clang`, or `cc`) are allowed only inside tests as external oracles that compile supported fixtures and compare native exit codes against Cust results; they must not be used as implementation helpers or as Cust's execution engine. `clangd` is editor/LSP-only and is not part of verification.
-- `tests/fuzz_safety.rs` adds deterministic generated malformed-program and arbitrary-byte/lossy-UTF-8 smoke properties that assert `cust::interpret` does not panic on lexer/parser/interpreter setup inputs; normal `CustError`s are accepted.
+- `tests/fuzz_safety.rs` adds deterministic generated malformed-program and arbitrary-byte/lossy-UTF-8 smoke properties plus a 320-case lexer/parser matrix over integer literals, escapes, comments, punctuators, and arbitrary bytes. It independently panic-guards tokenization and AST parsing, validates lexer caret context and parser line/column bounds, and uses exact family/route counters; normal `CustError`s are accepted.
 
 ## Diagnostics
 
