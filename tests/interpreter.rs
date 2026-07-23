@@ -9383,12 +9383,12 @@ fn adjusted_aggregate_parameter_distinct_root_selected_result_carry_matches_fixt
 }
 
 #[test]
-fn adjusted_aggregate_parameter_returned_distinct_root_reselection_matches_fixture() {
+fn adjusted_aggregate_parameter_final_reselected_distinct_root_carry_matches_fixture() {
     let program = include_str!(
         "fixtures/valid/adjusted_aggregate_parameter_returned_distinct_root_reselection.c",
     );
 
-    assert_eq!(interpret(program).unwrap(), 39);
+    assert_eq!(interpret(program).unwrap(), 51);
 }
 
 #[test]

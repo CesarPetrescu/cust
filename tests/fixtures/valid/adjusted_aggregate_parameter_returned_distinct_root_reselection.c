@@ -28,6 +28,13 @@ int scalar_carry_unselected;
 int aggregate_carry_comma;
 int scalar_final_selection_calls;
 int aggregate_final_selection_calls;
+int scalar_fresh_carry_calls;
+int aggregate_fresh_carry_calls;
+int scalar_fresh_return_calls;
+int aggregate_fresh_return_calls;
+int scalar_fresh_selected;
+int scalar_fresh_unselected;
+int aggregate_fresh_comma;
 
 const int *return_int(struct Item items[]) {
     int *raw = &items[0].nested.values[0];
@@ -137,6 +144,36 @@ const struct Point *reselect_carried_point(
     return select_first ? first : second;
 }
 
+const int *carry_final_int(const int *value) {
+    scalar_fresh_carry_calls = scalar_fresh_carry_calls + 1;
+    return value;
+}
+
+const int *carry_final_int_twice(const int *value) {
+    scalar_fresh_carry_calls = scalar_fresh_carry_calls + 1;
+    return carry_final_int(value);
+}
+
+const int *return_final_int(const int *value) {
+    scalar_fresh_return_calls = scalar_fresh_return_calls + 1;
+    return value;
+}
+
+const struct Point *carry_final_point(const struct Point *value) {
+    aggregate_fresh_carry_calls = aggregate_fresh_carry_calls + 1;
+    return value;
+}
+
+const struct Point *return_final_point(const struct Point *value) {
+    aggregate_fresh_return_calls = aggregate_fresh_return_calls + 1;
+    return value;
+}
+
+const struct Point *return_final_point_twice(const struct Point *value) {
+    aggregate_fresh_return_calls = aggregate_fresh_return_calls + 1;
+    return return_final_point(value);
+}
+
 int main(void) {
     struct Holder scalar_holder = {};
     struct Holder point_holder = {};
@@ -192,6 +229,22 @@ int main(void) {
         point_final,
         0
     );
+    const int *int_fresh_carried = carry_final_int_twice(
+        (1
+             ? (++scalar_fresh_selected, int_final_reselected)
+             : (++scalar_fresh_unselected, int_final))
+            + 1
+    );
+    const int *int_fresh_returned = return_final_int(int_fresh_carried);
+    const struct Point *point_fresh_carried = carry_final_point(
+        point_final_reselected
+    );
+    const struct Point *point_fresh_composed = &(
+        (++aggregate_fresh_comma, point_fresh_carried)
+    )[1];
+    const struct Point *point_fresh_returned = return_final_point_twice(
+        point_fresh_composed
+    );
 
     return (int_reselected == int_alternate) + (int_final == int_alternate + 1)
         + (*int_final == 19) + (int_carried == int_final)
@@ -215,5 +268,13 @@ int main(void) {
         + (int_final_reselected != int_final) + (scalar_final_selection_calls == 2)
         + (point_final_reselected == point_final) + (point_final_reselected->value == 5)
         + (point_final_reselected != point_alternate_slot)
-        + (aggregate_final_selection_calls == 1);
+        + (aggregate_final_selection_calls == 1)
+        + (int_fresh_returned == int_primary_slot + 1) + (*int_fresh_returned == 9)
+        + (int_final_reselected == int_primary_slot)
+        + (scalar_fresh_selected == 1 && scalar_fresh_unselected == 0)
+        + (scalar_fresh_carry_calls == 2) + (scalar_fresh_return_calls == 1)
+        + (point_fresh_returned == point_final_reselected + 1)
+        + (point_fresh_returned->value == 7)
+        + (point_final_reselected == point_final) + (aggregate_fresh_comma == 1)
+        + (aggregate_fresh_carry_calls == 1) + (aggregate_fresh_return_calls == 2);
 }

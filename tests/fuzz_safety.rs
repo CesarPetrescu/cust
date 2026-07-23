@@ -5789,6 +5789,116 @@ fn generated_returned_distinct_root_results_survive_final_parameter_reselection_
 }
 
 #[test]
+fn generated_final_reselected_distinct_root_results_survive_fresh_composition_without_panics() {
+    let mut kind_counts = [0; 2];
+    let mut primary_root_counts = [0; 4];
+    let mut final_result_counts = [0; 2];
+    let mut wrapper_counts = [0; 3];
+    let mut offset_counts = [0; 3];
+    let mut placement_counts = [0; 2];
+    let mut helper_hop_counts = [0; 2];
+    let mut return_hop_counts = [0; 2];
+    let mut case_count = 0;
+
+    for (kind_index, kind) in AdjustedParameterFieldKind::ALL.into_iter().enumerate() {
+        for primary_root in DerivedInnerReturnRoot::ALL {
+            for selects_returned in [false, true] {
+                for wrapper in WrappedDirectLiteralRoute::ALL {
+                    for offset in PostSelectionOffsetRoute::ALL {
+                        for placement in DistinctRootCarryPlacement::ALL {
+                            for helper_two_hop in [false, true] {
+                                for return_two_hop in [false, true] {
+                                    assert_interpretation(
+                                        &final_reselected_distinct_root_result_carry_program(
+                                            kind,
+                                            primary_root,
+                                            selects_returned,
+                                            wrapper,
+                                            offset,
+                                            placement,
+                                            helper_two_hop,
+                                            return_two_hop,
+                                        ),
+                                        ExpectedInterpretation::Value(45),
+                                        &format!(
+                                            "final reselected distinct-root carry, kind {kind:?}, primary root {primary_root:?}, selects returned {selects_returned}, wrapper {wrapper:?}, offset {offset:?}, placement {placement:?}, helper two hop {helper_two_hop}, return two hop {return_two_hop}"
+                                        ),
+                                    );
+                                    kind_counts[kind_index] += 1;
+                                    primary_root_counts[primary_root.index()] += 1;
+                                    final_result_counts[usize::from(selects_returned)] += 1;
+                                    wrapper_counts[wrapper.index()] += 1;
+                                    offset_counts[offset.index()] += 1;
+                                    placement_counts[placement.index()] += 1;
+                                    helper_hop_counts[usize::from(helper_two_hop)] += 1;
+                                    return_hop_counts[usize::from(return_two_hop)] += 1;
+                                    case_count += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for select_returned in [false, true] {
+            assert_interpretation(
+                &final_reselected_distinct_root_result_carry_bounds_program(kind, select_returned),
+                ExpectedInterpretation::Error(kind.inner_pointer_bounds_error()),
+                &format!(
+                    "final reselected distinct-root carry bounds, kind {kind:?}, select returned {select_returned}"
+                ),
+            );
+            assert_interpretation(
+                &final_reselected_distinct_root_result_carry_write_program(kind, select_returned),
+                ExpectedInterpretation::Error("cannot assign through pointer to const"),
+                &format!(
+                    "final reselected distinct-root carry write, kind {kind:?}, select returned {select_returned}"
+                ),
+            );
+        }
+        assert_interpretation(
+            &final_reselected_distinct_root_result_carry_cross_root_program(kind, false),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("final reselected distinct-root carry subtraction, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &final_reselected_distinct_root_result_carry_cross_root_program(kind, true),
+            ExpectedInterpretation::Error("cannot compare pointers to different arrays"),
+            &format!("final reselected distinct-root carry ordering, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &final_reselected_distinct_root_result_carry_lifetime_program(kind, false),
+            ExpectedInterpretation::Value(17),
+            &format!("final reselected distinct-root carry live lifetime, kind {kind:?}"),
+        );
+        assert_interpretation(
+            &final_reselected_distinct_root_result_carry_lifetime_program(kind, true),
+            ExpectedInterpretation::Error("pointer to out-of-scope variable 'local'"),
+            &format!("final reselected distinct-root carry dangling lifetime, kind {kind:?}"),
+        );
+    }
+
+    assert_interpretation(
+        &final_reselected_distinct_root_result_carry_type_mismatch_program(),
+        ExpectedInterpretation::Error(
+            "cannot convert pointer to struct 'Point' to pointer to struct 'Other'",
+        ),
+        "final reselected distinct-root carry aggregate type mismatch",
+    );
+
+    assert_eq!(case_count, 1_152);
+    assert_eq!(kind_counts, [576; 2]);
+    assert_eq!(primary_root_counts, [288; 4]);
+    assert_eq!(final_result_counts, [576; 2]);
+    assert_eq!(wrapper_counts, [384; 3]);
+    assert_eq!(offset_counts, [384; 3]);
+    assert_eq!(placement_counts, [576; 2]);
+    assert_eq!(helper_hop_counts, [576; 2]);
+    assert_eq!(return_hop_counts, [576; 2]);
+}
+
+#[test]
 fn generated_captured_literal_field_offset_adjusted_parameter_aliases_match_model_without_panics() {
     const PATHS: [AdjustedParameterStorage; 3] = [
         AdjustedParameterStorage::NamedLeftPrimary,
@@ -21374,6 +21484,294 @@ fn returned_distinct_root_result_reselection_type_mismatch_program() -> String {
         boundary_helpers = post_selection_reforward_and_return_helpers(kind),
         carry_helpers = distinct_root_selected_result_carry_helpers(kind),
         reselection_helpers = returned_distinct_root_result_reselection_helpers(kind),
+    )
+}
+
+fn final_reselected_distinct_root_result_carry_helpers(kind: AdjustedParameterFieldKind) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    format!(
+        "int final_carry_calls; int final_return_calls;\n\
+         {const_pointer_type}carry_final_{suffix}({const_pointer_type}value) {{ final_carry_calls = final_carry_calls + 1; return value; }}\n\
+         {const_pointer_type}carry_final_{suffix}_twice({const_pointer_type}value) {{ final_carry_calls = final_carry_calls + 1; return carry_final_{suffix}(value); }}\n\
+         {const_pointer_type}return_final_{suffix}({const_pointer_type}value) {{ final_return_calls = final_return_calls + 1; return value; }}\n\
+         {const_pointer_type}return_final_{suffix}_twice({const_pointer_type}value) {{ final_return_calls = final_return_calls + 1; return return_final_{suffix}(value); }}\n"
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn final_reselected_distinct_root_result_carry_program(
+    kind: AdjustedParameterFieldKind,
+    primary_root: DerivedInnerReturnRoot,
+    selects_returned: bool,
+    wrapper: WrappedDirectLiteralRoute,
+    offset: PostSelectionOffsetRoute,
+    placement: DistinctRootCarryPlacement,
+    helper_two_hop: bool,
+    return_two_hop: bool,
+) -> String {
+    let initial_delta = if primary_root.index() & 1 == 0 { 1 } else { -1 };
+    let mut program = returned_distinct_root_result_reselection_program(
+        kind,
+        primary_root,
+        false,
+        true,
+        primary_root.index() & 1 == 0,
+        WrappedDirectLiteralRoute::ConditionalTrue,
+        PostSelectionOffsetRoute::PointerPlusDelta,
+        DistinctRootCarryPlacement::ComposeBeforeHelper,
+        primary_root.index() & 2 == 0,
+        primary_root.index() & 2 != 0,
+        false,
+        selects_returned,
+        primary_root.index() & 1 != 0,
+    );
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let rejected_root = if selects_returned {
+        "alternate"
+    } else {
+        "selected_returned"
+    };
+    let expected_root = if selects_returned {
+        "primary_base"
+    } else {
+        "alternate"
+    };
+    let fresh_delta = if selects_returned {
+        -initial_delta
+    } else {
+        initial_delta
+    };
+    let expected_root_delta = if selects_returned { 0 } else { fresh_delta };
+    let expected_value = if selects_returned {
+        7
+    } else if fresh_delta == 1 {
+        19
+    } else {
+        15
+    };
+    let carry_helper = format!(
+        "carry_final_{suffix}{}",
+        if helper_two_hop { "_twice" } else { "" },
+    );
+    let return_helper = format!(
+        "return_final_{suffix}{}",
+        if return_two_hop { "_twice" } else { "" },
+    );
+    let (stages, expected_carried) = match placement {
+        DistinctRootCarryPlacement::ComposeBeforeHelper => {
+            let wrapped =
+                post_forward_pointer_wrapper(wrapper, "final_reselected", rejected_root, "fresh");
+            let composed = offset.render(&wrapped, fresh_delta);
+            (
+                format!(
+                    "{const_pointer_type}fresh_composed = {composed};\n\
+                     {const_pointer_type}fresh_carried = {carry_helper}(fresh_composed);\n"
+                ),
+                "fresh_composed",
+            )
+        }
+        DistinctRootCarryPlacement::ComposeAfterHelper => {
+            let wrapped =
+                post_forward_pointer_wrapper(wrapper, "fresh_carried", rejected_root, "fresh");
+            let composed = offset.render(&wrapped, fresh_delta);
+            (
+                format!(
+                    "{const_pointer_type}fresh_carried = {carry_helper}(final_reselected);\n\
+                     {const_pointer_type}fresh_composed = {composed};\n"
+                ),
+                "final_reselected",
+            )
+        }
+    };
+    let helper_definitions = final_reselected_distinct_root_result_carry_helpers(kind);
+    program = program.replacen(
+        "int main(void) {",
+        &format!("{helper_definitions}int main(void) {{"),
+        1,
+    );
+    let return_start = program
+        .rfind("return (")
+        .expect("generated final-reselected program should contain its main return");
+    program.insert_str(
+        return_start,
+        &format!(
+            "int fresh_selected = 0; int fresh_unselected = 0; int fresh_comma = 0;\n\
+             {const_pointer_type}final_slot = final_reselected;\n\
+             {const_pointer_type}returned_slot_after = selected_returned;\n\
+             {const_pointer_type}unselected_slot_after = alternate;\n\
+             {stages}\
+             {const_pointer_type}fresh_returned = {return_helper}(fresh_composed);\n\
+             "
+        ),
+    );
+    let fresh_read = kind.read("fresh_returned");
+    let marker_check = wrapper.marker_check("fresh");
+    let carry_calls = if helper_two_hop { 2 } else { 1 };
+    let return_calls = if return_two_hop { 2 } else { 1 };
+    let return_end = program
+        .rfind(';')
+        .expect("generated final-reselected program should end its main return");
+    program.insert_str(
+        return_end,
+        &format!(
+            "\n                 + (fresh_returned == fresh_composed) + ({fresh_read} == {expected_value})\n\
+             + (fresh_composed - final_reselected == {fresh_delta}) + (fresh_carried == {expected_carried})\n\
+             + (final_slot == final_reselected) + (returned_slot_after == selected_returned)\n\
+             + (unselected_slot_after == alternate) + ({marker_check})\n\
+             + (final_carry_calls == {carry_calls}) + (final_return_calls == {return_calls})\n\
+             + (fresh_returned - {expected_root} == {expected_root_delta})"
+        ),
+    );
+    program
+}
+
+fn final_reselected_distinct_root_result_carry_bounds_program(
+    kind: AdjustedParameterFieldKind,
+    select_returned: bool,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read = kind.read("fresh_returned");
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{boundary_helpers}\n{carry_helpers}\n{reselection_helpers}\n{fresh_helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}primary = return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}alternate = return_distinct_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}returned = return_selected_{suffix}(carry_selected_{suffix}(primary));\n\
+             {const_pointer_type}final_reselected = reselect_carried_{suffix}(returned, alternate, {selection});\n\
+             {const_pointer_type}fresh_returned = return_final_{suffix}_twice(carry_final_{suffix}_twice(final_reselected)) + 2;\n\
+             return {read};\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        carry_helpers = distinct_root_selected_result_carry_helpers(kind),
+        reselection_helpers = returned_distinct_root_result_reselection_helpers(kind),
+        fresh_helpers = final_reselected_distinct_root_result_carry_helpers(kind),
+        selection = i64::from(select_returned),
+    )
+}
+
+fn final_reselected_distinct_root_result_carry_write_program(
+    kind: AdjustedParameterFieldKind,
+    select_returned: bool,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let write = kind.write("fresh_returned", 23);
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{boundary_helpers}\n{carry_helpers}\n{reselection_helpers}\n{fresh_helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}primary = return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}alternate = return_distinct_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}returned = return_selected_{suffix}(carry_selected_{suffix}(primary));\n\
+             {const_pointer_type}final_reselected = reselect_carried_{suffix}(returned, alternate, {selection});\n\
+             {const_pointer_type}fresh_returned = return_final_{suffix}(carry_final_{suffix}_twice(final_reselected));\n\
+             {write}; return 0;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        carry_helpers = distinct_root_selected_result_carry_helpers(kind),
+        reselection_helpers = returned_distinct_root_result_reselection_helpers(kind),
+        fresh_helpers = final_reselected_distinct_root_result_carry_helpers(kind),
+        selection = i64::from(select_returned),
+    )
+}
+
+fn final_reselected_distinct_root_result_carry_cross_root_program(
+    kind: AdjustedParameterFieldKind,
+    ordering: bool,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let operation = if ordering {
+        "fresh_returned < alternate"
+    } else {
+        "fresh_returned - alternate"
+    };
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{boundary_helpers}\n{carry_helpers}\n{reselection_helpers}\n{fresh_helpers}\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             {const_pointer_type}primary = return_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}alternate = return_distinct_inner_{suffix}((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             {const_pointer_type}returned = return_selected_{suffix}(carry_selected_{suffix}(primary + 1));\n\
+             {const_pointer_type}final_reselected = reselect_carried_{suffix}_twice(returned, alternate, 1);\n\
+             {const_pointer_type}fresh_returned = return_final_{suffix}_twice(carry_final_{suffix}(final_reselected - 1));\n\
+             return {operation};\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        carry_helpers = distinct_root_selected_result_carry_helpers(kind),
+        reselection_helpers = returned_distinct_root_result_reselection_helpers(kind),
+        fresh_helpers = final_reselected_distinct_root_result_carry_helpers(kind),
+    )
+}
+
+fn final_reselected_distinct_root_result_carry_lifetime_program(
+    kind: AdjustedParameterFieldKind,
+    select_dangling: bool,
+) -> String {
+    let const_pointer_type = kind.const_pointer_type();
+    let suffix = kind.suffix();
+    let read = kind.read("fresh_returned");
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{boundary_helpers}\n{carry_helpers}\n{reselection_helpers}\n{fresh_helpers}\n\
+         struct Item live_items[1];\n\
+         {const_pointer_type}carry_final_lifetime_{suffix}(int select_dangling) {{\n\
+             struct Item local[1];\n\
+             {const_pointer_type}dangling = return_inner_{suffix}(local);\n\
+             {const_pointer_type}live = return_distinct_inner_{suffix}(live_items);\n\
+             {const_pointer_type}returned = return_selected_{suffix}_twice(carry_selected_{suffix}(dangling));\n\
+             {const_pointer_type}final_reselected = reselect_carried_{suffix}_twice(returned, live, select_dangling);\n\
+             return return_final_{suffix}_twice(carry_final_{suffix}_twice(final_reselected));\n\
+         }}\n\
+         int main(void) {{\n\
+             {const_pointer_type}fresh_returned = carry_final_lifetime_{suffix}({selection});\n\
+             return {read};\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        carry_helpers = distinct_root_selected_result_carry_helpers(kind),
+        reselection_helpers = returned_distinct_root_result_reselection_helpers(kind),
+        fresh_helpers = final_reselected_distinct_root_result_carry_helpers(kind),
+        selection = i64::from(select_dangling),
+    )
+}
+
+fn final_reselected_distinct_root_result_carry_type_mismatch_program() -> String {
+    let kind = AdjustedParameterFieldKind::Aggregate;
+    format!(
+        "{prelude}\n{primary_helpers}\n{alternate_helpers}\n{boundary_helpers}\n{carry_helpers}\n{reselection_helpers}\n{fresh_helpers}\n\
+         struct Other {{ int value; }};\n\
+         int main(void) {{\n\
+             int left_marker = 0; int right_marker = 0;\n\
+             const struct Point *primary = return_inner_point((struct Item[2]){{ {{ .nested = {{ .values = {{++left_marker}} }} }}, {{}} }});\n\
+             const struct Point *alternate = return_distinct_inner_point((struct Item[2]){{ {{ .nested = {{ .values = {{++right_marker}} }} }}, {{}} }});\n\
+             const struct Point *returned = return_selected_point(carry_selected_point(primary));\n\
+             const struct Point *final_reselected = reselect_carried_point_twice(alternate, returned, 0);\n\
+             const struct Point *fresh_returned = return_final_point_twice(carry_final_point(final_reselected));\n\
+             const struct Other *mismatch = fresh_returned;\n\
+             return mismatch->value;\n\
+         }}\n",
+        prelude = captured_literal_field_offset_prelude(),
+        primary_helpers = derived_inner_const_pointer_callee_return_helpers(kind),
+        alternate_helpers = distinct_root_return_helpers(kind),
+        boundary_helpers = post_selection_reforward_and_return_helpers(kind),
+        carry_helpers = distinct_root_selected_result_carry_helpers(kind),
+        reselection_helpers = returned_distinct_root_result_reselection_helpers(kind),
+        fresh_helpers = final_reselected_distinct_root_result_carry_helpers(kind),
     )
 }
 
