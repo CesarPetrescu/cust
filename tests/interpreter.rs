@@ -1462,6 +1462,13 @@ fn bool_conversion_semantics_match_fixture() {
 }
 
 #[test]
+fn bool_conversion_context_model_routes_match_fixture() {
+    let program = include_str!("fixtures/valid/bool_conversion_context_model_routes.c");
+
+    assert_eq!(interpret(program).unwrap(), 27);
+}
+
+#[test]
 fn normalizes_bool_scalar_declarations_and_assignments() {
     let program = r#"
         int main(void) {

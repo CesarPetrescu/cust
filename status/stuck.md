@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-23 C `_Bool` conversion/storage-normalization run after five focused regressions, canonical compiler-oracle coverage returning 27 under Cust/GCC/Clang, 78 passing fuzz-safety tests, 874 passing interpreter tests, and both Docker gates. Deterministic model-based `_Bool` conversion-context coverage is the next bounded correctness/tooling slice, not an external blocker.
+None. Last reviewed in the 2026-07-23 fixed-seed `_Bool` conversion-context run after focused RED/GREEN evidence, a warning-free compiler-oracle fixture returning 27 under Cust/GCC/Clang, 81 passing fuzz-safety tests, 875 passing interpreter tests (967 total), and both Docker gates. Deterministic arbitrary-byte/string lexer/parser robustness expansion is the next bounded tooling slice, not an external blocker.
 
 ## Blocker template
 

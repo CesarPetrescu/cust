@@ -15306,6 +15306,19 @@ impl Interpreter {
         Self::assign_scalar_field_in_map(&struct_types, &type_name, fields, path, value)
     }
 
+    fn struct_pointer_scalar_field_type(
+        &self,
+        pointer: &PointerValue,
+        path: &[String],
+    ) -> CustResult<Option<CType>> {
+        let (type_name, fields) = self.find_struct_pointer_fields(pointer)?;
+        let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
+        match field_value {
+            StructFieldValue::Scalar { ty, .. } => Ok(Some(*ty)),
+            _ => Ok(None),
+        }
+    }
+
     fn eval_struct_ptr_set(
         &mut self,
         pointer: &Expr,
@@ -15314,9 +15327,12 @@ impl Interpreter {
     ) -> CustResult<i64> {
         self.ensure_pointer_expr_pointee_mutable(pointer)?;
         let pointer = self.eval_pointer(pointer)?;
-        let value = self.eval(value)?;
+        let value = match self.struct_pointer_scalar_field_type(&pointer, path)? {
+            Some(ty) => self.eval_scalar_conversion(ty, value)?,
+            None => self.eval(value)?,
+        };
         self.assign_struct_pointer_field(&pointer, path, value)?;
-        Ok(value)
+        self.read_struct_pointer_field(&pointer, path)
     }
 
     fn eval_struct_ptr_compound_set(
@@ -15332,7 +15348,7 @@ impl Interpreter {
         let rhs = self.eval(value)?;
         let result = Self::apply_compound_op(current, op, rhs)?;
         self.assign_struct_pointer_field(&pointer, path, result)?;
-        Ok(result)
+        self.read_struct_pointer_field(&pointer, path)
     }
 
     fn assign_struct_copy(&mut self, name: &str, rhs: &Expr) -> CustResult<()> {
@@ -17766,14 +17782,16 @@ impl Interpreter {
         &mut self,
         aggregate: &Expr,
         path: &[String],
-    ) -> CustResult<(i64, bool)> {
+    ) -> CustResult<(i64, CType, bool)> {
         match self.eval_struct_expr(aggregate)? {
             ReturnValue::Struct { type_name, fields } => {
                 let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
                 match field_value {
                     StructFieldValue::Scalar {
-                        value, is_const, ..
-                    } => Ok((*value, *is_const)),
+                        value,
+                        ty,
+                        is_const,
+                    } => Ok((*value, *ty, *is_const)),
                     StructFieldValue::Array { .. }
                     | StructFieldValue::Struct { .. }
                     | StructFieldValue::StructArray { .. }
@@ -18861,6 +18879,7 @@ impl Interpreter {
                 let current = self.read_struct_pointer_field(&pointer, fields)?;
                 let updated = Self::apply_increment_op(current, op);
                 self.assign_struct_pointer_field(&pointer, fields, updated)?;
+                let updated = self.read_struct_pointer_field(&pointer, fields)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::StructElementGet {
@@ -18871,6 +18890,7 @@ impl Interpreter {
                 let current = self.read_struct_element_field(name, index, fields)?;
                 let updated = Self::apply_increment_op(current, op);
                 self.assign_struct_element_field(name, index, fields, updated)?;
+                let updated = self.read_struct_element_field(name, index, fields)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::StructElementArrayGet {
@@ -18925,6 +18945,7 @@ impl Interpreter {
                 let current = self.read_struct_pointer_field(&pointer, fields)?;
                 let updated = Self::apply_increment_op(current, op);
                 self.assign_struct_pointer_field(&pointer, fields, updated)?;
+                let updated = self.read_struct_pointer_field(&pointer, fields)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::Deref(pointer) => {
@@ -18936,13 +18957,13 @@ impl Interpreter {
                 let updated = self.deref_pointer(&pointer)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
-            Expr::ScalarLiteral { init, .. } => {
-                let current = self.eval(init)?;
-                let updated = Self::apply_increment_op(current, op);
+            Expr::ScalarLiteral { ty, init } => {
+                let current = self.eval_scalar_conversion(*ty, init)?;
+                let updated = ty.normalize(Self::apply_increment_op(current, op));
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::AggregateFieldGet { aggregate, fields } => {
-                let (current, is_const) =
+                let (current, ty, is_const) =
                     self.eval_aggregate_literal_field_scalar(aggregate, fields)?;
                 if is_const {
                     return Err(CustError::new(format!(
@@ -18950,7 +18971,7 @@ impl Interpreter {
                         Self::field_path_label(fields)
                     )));
                 }
-                let updated = Self::apply_increment_op(current, op);
+                let updated = ty.normalize(Self::apply_increment_op(current, op));
                 Ok(Self::increment_result(current, updated, prefix))
             }
             _ => Err(CustError::new("invalid increment/decrement target")),
@@ -19855,11 +19876,14 @@ impl Interpreter {
                 fields,
                 value,
             } => {
-                let value = self.eval(value)?;
                 let pointer =
                     self.struct_field_array_element_assignment_pointer(name, array_fields, index)?;
+                let value = match self.struct_pointer_scalar_field_type(&pointer, fields)? {
+                    Some(ty) => self.eval_scalar_conversion(ty, value)?,
+                    None => self.eval(value)?,
+                };
                 self.assign_struct_pointer_field(&pointer, fields, value)?;
-                Ok(value)
+                self.read_struct_pointer_field(&pointer, fields)
             }
             Expr::StructFieldArrayElementCompoundSet {
                 name,
@@ -19875,7 +19899,7 @@ impl Interpreter {
                 let rhs = self.eval(value)?;
                 let result = Self::apply_compound_op(current, *op, rhs)?;
                 self.assign_struct_pointer_field(&pointer, fields, result)?;
-                Ok(result)
+                self.read_struct_pointer_field(&pointer, fields)
             }
             Expr::StructElementGet {
                 name,
@@ -19968,14 +19992,15 @@ impl Interpreter {
                 fields,
                 value,
             } => {
-                let (_, is_const) = self.eval_aggregate_literal_field_scalar(aggregate, fields)?;
+                let (_, ty, is_const) =
+                    self.eval_aggregate_literal_field_scalar(aggregate, fields)?;
                 if is_const {
                     return Err(CustError::new(format!(
                         "cannot assign to const struct field '{}'",
                         Self::field_path_label(fields)
                     )));
                 }
-                self.eval(value)
+                self.eval_scalar_conversion(ty, value)
             }
             Expr::AggregateFieldCompoundSet {
                 aggregate,
@@ -19983,7 +20008,7 @@ impl Interpreter {
                 op,
                 value,
             } => {
-                let (current, is_const) =
+                let (current, ty, is_const) =
                     self.eval_aggregate_literal_field_scalar(aggregate, fields)?;
                 if is_const {
                     return Err(CustError::new(format!(
@@ -19992,7 +20017,7 @@ impl Interpreter {
                     )));
                 }
                 let rhs = self.eval(value)?;
-                Self::apply_compound_op(current, *op, rhs)
+                Ok(ty.normalize(Self::apply_compound_op(current, *op, rhs)?))
             }
             Expr::Increment { target, op, prefix } => {
                 self.eval_increment_expr(target, *op, *prefix)
@@ -20059,9 +20084,18 @@ impl Interpreter {
                 fields,
                 value,
             } => {
-                let value = self.eval(value)?;
+                let ty = self.struct_element_field_metadata(name, fields)?.and_then(
+                    |(field_type, _, _)| match field_type {
+                        StructFieldType::Scalar(ty) => Some(ty),
+                        _ => None,
+                    },
+                );
+                let value = match ty {
+                    Some(ty) => self.eval_scalar_conversion(ty, value)?,
+                    None => self.eval(value)?,
+                };
                 self.assign_struct_element_field(name, index, fields, value)?;
-                Ok(value)
+                self.read_struct_element_field(name, index, fields)
             }
             Expr::StructElementArraySet {
                 name,
@@ -20070,13 +20104,16 @@ impl Interpreter {
                 array_index,
                 value,
             } => {
-                if let Some((StructFieldType::Pointer(_), _, points_to_const)) =
+                if let Some((StructFieldType::Pointer(pointee_type), _, points_to_const)) =
                     self.struct_element_field_metadata(name, fields)?
                 {
                     if points_to_const {
                         return Err(CustError::new("cannot assign through pointer to const"));
                     }
-                    let value = self.eval(value)?;
+                    let value = match pointee_type {
+                        PointeeType::Scalar(ty) => self.eval_scalar_conversion(ty, value)?,
+                        PointeeType::Struct(_) => self.eval(value)?,
+                    };
                     let element_pointer = self.indexed_struct_element_pointer(name, index)?;
                     let field_element_pointer = self.struct_pointer_pointer_field_index_pointer(
                         &element_pointer,
@@ -20084,12 +20121,13 @@ impl Interpreter {
                         array_index,
                     )?;
                     self.assign_deref_pointer(&field_element_pointer, value)?;
-                    Ok(value)
+                    self.deref_pointer(&field_element_pointer)
                 } else {
                     self.ensure_struct_element_array_field_mutable(name, fields)?;
-                    let value = self.eval(value)?;
                     let (array, index) =
                         self.checked_struct_element_array_index(name, index, fields, array_index)?;
+                    let elem_type = array.borrow().elem_type;
+                    let value = self.eval_scalar_conversion(elem_type, value)?;
                     let mut array = array.borrow_mut();
                     if array.read_only {
                         return Err(CustError::new(format!(
@@ -20119,7 +20157,7 @@ impl Interpreter {
                 let rhs = self.eval(value)?;
                 let result = Self::apply_compound_op(current, *op, rhs)?;
                 self.assign_struct_element_field(name, index, fields, result)?;
-                Ok(result)
+                self.read_struct_element_field(name, index, fields)
             }
             Expr::StructElementArrayCompoundSet {
                 name,
@@ -20145,14 +20183,15 @@ impl Interpreter {
                     let rhs = self.eval(value)?;
                     let result = Self::apply_compound_op(current, *op, rhs)?;
                     self.assign_deref_pointer(&field_element_pointer, result)?;
-                    Ok(result)
+                    self.deref_pointer(&field_element_pointer)
                 } else {
                     self.ensure_struct_element_array_field_mutable(name, fields)?;
                     let (array, index) =
                         self.checked_struct_element_array_index(name, index, fields, array_index)?;
                     let current = array.borrow().elements[index];
                     let rhs = self.eval(value)?;
-                    let result = Self::apply_compound_op(current, *op, rhs)?;
+                    let elem_type = array.borrow().elem_type;
+                    let result = elem_type.normalize(Self::apply_compound_op(current, *op, rhs)?);
                     let mut array = array.borrow_mut();
                     if array.read_only {
                         return Err(CustError::new(format!(
@@ -20269,7 +20308,7 @@ impl Interpreter {
                 fields: path,
             } => self
                 .eval_aggregate_literal_field_scalar(aggregate, path)
-                .map(|(value, _)| value),
+                .map(|(value, _, _)| value),
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::BitwiseNot(inner) => Ok(!self.eval(inner)?),

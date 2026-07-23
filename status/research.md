@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-23 — `_Bool` conversion-context model and aggregate result normalization
+
+- No new external semantics source was needed beyond N1570 §6.3.1.2. The runtime finding is that low-level field writers can normalize stored `_Bool` values while assignment, compound-assignment, and increment/decrement callers still leak raw RHS/arithmetic results. Aggregate-backed mutation paths must return the normalized stored slot; aggregate compound-literal field paths must carry field `CType` metadata and normalize the result directly.
+- Struct-pointer and aggregate-array element fields are pointer-RHS seams: resolve the target once, recover destination scalar type metadata before RHS evaluation, then use typed scalar conversion. The fixed-seed matrix covers 432 conversion routes, 72 update-result routes, reverse subscripts, and five exact diagnostic families under panic guards.
+- GCC with `-Wall -Wextra -Werror` rejects `++`/`--` on `_Bool` via `-Wbool-operation`. The warning-free compiler-oracle fixture therefore uses compound assignments, while Cust-specific prefix/postfix normalization remains covered by interpreter-only property cases.
+
 ## 2026-07-23 — C `_Bool` conversion and storage normalization
 
 - Official WG14 N1570 draft, §6.3.1.2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — conversion of any scalar value to `_Bool` yields 0 when the value compares equal to 0 and 1 otherwise. In Cust this means both scalar expressions and interpreter-owned pointers must be classified without speculative evaluation, evaluated once, and normalized at the typed destination boundary.

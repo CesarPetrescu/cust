@@ -7440,6 +7440,204 @@ fn generated_void_return_context_rejects_every_value_shape_without_panics() {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum BoolModelShape {
+    Scalar,
+    Pointer,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum BoolConversionRoute {
+    Direct,
+    Conditional,
+    Comma,
+    Assignment,
+    Call,
+    Cast,
+}
+
+impl BoolConversionRoute {
+    const ALL: [Self; 6] = [
+        Self::Direct,
+        Self::Conditional,
+        Self::Comma,
+        Self::Assignment,
+        Self::Call,
+        Self::Cast,
+    ];
+
+    fn render(self, shape: BoolModelShape, truthy: bool, scalar_value: i64) -> (String, i64) {
+        let selected = match shape {
+            BoolModelShape::Scalar => scalar_value.to_string(),
+            BoolModelShape::Pointer if truthy => "cursor".to_string(),
+            BoolModelShape::Pointer => "null_pointer".to_string(),
+        };
+        let alternate = match shape {
+            BoolModelShape::Scalar if truthy => "0",
+            BoolModelShape::Scalar => "7",
+            BoolModelShape::Pointer if truthy => "null_pointer",
+            BoolModelShape::Pointer => "cursor",
+        };
+
+        let expression = match (self, shape) {
+            (Self::Direct, _) => return (selected, 0),
+            (Self::Conditional, _) => {
+                format!("1 ? (marker++, {selected}) : (marker += 20, {alternate})")
+            }
+            (Self::Comma, _) => format!("(marker++, {selected})"),
+            (Self::Assignment, BoolModelShape::Scalar) => {
+                format!("scalar_source = (marker++, {selected})")
+            }
+            (Self::Assignment, BoolModelShape::Pointer) => {
+                format!("pointer_source = (marker++, {selected})")
+            }
+            (Self::Call, BoolModelShape::Scalar) => format!("scalar_call({selected})"),
+            (Self::Call, BoolModelShape::Pointer) => format!("pointer_call({selected})"),
+            (Self::Cast, BoolModelShape::Scalar) => format!("(int)(marker++, {selected})"),
+            (Self::Cast, BoolModelShape::Pointer) => {
+                format!("(int *)(marker++, {selected})")
+            }
+        };
+        (expression, 1)
+    }
+}
+
+#[test]
+fn generated_bool_conversion_contexts_match_model_without_panics() {
+    const SEED: u64 = 0xC057_B001;
+    let mut state = SEED;
+    let mut cases = 0;
+    let mut zero_cases = 0;
+    let mut nonzero_cases = 0;
+
+    for route in BoolConversionRoute::ALL {
+        for shape in [BoolModelShape::Scalar, BoolModelShape::Pointer] {
+            for truthy in [false, true] {
+                let magnitude = (next_u64(&mut state) % 17 + 1) as i64;
+                let scalar_value = if truthy {
+                    if next_u64(&mut state) & 1 == 0 {
+                        magnitude
+                    } else {
+                        -magnitude
+                    }
+                } else {
+                    0
+                };
+                let (expression, marker_increments) = route.render(shape, truthy, scalar_value);
+                let expected_bool = i64::from(truthy);
+
+                for context in 0..18 {
+                    assert_interpretation(
+                        &bool_conversion_context_program(&expression, context),
+                        ExpectedInterpretation::Value(marker_increments * 2 + expected_bool),
+                        &format!(
+                            "bool conversion seed {SEED:#x}, route {route:?}, shape {shape:?}, truthy {truthy}, context {context}"
+                        ),
+                    );
+                    cases += 1;
+                    if truthy {
+                        nonzero_cases += 1;
+                    } else {
+                        zero_cases += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    assert_eq!(cases, 432);
+    assert_eq!(zero_cases, 216);
+    assert_eq!(nonzero_cases, 216);
+}
+
+#[test]
+fn generated_bool_update_contexts_match_model_without_panics() {
+    let updates = [
+        ("add compound", 0, "+= 7", 1, 1),
+        ("subtract compound", 1, "-= 1", 0, 0),
+        ("prefix increment", 0, "prefix ++", 1, 1),
+        ("postfix increment", 0, "postfix ++", 0, 1),
+        ("prefix decrement", 1, "prefix --", 0, 0),
+        ("postfix decrement", 1, "postfix --", 1, 0),
+    ];
+
+    for (update_index, (label, initial, operation, observed, stored)) in updates.iter().enumerate()
+    {
+        for context in 0..11 {
+            assert_interpretation(
+                &bool_update_context_program(*initial, operation, context),
+                ExpectedInterpretation::Value(observed * 2 + stored),
+                &format!("bool update {update_index} ({label}), context {context}"),
+            );
+        }
+    }
+
+    let aggregate_literal_updates = [
+        ("add compound", "(((struct BoolBox){0}).value += 7)", 1),
+        ("subtract compound", "(((struct BoolBox){1}).value -= 1)", 0),
+        ("prefix increment", "++((struct BoolBox){0}).value", 1),
+        ("postfix increment", "((struct BoolBox){0}).value++", 0),
+        ("prefix decrement", "--((struct BoolBox){1}).value", 0),
+        ("postfix decrement", "((struct BoolBox){1}).value--", 1),
+    ];
+    for (case_index, (label, expression, expected)) in aggregate_literal_updates.iter().enumerate()
+    {
+        let source = format!(
+            "struct BoolBox {{ _Bool value; }}; int main(void) {{ return {expression}; }}\n"
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Value(*expected),
+            &format!("bool aggregate literal update {case_index} ({label})"),
+        );
+    }
+
+    assert_eq!(updates.len() * 11, 66);
+    assert_eq!(aggregate_literal_updates.len(), 6);
+}
+
+#[test]
+fn generated_bool_conversion_context_diagnostics_remain_exact_without_panics() {
+    let cases = [
+        (
+            "aggregate conversion",
+            "struct Point point = {1}; _Bool result = point;",
+            "struct variable 'point' used as scalar",
+        ),
+        (
+            "void conversion",
+            "_Bool result = touch();",
+            "void function 'touch' used as scalar expression",
+        ),
+        (
+            "const scalar destination",
+            "const _Bool result = 0; result = 1;",
+            "cannot assign to const variable 'result'",
+        ),
+        (
+            "const pointer destination",
+            "const _Bool result = 0; const _Bool *slot = &result; *slot = 1;",
+            "cannot assign through pointer to const",
+        ),
+        (
+            "pointer pointee mismatch",
+            "int values[1] = {1}; _Bool *slot = values;",
+            "cannot convert pointer to int to pointer to _Bool",
+        ),
+    ];
+
+    for (case_index, (label, body, expected)) in cases.iter().enumerate() {
+        let source = format!(
+            "struct Point {{ int x; }};\nvoid touch(void) {{ return; }}\nint main(void) {{ {body} return 0; }}\n"
+        );
+        assert_interpretation(
+            &source,
+            ExpectedInterpretation::Error(expected),
+            &format!("bool conversion diagnostic {case_index} ({label})"),
+        );
+    }
+}
+
 #[test]
 fn generated_return_context_classification_matches_model_without_panics() {
     let scalar_routes = [
@@ -18554,6 +18752,135 @@ fn assert_interpretation(source: &str, expected: ExpectedInterpretation, context
             assert_eq!(actual.to_string(), expected, "{context}: {source}");
         }
     }
+}
+
+fn bool_conversion_context_program(expression: &str, context: usize) -> String {
+    let prelude = "int marker;\n\
+        int values[2] = {3, 7};\n\
+        int *cursor = values;\n\
+        int *null_pointer = 0;\n\
+        int scalar_source;\n\
+        int *pointer_source;\n\
+        _Bool global_result;\n\
+        struct BoolBox { _Bool value; _Bool values[1]; };\n\
+        struct BoolContainer { struct BoolBox boxes[1]; };\n\
+        int scalar_call(int value) { marker++; return value; }\n\
+        int *pointer_call(int *value) { marker++; return value; }\n\
+        int consume_bool(_Bool value) { return value; }\n";
+    let body = match context {
+        0 => format!("_Bool result = {expression}; return marker * 2 + result;"),
+        1 => format!("_Bool result = 0; result = {expression}; return marker * 2 + result;"),
+        2 => format!("global_result = {expression}; return marker * 2 + global_result;"),
+        3 => format!("static _Bool result; result = {expression}; return marker * 2 + result;"),
+        4 => format!(
+            "_Bool result[1] = {{0}}; result[0] = {expression}; return marker * 2 + result[0];"
+        ),
+        5 => format!(
+            "struct BoolBox result = {{0}}; result.value = {expression}; return marker * 2 + result.value;"
+        ),
+        6 => format!(
+            "struct BoolBox result = {{0}}; struct BoolBox *view = &result; view->value = {expression}; return marker * 2 + result.value;"
+        ),
+        7 => format!("int result = consume_bool({expression}); return marker * 2 + result;"),
+        8 => {
+            return format!(
+                "{prelude}_Bool produce_bool(void) {{ return {expression}; }}\n\
+                 int main(void) {{ int result = produce_bool(); return marker * 2 + result; }}\n"
+            );
+        }
+        9 => format!(
+            "_Bool result = 0; _Bool *slot = &result; *slot = {expression}; return marker * 2 + result;"
+        ),
+        10 => format!(
+            "struct BoolBox result[1] = {{{{0, {{0}}}}}}; result[0].value = {expression}; return marker * 2 + result[0].value;"
+        ),
+        11 => format!(
+            "struct BoolContainer result = {{{{{{0, {{0}}}}}}}}; result.boxes[0].value = {expression}; return marker * 2 + result.boxes[0].value;"
+        ),
+        12 => format!(
+            "struct BoolContainer result = {{{{{{0, {{0}}}}}}}}; struct BoolContainer *view = &result; view->boxes[0].value = {expression}; return marker * 2 + result.boxes[0].value;"
+        ),
+        13 => format!(
+            "struct BoolBox result = {{0, {{0}}}}; result.values[0] = {expression}; return marker * 2 + result.values[0];"
+        ),
+        14 => format!(
+            "struct BoolBox result = {{0, {{0}}}}; struct BoolBox *view = &result; view->values[0] = {expression}; return marker * 2 + result.values[0];"
+        ),
+        15 => format!(
+            "int result = (((struct BoolBox){{0, {{0}}}}).value = {expression}); return marker * 2 + result;"
+        ),
+        16 => format!(
+            "_Bool result[1] = {{0}}; 0[result] = {expression}; return marker * 2 + result[0];"
+        ),
+        17 => format!(
+            "struct BoolBox result = {{0, {{0}}}}; 0[result.values] = {expression}; return marker * 2 + result.values[0];"
+        ),
+        _ => unreachable!("unknown bool conversion context {context}"),
+    };
+    format!("{prelude}int main(void) {{ {body} }}\n")
+}
+
+fn bool_update_context_program(initial: i64, operation: &str, context: usize) -> String {
+    let (setup, target) = match context {
+        0 => (format!("_Bool value = {initial};"), "value"),
+        1 => (format!("_Bool values[1] = {{{initial}}};"), "values[0]"),
+        2 => (
+            format!("struct BoolBox {{ _Bool value; }}; struct BoolBox box = {{{initial}}};"),
+            "box.value",
+        ),
+        3 => (
+            format!(
+                "struct BoolBox {{ _Bool value; }}; struct BoolBox box = {{{initial}}}; struct BoolBox *view = &box;"
+            ),
+            "view->value",
+        ),
+        4 => (
+            format!("_Bool value = {initial}; _Bool *slot = &value;"),
+            "*slot",
+        ),
+        5 => (
+            format!(
+                "struct BoolBox {{ _Bool value; }}; struct BoolBox boxes[1] = {{{{{initial}}}}};"
+            ),
+            "boxes[0].value",
+        ),
+        6 => (
+            format!(
+                "struct BoolBox {{ _Bool value; }}; struct BoolContainer {{ struct BoolBox boxes[1]; }}; struct BoolContainer container = {{{{{{{initial}}}}}}};"
+            ),
+            "container.boxes[0].value",
+        ),
+        7 => (
+            format!(
+                "struct BoolBox {{ _Bool value; }}; struct BoolContainer {{ struct BoolBox boxes[1]; }}; struct BoolContainer container = {{{{{{{initial}}}}}}}; struct BoolContainer *view = &container;"
+            ),
+            "view->boxes[0].value",
+        ),
+        8 => (
+            format!(
+                "struct BoolBox {{ _Bool values[1]; }}; struct BoolBox box = {{{{{initial}}}}};"
+            ),
+            "box.values[0]",
+        ),
+        9 => (format!("_Bool values[1] = {{{initial}}};"), "0[values]"),
+        10 => (
+            format!(
+                "struct BoolBox {{ _Bool values[1]; }}; struct BoolBox box = {{{{{initial}}}}};"
+            ),
+            "0[box.values]",
+        ),
+        _ => unreachable!("unknown bool update context {context}"),
+    };
+    let update = match operation {
+        "prefix ++" => format!("++({target})"),
+        "postfix ++" => format!("({target})++"),
+        "prefix --" => format!("--({target})"),
+        "postfix --" => format!("({target})--"),
+        compound => format!("({target}) {compound}"),
+    };
+    format!(
+        "int main(void) {{ {setup} int observed = ({update}); return observed * 2 + ({target}); }}\n"
+    )
 }
 
 fn pointer_program(result_type: &str, expression: &str, setup: &str) -> String {
