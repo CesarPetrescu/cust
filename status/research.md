@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-23 — Freshly composed distinct-root result reselection
+
+- No external documentation was needed. A copied `const T *` parameter selector returns one complete interpreter pointer value; argument order, selection outcome, and helper depth cannot combine owner/path/base/index/type/qualification/lifetime metadata from the rejected input.
+- Nine thousand two hundred sixteen balanced routes extend every preceding fresh composition route with final argument order, both selections, and one/two-hop selector depth. Seventeen exact safety checks pass, and existing runtime behavior was immediately green as deliberate property/conformance closure.
+- The warning-free fixture returns 63 under Cust, GCC, and Clang using only defined equality, dereference, and same-root relationships. See `references/cust-freshly-composed-distinct-root-result-reselection.md`.
+
 ## 2026-07-23 — Fresh composition after final distinct-root reselection
 
 - No external documentation was needed. Once the final selector chooses one pointer, later conditional/comma wrappers, same-root offsets, const-preserving parameter copies, and return copies must transform only that selected interpreter pointer; preserved rejected slots cannot contribute owner/path/base/index/type/qualification/lifetime metadata.

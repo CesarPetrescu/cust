@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-23 final-reselected distinct-root composition run after 1,152 balanced scalar/aggregate fresh wrapper/offset/helper/return routes, 17 exact bounds/const/cross-root/type/lifetime checks, a warning-free Cust/GCC/Clang fixture returning 51, 77 passing fuzz-safety tests, and 866 passing interpreter tests. One more copied-parameter selector over the fresh result and preserved rejected input is a scoped follow-up, not an external blocker.
+None. Last reviewed in the 2026-07-23 freshly composed distinct-root result reselection run after 9,216 balanced scalar/aggregate final selector routes, 17 exact bounds/const/cross-root/type/lifetime checks, a warning-free Cust/GCC/Clang fixture returning 63, 78 passing fuzz-safety tests, and 866 passing interpreter tests. The explicit pointer-provenance queue is complete; C99 `__func__` is the next bounded language slice, not an external blocker.
 
 ## Blocker template
 

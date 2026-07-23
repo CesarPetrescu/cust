@@ -35,6 +35,8 @@ int aggregate_fresh_return_calls;
 int scalar_fresh_selected;
 int scalar_fresh_unselected;
 int aggregate_fresh_comma;
+int scalar_fresh_reselection_calls;
+int aggregate_fresh_reselection_calls;
 
 const int *return_int(struct Item items[]) {
     int *raw = &items[0].nested.values[0];
@@ -174,6 +176,33 @@ const struct Point *return_final_point_twice(const struct Point *value) {
     return return_final_point(value);
 }
 
+const int *reselect_fresh_int(
+    const int *first,
+    const int *second,
+    int select_first
+) {
+    scalar_fresh_reselection_calls = scalar_fresh_reselection_calls + 1;
+    return select_first ? first : second;
+}
+
+const struct Point *reselect_fresh_point(
+    const struct Point *first,
+    const struct Point *second,
+    int select_first
+) {
+    aggregate_fresh_reselection_calls = aggregate_fresh_reselection_calls + 1;
+    return select_first ? first : second;
+}
+
+const struct Point *reselect_fresh_point_twice(
+    const struct Point *first,
+    const struct Point *second,
+    int select_first
+) {
+    aggregate_fresh_reselection_calls = aggregate_fresh_reselection_calls + 1;
+    return reselect_fresh_point(first, second, select_first);
+}
+
 int main(void) {
     struct Holder scalar_holder = {};
     struct Holder point_holder = {};
@@ -245,6 +274,20 @@ int main(void) {
     const struct Point *point_fresh_returned = return_final_point_twice(
         point_fresh_composed
     );
+    const int *int_fresh_slot = int_fresh_returned;
+    const int *int_rejected_slot = int_final;
+    const int *int_fresh_reselected = reselect_fresh_int(
+        int_fresh_returned,
+        int_final,
+        0
+    );
+    const struct Point *point_fresh_slot = point_fresh_returned;
+    const struct Point *point_rejected_slot = point_alternate_slot;
+    const struct Point *point_fresh_reselected = reselect_fresh_point_twice(
+        point_alternate_slot,
+        point_fresh_returned,
+        0
+    );
 
     return (int_reselected == int_alternate) + (int_final == int_alternate + 1)
         + (*int_final == 19) + (int_carried == int_final)
@@ -276,5 +319,15 @@ int main(void) {
         + (point_fresh_returned == point_final_reselected + 1)
         + (point_fresh_returned->value == 7)
         + (point_final_reselected == point_final) + (aggregate_fresh_comma == 1)
-        + (aggregate_fresh_carry_calls == 1) + (aggregate_fresh_return_calls == 2);
+        + (aggregate_fresh_carry_calls == 1) + (aggregate_fresh_return_calls == 2)
+        + (int_fresh_reselected == int_final) + (*int_fresh_reselected == 19)
+        + (int_fresh_reselected != int_fresh_returned)
+        + (int_fresh_slot == int_fresh_returned) + (int_rejected_slot == int_final)
+        + (scalar_fresh_reselection_calls == 1)
+        + (point_fresh_reselected == point_fresh_returned)
+        + (point_fresh_reselected->value == 7)
+        + (point_fresh_reselected != point_alternate_slot)
+        + (point_fresh_slot == point_fresh_returned)
+        + (point_rejected_slot == point_alternate_slot)
+        + (aggregate_fresh_reselection_calls == 2);
 }
