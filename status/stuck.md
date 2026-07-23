@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-23 freshly composed distinct-root result reselection run after 9,216 balanced scalar/aggregate final selector routes, 17 exact bounds/const/cross-root/type/lifetime checks, a warning-free Cust/GCC/Clang fixture returning 63, 78 passing fuzz-safety tests, and 866 passing interpreter tests. The explicit pointer-provenance queue is complete; C99 `__func__` is the next bounded language slice, not an external blocker.
+None. Last reviewed in the 2026-07-23 C99 `__func__` run after focused read-only/file-scope/static-recursion coverage, a warning-free Cust/GCC/Clang fixture returning 73, 78 passing fuzz-safety tests, and 869 passing interpreter tests. `_Bool` conversion/storage normalization is the next bounded correctness slice, not an external blocker.
 
 ## Blocker template
 

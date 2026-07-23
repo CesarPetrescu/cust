@@ -8278,6 +8278,33 @@ fn supports_function_definitions_calls_and_parameters() {
 }
 
 #[test]
+fn supports_predefined_func_name_identifier() {
+    let program = include_str!("fixtures/valid/predefined_func_name.c");
+
+    assert_eq!(interpret(program).unwrap(), 73);
+}
+
+#[test]
+fn rejects_writes_to_predefined_func_name_array() {
+    let program = include_str!("fixtures/invalid/predefined_func_name_write.c");
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot modify read-only array '__func__'"
+    );
+}
+
+#[test]
+fn rejects_predefined_func_name_outside_function_bodies() {
+    let program = include_str!("fixtures/invalid/predefined_func_name_file_scope.c");
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "predefined identifier '__func__' is only available inside function bodies at line 1, column 14"
+    );
+}
+
+#[test]
 fn supports_void_functions_and_empty_returns_for_side_effects() {
     let program = include_str!("fixtures/valid/void_functions.c");
 

@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-23 — C99 predefined function names and next `_Bool` gap
+
+- Official WG14 N1570 draft, §6.4.2.2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — each function definition behaves as if `static const char __func__[] = "function-name";` appeared immediately after its opening brace. Implementation therefore keeps one read-only `ArrayValue` per function, shares it across recursive calls, and excludes that static backing array from lexical owner-expiry attachment.
+- Parser expression routing tracks whether a function body is being parsed so file-scope `__func__` use reports a source-located feature diagnostic instead of a later generic undefined-variable error. Ordinary array/index/decay/`sizeof` paths remain reused rather than adding a new expression variant.
+- N1570 §6.3.1.2 says conversion of any scalar to `_Bool` yields 0 when equal to zero and 1 otherwise. A local warning-free probe currently returns 3 under Cust and 1 under native C after `_Bool value = 7; value = 3;`; this is the next concrete correctness package.
+
 ## 2026-07-23 — Freshly composed distinct-root result reselection
 
 - No external documentation was needed. A copied `const T *` parameter selector returns one complete interpreter pointer value; argument order, selection outcome, and helper depth cannot combine owner/path/base/index/type/qualification/lifetime metadata from the rejected input.

@@ -1691,6 +1691,7 @@ struct Parser {
     next_aggregate_type_id: usize,
     last_decl_had_initializer: bool,
     pending_inline_enum_constants: Option<Vec<EnumConstant>>,
+    parsing_function_body: bool,
 }
 
 impl Parser {
@@ -1709,6 +1710,7 @@ impl Parser {
             next_aggregate_type_id: 0,
             last_decl_had_initializer: false,
             pending_inline_enum_constants: None,
+            parsing_function_body: false,
         }
     }
 
@@ -3439,7 +3441,11 @@ impl Parser {
                     inline_return_enum_decl,
                 ));
             }
-            let mut body = self.parse_block_after("function header")?;
+            let previous_parsing_function_body = self.parsing_function_body;
+            self.parsing_function_body = true;
+            let body_result = self.parse_block_after("function header");
+            self.parsing_function_body = previous_parsing_function_body;
+            let mut body = body_result?;
             if let Some(stmt) = inline_param_enum_decl {
                 body.insert(0, stmt);
             }
@@ -9762,6 +9768,13 @@ impl Parser {
                 }
             }
             Token::Ident(name) => {
+                if name == "__func__" && !self.parsing_function_body {
+                    return Err(Self::error_at(
+                        "predefined identifier '__func__' is only available inside function bodies"
+                            .to_string(),
+                        &found,
+                    ));
+                }
                 if self.matches(&Token::LParen) {
                     let args = self.parse_call_args()?;
                     self.expect_closing_paren_after("function call arguments")?;
@@ -10399,6 +10412,7 @@ struct Interpreter {
     max_loop_iterations: Option<usize>,
     loop_iterations: usize,
     next_compound_literal_id: usize,
+    function_name_arrays: HashMap<String, Rc<RefCell<ArrayValue>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10667,6 +10681,7 @@ impl Interpreter {
             max_loop_iterations: options.max_loop_iterations,
             loop_iterations: 0,
             next_compound_literal_id: 0,
+            function_name_arrays: HashMap::new(),
         }
     }
 
@@ -10743,7 +10758,17 @@ impl Interpreter {
             )));
         }
 
-        let mut param_scope = HashMap::new();
+        let function_name_array = Rc::clone(
+            self.function_name_arrays
+                .entry(name.to_string())
+                .or_insert_with(|| {
+                    let mut bytes = name.bytes().map(i64::from).collect::<Vec<_>>();
+                    bytes.push(0);
+                    Rc::new(RefCell::new(ArrayValue::read_only(bytes)))
+                }),
+        );
+        let mut param_scope =
+            HashMap::from([("__func__".to_string(), Value::Array(function_name_array))]);
         let mut const_params = HashSet::new();
         for (param, arg_expr) in function.params.iter().zip(arg_exprs) {
             let arg = match param.kind {
@@ -11852,6 +11877,13 @@ impl Interpreter {
         &self,
         array: &Rc<RefCell<ArrayValue>>,
     ) -> Option<ArrayPointerOwner> {
+        if self
+            .function_name_arrays
+            .values()
+            .any(|function_name| Rc::ptr_eq(function_name, array))
+        {
+            return None;
+        }
         for scope in self.scopes.iter().rev() {
             if let Some((name, _)) = scope
                 .values
