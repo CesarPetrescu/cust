@@ -255,6 +255,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/long_long_type_spellings.c",
     "tests/fixtures/compat/valid/line_comments.c",
     "tests/fixtures/compat/valid/bool_type_spellings.c",
+    "tests/fixtures/compat/valid/bool_conversion_semantics.c",
     "tests/fixtures/compat/valid/permuted_scalar_type_specifiers.c",
     "tests/fixtures/compat/valid/parenthesized_function_declarators.c",
     "tests/fixtures/compat/valid/parenthesized_variable_declarators.c",

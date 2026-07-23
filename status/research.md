@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-23 — C `_Bool` conversion and storage normalization
+
+- Official WG14 N1570 draft, §6.3.1.2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — conversion of any scalar value to `_Bool` yields 0 when the value compares equal to 0 and 1 otherwise. In Cust this means both scalar expressions and interpreter-owned pointers must be classified without speculative evaluation, evaluated once, and normalized at the typed destination boundary.
+- Implementation decision: `CType::normalize()` handles stored scalar values while `Interpreter::eval_scalar_conversion()` handles pointer truthiness before scalar fallback. Apply it at declarations, assignments, arguments/returns, casts/literals, and scalar array/aggregate initializer boundaries; retain defensive normalization in low-level scalar/field/array writers so uncommon pointer-mediated update routes cannot store raw non-boolean values.
+- Compound assignment and increment expressions return the normalized value actually stored in `_Bool`; postfix results still return the prior normalized value. The warning-free C11 fixture returns 27 under Cust, GCC, and Clang, and focused comma-marker coverage proves one-time evaluation.
+
 ## 2026-07-23 — C99 predefined function names and next `_Bool` gap
 
 - Official WG14 N1570 draft, §6.4.2.2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — each function definition behaves as if `static const char __func__[] = "function-name";` appeared immediately after its opening brace. Implementation therefore keeps one read-only `ArrayValue` per function, shares it across recursive calls, and excludes that static backing array from lexical owner-expiry attachment.

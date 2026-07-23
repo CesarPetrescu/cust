@@ -664,6 +664,13 @@ enum CType {
 }
 
 impl CType {
+    fn normalize(self, value: i64) -> i64 {
+        match self {
+            CType::Bool => i64::from(value != 0),
+            CType::Int | CType::Char => value,
+        }
+    }
+
     fn size(self) -> i64 {
         match self {
             CType::Int => INT_SIZE,
@@ -10685,6 +10692,13 @@ impl Interpreter {
         }
     }
 
+    fn eval_scalar_conversion(&mut self, ty: CType, expr: &Expr) -> CustResult<i64> {
+        if ty == CType::Bool && self.expr_is_pointer_value(expr) {
+            return Ok(i64::from(Self::pointer_truthy(&self.eval_pointer(expr)?)));
+        }
+        Ok(ty.normalize(self.eval(expr)?))
+    }
+
     fn aggregate_kind_label(&self, type_name: &str) -> &'static str {
         self.struct_types
             .get(type_name)
@@ -10778,7 +10792,7 @@ impl Interpreter {
                     };
                     let ty = *ty;
                     Value::Scalar {
-                        value: self.eval(arg_expr)?,
+                        value: self.eval_scalar_conversion(ty, arg_expr)?,
                         ty,
                     }
                 }
@@ -12310,11 +12324,12 @@ impl Interpreter {
         for initializer in init {
             match initializer {
                 ArrayInitializer::Expr(expr) => {
-                    array.elements[next_positional_index] = self.eval(expr)?;
+                    array.elements[next_positional_index] =
+                        self.eval_scalar_conversion(elem_type, expr)?;
                     next_positional_index += 1;
                 }
                 ArrayInitializer::Designated { index, value } => {
-                    array.elements[*index] = self.eval(value)?;
+                    array.elements[*index] = self.eval_scalar_conversion(elem_type, value)?;
                     next_positional_index = *index + 1;
                 }
                 ArrayInitializer::StringLiteral(values) => {
@@ -12487,7 +12502,7 @@ impl Interpreter {
         ty: CType,
         init: &Expr,
     ) -> CustResult<PointerValue> {
-        let value = self.eval(init)?;
+        let value = self.eval_scalar_conversion(ty, init)?;
         let scope_id = self
             .scopes
             .last()
@@ -12681,11 +12696,11 @@ impl Interpreter {
             .ok_or_else(|| CustError::new(format!("missing struct field '{}'", field.name)))?;
         match (&field.ty, field_value, initializer) {
             (
-                StructFieldType::Scalar(_),
+                StructFieldType::Scalar(ty),
                 StructFieldValue::Scalar { value, .. },
                 StructInitializer::Expr(expr),
             ) => {
-                *value = self.eval(expr)?;
+                *value = self.eval_scalar_conversion(*ty, expr)?;
             }
             (
                 StructFieldType::Scalar(_),
@@ -12698,7 +12713,7 @@ impl Interpreter {
                 )));
             }
             (
-                StructFieldType::Array(_, _),
+                StructFieldType::Array(elem_type, _),
                 StructFieldValue::Array { value, .. },
                 StructInitializer::Array(array_init),
             ) => {
@@ -12707,11 +12722,13 @@ impl Interpreter {
                 for initializer in array_init {
                     match initializer {
                         ArrayInitializer::Expr(expr) => {
-                            array.elements[next_positional_index] = self.eval(expr)?;
+                            array.elements[next_positional_index] =
+                                self.eval_scalar_conversion(*elem_type, expr)?;
                             next_positional_index += 1;
                         }
                         ArrayInitializer::Designated { index, value } => {
-                            array.elements[*index] = self.eval(value)?;
+                            array.elements[*index] =
+                                self.eval_scalar_conversion(*elem_type, value)?;
                             next_positional_index = *index + 1;
                         }
                         ArrayInitializer::StringLiteral(values) => {
@@ -13072,8 +13089,10 @@ impl Interpreter {
                 )));
             }
             match field_value {
-                StructFieldValue::Scalar { value: slot, .. } => {
-                    *slot = value;
+                StructFieldValue::Scalar {
+                    value: slot, ty, ..
+                } => {
+                    *slot = ty.normalize(value);
                     if struct_types
                         .get(type_name)
                         .is_some_and(|aggregate| aggregate.kind == AggregateKind::Union)
@@ -14525,8 +14544,10 @@ impl Interpreter {
             return Err(CustError::new("cannot assign through pointer to const"));
         }
         match self.struct_field_by_scope_mut(scope_id, name, element_index, fields)? {
-            StructFieldValue::Scalar { value: slot, .. } => {
-                *slot = value;
+            StructFieldValue::Scalar {
+                value: slot, ty, ..
+            } => {
+                *slot = ty.normalize(value);
                 Ok(())
             }
             _ => Err(CustError::new(format!(
@@ -14592,13 +14613,13 @@ impl Interpreter {
         match Self::nested_field_value_mut(&type_name, element_fields, fields)?.1 {
             StructFieldValue::Scalar {
                 value: slot,
+                ty,
                 is_const,
-                ..
             } => {
                 if *is_const {
                     return Err(CustError::new("cannot assign through pointer to const"));
                 }
-                *slot = value;
+                *slot = ty.normalize(value);
                 Ok(())
             }
             _ => Err(CustError::new(format!(
@@ -14817,8 +14838,9 @@ impl Interpreter {
             return Ok(value);
         }
         self.ensure_variable_mutable(name)?;
-        let value = self.eval(value)?;
         let (array, index) = self.checked_struct_array_index(name, fields, index)?;
+        let elem_type = array.borrow().elem_type;
+        let value = self.eval_scalar_conversion(elem_type, value)?;
         let mut array = array.borrow_mut();
         if array.read_only {
             return Err(CustError::new(format!(
@@ -14850,7 +14872,8 @@ impl Interpreter {
         let (array, index) = self.checked_struct_array_index(name, fields, index)?;
         let current = array.borrow().elements[index];
         let rhs = self.eval(value)?;
-        let result = Self::apply_compound_op(current, op, rhs)?;
+        let elem_type = array.borrow().elem_type;
+        let result = elem_type.normalize(Self::apply_compound_op(current, op, rhs)?);
         let mut array = array.borrow_mut();
         if array.read_only {
             return Err(CustError::new(format!(
@@ -15635,11 +15658,34 @@ impl Interpreter {
         })
     }
 
+    fn scalar_array_element_type(&self, name: &str) -> Option<CType> {
+        match self.find_variable(name) {
+            Some(Value::Array(array)) => Some(array.borrow().elem_type),
+            Some(Value::Pointer {
+                ty: PointeeType::Scalar(ty),
+                ..
+            }) => Some(*ty),
+            _ => None,
+        }
+    }
+
     fn eval_struct_set(&mut self, name: &str, fields: &[String], value: &Expr) -> CustResult<i64> {
         if self.struct_field_is_pointer(name, fields) {
             return Err(CustError::new("pointer value used as scalar"));
         }
-        let value = self.eval(value)?;
+        let ty = match self.find_variable(name) {
+            Some(Value::Struct { type_name, .. }) => self
+                .aggregate_type_field_metadata(type_name, fields)?
+                .and_then(|(field_type, _, _)| match field_type {
+                    StructFieldType::Scalar(ty) => Some(ty),
+                    _ => None,
+                }),
+            _ => None,
+        };
+        let value = match ty {
+            Some(ty) => self.eval_scalar_conversion(ty, value)?,
+            None => self.eval(value)?,
+        };
         self.assign_struct_field(name, fields, value)?;
         Ok(value)
     }
@@ -15655,7 +15701,7 @@ impl Interpreter {
         let rhs = self.eval(value)?;
         let result = Self::apply_compound_op(current, op, rhs)?;
         self.assign_struct_field(name, fields, result)?;
-        Ok(result)
+        self.read_struct_field(name, fields)
     }
 
     fn address_of_scalar(&self, name: &str) -> CustResult<PointerValue> {
@@ -16672,16 +16718,20 @@ impl Interpreter {
                     .find(|scope| scope.id == *scope_id)
                     .and_then(|scope| scope.values.get_mut(name))
                 {
-                    Some(Value::Scalar { value: slot, .. }) => {
-                        *slot = value;
+                    Some(Value::Scalar {
+                        value: slot, ty, ..
+                    }) => {
+                        *slot = ty.normalize(value);
                         Ok(())
                     }
                     Some(_) => Err(CustError::new(format!(
                         "pointer to out-of-scope variable '{name}'"
                     ))),
                     None => match self.static_value_by_scope_mut(*scope_id, name) {
-                        Some(Value::Scalar { value: slot, .. }) => {
-                            *slot = value;
+                        Some(Value::Scalar {
+                            value: slot, ty, ..
+                        }) => {
+                            *slot = ty.normalize(value);
                             Ok(())
                         }
                         _ => Err(CustError::new(format!(
@@ -16906,7 +16956,7 @@ impl Interpreter {
                 None => "cannot modify read-only array through pointer".to_string(),
             }));
         }
-        array.elements[index] = value;
+        array.elements[index] = array.elem_type.normalize(value);
         Ok(())
     }
 
@@ -17609,9 +17659,9 @@ impl Interpreter {
 
     fn eval_assignment_expr(&mut self, name: &str, value: &Expr) -> CustResult<i64> {
         match self.find_variable(name).cloned() {
-            Some(Value::Scalar { .. }) => {
+            Some(Value::Scalar { ty, .. }) => {
                 self.ensure_variable_mutable(name)?;
-                let value = self.eval(value)?;
+                let value = self.eval_scalar_conversion(ty, value)?;
                 if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
                     *slot = value;
                 }
@@ -17640,10 +17690,12 @@ impl Interpreter {
         value: &Expr,
     ) -> CustResult<i64> {
         match self.find_variable(name).cloned() {
-            Some(Value::Scalar { value: current, .. }) => {
+            Some(Value::Scalar {
+                value: current, ty, ..
+            }) => {
                 self.ensure_variable_mutable(name)?;
                 let rhs = self.eval(value)?;
-                let result = Self::apply_compound_op(current, op, rhs)?;
+                let result = ty.normalize(Self::apply_compound_op(current, op, rhs)?);
                 if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
                     *slot = result;
                 }
@@ -18710,9 +18762,11 @@ impl Interpreter {
     ) -> CustResult<i64> {
         match target {
             Expr::Var(name) => match self.find_variable(name).cloned() {
-                Some(Value::Scalar { value: current, .. }) => {
+                Some(Value::Scalar {
+                    value: current, ty, ..
+                }) => {
                     self.ensure_variable_mutable(name)?;
-                    let updated = Self::apply_increment_op(current, op);
+                    let updated = ty.normalize(Self::apply_increment_op(current, op));
                     if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
                         *slot = updated;
                     }
@@ -18752,7 +18806,10 @@ impl Interpreter {
                     Some(_) | None => self.checked_array_index(name, index)?,
                 };
                 let current = array.borrow().elements[index];
-                let updated = Self::apply_increment_op(current, op);
+                let updated = array
+                    .borrow()
+                    .elem_type
+                    .normalize(Self::apply_increment_op(current, op));
                 let mut array = array.borrow_mut();
                 if array.read_only {
                     return Err(CustError::new(format!(
@@ -18779,7 +18836,10 @@ impl Interpreter {
                 self.ensure_variable_mutable(name)?;
                 let (array, index) = self.checked_struct_array_index(name, fields, index)?;
                 let current = array.borrow().elements[index];
-                let updated = Self::apply_increment_op(current, op);
+                let updated = array
+                    .borrow()
+                    .elem_type
+                    .normalize(Self::apply_increment_op(current, op));
                 let mut array = array.borrow_mut();
                 if array.read_only {
                     return Err(CustError::new(format!(
@@ -18856,6 +18916,7 @@ impl Interpreter {
                 let current = self.read_struct_field(name, fields)?;
                 let updated = Self::apply_increment_op(current, op);
                 self.assign_struct_field(name, fields, updated)?;
+                let updated = self.read_struct_field(name, fields)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::StructPtrGet { pointer, fields } => {
@@ -18872,6 +18933,7 @@ impl Interpreter {
                 let current = self.deref_pointer(&pointer)?;
                 let updated = Self::apply_increment_op(current, op);
                 self.assign_deref_pointer(&pointer, updated)?;
+                let updated = self.deref_pointer(&pointer)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::ScalarLiteral { init, .. } => {
@@ -18922,7 +18984,8 @@ impl Interpreter {
         };
         let current = array.borrow().elements[index];
         let rhs = self.eval(value)?;
-        let result = Self::apply_compound_op(current, op, rhs)?;
+        let elem_type = array.borrow().elem_type;
+        let result = elem_type.normalize(Self::apply_compound_op(current, op, rhs)?);
         let mut array = array.borrow_mut();
         if array.read_only {
             return Err(CustError::new(format!(
@@ -18945,7 +19008,7 @@ impl Interpreter {
         let rhs = self.eval(value)?;
         let result = Self::apply_compound_op(current, op, rhs)?;
         self.assign_deref_pointer(&pointer, result)?;
-        Ok(result)
+        self.deref_pointer(&pointer)
     }
 
     fn eval_equality(&mut self, left: &Expr, op: &BinaryOp, right: &Expr) -> CustResult<i64> {
@@ -19204,7 +19267,9 @@ impl Interpreter {
                     points_to_const,
                 }))
             }
-            Some(ReturnType::Scalar(_)) => Ok(Some(ReturnValue::Scalar(self.eval(expr)?))),
+            Some(ReturnType::Scalar(ty)) => Ok(Some(ReturnValue::Scalar(
+                self.eval_scalar_conversion(ty, expr)?,
+            ))),
             Some(ReturnType::Void) => {
                 unreachable!("void returns are handled before classification")
             }
@@ -19228,7 +19293,7 @@ impl Interpreter {
     fn initialize_static_local(&mut self, decl: &Stmt) -> CustResult<Value> {
         match decl {
             Stmt::VarDecl { ty, expr, .. } => Ok(Value::Scalar {
-                value: self.eval(expr)?,
+                value: self.eval_scalar_conversion(*ty, expr)?,
                 ty: *ty,
             }),
             Stmt::PointerDecl {
@@ -19318,7 +19383,7 @@ impl Interpreter {
                 expr,
                 is_const,
             } => {
-                let value = self.eval(expr)?;
+                let value = self.eval_scalar_conversion(*ty, expr)?;
                 if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
                         "variable '{name}' already declared in this scope"
@@ -19434,9 +19499,9 @@ impl Interpreter {
             Stmt::Assign(name, expr) => {
                 let existing = self.find_variable(name).cloned();
                 match existing {
-                    Some(Value::Scalar { .. }) => {
+                    Some(Value::Scalar { ty, .. }) => {
                         self.ensure_variable_mutable(name)?;
-                        let value = self.eval(expr)?;
+                        let value = self.eval_scalar_conversion(ty, expr)?;
                         if let Some(Value::Scalar { value: slot, .. }) =
                             self.find_variable_mut(name)
                         {
@@ -19493,8 +19558,12 @@ impl Interpreter {
                     return Ok(ExecFlow::None);
                 }
                 self.ensure_pointer_expr_pointee_mutable(pointer)?;
+                let pointee_type = self.pointer_expr_pointee_type(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;
-                let value = self.eval(value)?;
+                let value = match pointee_type {
+                    Some(PointeeType::Scalar(ty)) => self.eval_scalar_conversion(ty, value)?,
+                    _ => self.eval(value)?,
+                };
                 self.assign_deref_pointer(&pointer, value)?;
                 Ok(ExecFlow::None)
             }
@@ -19518,7 +19587,12 @@ impl Interpreter {
                     self.eval_struct_index_assignment_expr(name, index, value)?;
                     return Ok(ExecFlow::None);
                 }
-                let value = self.eval(value)?;
+                let elem_type = self.scalar_array_element_type(name).ok_or_else(|| {
+                    CustError::new(format!(
+                        "variable '{name}' is not a scalar array or pointer"
+                    ))
+                })?;
+                let value = self.eval_scalar_conversion(elem_type, value)?;
                 match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => {
                         self.ensure_pointer_variable_pointee_mutable(name)?;
@@ -19551,7 +19625,19 @@ impl Interpreter {
                     let pointer = self.eval_pointer(value)?;
                     self.assign_direct_struct_pointer_field(name, fields, pointer)?;
                 } else {
-                    let value = self.eval(value)?;
+                    let ty = match self.find_variable(name) {
+                        Some(Value::Struct { type_name, .. }) => self
+                            .aggregate_type_field_metadata(type_name, fields)?
+                            .and_then(|(field_type, _, _)| match field_type {
+                                StructFieldType::Scalar(ty) => Some(ty),
+                                _ => None,
+                            }),
+                        _ => None,
+                    };
+                    let value = match ty {
+                        Some(ty) => self.eval_scalar_conversion(ty, value)?,
+                        None => self.eval(value)?,
+                    };
                     self.assign_struct_field(name, fields, value)?;
                 }
                 Ok(ExecFlow::None)
@@ -19863,16 +19949,19 @@ impl Interpreter {
             Expr::CompoundAssign { name, op, value } => {
                 self.eval_compound_assignment_expr(name, *op, value)
             }
-            Expr::ScalarLiteralSet { init, value, .. } => {
-                self.eval(init)?;
-                self.eval(value)
+            Expr::ScalarLiteralSet { ty, init, value } => {
+                self.eval_scalar_conversion(*ty, init)?;
+                self.eval_scalar_conversion(*ty, value)
             }
             Expr::ScalarLiteralCompoundSet {
-                init, op, value, ..
+                ty,
+                init,
+                op,
+                value,
             } => {
-                let current = self.eval(init)?;
+                let current = self.eval_scalar_conversion(*ty, init)?;
                 let rhs = self.eval(value)?;
-                Self::apply_compound_op(current, *op, rhs)
+                Ok(ty.normalize(Self::apply_compound_op(current, *op, rhs)?))
             }
             Expr::AggregateFieldSet {
                 aggregate,
@@ -19927,7 +20016,12 @@ impl Interpreter {
                 ) {
                     return Err(CustError::new("struct value used as scalar expression"));
                 }
-                let value = self.eval(value)?;
+                let elem_type = self.scalar_array_element_type(name).ok_or_else(|| {
+                    CustError::new(format!(
+                        "variable '{name}' is not a scalar array or pointer"
+                    ))
+                })?;
+                let value = self.eval_scalar_conversion(elem_type, value)?;
                 match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => {
                         self.ensure_pointer_variable_pointee_mutable(name)?;
@@ -20072,10 +20166,14 @@ impl Interpreter {
             }
             Expr::DerefSet { pointer, value } => {
                 self.ensure_pointer_expr_pointee_mutable(pointer)?;
+                let pointee_type = self.pointer_expr_pointee_type(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;
-                let value = self.eval(value)?;
+                let value = match pointee_type {
+                    Some(PointeeType::Scalar(ty)) => self.eval_scalar_conversion(ty, value)?,
+                    _ => self.eval(value)?,
+                };
                 self.assign_deref_pointer(&pointer, value)?;
-                Ok(value)
+                self.deref_pointer(&pointer)
             }
             Expr::DerefCompoundSet { pointer, op, value } => {
                 self.eval_deref_compound_set(pointer, *op, value)
@@ -20154,12 +20252,12 @@ impl Interpreter {
                     "void function '{name}' used as scalar expression"
                 ))),
             },
-            Expr::Cast { expr, .. } => self.eval(expr),
+            Expr::Cast { ty, expr } => self.eval_scalar_conversion(*ty, expr),
             Expr::VoidCast(expr) => {
                 self.eval_discard(expr)?;
                 Err(CustError::new("void expression used as scalar"))
             }
-            Expr::ScalarLiteral { init, .. } => self.eval(init),
+            Expr::ScalarLiteral { ty, init } => self.eval_scalar_conversion(*ty, init),
             Expr::AggregateLiteral { type_name, .. } => {
                 let aggregate_kind = self.aggregate_kind_label(type_name);
                 Err(CustError::new(format!(

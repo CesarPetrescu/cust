@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-23 C99 `__func__` run after focused read-only/file-scope/static-recursion coverage, a warning-free Cust/GCC/Clang fixture returning 73, 78 passing fuzz-safety tests, and 869 passing interpreter tests. `_Bool` conversion/storage normalization is the next bounded correctness slice, not an external blocker.
+None. Last reviewed in the 2026-07-23 C `_Bool` conversion/storage-normalization run after five focused regressions, canonical compiler-oracle coverage returning 27 under Cust/GCC/Clang, 78 passing fuzz-safety tests, 874 passing interpreter tests, and both Docker gates. Deterministic model-based `_Bool` conversion-context coverage is the next bounded correctness/tooling slice, not an external blocker.
 
 ## Blocker template
 

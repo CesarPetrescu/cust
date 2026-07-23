@@ -1455,6 +1455,152 @@ fn supports_bool_type_spellings() {
 }
 
 #[test]
+fn bool_conversion_semantics_match_fixture() {
+    let program = include_str!("fixtures/valid/bool_conversion_semantics.c");
+
+    assert_eq!(interpret(program).unwrap(), 27);
+}
+
+#[test]
+fn normalizes_bool_scalar_declarations_and_assignments() {
+    let program = r#"
+        int main(void) {
+            _Bool value = 7;
+            int initial = value;
+            value = -3;
+            int assigned = value;
+            value = 0;
+            return initial * 4 + assigned * 2 + value;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 6);
+}
+
+#[test]
+fn converts_scalar_and_pointer_expressions_in_bool_casts_and_compound_literals_once() {
+    let program = r#"
+        int main(void) {
+            int marker = 0;
+            int values[2] = {4, 8};
+            int *pointer = values;
+            int *null_pointer = 0;
+            _Bool direct_pointer = (marker += 1, pointer);
+            _Bool direct_null = null_pointer;
+            direct_null = pointer;
+            return direct_pointer
+                + direct_null * 2
+                + ((_Bool)-9) * 4
+                + ((_Bool)pointer) * 8
+                + ((_Bool){6}) * 16
+                + ((_Bool){null_pointer}) * 32
+                + marker * 64;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 95);
+}
+
+#[test]
+fn normalizes_bool_parameters_and_return_values_from_scalars_and_pointers() {
+    let program = r#"
+        _Bool from_scalar(int value) { return value; }
+        _Bool from_pointer(int *value) { return value; }
+        int take_bool(_Bool value) { return value; }
+
+        int main(void) {
+            int values[1] = {7};
+            int *pointer = values;
+            int *null_pointer = 0;
+            return from_scalar(-5)
+                + from_pointer(pointer) * 2
+                + from_pointer(null_pointer) * 4
+                + take_bool(9) * 8
+                + take_bool(pointer) * 16
+                + take_bool(null_pointer) * 32;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 27);
+}
+
+#[test]
+fn normalizes_bool_array_and_field_storage_across_assignment_and_updates() {
+    let program = r#"
+        struct Flags {
+            _Bool direct;
+            _Bool values[2];
+        };
+
+        int main(void) {
+            int raw[1] = {5};
+            int *pointer = raw;
+            _Bool values[3] = {7, 0, pointer};
+            struct Flags flags = {9, {0, -4}};
+            int checks = 0;
+
+            checks += values[0] == 1;
+            checks += values[1] == 0;
+            checks += values[2] == 1;
+            checks += flags.direct == 1;
+            checks += flags.values[0] == 0;
+            checks += flags.values[1] == 1;
+
+            values[0] = 4;
+            values[1] = pointer;
+            flags.direct = pointer;
+            flags.values[0] = 8;
+            checks += values[0] == 1;
+            checks += values[1] == 1;
+            checks += flags.direct == 1;
+            checks += flags.values[0] == 1;
+
+            _Bool scalar = 0;
+            int scalar_compound = (scalar += 8);
+            int scalar_postfix = scalar++;
+            int scalar_prefix = --scalar;
+            checks += scalar_compound == 1;
+            checks += scalar_postfix == 1;
+            checks += scalar_prefix == 0;
+            checks += scalar == 0;
+
+            values[0] = 0;
+            int array_compound = (values[0] += 8);
+            int array_postfix = values[0]++;
+            int array_prefix = --values[0];
+            checks += array_compound == 1;
+            checks += array_postfix == 1;
+            checks += array_prefix == 0;
+            checks += values[0] == 0;
+
+            flags.direct = 0;
+            int field_compound = (flags.direct += 8);
+            int field_postfix = flags.direct++;
+            int field_prefix = --flags.direct;
+            checks += field_compound == 1;
+            checks += field_postfix == 1;
+            checks += field_prefix == 0;
+            checks += flags.direct == 0;
+
+            _Bool *slot = values;
+            *slot = pointer;
+            checks += *slot == 1;
+            *slot = 0;
+            int deref_compound = (*slot += 8);
+            int deref_postfix = (*slot)++;
+            int deref_prefix = --*slot;
+            checks += deref_compound == 1;
+            checks += deref_postfix == 1;
+            checks += deref_prefix == 0;
+            checks += *slot == 0;
+            return checks;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 27);
+}
+
+#[test]
 fn supports_permuted_scalar_type_specifiers() {
     let program = include_str!("fixtures/valid/permuted_scalar_type_specifiers.c");
 
