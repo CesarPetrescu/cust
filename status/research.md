@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-23 — Distinct-root selected-result composition and return
+
+- No external documentation was needed. Conditional/comma pointer wrappers, same-root offsets, const-preserving parameter copies, and return-value copies must transform or copy only the already selected interpreter pointer; the previously unselected root cannot contribute owner/path/base/index/type/qualification/lifetime metadata.
+- Four thousand six hundred eight generated routes balance both pointee kinds, four primary direct/captured roots, both selected roots, all three wrappers and offset spellings, composition before/after one/two-hop helpers, and one/two returns. Seventeen exact diagnostic/lifetime checks pass. The initial RED was a missing generated `carry_*` marker declaration; existing runtime behavior then passed without production changes.
+- The warning-free fixture returns 31 under Cust/GCC/Clang and uses only selected-root-local offsets/equality. Cross-root subtraction/ordering and dangling-pointer selection remain interpreter-only. See `references/cust-distinct-root-selected-result-carry.md`.
+
 ## 2026-07-23 — Distinct-root final pointer reselection
 
 - No external documentation was needed. A copied-parameter selector over pointers from different storage roots must return one complete interpreter pointer value; owner/path/base/index/type/qualification/lifetime provenance comes only from the selected input, while both caller-side slots remain unchanged.

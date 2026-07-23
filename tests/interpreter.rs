@@ -9374,6 +9374,15 @@ fn adjusted_aggregate_parameter_distinct_root_final_reselection_matches_fixture(
 }
 
 #[test]
+fn adjusted_aggregate_parameter_distinct_root_selected_result_carry_matches_fixture() {
+    let program = include_str!(
+        "fixtures/valid/adjusted_aggregate_parameter_distinct_root_selected_result_carry.c",
+    );
+
+    assert_eq!(interpret(program).unwrap(), 31);
+}
+
+#[test]
 fn aggregate_array_field_elements_decay_embedded_arrays_for_direct_access() {
     let program = r#"
         struct Point { int value; };

@@ -193,6 +193,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_post_selection_reforward_return_boundaries.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_final_returned_composed_pointer_reselection.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_distinct_root_final_reselection.c",
+    "tests/fixtures/compat/valid/adjusted_aggregate_parameter_distinct_root_selected_result_carry.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_derived_inner_pointer_const_promotion_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_direct_literal_derived_inner_pointer_const_promotion_routes.c",
     "tests/fixtures/compat/valid/adjusted_aggregate_parameter_direct_literal_derived_inner_pointer_const_reforward_routes.c",
