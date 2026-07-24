@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-24 — Numeric escapes across adjacent string tokens
+
+- No external language-semantics research was needed because `Parser::concatenate_adjacent_string_literals()` and `references/cust-adjacent-string-literals.md` already define Cust's supported behavior: each lexer token owns a trailing NUL, and parser concatenation removes each intermediate NUL before extending the combined byte vector.
+- Model lexer token values separately from parser concatenation: each of the two expected lexer tokens retains its own NUL, while the AST must contain exactly one `StringLiteral` with the left/right decoded values and one final NUL. Weighted runtime indexing plus a final-NUL check proves byte order and catches leaked intermediate NULs. Model every token and EOF location one Unicode scalar at a time across spaces, multibyte block comments, LF, and CRLF; place malformed `\x`/`\8` fragments on both sides and require exact opening-quote carets from token and AST APIs. Existing behavior passed all 240 sources after correcting only the test oracle's debug token name from `EqEq` to `Eq`.
+- The next bounded seam is a three-token chain with independently composed trivia at both boundaries, including terminated line comments and malformed escapes in first/middle/final positions.
+
 ## 2026-07-24 — Numeric-escape literal fragments
 
 - No external language-semantics research was needed because supported octal/hex escape behavior and exact diagnostics are already defined by `parse_escape_sequence()` plus existing fixtures. The implementation decision is to treat this as deterministic coverage closure: keep source fragments independent from decoded vectors; cover bounded octal/hex run lengths, ordinary terminators, `/`/`*` delimiters, multibyte terminators, missing hex digits, and unsupported escapes in both literal kinds.

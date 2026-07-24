@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-24 deterministic numeric-escape/literal-fragment robustness run after 256 unique string/character sources, LF/CRLF, four expression/initializer boundaries, 128 exact valid decoded-value/token/location/AST/result checks, 128 exact malformed diagnostic/caret checks, 90 passing fuzz-safety tests, 875 passing interpreter tests (976 total), a warning-free full Clippy gate, and both Docker gates. Numeric-escape adjacent-string concatenation is the next bounded tooling slice, not an external blocker.
+None. Last reviewed in the 2026-07-24 deterministic numeric-escape adjacent-string concatenation run after 240 unique programs, four fragments on both boundary sides, four trivia forms, three declaration/expression routes, 192 exact valid token/location/AST/runtime checks, 48 exact malformed diagnostic/caret checks, 91 passing fuzz-safety tests, 875 passing interpreter tests (977 total), a warning-free full Clippy gate, and both Docker gates. Three-token numeric-escape concatenation is the next bounded tooling slice, not an external blocker.
 
 ## Blocker template
 
