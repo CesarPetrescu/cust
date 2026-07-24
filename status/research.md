@@ -18,6 +18,11 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-24 — Numeric-escape literal fragments
+
+- No external language-semantics research was needed because supported octal/hex escape behavior and exact diagnostics are already defined by `parse_escape_sequence()` plus existing fixtures. The implementation decision is to treat this as deterministic coverage closure: keep source fragments independent from decoded vectors; cover bounded octal/hex run lengths, ordinary terminators, `/`/`*` delimiters, multibyte terminators, missing hex digits, and unsupported escapes in both literal kinds.
+- Cross LF/CRLF and all expression/initializer before/after routes; independently panic-guard token and AST APIs; compare complete token-plus-EOF locations and decoded values; require malformed diagnostics at the exact opening quote with source-line/caret context; reject duplicate sources; and assert exact literal/family/line-ending/route totals. Existing lexer/parser/runtime behavior passed all 256 sources immediately. The next seam is numeric escapes across adjacent string-literal token boundaries and intervening trivia, including exact intermediate-NUL removal.
+
 ## 2026-07-24 — Composed literal-fragment runs
 
 - No external language-semantics research was needed. The implementation decision is to cross all 25 ordered pairs and five balanced cyclic triples of `/`, `*`, escaped quote, escaped backslash, and multibyte atoms under LF/CRLF at all four expression/initializer before/after routes, then add five valid and four malformed character forms plus interrupted strings.

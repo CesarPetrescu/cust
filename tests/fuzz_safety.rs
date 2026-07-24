@@ -2154,6 +2154,325 @@ fn assert_malformed_literal_render(
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum ValidStringNumericEscape {
+    OctalSingleTerminator,
+    OctalDoubleTerminator,
+    OctalTripleTerminator,
+    OctalSlashDelimiter,
+    OctalStarDelimiter,
+    OctalMultibyteTerminator,
+    HexSingleTerminator,
+    HexRunTerminator,
+    HexSlashDelimiter,
+    HexStarDelimiter,
+    HexMultibyteTerminator,
+}
+
+impl ValidStringNumericEscape {
+    const ALL: [Self; 11] = [
+        Self::OctalSingleTerminator,
+        Self::OctalDoubleTerminator,
+        Self::OctalTripleTerminator,
+        Self::OctalSlashDelimiter,
+        Self::OctalStarDelimiter,
+        Self::OctalMultibyteTerminator,
+        Self::HexSingleTerminator,
+        Self::HexRunTerminator,
+        Self::HexSlashDelimiter,
+        Self::HexStarDelimiter,
+        Self::HexMultibyteTerminator,
+    ];
+
+    fn fragment(self) -> &'static str {
+        match self {
+            Self::OctalSingleTerminator => r"\7q",
+            Self::OctalDoubleTerminator => r"\12q",
+            Self::OctalTripleTerminator => r"\1018",
+            Self::OctalSlashDelimiter => r"\57/",
+            Self::OctalStarDelimiter => r"\52*",
+            Self::OctalMultibyteTerminator => r"\101多",
+            Self::HexSingleTerminator => r"\x4g",
+            Self::HexRunTerminator => r"\x41z",
+            Self::HexSlashDelimiter => r"\x2f/",
+            Self::HexStarDelimiter => r"\x2a*",
+            Self::HexMultibyteTerminator => r"\x41多",
+        }
+    }
+
+    fn values(self) -> Vec<i64> {
+        match self {
+            Self::OctalSingleTerminator => vec![7, 'q' as i64],
+            Self::OctalDoubleTerminator => vec![10, 'q' as i64],
+            Self::OctalTripleTerminator => vec![65, '8' as i64],
+            Self::OctalSlashDelimiter => vec!['/' as i64, '/' as i64],
+            Self::OctalStarDelimiter => vec!['*' as i64, '*' as i64],
+            Self::OctalMultibyteTerminator => vec![65, '多' as i64],
+            Self::HexSingleTerminator => vec![4, 'g' as i64],
+            Self::HexRunTerminator => vec![65, 'z' as i64],
+            Self::HexSlashDelimiter => vec!['/' as i64, '/' as i64],
+            Self::HexStarDelimiter => vec!['*' as i64, '*' as i64],
+            Self::HexMultibyteTerminator => vec![65, '多' as i64],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ValidCharacterNumericEscape {
+    OctalSingle,
+    OctalDouble,
+    OctalTriple,
+    HexSingle,
+    HexRun,
+}
+
+impl ValidCharacterNumericEscape {
+    const ALL: [Self; 5] = [
+        Self::OctalSingle,
+        Self::OctalDouble,
+        Self::OctalTriple,
+        Self::HexSingle,
+        Self::HexRun,
+    ];
+
+    fn fragment_and_value(self) -> (&'static str, i64) {
+        match self {
+            Self::OctalSingle => (r"\7", 7),
+            Self::OctalDouble => (r"\12", 10),
+            Self::OctalTriple => (r"\101", 65),
+            Self::HexSingle => (r"\x4", 4),
+            Self::HexRun => (r"\x41", 65),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum MalformedNumericEscape {
+    MissingHexDigits,
+    MissingHexBeforeSlash,
+    MissingHexBeforeStar,
+    MissingHexBeforeMultibyte,
+    UnsupportedEight,
+    UnsupportedUpperX,
+    UnsupportedLetter,
+    UnsupportedMultibyte,
+}
+
+impl MalformedNumericEscape {
+    const ALL: [Self; 8] = [
+        Self::MissingHexDigits,
+        Self::MissingHexBeforeSlash,
+        Self::MissingHexBeforeStar,
+        Self::MissingHexBeforeMultibyte,
+        Self::UnsupportedEight,
+        Self::UnsupportedUpperX,
+        Self::UnsupportedLetter,
+        Self::UnsupportedMultibyte,
+    ];
+
+    fn fragment(self) -> &'static str {
+        match self {
+            Self::MissingHexDigits => r"\x",
+            Self::MissingHexBeforeSlash => r"\x/",
+            Self::MissingHexBeforeStar => r"\x*",
+            Self::MissingHexBeforeMultibyte => r"\x多",
+            Self::UnsupportedEight => r"\8",
+            Self::UnsupportedUpperX => r"\X",
+            Self::UnsupportedLetter => r"\z",
+            Self::UnsupportedMultibyte => r"\多",
+        }
+    }
+
+    fn error_message(self, literal_kind: LiteralBoundaryKind) -> String {
+        match self {
+            Self::MissingHexDigits
+            | Self::MissingHexBeforeSlash
+            | Self::MissingHexBeforeStar
+            | Self::MissingHexBeforeMultibyte => {
+                "hex escape sequence requires at least one digit".to_string()
+            }
+            Self::UnsupportedEight => {
+                format!("unsupported {} escape '\\8'", literal_kind.error_label())
+            }
+            Self::UnsupportedUpperX => {
+                format!("unsupported {} escape '\\X'", literal_kind.error_label())
+            }
+            Self::UnsupportedLetter => {
+                format!("unsupported {} escape '\\z'", literal_kind.error_label())
+            }
+            Self::UnsupportedMultibyte => {
+                format!("unsupported {} escape '\\多'", literal_kind.error_label())
+            }
+        }
+    }
+}
+
+#[test]
+fn generated_numeric_escape_literal_fragments_remain_exact_and_panic_free() {
+    const LINE_ENDINGS: [&str; 2] = ["\n", "\r\n"];
+
+    let mut literal_counts = [0; LiteralBoundaryKind::ALL.len()];
+    let mut string_family_counts = [0; ValidStringNumericEscape::ALL.len()];
+    let mut character_family_counts = [0; ValidCharacterNumericEscape::ALL.len()];
+    let mut malformed_family_counts = [0; MalformedNumericEscape::ALL.len()];
+    let mut line_ending_counts = [0; LINE_ENDINGS.len()];
+    let mut route_counts = [0; LiteralBoundaryRoute::ALL.len()];
+    let mut valid_count = 0;
+    let mut malformed_count = 0;
+    let mut sources = HashSet::new();
+
+    for (family_index, family) in ValidStringNumericEscape::ALL.into_iter().enumerate() {
+        let mut values = family.values();
+        values.push(0);
+        let literal = format!("\"{}\"", family.fragment());
+        let expected_kind = format!("StringLiteral({values:?})");
+
+        for (line_ending_index, line_ending) in LINE_ENDINGS.into_iter().enumerate() {
+            for (route_index, route) in LiteralBoundaryRoute::ALL.into_iter().enumerate() {
+                let rendered = render_literal_boundary_source(
+                    LiteralBoundaryKind::String,
+                    route,
+                    line_ending,
+                    &literal,
+                    Some(&expected_kind),
+                );
+                let context = format!(
+                    "valid string numeric escape {family:?}, line ending {line_ending:?}, route {route:?}, source {:?}",
+                    rendered.source
+                );
+                assert!(
+                    sources.insert(rendered.source.clone()),
+                    "duplicate numeric-escape source for {context}"
+                );
+                assert_valid_literal_render(&rendered, values[0], &context);
+
+                literal_counts[LiteralBoundaryKind::String as usize] += 1;
+                string_family_counts[family_index] += 1;
+                line_ending_counts[line_ending_index] += 1;
+                route_counts[route_index] += 1;
+                valid_count += 1;
+            }
+        }
+    }
+
+    for (family_index, family) in ValidCharacterNumericEscape::ALL.into_iter().enumerate() {
+        let (fragment, expected_value) = family.fragment_and_value();
+        let literal = format!("'{fragment}'");
+        let expected_kind = format!("Number({expected_value})");
+
+        for (line_ending_index, line_ending) in LINE_ENDINGS.into_iter().enumerate() {
+            for (route_index, route) in LiteralBoundaryRoute::ALL.into_iter().enumerate() {
+                let rendered = render_literal_boundary_source(
+                    LiteralBoundaryKind::Character,
+                    route,
+                    line_ending,
+                    &literal,
+                    Some(&expected_kind),
+                );
+                let context = format!(
+                    "valid character numeric escape {family:?}, line ending {line_ending:?}, route {route:?}, source {:?}",
+                    rendered.source
+                );
+                assert!(
+                    sources.insert(rendered.source.clone()),
+                    "duplicate numeric-escape source for {context}"
+                );
+                assert_valid_literal_render(&rendered, expected_value, &context);
+
+                literal_counts[LiteralBoundaryKind::Character as usize] += 1;
+                character_family_counts[family_index] += 1;
+                line_ending_counts[line_ending_index] += 1;
+                route_counts[route_index] += 1;
+                valid_count += 1;
+            }
+        }
+    }
+
+    for (family_index, family) in MalformedNumericEscape::ALL.into_iter().enumerate() {
+        for literal_kind in LiteralBoundaryKind::ALL {
+            let literal = match literal_kind {
+                LiteralBoundaryKind::String => format!("\"{}\"", family.fragment()),
+                LiteralBoundaryKind::Character => format!("'{}'", family.fragment()),
+            };
+            let expected_message = family.error_message(literal_kind);
+
+            for (line_ending_index, line_ending) in LINE_ENDINGS.into_iter().enumerate() {
+                for (route_index, route) in LiteralBoundaryRoute::ALL.into_iter().enumerate() {
+                    let rendered = render_literal_boundary_source(
+                        literal_kind,
+                        route,
+                        line_ending,
+                        &literal,
+                        None,
+                    );
+                    let context = format!(
+                        "malformed numeric escape {family:?}, literal {literal_kind:?}, line ending {line_ending:?}, route {route:?}, source {:?}",
+                        rendered.source
+                    );
+                    assert!(
+                        sources.insert(rendered.source.clone()),
+                        "duplicate numeric-escape source for {context}"
+                    );
+                    assert_numeric_escape_error(&rendered, &expected_message, &context);
+
+                    literal_counts[literal_kind as usize] += 1;
+                    malformed_family_counts[family_index] += 1;
+                    line_ending_counts[line_ending_index] += 1;
+                    route_counts[route_index] += 1;
+                    malformed_count += 1;
+                }
+            }
+        }
+    }
+
+    assert_eq!(literal_counts, [152, 104]);
+    assert_eq!(
+        string_family_counts,
+        [8; ValidStringNumericEscape::ALL.len()]
+    );
+    assert_eq!(
+        character_family_counts,
+        [8; ValidCharacterNumericEscape::ALL.len()]
+    );
+    assert_eq!(
+        malformed_family_counts,
+        [16; MalformedNumericEscape::ALL.len()]
+    );
+    assert_eq!(line_ending_counts, [128, 128]);
+    assert_eq!(route_counts, [64; LiteralBoundaryRoute::ALL.len()]);
+    assert_eq!(valid_count, 128);
+    assert_eq!(malformed_count, 128);
+    assert_eq!(sources.len(), 256);
+}
+
+fn assert_numeric_escape_error(
+    rendered: &RenderedLiteralBoundary,
+    expected_message: &str,
+    context: &str,
+) {
+    let token_error = panic::catch_unwind(|| format_tokens(&rendered.source))
+        .unwrap_or_else(|_| panic!("format_tokens panicked for {context}"))
+        .unwrap_err()
+        .to_string();
+    let ast_error = panic::catch_unwind(|| format_ast(&rendered.source))
+        .unwrap_or_else(|_| panic!("format_ast panicked for {context}"))
+        .unwrap_err()
+        .to_string();
+    let expected_first_line = format!(
+        "{expected_message} at line {}, column {}",
+        rendered.literal_location.0, rendered.literal_location.1
+    );
+
+    for error in [&token_error, &ast_error] {
+        assert_eq!(
+            error.lines().next(),
+            Some(expected_first_line.as_str()),
+            "{context}: {error:?}"
+        );
+        assert_source_location_invariants(&rendered.source, error, true, context);
+    }
+}
+
 #[test]
 fn generated_pointer_expression_values_match_model_without_panics() {
     const SEEDS: [u64; 3] = [0xC057_5101, 0xC057_5102, 0xC057_5103];
