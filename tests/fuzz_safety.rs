@@ -1458,6 +1458,386 @@ fn assert_unterminated_comment_error(
     assert_source_location_invariants(source, message, true, context);
 }
 
+#[derive(Clone, Copy, Debug)]
+enum LiteralBoundaryKind {
+    String,
+    Character,
+}
+
+impl LiteralBoundaryKind {
+    const ALL: [Self; 2] = [Self::String, Self::Character];
+
+    fn error_label(self) -> &'static str {
+        match self {
+            Self::String => "string",
+            Self::Character => "character",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum LiteralBoundaryMutation {
+    Slash,
+    Star,
+    LineCommentDelimiter,
+    BlockCommentOpen,
+    BlockCommentClose,
+    EscapedQuote,
+    EscapedBackslash,
+    Multibyte,
+    Unterminated,
+    EmbeddedLineEnding,
+}
+
+impl LiteralBoundaryMutation {
+    const ALL: [Self; 10] = [
+        Self::Slash,
+        Self::Star,
+        Self::LineCommentDelimiter,
+        Self::BlockCommentOpen,
+        Self::BlockCommentClose,
+        Self::EscapedQuote,
+        Self::EscapedBackslash,
+        Self::Multibyte,
+        Self::Unterminated,
+        Self::EmbeddedLineEnding,
+    ];
+
+    fn literal(self, kind: LiteralBoundaryKind, line_ending: &str) -> (String, Option<String>) {
+        match kind {
+            LiteralBoundaryKind::String => {
+                let values = match self {
+                    Self::Slash => Some(vec!['/' as i64, 0]),
+                    Self::Star => Some(vec!['*' as i64, 0]),
+                    Self::LineCommentDelimiter => Some(vec!['/' as i64, '/' as i64, 0]),
+                    Self::BlockCommentOpen => Some(vec!['/' as i64, '*' as i64, 0]),
+                    Self::BlockCommentClose => Some(vec!['*' as i64, '/' as i64, 0]),
+                    Self::EscapedQuote => Some(vec!['"' as i64, 0]),
+                    Self::EscapedBackslash => Some(vec!['\\' as i64, 0]),
+                    Self::Multibyte => Some(vec!['多' as i64, '🦀' as i64, 0]),
+                    Self::Unterminated | Self::EmbeddedLineEnding => None,
+                };
+                let literal = match self {
+                    Self::Slash => "\"/\"".to_string(),
+                    Self::Star => "\"*\"".to_string(),
+                    Self::LineCommentDelimiter => "\"//\"".to_string(),
+                    Self::BlockCommentOpen => "\"/*\"".to_string(),
+                    Self::BlockCommentClose => "\"*/\"".to_string(),
+                    Self::EscapedQuote => "\"\\\"\"".to_string(),
+                    Self::EscapedBackslash => "\"\\\\\"".to_string(),
+                    Self::Multibyte => "\"多🦀\"".to_string(),
+                    Self::Unterminated => "\"unterminated".to_string(),
+                    Self::EmbeddedLineEnding => format!("\"left{line_ending}right\""),
+                };
+                let expected = values.map(|values| format!("StringLiteral({values:?})"));
+                (literal, expected)
+            }
+            LiteralBoundaryKind::Character => {
+                let value = match self {
+                    Self::Slash => Some('/' as i64),
+                    Self::Star => Some('*' as i64),
+                    Self::EscapedQuote => Some('\'' as i64),
+                    Self::EscapedBackslash => Some('\\' as i64),
+                    Self::Multibyte => Some('多' as i64),
+                    Self::LineCommentDelimiter
+                    | Self::BlockCommentOpen
+                    | Self::BlockCommentClose
+                    | Self::Unterminated
+                    | Self::EmbeddedLineEnding => None,
+                };
+                let literal = match self {
+                    Self::Slash => "'/'".to_string(),
+                    Self::Star => "'*'".to_string(),
+                    Self::LineCommentDelimiter => "'//'".to_string(),
+                    Self::BlockCommentOpen => "'/*'".to_string(),
+                    Self::BlockCommentClose => "'*/'".to_string(),
+                    Self::EscapedQuote => "'\\''".to_string(),
+                    Self::EscapedBackslash => "'\\\\'".to_string(),
+                    Self::Multibyte => "'多'".to_string(),
+                    Self::Unterminated => "'q".to_string(),
+                    Self::EmbeddedLineEnding => format!("'x{line_ending}'"),
+                };
+                let expected = value.map(|value| format!("Number({value})"));
+                (literal, expected)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum LiteralBoundaryRoute {
+    ExpressionBefore,
+    ExpressionAfter,
+    InitializerBefore,
+    InitializerAfter,
+}
+
+impl LiteralBoundaryRoute {
+    const ALL: [Self; 4] = [
+        Self::ExpressionBefore,
+        Self::ExpressionAfter,
+        Self::InitializerBefore,
+        Self::InitializerAfter,
+    ];
+
+    fn is_initializer(self) -> bool {
+        matches!(self, Self::InitializerBefore | Self::InitializerAfter)
+    }
+
+    fn splits_before_literal(self) -> bool {
+        matches!(self, Self::ExpressionBefore | Self::InitializerBefore)
+    }
+}
+
+#[test]
+fn generated_comment_delimiter_literal_boundaries_remain_exact_and_panic_free() {
+    const LINE_ENDINGS: [&str; 2] = ["\n", "\r\n"];
+
+    let mut literal_counts = [0; LiteralBoundaryKind::ALL.len()];
+    let mut mutation_counts = [0; LiteralBoundaryMutation::ALL.len()];
+    let mut line_ending_counts = [0; LINE_ENDINGS.len()];
+    let mut boundary_counts = [0; LiteralBoundaryRoute::ALL.len()];
+    let mut valid_count = 0;
+    let mut malformed_count = 0;
+    let mut sources = HashSet::new();
+
+    for (literal_index, literal_kind) in LiteralBoundaryKind::ALL.into_iter().enumerate() {
+        for (mutation_index, mutation) in LiteralBoundaryMutation::ALL.into_iter().enumerate() {
+            for (line_ending_index, line_ending) in LINE_ENDINGS.into_iter().enumerate() {
+                for (boundary_index, route) in LiteralBoundaryRoute::ALL.into_iter().enumerate() {
+                    let (literal, expected_literal_kind) =
+                        mutation.literal(literal_kind, line_ending);
+                    let rendered = render_literal_boundary_source(
+                        literal_kind,
+                        route,
+                        line_ending,
+                        &literal,
+                        expected_literal_kind.as_deref(),
+                    );
+                    let context = format!(
+                        "literal {literal_kind:?}, mutation {mutation:?}, line ending {line_ending:?}, route {route:?}, source {:?}",
+                        rendered.source
+                    );
+                    assert!(
+                        sources.insert(rendered.source.clone()),
+                        "duplicate literal-boundary source for {context}"
+                    );
+
+                    let token_result = panic::catch_unwind(|| format_tokens(&rendered.source))
+                        .unwrap_or_else(|_| panic!("format_tokens panicked for {context}"));
+                    let ast_result = panic::catch_unwind(|| format_ast(&rendered.source))
+                        .unwrap_or_else(|_| panic!("format_ast panicked for {context}"));
+
+                    if expected_literal_kind.is_some() {
+                        let token_output = token_result.unwrap_or_else(|error| {
+                            panic!("valid literal did not tokenize for {context}: {error}")
+                        });
+                        assert_eq!(
+                            formatted_token_kinds(&token_output),
+                            rendered
+                                .expected_kinds
+                                .iter()
+                                .map(String::as_str)
+                                .collect::<Vec<_>>(),
+                            "{context}"
+                        );
+                        assert_eq!(
+                            formatted_token_locations(&token_output, &context),
+                            rendered.expected_locations,
+                            "{context}"
+                        );
+                        ast_result.unwrap_or_else(|error| {
+                            panic!("valid literal did not parse for {context}: {error}")
+                        });
+                        valid_count += 1;
+                    } else {
+                        let expected_line = rendered.literal_location.0;
+                        let expected_column = rendered.literal_location.1;
+                        let token_error = token_result.unwrap_err().to_string();
+                        let ast_error = ast_result.unwrap_err().to_string();
+                        assert_literal_boundary_error(
+                            &rendered.source,
+                            &token_error,
+                            literal_kind,
+                            expected_line,
+                            expected_column,
+                            &context,
+                        );
+                        assert_literal_boundary_error(
+                            &rendered.source,
+                            &ast_error,
+                            literal_kind,
+                            expected_line,
+                            expected_column,
+                            &context,
+                        );
+                        malformed_count += 1;
+                    }
+
+                    literal_counts[literal_index] += 1;
+                    mutation_counts[mutation_index] += 1;
+                    line_ending_counts[line_ending_index] += 1;
+                    boundary_counts[boundary_index] += 1;
+                }
+            }
+        }
+    }
+
+    assert_eq!(literal_counts, [80, 80]);
+    assert_eq!(mutation_counts, [16; LiteralBoundaryMutation::ALL.len()]);
+    assert_eq!(line_ending_counts, [80, 80]);
+    assert_eq!(boundary_counts, [40; LiteralBoundaryRoute::ALL.len()]);
+    assert_eq!(valid_count, 104);
+    assert_eq!(malformed_count, 56);
+    assert_eq!(sources.len(), 160);
+}
+
+struct RenderedLiteralBoundary {
+    source: String,
+    expected_kinds: Vec<String>,
+    expected_locations: Vec<(usize, usize)>,
+    literal_location: (usize, usize),
+}
+
+fn render_literal_boundary_source(
+    literal_kind: LiteralBoundaryKind,
+    route: LiteralBoundaryRoute,
+    line_ending: &str,
+    literal: &str,
+    expected_literal_kind: Option<&str>,
+) -> RenderedLiteralBoundary {
+    let mut tokens = vec![
+        ("int".to_string(), "Int".to_string()),
+        ("main".to_string(), "Ident(\"main\")".to_string()),
+        ("(".to_string(), "LParen".to_string()),
+        ("void".to_string(), "Void".to_string()),
+        (")".to_string(), "RParen".to_string()),
+        ("{".to_string(), "LBrace".to_string()),
+    ];
+
+    if route.is_initializer() {
+        tokens.push(("char".to_string(), "Char".to_string()));
+        let name = match literal_kind {
+            LiteralBoundaryKind::String => "text",
+            LiteralBoundaryKind::Character => "value",
+        };
+        tokens.push((name.to_string(), format!("Ident(\"{name}\")")));
+        if matches!(literal_kind, LiteralBoundaryKind::String) {
+            tokens.extend([
+                ("[".to_string(), "LBracket".to_string()),
+                ("8".to_string(), "Number(8)".to_string()),
+                ("]".to_string(), "RBracket".to_string()),
+            ]);
+        }
+        tokens.push(("=".to_string(), "Assign".to_string()));
+        let literal_index = tokens.len();
+        tokens.push((
+            literal.to_string(),
+            expected_literal_kind
+                .unwrap_or("malformed literal")
+                .to_string(),
+        ));
+        tokens.extend([
+            (";".to_string(), "Semi".to_string()),
+            ("return".to_string(), "Return".to_string()),
+            (name.to_string(), format!("Ident(\"{name}\")")),
+        ]);
+        if matches!(literal_kind, LiteralBoundaryKind::String) {
+            tokens.extend([
+                ("[".to_string(), "LBracket".to_string()),
+                ("0".to_string(), "Number(0)".to_string()),
+                ("]".to_string(), "RBracket".to_string()),
+            ]);
+        }
+        tokens.extend([
+            (";".to_string(), "Semi".to_string()),
+            ("}".to_string(), "RBrace".to_string()),
+        ]);
+        render_literal_boundary_tokens(tokens, literal_index, route, line_ending)
+    } else {
+        tokens.push(("return".to_string(), "Return".to_string()));
+        let literal_index = tokens.len();
+        tokens.push((
+            literal.to_string(),
+            expected_literal_kind
+                .unwrap_or("malformed literal")
+                .to_string(),
+        ));
+        if matches!(literal_kind, LiteralBoundaryKind::String) {
+            tokens.extend([
+                ("[".to_string(), "LBracket".to_string()),
+                ("0".to_string(), "Number(0)".to_string()),
+                ("]".to_string(), "RBracket".to_string()),
+            ]);
+        }
+        tokens.extend([
+            (";".to_string(), "Semi".to_string()),
+            ("}".to_string(), "RBrace".to_string()),
+        ]);
+        render_literal_boundary_tokens(tokens, literal_index, route, line_ending)
+    }
+}
+
+fn render_literal_boundary_tokens(
+    tokens: Vec<(String, String)>,
+    literal_index: usize,
+    route: LiteralBoundaryRoute,
+    line_ending: &str,
+) -> RenderedLiteralBoundary {
+    let mut source = String::new();
+    let mut expected_kinds = Vec::with_capacity(tokens.len() + 1);
+    let mut expected_locations = Vec::with_capacity(tokens.len() + 1);
+    let mut line = 1;
+    let mut column = 1;
+
+    for (token_index, (spelling, kind)) in tokens.into_iter().enumerate() {
+        if token_index > 0 {
+            let separator = if route.splits_before_literal() && token_index == literal_index {
+                format!("{line_ending}/* boundary 前🦀 */")
+            } else if !route.splits_before_literal() && token_index == literal_index + 1 {
+                format!("/* boundary 后🦀 */{line_ending}")
+            } else {
+                " ".to_string()
+            };
+            push_source_fragment(&mut source, &mut line, &mut column, &separator);
+        }
+        expected_locations.push((line, column));
+        expected_kinds.push(kind);
+        push_source_fragment(&mut source, &mut line, &mut column, &spelling);
+    }
+    expected_locations.push((line, column));
+    expected_kinds.push("Eof".to_string());
+
+    RenderedLiteralBoundary {
+        literal_location: expected_locations[literal_index],
+        source,
+        expected_kinds,
+        expected_locations,
+    }
+}
+
+fn assert_literal_boundary_error(
+    source: &str,
+    message: &str,
+    literal_kind: LiteralBoundaryKind,
+    expected_line: usize,
+    expected_column: usize,
+    context: &str,
+) {
+    assert_eq!(
+        message.lines().next(),
+        Some(
+            format!(
+                "unterminated {} literal at line {expected_line}, column {expected_column}",
+                literal_kind.error_label()
+            )
+            .as_str()
+        ),
+        "{context}: {message:?}"
+    );
+    assert_source_location_invariants(source, message, true, context);
+}
+
 #[test]
 fn generated_pointer_expression_values_match_model_without_panics() {
     const SEEDS: [u64; 3] = [0xC057_5101, 0xC057_5102, 0xC057_5103];

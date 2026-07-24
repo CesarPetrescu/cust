@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-24 — Comment-delimiter/literal boundaries
+
+- No external language-semantics research was needed. The implementation decision is to cross string and character literals with ten bounded `/`, `*`, `//`, `/*`, `*/`, escaped-quote, escaped-backslash, multibyte, unterminated, and embedded-line-ending mutations; LF/CRLF; and expression/initializer boundaries immediately before or after adjacent multibyte block-comment trivia.
+- Build each valid source from independently specified token spellings and expected debug kinds, model line/column one Unicode scalar at a time, include EOF, and compare the complete token-kind/location vectors. For malformed sources, require both public APIs to report the opening quote's exact line/column plus source line/caret. Reject duplicate sources and assert exact literal/mutation/line-ending/boundary/valid/malformed totals. Existing behavior passed immediately after correcting a test-helper `matches!` syntax error.
+- The next seam is composed literal content: all ordered pairs plus selected triples of delimiter, escape, and multibyte atoms, with selected character-literal and LF/CRLF interruption routes.
+
 ## 2026-07-24 — Malformed composed comment runs
 
 - No external language-semantics research was needed. The implementation decision is to isolate eight bounded lexical families: standalone `/` and `*`, line-comment open, unterminated block-comment open, unmatched block-comment close, `/=`, `*=`, and a valid closed multibyte block comment. Cross each with LF/CRLF and six representative start/interior/end boundaries over all four token-vector bases.

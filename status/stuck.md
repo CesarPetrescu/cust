@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-24 deterministic malformed composed-comment-run robustness run after eight mutation families, both LF/CRLF endings, 384 unique sources, 48 exact unterminated-comment caret checks, bounded parser locations, exact dimension counters, 87 passing fuzz-safety tests, 875 passing interpreter tests (973 total), a warning-free full Clippy gate, and both Docker gates. Comment-delimiter/literal-boundary robustness is the next bounded tooling slice, not an external blocker.
+None. Last reviewed in the 2026-07-24 deterministic comment-delimiter/literal-boundary robustness run after 160 unique string/character sources, ten delimiter/escape/multibyte/malformed mutations, LF/CRLF, four expression/initializer boundaries, 104 exact valid token/location checks, 56 exact malformed opening-quote caret checks, 88 passing fuzz-safety tests, 875 passing interpreter tests (974 total), a warning-free full Clippy gate, and both Docker gates. Composed literal-fragment-run robustness is the next bounded tooling slice, not an external blocker.
 
 ## Blocker template
 
