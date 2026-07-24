@@ -876,6 +876,347 @@ fn formatted_token_locations(formatted: &str, context: &str) -> Vec<(usize, usiz
         .collect()
 }
 
+#[derive(Clone, Copy, Debug)]
+enum ComposedTriviaAtom {
+    Spaces,
+    Tab,
+    Newline,
+    Crlf,
+    BlockComment,
+    MultilineBlockComment,
+    LineComment,
+    CrlfLineComment,
+}
+
+impl ComposedTriviaAtom {
+    const ALL: [Self; 8] = [
+        Self::Spaces,
+        Self::Tab,
+        Self::Newline,
+        Self::Crlf,
+        Self::BlockComment,
+        Self::MultilineBlockComment,
+        Self::LineComment,
+        Self::CrlfLineComment,
+    ];
+
+    fn text(self) -> &'static str {
+        match self {
+            Self::Spaces => "  ",
+            Self::Tab => "\t",
+            Self::Newline => "\n",
+            Self::Crlf => "\r\n",
+            Self::BlockComment => "/* pair α🦀 */",
+            Self::MultilineBlockComment => "/* multi多\nline🦀 */",
+            Self::LineComment => "// line café🦀\n",
+            Self::CrlfLineComment => "// crlf 多🦀\r\n",
+        }
+    }
+}
+
+const SELECTED_TRIVIA_TRIPLES: [[ComposedTriviaAtom; 3]; 8] = [
+    [
+        ComposedTriviaAtom::Spaces,
+        ComposedTriviaAtom::BlockComment,
+        ComposedTriviaAtom::Tab,
+    ],
+    [
+        ComposedTriviaAtom::BlockComment,
+        ComposedTriviaAtom::BlockComment,
+        ComposedTriviaAtom::Newline,
+    ],
+    [
+        ComposedTriviaAtom::Spaces,
+        ComposedTriviaAtom::MultilineBlockComment,
+        ComposedTriviaAtom::Crlf,
+    ],
+    [
+        ComposedTriviaAtom::BlockComment,
+        ComposedTriviaAtom::LineComment,
+        ComposedTriviaAtom::Tab,
+    ],
+    [
+        ComposedTriviaAtom::Tab,
+        ComposedTriviaAtom::CrlfLineComment,
+        ComposedTriviaAtom::BlockComment,
+    ],
+    [
+        ComposedTriviaAtom::LineComment,
+        ComposedTriviaAtom::BlockComment,
+        ComposedTriviaAtom::MultilineBlockComment,
+    ],
+    [
+        ComposedTriviaAtom::Crlf,
+        ComposedTriviaAtom::MultilineBlockComment,
+        ComposedTriviaAtom::CrlfLineComment,
+    ],
+    [
+        ComposedTriviaAtom::MultilineBlockComment,
+        ComposedTriviaAtom::Crlf,
+        ComposedTriviaAtom::BlockComment,
+    ],
+];
+
+#[test]
+fn generated_composed_trivia_runs_retain_exact_token_locations_ast_and_results() {
+    const LAYOUT_SEEDS: [usize; 8] = [0, 9, 18, 27, 36, 45, 54, 63];
+    const REPRESENTATIVE_BOUNDARIES: usize = 6;
+
+    let mut compositions = Vec::new();
+    for left in ComposedTriviaAtom::ALL {
+        for right in ComposedTriviaAtom::ALL {
+            compositions.push(vec![left, right]);
+        }
+    }
+    let pair_count = compositions.len();
+    compositions.extend(SELECTED_TRIVIA_TRIPLES.map(Vec::from));
+
+    let mut isolated_base_counts = [0; TOKEN_SPLICE_BASES.len()];
+    let mut isolated_composition_counts = vec![0; compositions.len()];
+    let mut isolated_run_kind_counts = [0; 2];
+    let mut isolated_boundary_counts = [0; 3];
+    let mut layout_counts = [0; LAYOUT_SEEDS.len()];
+    let mut layout_composition_counts = vec![0; compositions.len()];
+    let mut layout_boundary_counts = [0; 3];
+    let mut sources = HashSet::new();
+
+    for (base_index, base) in TOKEN_SPLICE_BASES.into_iter().enumerate() {
+        let baseline_source = base.tokens.join(" ");
+        let baseline_tokens = format_tokens(&baseline_source)
+            .unwrap_or_else(|error| panic!("invalid token baseline {}: {error}", base.name));
+        let baseline_kinds = formatted_token_kinds(&baseline_tokens);
+        let baseline_ast = format_ast(&baseline_source)
+            .unwrap_or_else(|error| panic!("invalid AST baseline {}: {error}", base.name));
+        assert_eq!(interpret(&baseline_source), Ok(base.expected));
+
+        let representative_boundaries = [
+            0,
+            1,
+            base.tokens.len() / 3,
+            base.tokens.len() / 2,
+            base.tokens.len() - 1,
+            base.tokens.len(),
+        ];
+        assert_eq!(
+            representative_boundaries
+                .into_iter()
+                .collect::<HashSet<_>>()
+                .len(),
+            REPRESENTATIVE_BOUNDARIES
+        );
+
+        for (composition_index, composition) in compositions.iter().enumerate() {
+            for boundary in representative_boundaries {
+                let (source, expected_locations) =
+                    render_composed_trivia_splice(base.tokens, composition, boundary);
+                let context = format!(
+                    "isolated base {}, composition {composition_index} {composition:?}, boundary {boundary}, source {source:?}",
+                    base.name
+                );
+                assert!(
+                    sources.insert(source.clone()),
+                    "duplicate composed-trivia source for {context}"
+                );
+                assert_composed_trivia_program(
+                    &source,
+                    &expected_locations,
+                    &baseline_kinds,
+                    &baseline_ast,
+                    base.expected,
+                    &context,
+                );
+
+                isolated_base_counts[base_index] += 1;
+                isolated_composition_counts[composition_index] += 1;
+                isolated_run_kind_counts[usize::from(composition_index >= pair_count)] += 1;
+                let boundary_class = if boundary == 0 {
+                    0
+                } else if boundary == base.tokens.len() {
+                    2
+                } else {
+                    1
+                };
+                isolated_boundary_counts[boundary_class] += 1;
+            }
+        }
+
+        for (layout_index, seed) in LAYOUT_SEEDS.into_iter().enumerate() {
+            let (source, expected_locations, assigned_compositions) =
+                render_composed_trivia_layout(base.tokens, &compositions, seed);
+            let context = format!(
+                "layout base {}, layout {layout_index}, seed {seed}, source {source:?}",
+                base.name
+            );
+            assert!(
+                sources.insert(source.clone()),
+                "duplicate composed-trivia layout for {context}"
+            );
+            assert_composed_trivia_program(
+                &source,
+                &expected_locations,
+                &baseline_kinds,
+                &baseline_ast,
+                base.expected,
+                &context,
+            );
+
+            for (boundary, composition_index) in assigned_compositions.into_iter().enumerate() {
+                layout_composition_counts[composition_index] += 1;
+                let boundary_class = if boundary == 0 {
+                    0
+                } else if boundary == base.tokens.len() {
+                    2
+                } else {
+                    1
+                };
+                layout_boundary_counts[boundary_class] += 1;
+            }
+            layout_counts[layout_index] += 1;
+        }
+    }
+
+    assert_eq!(compositions.len(), 72);
+    assert_eq!(pair_count, 64);
+    assert_eq!(
+        isolated_base_counts,
+        [compositions.len() * REPRESENTATIVE_BOUNDARIES; TOKEN_SPLICE_BASES.len()]
+    );
+    assert_eq!(
+        isolated_composition_counts,
+        vec![TOKEN_SPLICE_BASES.len() * REPRESENTATIVE_BOUNDARIES; compositions.len()]
+    );
+    assert_eq!(isolated_run_kind_counts, [1_536, 192]);
+    assert_eq!(isolated_boundary_counts, [288, 1_152, 288]);
+    assert_eq!(
+        layout_counts,
+        [TOKEN_SPLICE_BASES.len(); LAYOUT_SEEDS.len()]
+    );
+    assert_eq!(
+        layout_composition_counts,
+        (0..compositions.len())
+            .map(|index| match index % 9 {
+                6 => 12,
+                7 => 11,
+                8 => 10,
+                _ => 13,
+            })
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(layout_boundary_counts, [32, 824, 32]);
+    assert_eq!(sources.len(), 1_760);
+}
+
+fn render_composed_trivia_splice(
+    tokens: &[&str],
+    composition: &[ComposedTriviaAtom],
+    boundary: usize,
+) -> (String, Vec<(usize, usize)>) {
+    let mut source = String::new();
+    let mut expected_locations = Vec::with_capacity(tokens.len() + 1);
+    let mut line = 1;
+    let mut column = 1;
+
+    for (token_index, token) in tokens.iter().enumerate() {
+        if token_index == boundary {
+            push_composed_trivia(&mut source, &mut line, &mut column, composition);
+        } else if token_index > 0 {
+            push_source_fragment(&mut source, &mut line, &mut column, " ");
+        }
+        expected_locations.push((line, column));
+        push_source_fragment(&mut source, &mut line, &mut column, token);
+    }
+    if boundary == tokens.len() {
+        push_composed_trivia(&mut source, &mut line, &mut column, composition);
+    }
+    expected_locations.push((line, column));
+
+    (source, expected_locations)
+}
+
+fn render_composed_trivia_layout(
+    tokens: &[&str],
+    compositions: &[Vec<ComposedTriviaAtom>],
+    seed: usize,
+) -> (String, Vec<(usize, usize)>, Vec<usize>) {
+    let mut source = String::new();
+    let mut expected_locations = Vec::with_capacity(tokens.len() + 1);
+    let mut assigned_compositions = Vec::with_capacity(tokens.len() + 1);
+    let mut line = 1;
+    let mut column = 1;
+
+    for (token_index, token) in tokens.iter().enumerate() {
+        let composition_index = (token_index + seed) % compositions.len();
+        assigned_compositions.push(composition_index);
+        push_composed_trivia(
+            &mut source,
+            &mut line,
+            &mut column,
+            &compositions[composition_index],
+        );
+        expected_locations.push((line, column));
+        push_source_fragment(&mut source, &mut line, &mut column, token);
+    }
+
+    let composition_index = (tokens.len() + seed) % compositions.len();
+    assigned_compositions.push(composition_index);
+    push_composed_trivia(
+        &mut source,
+        &mut line,
+        &mut column,
+        &compositions[composition_index],
+    );
+    expected_locations.push((line, column));
+
+    (source, expected_locations, assigned_compositions)
+}
+
+fn push_composed_trivia(
+    source: &mut String,
+    line: &mut usize,
+    column: &mut usize,
+    composition: &[ComposedTriviaAtom],
+) {
+    for atom in composition {
+        push_source_fragment(source, line, column, atom.text());
+    }
+}
+
+fn assert_composed_trivia_program(
+    source: &str,
+    expected_locations: &[(usize, usize)],
+    baseline_kinds: &[&str],
+    baseline_ast: &str,
+    expected_result: i64,
+    context: &str,
+) {
+    let token_result = panic::catch_unwind(|| format_tokens(source))
+        .unwrap_or_else(|_| panic!("format_tokens panicked for {context}"));
+    let token_output =
+        token_result.unwrap_or_else(|error| panic!("format_tokens failed for {context}: {error}"));
+    assert_eq!(
+        formatted_token_kinds(&token_output),
+        baseline_kinds,
+        "{context}"
+    );
+    assert_eq!(
+        formatted_token_locations(&token_output, context),
+        expected_locations,
+        "{context}"
+    );
+
+    let ast_result = panic::catch_unwind(|| format_ast(source))
+        .unwrap_or_else(|_| panic!("format_ast panicked for {context}"));
+    assert_eq!(
+        ast_result.unwrap_or_else(|error| panic!("format_ast failed for {context}: {error}")),
+        baseline_ast,
+        "{context}"
+    );
+
+    let interpret_result = panic::catch_unwind(|| interpret(source))
+        .unwrap_or_else(|_| panic!("interpret panicked for {context}"));
+    assert_eq!(interpret_result, Ok(expected_result), "{context}");
+}
+
 #[test]
 fn generated_pointer_expression_values_match_model_without_panics() {
     const SEEDS: [u64; 3] = [0xC057_5101, 0xC057_5102, 0xC057_5103];

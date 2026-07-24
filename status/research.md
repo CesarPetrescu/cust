@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-24 — Composed trivia runs
+
+- No external language-semantics research was needed. The implementation decision is to cross all ordered pairs of eight independently meaningful trivia atoms (spaces, tab, LF, CRLF, single-line/multiline block comments, and LF/CRLF-terminated line comments), then add eight selected triples that emphasize adjacent comments and comment/line-ending transitions.
+- Run each composition at six representative start/interior/end boundaries over all four verified bases, then use seeds spaced by nine across eight whole-program layouts. This gives every one of the 72 compositions 10-13 whole-layout assignments rather than clustering only the first families. Model positions one Unicode scalar at a time: carriage return advances the column, newline advances the line and resets the column, matching Cust's lexer.
+- Compare every public API independently under panic guards, include EOF in the exact location oracle, reject duplicate sources, and assert exact base/composition/pair-triple/boundary/layout/source totals. Existing behavior passed immediately as deliberate conformance closure. The next seam is malformed composed-comment-run robustness around comment delimiters and `/`/`*` compound operators.
+
 ## 2026-07-24 — Whole-program mixed-trivia layouts
 
 - No external language-semantics research was needed. The implementation decision is to reuse the four verified token-vector programs under five fixed cyclic layouts. Every layout assigns all five trivia forms over all start/interior/end boundaries simultaneously, while multibyte block (`多字节🦀`) and line (`café🦀`) comments make byte-counting diverge from Cust's character-based columns.
