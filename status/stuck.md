@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-24 deterministic valid-program token-splice robustness run after 761 unique panic-guarded multiline mutants with bounded parser locations, duplicate-source rejection, exact dimension counters, 83 passing fuzz-safety tests, 875 passing interpreter tests (969 total), a warning-free Clippy gate, and both Docker gates. Token-preserving trivia-splice conformance is the next bounded tooling slice, not an external blocker.
+None. Last reviewed in the 2026-07-24 deterministic token-preserving trivia-splice conformance run after 555 unique valid programs with public lexer/parser/runtime panic guards, baseline token-kind/AST/result parity, bounded 1-based lexer locations, exact dimension counters, 84 passing fuzz-safety tests, 875 passing interpreter tests (970 total), a warning-free Clippy gate, and both Docker gates. Whole-program mixed-trivia layout conformance is the next bounded tooling slice, not an external blocker.
 
 ## Blocker template
 

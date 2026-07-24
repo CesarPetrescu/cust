@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-24 — Token-preserving trivia-splice boundaries
+
+- No external language-semantics research was needed. The implementation decision is to reuse the four verified token-vector bases and splice three spaces, a tab, a newline, a block comment, or a newline-terminated line comment at every start/interior/end token boundary while all other boundaries retain one canonical space. This produces 555 unique valid programs and isolates each trivia/boundary interaction.
+- Compare public `format_tokens()` output after removing only the location prefix, compare complete public `format_ast()` output, and compare `interpret()` results with each baseline under independent panic guards. Parse every formatted token's location and require a bounded 1-based line/column, then assert exact per-base, per-trivia, start/interior/end, and unique-source totals. Existing behavior passed immediately as deliberate conformance closure.
+- The next interaction seam is whole-program mixed-trivia layouts: distribute all trivia forms over many boundaries simultaneously and include multibyte comment text so exact character-based line/column tracking is exercised rather than only bounded.
+
 ## 2026-07-24 — Deterministic valid-program token-splice boundaries
 
 - No external language-semantics research was needed. The implementation decision is to keep four known-valid token-vector bases, verify each baseline AST/result first, then cross delimiter/operator/keyword families with insertion at every boundary and replacement at every token position while running family-neutral deletion only once per position. Reject duplicate rendered sources so dimension counters cannot overstate distinct coverage. Render mutants over multiple lines so parser location bounds exercise nontrivial line numbers.

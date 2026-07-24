@@ -527,6 +527,172 @@ fn mutated_token_splice_source(
     render_token_splice_source(&tokens)
 }
 
+#[derive(Clone, Copy, Debug)]
+enum TriviaSplice {
+    Spaces,
+    Tab,
+    Newline,
+    BlockComment,
+    LineComment,
+}
+
+impl TriviaSplice {
+    const ALL: [Self; 5] = [
+        Self::Spaces,
+        Self::Tab,
+        Self::Newline,
+        Self::BlockComment,
+        Self::LineComment,
+    ];
+
+    fn text(self) -> &'static str {
+        match self {
+            Self::Spaces => "   ",
+            Self::Tab => "\t",
+            Self::Newline => "\n",
+            Self::BlockComment => "/* trivia */",
+            Self::LineComment => "// trivia\n",
+        }
+    }
+}
+
+#[test]
+fn generated_token_preserving_trivia_splices_retain_tokens_ast_and_results() {
+    let total_base_tokens = TOKEN_SPLICE_BASES
+        .iter()
+        .map(|base| base.tokens.len())
+        .sum::<usize>();
+    let total_boundaries = total_base_tokens + TOKEN_SPLICE_BASES.len();
+    let mut base_counts = [0; TOKEN_SPLICE_BASES.len()];
+    let mut trivia_counts = [0; TriviaSplice::ALL.len()];
+    let mut boundary_counts = [0; 3];
+    let mut sources = HashSet::new();
+
+    for (base_index, base) in TOKEN_SPLICE_BASES.into_iter().enumerate() {
+        let baseline_source = base.tokens.join(" ");
+        let baseline_tokens = format_tokens(&baseline_source)
+            .unwrap_or_else(|error| panic!("invalid token baseline {}: {error}", base.name));
+        let baseline_kinds = formatted_token_kinds(&baseline_tokens);
+        let baseline_ast = format_ast(&baseline_source)
+            .unwrap_or_else(|error| panic!("invalid AST baseline {}: {error}", base.name));
+        assert_eq!(interpret(&baseline_source), Ok(base.expected));
+
+        for (trivia_index, trivia) in TriviaSplice::ALL.into_iter().enumerate() {
+            for boundary in 0..=base.tokens.len() {
+                let source = render_trivia_splice_source(base.tokens, trivia, boundary);
+                let context = format!(
+                    "base {}, trivia {trivia:?}, boundary {boundary}, source {source:?}",
+                    base.name
+                );
+                assert!(
+                    sources.insert(source.clone()),
+                    "duplicate trivia-splice source for {context}"
+                );
+
+                let token_result = panic::catch_unwind(|| format_tokens(&source))
+                    .unwrap_or_else(|_| panic!("format_tokens panicked for {context}"));
+                let token_output = token_result
+                    .unwrap_or_else(|error| panic!("format_tokens failed for {context}: {error}"));
+                assert_eq!(
+                    formatted_token_kinds(&token_output),
+                    baseline_kinds,
+                    "{context}"
+                );
+                assert_formatted_token_locations(&source, &token_output, &context);
+
+                let ast_result = panic::catch_unwind(|| format_ast(&source))
+                    .unwrap_or_else(|_| panic!("format_ast panicked for {context}"));
+                assert_eq!(
+                    ast_result
+                        .unwrap_or_else(|error| panic!("format_ast failed for {context}: {error}")),
+                    baseline_ast,
+                    "{context}"
+                );
+
+                let interpret_result = panic::catch_unwind(|| interpret(&source))
+                    .unwrap_or_else(|_| panic!("interpret panicked for {context}"));
+                assert_eq!(interpret_result, Ok(base.expected), "{context}");
+
+                base_counts[base_index] += 1;
+                trivia_counts[trivia_index] += 1;
+                let boundary_class = if boundary == 0 {
+                    0
+                } else if boundary == base.tokens.len() {
+                    2
+                } else {
+                    1
+                };
+                boundary_counts[boundary_class] += 1;
+            }
+        }
+    }
+
+    assert_eq!(
+        base_counts,
+        TOKEN_SPLICE_BASES.map(|base| TriviaSplice::ALL.len() * (base.tokens.len() + 1))
+    );
+    assert_eq!(trivia_counts, [total_boundaries; TriviaSplice::ALL.len()]);
+    assert_eq!(
+        boundary_counts,
+        [
+            TOKEN_SPLICE_BASES.len() * TriviaSplice::ALL.len(),
+            (total_base_tokens - TOKEN_SPLICE_BASES.len()) * TriviaSplice::ALL.len(),
+            TOKEN_SPLICE_BASES.len() * TriviaSplice::ALL.len(),
+        ]
+    );
+    assert_eq!(sources.len(), total_boundaries * TriviaSplice::ALL.len());
+}
+
+fn render_trivia_splice_source(tokens: &[&str], trivia: TriviaSplice, boundary: usize) -> String {
+    let mut source = String::new();
+    for (token_index, token) in tokens.iter().enumerate() {
+        if token_index == boundary {
+            source.push_str(trivia.text());
+        } else if token_index > 0 {
+            source.push(' ');
+        }
+        source.push_str(token);
+    }
+    if boundary == tokens.len() {
+        source.push_str(trivia.text());
+    }
+    source
+}
+
+fn formatted_token_kinds(formatted: &str) -> Vec<&str> {
+    formatted
+        .lines()
+        .map(|line| {
+            line.split_once(' ')
+                .unwrap_or_else(|| panic!("malformed formatted token: {line:?}"))
+                .1
+        })
+        .collect()
+}
+
+fn assert_formatted_token_locations(source: &str, formatted: &str, context: &str) {
+    let source_lines = source.split('\n').collect::<Vec<_>>();
+    for formatted_token in formatted.lines() {
+        let (location, _) = formatted_token.split_once(' ').unwrap_or_else(|| {
+            panic!("malformed formatted token for {context}: {formatted_token:?}")
+        });
+        let (line, column) = location.split_once(':').unwrap_or_else(|| {
+            panic!("malformed token location for {context}: {formatted_token:?}")
+        });
+        let line = line
+            .parse::<usize>()
+            .unwrap_or_else(|_| panic!("invalid token line for {context}: {formatted_token:?}"));
+        let column = column
+            .parse::<usize>()
+            .unwrap_or_else(|_| panic!("invalid token column for {context}: {formatted_token:?}"));
+        assert!((1..=source_lines.len()).contains(&line), "{context}");
+        assert!(
+            (1..=source_lines[line - 1].chars().count() + 1).contains(&column),
+            "{context}"
+        );
+    }
+}
+
 #[test]
 fn generated_pointer_expression_values_match_model_without_panics() {
     const SEEDS: [u64; 3] = [0xC057_5101, 0xC057_5102, 0xC057_5103];
