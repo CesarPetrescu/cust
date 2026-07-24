@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-24 — Whole-program mixed-trivia layouts
+
+- No external language-semantics research was needed. The implementation decision is to reuse the four verified token-vector programs under five fixed cyclic layouts. Every layout assigns all five trivia forms over all start/interior/end boundaries simultaneously, while multibyte block (`多字节🦀`) and line (`café🦀`) comments make byte-counting diverge from Cust's character-based columns.
+- Model source construction independently one Unicode scalar at a time, recording the line/column before each token. Public `format_tokens()` includes an EOF entry, so exact location oracles must also record the final position after trailing trivia; omitting EOF caused the focused RED. Compare location-free token kinds, complete ASTs, and interpreted results to each baseline under separate panic guards, then assert exact base/layout/trivia/boundary/source totals.
+- The next interaction seam is composed trivia runs: ordered comment/whitespace pairs and selected triples, including adjacent block comments, line-comment termination, multiline multibyte block comments, and CRLF-containing runs.
+
 ## 2026-07-24 — Token-preserving trivia-splice boundaries
 
 - No external language-semantics research was needed. The implementation decision is to reuse the four verified token-vector bases and splice three spaces, a tab, a newline, a block comment, or a newline-terminated line comment at every start/interior/end token boundary while all other boundaries retain one canonical space. This produces 555 unique valid programs and isolates each trivia/boundary interaction.

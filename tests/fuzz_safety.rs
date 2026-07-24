@@ -554,6 +554,16 @@ impl TriviaSplice {
             Self::LineComment => "// trivia\n",
         }
     }
+
+    fn mixed_layout_text(self) -> &'static str {
+        match self {
+            Self::Spaces => "   ",
+            Self::Tab => "\t",
+            Self::Newline => "\n",
+            Self::BlockComment => "/* 多字节🦀 */",
+            Self::LineComment => "// café🦀\n",
+        }
+    }
 }
 
 #[test]
@@ -691,6 +701,179 @@ fn assert_formatted_token_locations(source: &str, formatted: &str, context: &str
             "{context}"
         );
     }
+}
+
+#[test]
+fn generated_mixed_trivia_layouts_retain_exact_token_locations_ast_and_results() {
+    const LAYOUT_SEEDS: [usize; TriviaSplice::ALL.len()] = [0, 1, 2, 3, 4];
+
+    let total_base_tokens = TOKEN_SPLICE_BASES
+        .iter()
+        .map(|base| base.tokens.len())
+        .sum::<usize>();
+    let total_boundaries = total_base_tokens + TOKEN_SPLICE_BASES.len();
+    let mut base_counts = [0; TOKEN_SPLICE_BASES.len()];
+    let mut layout_counts = [0; LAYOUT_SEEDS.len()];
+    let mut trivia_counts = [0; TriviaSplice::ALL.len()];
+    let mut boundary_counts = [0; 3];
+    let mut sources = HashSet::new();
+
+    for (base_index, base) in TOKEN_SPLICE_BASES.into_iter().enumerate() {
+        let baseline_source = base.tokens.join(" ");
+        let baseline_tokens = format_tokens(&baseline_source)
+            .unwrap_or_else(|error| panic!("invalid token baseline {}: {error}", base.name));
+        let baseline_kinds = formatted_token_kinds(&baseline_tokens);
+        let baseline_ast = format_ast(&baseline_source)
+            .unwrap_or_else(|error| panic!("invalid AST baseline {}: {error}", base.name));
+        assert_eq!(interpret(&baseline_source), Ok(base.expected));
+
+        for (layout_index, seed) in LAYOUT_SEEDS.into_iter().enumerate() {
+            let (source, expected_locations, assigned_trivia) =
+                render_mixed_trivia_layout(base.tokens, seed);
+            let context = format!(
+                "base {}, layout {layout_index}, seed {seed}, source {source:?}",
+                base.name
+            );
+            assert!(
+                sources.insert(source.clone()),
+                "duplicate mixed-trivia layout for {context}"
+            );
+
+            let mut layout_trivia_counts = [0; TriviaSplice::ALL.len()];
+            for (boundary, trivia_index) in assigned_trivia.into_iter().enumerate() {
+                trivia_counts[trivia_index] += 1;
+                layout_trivia_counts[trivia_index] += 1;
+                let boundary_class = if boundary == 0 {
+                    0
+                } else if boundary == base.tokens.len() {
+                    2
+                } else {
+                    1
+                };
+                boundary_counts[boundary_class] += 1;
+            }
+            assert!(
+                layout_trivia_counts.into_iter().all(|count| count > 0),
+                "layout did not contain every trivia form for {context}"
+            );
+
+            let token_result = panic::catch_unwind(|| format_tokens(&source))
+                .unwrap_or_else(|_| panic!("format_tokens panicked for {context}"));
+            let token_output = token_result
+                .unwrap_or_else(|error| panic!("format_tokens failed for {context}: {error}"));
+            assert_eq!(
+                formatted_token_kinds(&token_output),
+                baseline_kinds,
+                "{context}"
+            );
+            assert_eq!(
+                formatted_token_locations(&token_output, &context),
+                expected_locations,
+                "{context}"
+            );
+
+            let ast_result = panic::catch_unwind(|| format_ast(&source))
+                .unwrap_or_else(|_| panic!("format_ast panicked for {context}"));
+            assert_eq!(
+                ast_result
+                    .unwrap_or_else(|error| panic!("format_ast failed for {context}: {error}")),
+                baseline_ast,
+                "{context}"
+            );
+
+            let interpret_result = panic::catch_unwind(|| interpret(&source))
+                .unwrap_or_else(|_| panic!("interpret panicked for {context}"));
+            assert_eq!(interpret_result, Ok(base.expected), "{context}");
+
+            base_counts[base_index] += 1;
+            layout_counts[layout_index] += 1;
+        }
+    }
+
+    assert_eq!(base_counts, [LAYOUT_SEEDS.len(); TOKEN_SPLICE_BASES.len()]);
+    assert_eq!(
+        layout_counts,
+        [TOKEN_SPLICE_BASES.len(); LAYOUT_SEEDS.len()]
+    );
+    assert_eq!(trivia_counts, [total_boundaries; TriviaSplice::ALL.len()]);
+    assert_eq!(
+        boundary_counts,
+        [
+            TOKEN_SPLICE_BASES.len() * LAYOUT_SEEDS.len(),
+            (total_base_tokens - TOKEN_SPLICE_BASES.len()) * LAYOUT_SEEDS.len(),
+            TOKEN_SPLICE_BASES.len() * LAYOUT_SEEDS.len(),
+        ]
+    );
+    assert_eq!(sources.len(), TOKEN_SPLICE_BASES.len() * LAYOUT_SEEDS.len());
+}
+
+fn render_mixed_trivia_layout(
+    tokens: &[&str],
+    seed: usize,
+) -> (String, Vec<(usize, usize)>, Vec<usize>) {
+    let mut source = String::new();
+    let mut expected_locations = Vec::with_capacity(tokens.len() + 1);
+    let mut assigned_trivia = Vec::with_capacity(tokens.len() + 1);
+    let mut line = 1;
+    let mut column = 1;
+
+    for (token_index, token) in tokens.iter().enumerate() {
+        let trivia_index = (token_index + seed) % TriviaSplice::ALL.len();
+        assigned_trivia.push(trivia_index);
+        push_source_fragment(
+            &mut source,
+            &mut line,
+            &mut column,
+            TriviaSplice::ALL[trivia_index].mixed_layout_text(),
+        );
+        expected_locations.push((line, column));
+        push_source_fragment(&mut source, &mut line, &mut column, token);
+    }
+
+    let trivia_index = (tokens.len() + seed) % TriviaSplice::ALL.len();
+    assigned_trivia.push(trivia_index);
+    push_source_fragment(
+        &mut source,
+        &mut line,
+        &mut column,
+        TriviaSplice::ALL[trivia_index].mixed_layout_text(),
+    );
+    expected_locations.push((line, column));
+
+    (source, expected_locations, assigned_trivia)
+}
+
+fn push_source_fragment(source: &mut String, line: &mut usize, column: &mut usize, fragment: &str) {
+    for character in fragment.chars() {
+        source.push(character);
+        if character == '\n' {
+            *line += 1;
+            *column = 1;
+        } else {
+            *column += 1;
+        }
+    }
+}
+
+fn formatted_token_locations(formatted: &str, context: &str) -> Vec<(usize, usize)> {
+    formatted
+        .lines()
+        .map(|formatted_token| {
+            let (location, _) = formatted_token.split_once(' ').unwrap_or_else(|| {
+                panic!("malformed formatted token for {context}: {formatted_token:?}")
+            });
+            let (line, column) = location.split_once(':').unwrap_or_else(|| {
+                panic!("malformed token location for {context}: {formatted_token:?}")
+            });
+            let line = line.parse::<usize>().unwrap_or_else(|_| {
+                panic!("invalid token line for {context}: {formatted_token:?}")
+            });
+            let column = column.parse::<usize>().unwrap_or_else(|_| {
+                panic!("invalid token column for {context}: {formatted_token:?}")
+            });
+            (line, column)
+        })
+        .collect()
 }
 
 #[test]
