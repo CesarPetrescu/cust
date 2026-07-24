@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-24 — Malformed composed comment runs
+
+- No external language-semantics research was needed. The implementation decision is to isolate eight bounded lexical families: standalone `/` and `*`, line-comment open, unterminated block-comment open, unmatched block-comment close, `/=`, `*=`, and a valid closed multibyte block comment. Cross each with LF/CRLF and six representative start/interior/end boundaries over all four token-vector bases.
+- Call `format_tokens()` and `format_ast()` independently under panic guards. Require non-unterminated mutations to tokenize, require every unterminated mutation to fail both APIs at the modeled comment-opening character location, and validate the exact source line/caret. Count location-free `missing main() function` validation separately from bounded parser locations, reject duplicate sources, and assert exact base/mutation/line-ending/boundary/source totals. Existing behavior passed immediately as deliberate robustness closure.
+- The next seam is comment-delimiter text inside string and character literals, especially escaped quotes/backslashes, invalid embedded line endings, multibyte text, and the boundary between literal termination and following `/`/`*` operators.
+
 ## 2026-07-24 — Composed trivia runs
 
 - No external language-semantics research was needed. The implementation decision is to cross all ordered pairs of eight independently meaningful trivia atoms (spaces, tab, LF, CRLF, single-line/multiline block comments, and LF/CRLF-terminated line comments), then add eight selected triples that emphasize adjacent comments and comment/line-ending transitions.

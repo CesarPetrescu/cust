@@ -1217,6 +1217,247 @@ fn assert_composed_trivia_program(
     assert_eq!(interpret_result, Ok(expected_result), "{context}");
 }
 
+#[derive(Clone, Copy, Debug)]
+enum MalformedCommentRunMutation {
+    Slash,
+    Star,
+    LineCommentOpen,
+    BlockCommentOpen,
+    BlockCommentClose,
+    SlashAssign,
+    StarAssign,
+    ClosedBlockComment,
+}
+
+impl MalformedCommentRunMutation {
+    const ALL: [Self; 8] = [
+        Self::Slash,
+        Self::Star,
+        Self::LineCommentOpen,
+        Self::BlockCommentOpen,
+        Self::BlockCommentClose,
+        Self::SlashAssign,
+        Self::StarAssign,
+        Self::ClosedBlockComment,
+    ];
+
+    fn text(self, line_ending: &str) -> String {
+        let fragment = match self {
+            Self::Slash => "/",
+            Self::Star => "*",
+            Self::LineCommentOpen => "// malformed 多🦀",
+            Self::BlockCommentOpen => "/* unterminated 多🦀",
+            Self::BlockCommentClose => "*/",
+            Self::SlashAssign => "/=",
+            Self::StarAssign => "*=",
+            Self::ClosedBlockComment => "/* closed 多🦀 */",
+        };
+        format!("{fragment}{line_ending}")
+    }
+
+    fn is_unterminated(self) -> bool {
+        matches!(self, Self::BlockCommentOpen)
+    }
+}
+
+#[test]
+fn generated_malformed_composed_comment_runs_remain_panic_free_and_source_located() {
+    const LINE_ENDINGS: [&str; 2] = ["\n", "\r\n"];
+    const REPRESENTATIVE_BOUNDARIES: usize = 6;
+
+    let mut base_counts = [0; TOKEN_SPLICE_BASES.len()];
+    let mut mutation_counts = [0; MalformedCommentRunMutation::ALL.len()];
+    let mut line_ending_counts = [0; LINE_ENDINGS.len()];
+    let mut boundary_counts = [0; 3];
+    let mut lexer_error_count = 0;
+    let mut parser_error_count = 0;
+    let mut semantic_validation_count = 0;
+    let mut parsed_program_count = 0;
+    let mut sources = HashSet::new();
+
+    for (base_index, base) in TOKEN_SPLICE_BASES.into_iter().enumerate() {
+        let representative_boundaries = [
+            0,
+            1,
+            base.tokens.len() / 3,
+            base.tokens.len() / 2,
+            base.tokens.len() - 1,
+            base.tokens.len(),
+        ];
+        assert_eq!(
+            representative_boundaries
+                .into_iter()
+                .collect::<HashSet<_>>()
+                .len(),
+            REPRESENTATIVE_BOUNDARIES
+        );
+
+        for (mutation_index, mutation) in MalformedCommentRunMutation::ALL.into_iter().enumerate() {
+            for (line_ending_index, line_ending) in LINE_ENDINGS.into_iter().enumerate() {
+                for boundary in representative_boundaries {
+                    let (source, mutation_line, mutation_column) =
+                        render_malformed_comment_run(base.tokens, mutation, line_ending, boundary);
+                    let context = format!(
+                        "base {}, mutation {mutation:?}, line ending {line_ending:?}, boundary {boundary}, source {source:?}",
+                        base.name
+                    );
+                    assert!(
+                        sources.insert(source.clone()),
+                        "duplicate malformed-comment-run source for {context}"
+                    );
+
+                    let token_result = panic::catch_unwind(|| format_tokens(&source))
+                        .unwrap_or_else(|_| panic!("format_tokens panicked for {context}"));
+                    match token_result {
+                        Ok(_) if mutation.is_unterminated() => {
+                            panic!("unterminated block comment tokenized for {context}")
+                        }
+                        Ok(_) => {}
+                        Err(error) if mutation.is_unterminated() => {
+                            lexer_error_count += 1;
+                            assert_unterminated_comment_error(
+                                &source,
+                                &error.to_string(),
+                                mutation_line,
+                                mutation_column,
+                                &context,
+                            );
+                        }
+                        Err(error) => panic!("unexpected lexer error for {context}: {error}"),
+                    }
+
+                    let ast_result = panic::catch_unwind(|| format_ast(&source))
+                        .unwrap_or_else(|_| panic!("format_ast panicked for {context}"));
+                    match ast_result {
+                        Ok(_) if mutation.is_unterminated() => {
+                            panic!("unterminated block comment parsed for {context}")
+                        }
+                        Ok(_) => parsed_program_count += 1,
+                        Err(error) if mutation.is_unterminated() => {
+                            assert_unterminated_comment_error(
+                                &source,
+                                &error.to_string(),
+                                mutation_line,
+                                mutation_column,
+                                &context,
+                            );
+                        }
+                        Err(error) => {
+                            let message = error.to_string();
+                            if message == "missing main() function" {
+                                semantic_validation_count += 1;
+                            } else {
+                                parser_error_count += 1;
+                                assert_source_location_invariants(
+                                    &source, &message, false, &context,
+                                );
+                            }
+                        }
+                    }
+
+                    base_counts[base_index] += 1;
+                    mutation_counts[mutation_index] += 1;
+                    line_ending_counts[line_ending_index] += 1;
+                    let boundary_class = if boundary == 0 {
+                        0
+                    } else if boundary == base.tokens.len() {
+                        2
+                    } else {
+                        1
+                    };
+                    boundary_counts[boundary_class] += 1;
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        base_counts,
+        [MalformedCommentRunMutation::ALL.len() * LINE_ENDINGS.len() * REPRESENTATIVE_BOUNDARIES;
+            TOKEN_SPLICE_BASES.len()]
+    );
+    assert_eq!(
+        mutation_counts,
+        [TOKEN_SPLICE_BASES.len() * LINE_ENDINGS.len() * REPRESENTATIVE_BOUNDARIES;
+            MalformedCommentRunMutation::ALL.len()]
+    );
+    assert_eq!(
+        line_ending_counts,
+        [TOKEN_SPLICE_BASES.len()
+            * MalformedCommentRunMutation::ALL.len()
+            * REPRESENTATIVE_BOUNDARIES; LINE_ENDINGS.len()]
+    );
+    assert_eq!(boundary_counts, [64, 256, 64]);
+    assert_eq!(lexer_error_count, 48);
+    assert_eq!(
+        lexer_error_count + parser_error_count + semantic_validation_count + parsed_program_count,
+        sources.len()
+    );
+    assert!(parser_error_count > 0);
+    assert!(parsed_program_count > 0);
+    assert_eq!(sources.len(), 384);
+}
+
+fn render_malformed_comment_run(
+    tokens: &[&str],
+    mutation: MalformedCommentRunMutation,
+    line_ending: &str,
+    boundary: usize,
+) -> (String, usize, usize) {
+    let mut source = String::new();
+    let mut line = 1;
+    let mut column = 1;
+    let mut mutation_location = None;
+
+    for (token_index, token) in tokens.iter().enumerate() {
+        if token_index > 0 {
+            push_source_fragment(&mut source, &mut line, &mut column, " ");
+        }
+        if token_index == boundary {
+            mutation_location = Some((line, column));
+            push_source_fragment(
+                &mut source,
+                &mut line,
+                &mut column,
+                &mutation.text(line_ending),
+            );
+            push_source_fragment(&mut source, &mut line, &mut column, " ");
+        }
+        push_source_fragment(&mut source, &mut line, &mut column, token);
+    }
+    if boundary == tokens.len() {
+        push_source_fragment(&mut source, &mut line, &mut column, " ");
+        mutation_location = Some((line, column));
+        push_source_fragment(
+            &mut source,
+            &mut line,
+            &mut column,
+            &mutation.text(line_ending),
+        );
+    }
+
+    let (mutation_line, mutation_column) = mutation_location.expect("mutation boundary missing");
+    (source, mutation_line, mutation_column)
+}
+
+fn assert_unterminated_comment_error(
+    source: &str,
+    message: &str,
+    expected_line: usize,
+    expected_column: usize,
+    context: &str,
+) {
+    assert_eq!(
+        message.lines().next(),
+        Some(
+            format!("unterminated block comment at line {expected_line}, column {expected_column}")
+                .as_str()
+        ),
+        "{context}: {message:?}"
+    );
+    assert_source_location_invariants(source, message, true, context);
+}
+
 #[test]
 fn generated_pointer_expression_values_match_model_without_panics() {
     const SEEDS: [u64; 3] = [0xC057_5101, 0xC057_5102, 0xC057_5103];
