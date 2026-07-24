@@ -2860,6 +2860,113 @@ fn generated_three_token_numeric_escape_adjacent_strings_remain_exact_and_panic_
     assert_eq!(sources.len(), 1_350);
 }
 
+#[test]
+fn generated_simultaneous_numeric_escape_adjacent_strings_remain_exact_and_panic_free() {
+    const POSITION_MASKS: [[bool; 3]; 4] = [
+        [true, true, false],
+        [true, false, true],
+        [false, true, true],
+        [true, true, true],
+    ];
+
+    let mut composition_counts = [0; POSITION_MASKS.len() * AdjacentStringNumericEscape::ALL.len()];
+    let mut position_mask_counts = [0; POSITION_MASKS.len()];
+    let mut rotation_counts = [0; AdjacentStringNumericEscape::ALL.len()];
+    let mut escape_counts = [0; AdjacentStringNumericEscape::ALL.len()];
+    let mut position_counts = [0; 3];
+    let mut arity_counts = [0; 2];
+    let mut trivia_pair_counts =
+        [0; ThreeTokenAdjacentStringTrivia::ALL.len() * ThreeTokenAdjacentStringTrivia::ALL.len()];
+    let mut route_counts = [0; AdjacentStringRoute::ALL.len()];
+    let mut sources = HashSet::new();
+
+    let ordinary_fragments = ["a0", "b1", "c2"];
+    let ordinary_values = [
+        vec!['a' as i64, '0' as i64],
+        vec!['b' as i64, '1' as i64],
+        vec!['c' as i64, '2' as i64],
+    ];
+
+    for (position_mask_index, position_mask) in POSITION_MASKS.into_iter().enumerate() {
+        let arity = position_mask.into_iter().filter(|active| *active).count();
+        for (rotation, rotation_count) in rotation_counts.iter_mut().enumerate() {
+            let composition_index =
+                position_mask_index * AdjacentStringNumericEscape::ALL.len() + rotation;
+            let mut fragments = ordinary_fragments;
+            let mut values = ordinary_values.clone().map(Some);
+            let mut composition_escape_indexes = Vec::new();
+
+            for (position, active) in position_mask.into_iter().enumerate() {
+                if active {
+                    let escape_index =
+                        (rotation + position) % AdjacentStringNumericEscape::ALL.len();
+                    let escape = AdjacentStringNumericEscape::ALL[escape_index];
+                    fragments[position] = escape.fragment();
+                    values[position] = Some(escape.values());
+                    composition_escape_indexes.push(escape_index);
+                }
+            }
+
+            for (first_trivia_index, first_trivia) in
+                ThreeTokenAdjacentStringTrivia::ALL.into_iter().enumerate()
+            {
+                for (second_trivia_index, second_trivia) in
+                    ThreeTokenAdjacentStringTrivia::ALL.into_iter().enumerate()
+                {
+                    let trivia_pair_index = first_trivia_index
+                        * ThreeTokenAdjacentStringTrivia::ALL.len()
+                        + second_trivia_index;
+                    for (route_index, route) in AdjacentStringRoute::ALL.into_iter().enumerate() {
+                        let rendered = render_three_token_numeric_escape_adjacent_program(
+                            route,
+                            [first_trivia, second_trivia],
+                            fragments,
+                            values.clone(),
+                        );
+                        let context = format!(
+                            "position mask {position_mask:?}, rotation {rotation}, trivia {first_trivia:?}/{second_trivia:?}, route {route:?}, source {:?}",
+                            rendered.source
+                        );
+                        assert!(
+                            sources.insert(rendered.source.clone()),
+                            "duplicate simultaneous numeric-escape source for {context}"
+                        );
+                        assert_valid_numeric_escape_adjacent_program(&rendered, &context);
+
+                        composition_counts[composition_index] += 1;
+                        position_mask_counts[position_mask_index] += 1;
+                        *rotation_count += 1;
+                        for escape_index in &composition_escape_indexes {
+                            escape_counts[*escape_index] += 1;
+                        }
+                        for (position, active) in position_mask.into_iter().enumerate() {
+                            if active {
+                                position_counts[position] += 1;
+                            }
+                        }
+                        arity_counts[arity - 2] += 1;
+                        trivia_pair_counts[trivia_pair_index] += 1;
+                        route_counts[route_index] += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    assert_eq!(composition_counts, [75; 16]);
+    assert_eq!(position_mask_counts, [300; POSITION_MASKS.len()]);
+    assert_eq!(
+        rotation_counts,
+        [300; AdjacentStringNumericEscape::ALL.len()]
+    );
+    assert_eq!(escape_counts, [675; AdjacentStringNumericEscape::ALL.len()]);
+    assert_eq!(position_counts, [900; 3]);
+    assert_eq!(arity_counts, [900, 300]);
+    assert_eq!(trivia_pair_counts, [48; 25]);
+    assert_eq!(route_counts, [400; AdjacentStringRoute::ALL.len()]);
+    assert_eq!(sources.len(), 1_200);
+}
+
 fn render_three_token_numeric_escape_adjacent_program(
     route: AdjacentStringRoute,
     trivia: [ThreeTokenAdjacentStringTrivia; 2],

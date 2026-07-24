@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-25 — Simultaneous multi-token numeric-escape concatenation
+
+- No external language-semantics research was needed because the preceding one-escape three-token model already establishes the lexer/parser contract: each string token retains its own trailing NUL, while parser concatenation removes intermediate NULs and retains one final NUL.
+- Use four deterministic position masks (three pairs plus one triple) and four cyclic escape-family rotations. This balances every family and token position without an exhaustive 4×4×4 expansion, while crossing all 25 trivia pairs and three runtime routes for 1,200 unique sources.
+- Derive family, position, arity, composition, trivia-pair, and route totals independently. A newly added coverage test may pass immediately when it deliberately exercises an already-supported seam; report that as coverage closure rather than inventing a production change.
+
 ## 2026-07-25 — Three-token numeric-escape string concatenation
 
 - No external language-semantics research was needed because the established adjacent-string implementation and prior numeric-escape model already define the seam: each lexer token owns one trailing NUL, while parser concatenation removes every intermediate NUL and leaves one final NUL.

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-25 deterministic three-token numeric-escape concatenation run after 1,350 unique programs, four fragments in all three positions, 25 independently composed trivia pairs, three routes, 900 exact valid token/location/AST/runtime checks, 450 exact malformed diagnostic/caret checks, 92 passing fuzz-safety tests, 875 passing interpreter tests (978 total), a warning-free full Clippy gate, and both Docker gates. Simultaneous multi-token numeric-escape composition is the next bounded tooling slice, not an external blocker.
+None. Last reviewed in the 2026-07-25 deterministic simultaneous multi-token numeric-escape concatenation run after 1,200 unique programs, three pair masks plus one triple mask, four balanced family rotations, 25 independently composed trivia pairs, three routes, exact token/location/AST/runtime and counter checks, 93 passing fuzz-safety tests, 875 passing interpreter tests (979 total), a warning-free full Clippy gate, and both Docker gates. Multiple-malformed-token first-error precedence is the next bounded tooling slice, not an external blocker.
 
 ## Blocker template
 
