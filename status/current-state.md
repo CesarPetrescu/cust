@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-24
+Last updated: 2026-07-25
 
 ## Latest autonomous verification
+
+All required verification passed for the 2026-07-25 deterministic three-token numeric-escape string-concatenation run. Four bounded octal/hex families rotate through first/middle/final literal positions; both token boundaries independently cross spaces, multibyte block comments, LF, CRLF, and terminated multibyte line comments; and pointer-expression, inferred-array, and fixed-array routes produce 900 valid programs. Two malformed escape families in each position add 450 exact diagnostic routes, for 1,350 unique sources total. Valid token values retain one per-token NUL and exact token-plus-EOF locations, parsed ASTs retain one concatenated byte vector with both intermediate NULs removed and one final NUL, weighted runtime checks preserve byte order, malformed token/AST diagnostics retain exact opening-quote carets, and all family/position/trivia-pair/route counters pass. Existing lexer/parser/runtime behavior matched immediately, so this is deliberate robustness coverage without production changes. The suite now has 92 fuzz-safety tests and 875 interpreter tests (978 total).
+
+Verified commands: clean-baseline `cargo test`; focused new three-token coverage (immediate GREEN); preceding two-token adjacent-string regression; focused Clippy; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust` (output 10); and `git diff --check`.
 
 All required verification passed for the 2026-07-24 deterministic numeric-escape adjacent-string concatenation run. Four bounded octal/hex fragment families appear on both sides of every adjacent string-token boundary across space, multibyte block-comment, LF, and CRLF trivia plus pointer-expression, inferred-array, and fixed-array routes. The matrix contains 192 valid and 48 malformed sources (240 unique programs total): valid routes retain exact independently modeled lexer token values and every token-plus-EOF character location, parser ASTs contain one concatenated byte vector with exactly one final NUL, weighted runtime checks preserve byte order and the final NUL, malformed `\x`/`\8` escapes on either side retain exact opening-quote diagnostics and carets, and all escape/trivia/route/side counters pass. The initial focused RED exposed only a test-oracle token-name mistake (`EqEq` versus Cust's `Eq`); existing lexer/parser/runtime behavior then passed without production changes. The suite now has 91 fuzz-safety tests and 875 interpreter tests (977 total).
 

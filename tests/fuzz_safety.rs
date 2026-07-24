@@ -2538,6 +2538,7 @@ enum AdjacentStringTrivia {
     BlockComment,
     Lf,
     Crlf,
+    LineComment,
 }
 
 impl AdjacentStringTrivia {
@@ -2549,6 +2550,7 @@ impl AdjacentStringTrivia {
             Self::BlockComment => "/* 多🦀 */",
             Self::Lf => "\n",
             Self::Crlf => "\r\n",
+            Self::LineComment => "// 三🦀\n",
         }
     }
 }
@@ -2572,7 +2574,7 @@ struct RenderedAdjacentStrings {
     source: String,
     expected_kinds: Vec<String>,
     expected_locations: Vec<(usize, usize)>,
-    literal_locations: [(usize, usize); 2],
+    literal_locations: Vec<(usize, usize)>,
     expected_result: i64,
     combined_values: Vec<i64>,
 }
@@ -2696,6 +2698,241 @@ fn generated_numeric_escape_adjacent_strings_remain_exact_and_panic_free() {
     assert_eq!(valid_count, 192);
     assert_eq!(malformed_count, 48);
     assert_eq!(sources.len(), 240);
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ThreeTokenAdjacentStringTrivia {
+    Space,
+    BlockComment,
+    Lf,
+    Crlf,
+    LineComment,
+}
+
+impl ThreeTokenAdjacentStringTrivia {
+    const ALL: [Self; 5] = [
+        Self::Space,
+        Self::BlockComment,
+        Self::Lf,
+        Self::Crlf,
+        Self::LineComment,
+    ];
+
+    fn text(self) -> &'static str {
+        match self {
+            Self::Space => "   ",
+            Self::BlockComment => "/* 三🦀 */",
+            Self::Lf => "\n",
+            Self::Crlf => "\r\n",
+            Self::LineComment => "// 三🦀\n",
+        }
+    }
+}
+
+#[test]
+fn generated_three_token_numeric_escape_adjacent_strings_remain_exact_and_panic_free() {
+    let mut valid_escape_counts = [0; AdjacentStringNumericEscape::ALL.len()];
+    let mut valid_position_counts = [0; 3];
+    let mut malformed_family_counts = [0; MalformedAdjacentStringNumericEscape::ALL.len()];
+    let mut malformed_position_counts = [0; 3];
+    let mut trivia_pair_counts =
+        [0; ThreeTokenAdjacentStringTrivia::ALL.len() * ThreeTokenAdjacentStringTrivia::ALL.len()];
+    let mut route_counts = [0; AdjacentStringRoute::ALL.len()];
+    let mut valid_count = 0;
+    let mut malformed_count = 0;
+    let mut sources = HashSet::new();
+
+    let ordinary_fragments = ["a0", "b1", "c2"];
+    let ordinary_values = [
+        vec!['a' as i64, '0' as i64],
+        vec!['b' as i64, '1' as i64],
+        vec!['c' as i64, '2' as i64],
+    ];
+
+    for (escape_index, escape) in AdjacentStringNumericEscape::ALL.into_iter().enumerate() {
+        for (position, position_count) in valid_position_counts.iter_mut().enumerate() {
+            for (first_trivia_index, first_trivia) in
+                ThreeTokenAdjacentStringTrivia::ALL.into_iter().enumerate()
+            {
+                for (second_trivia_index, second_trivia) in
+                    ThreeTokenAdjacentStringTrivia::ALL.into_iter().enumerate()
+                {
+                    let trivia_pair_index = first_trivia_index
+                        * ThreeTokenAdjacentStringTrivia::ALL.len()
+                        + second_trivia_index;
+                    for (route_index, route) in AdjacentStringRoute::ALL.into_iter().enumerate() {
+                        let mut fragments = ordinary_fragments;
+                        fragments[position] = escape.fragment();
+                        let mut values = ordinary_values.clone().map(Some);
+                        values[position] = Some(escape.values());
+                        let rendered = render_three_token_numeric_escape_adjacent_program(
+                            route,
+                            [first_trivia, second_trivia],
+                            fragments,
+                            values,
+                        );
+                        let context = format!(
+                            "valid escape {escape:?}, position {position}, trivia {first_trivia:?}/{second_trivia:?}, route {route:?}, source {:?}",
+                            rendered.source
+                        );
+                        assert!(
+                            sources.insert(rendered.source.clone()),
+                            "duplicate three-token adjacent-string source for {context}"
+                        );
+                        assert_valid_numeric_escape_adjacent_program(&rendered, &context);
+
+                        valid_escape_counts[escape_index] += 1;
+                        *position_count += 1;
+                        trivia_pair_counts[trivia_pair_index] += 1;
+                        route_counts[route_index] += 1;
+                        valid_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    for (family_index, malformed) in MalformedAdjacentStringNumericEscape::ALL
+        .into_iter()
+        .enumerate()
+    {
+        for (position, position_count) in malformed_position_counts.iter_mut().enumerate() {
+            for (first_trivia_index, first_trivia) in
+                ThreeTokenAdjacentStringTrivia::ALL.into_iter().enumerate()
+            {
+                for (second_trivia_index, second_trivia) in
+                    ThreeTokenAdjacentStringTrivia::ALL.into_iter().enumerate()
+                {
+                    let trivia_pair_index = first_trivia_index
+                        * ThreeTokenAdjacentStringTrivia::ALL.len()
+                        + second_trivia_index;
+                    for (route_index, route) in AdjacentStringRoute::ALL.into_iter().enumerate() {
+                        let mut fragments = ordinary_fragments;
+                        fragments[position] = malformed.fragment();
+                        let mut values = ordinary_values.clone().map(Some);
+                        values[position] = None;
+                        let rendered = render_three_token_numeric_escape_adjacent_program(
+                            route,
+                            [first_trivia, second_trivia],
+                            fragments,
+                            values,
+                        );
+                        let context = format!(
+                            "malformed {malformed:?}, position {position}, trivia {first_trivia:?}/{second_trivia:?}, route {route:?}, source {:?}",
+                            rendered.source
+                        );
+                        assert!(
+                            sources.insert(rendered.source.clone()),
+                            "duplicate malformed three-token adjacent-string source for {context}"
+                        );
+                        assert_numeric_escape_error_at(
+                            &rendered.source,
+                            rendered.literal_locations[position],
+                            malformed.error_message(),
+                            &context,
+                        );
+
+                        malformed_family_counts[family_index] += 1;
+                        *position_count += 1;
+                        trivia_pair_counts[trivia_pair_index] += 1;
+                        route_counts[route_index] += 1;
+                        malformed_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        valid_escape_counts,
+        [225; AdjacentStringNumericEscape::ALL.len()]
+    );
+    assert_eq!(valid_position_counts, [300; 3]);
+    assert_eq!(
+        malformed_family_counts,
+        [225; MalformedAdjacentStringNumericEscape::ALL.len()]
+    );
+    assert_eq!(malformed_position_counts, [150; 3]);
+    assert_eq!(trivia_pair_counts, [54; 25]);
+    assert_eq!(route_counts, [450; AdjacentStringRoute::ALL.len()]);
+    assert_eq!(valid_count, 900);
+    assert_eq!(malformed_count, 450);
+    assert_eq!(sources.len(), 1_350);
+}
+
+fn render_three_token_numeric_escape_adjacent_program(
+    route: AdjacentStringRoute,
+    trivia: [ThreeTokenAdjacentStringTrivia; 2],
+    fragments: [&str; 3],
+    values: [Option<Vec<i64>>; 3],
+) -> RenderedAdjacentStrings {
+    let second_and_third_fragment =
+        format!("{}\"{}\"{}", fragments[1], trivia[1].text(), fragments[2]);
+    let trailing_values =
+        values[1]
+            .as_ref()
+            .zip(values[2].as_ref())
+            .map(|(second_values, third_values)| {
+                second_values
+                    .iter()
+                    .chain(third_values)
+                    .copied()
+                    .collect::<Vec<_>>()
+            });
+    let mut rendered = render_numeric_escape_adjacent_program(
+        route,
+        match trivia[0] {
+            ThreeTokenAdjacentStringTrivia::Space => AdjacentStringTrivia::Space,
+            ThreeTokenAdjacentStringTrivia::BlockComment => AdjacentStringTrivia::BlockComment,
+            ThreeTokenAdjacentStringTrivia::Lf => AdjacentStringTrivia::Lf,
+            ThreeTokenAdjacentStringTrivia::Crlf => AdjacentStringTrivia::Crlf,
+            ThreeTokenAdjacentStringTrivia::LineComment => AdjacentStringTrivia::LineComment,
+        },
+        fragments[0],
+        values[0].as_deref(),
+        &second_and_third_fragment,
+        trailing_values.as_deref(),
+    );
+
+    let second_location = rendered.literal_locations[1];
+    let second_literal = format!("\"{}\"", fragments[1]);
+    let mut discarded = String::new();
+    let mut line = second_location.0;
+    let mut column = second_location.1;
+    push_source_fragment(&mut discarded, &mut line, &mut column, &second_literal);
+    push_source_fragment(&mut discarded, &mut line, &mut column, trivia[1].text());
+    let third_location = (line, column);
+    let second_token_index = rendered
+        .expected_locations
+        .iter()
+        .position(|location| *location == second_location)
+        .expect("second literal token location");
+    rendered.expected_kinds[second_token_index] = format!(
+        "StringLiteral({:?})",
+        values[1]
+            .as_ref()
+            .map(|values| values.iter().copied().chain([0]).collect::<Vec<_>>())
+            .unwrap_or_default()
+    );
+    rendered
+        .expected_locations
+        .insert(second_token_index + 1, third_location);
+    rendered.expected_kinds.insert(
+        second_token_index + 1,
+        format!(
+            "StringLiteral({:?})",
+            values[2]
+                .as_ref()
+                .map(|values| values.iter().copied().chain([0]).collect::<Vec<_>>())
+                .unwrap_or_default()
+        ),
+    );
+    rendered.literal_locations = vec![
+        rendered.literal_locations[0],
+        second_location,
+        third_location,
+    ];
+    rendered
 }
 
 fn render_numeric_escape_adjacent_program(
@@ -2979,7 +3216,7 @@ fn render_numeric_escape_adjacent_program(
         source,
         expected_kinds,
         expected_locations,
-        literal_locations: [left_location, right_location],
+        literal_locations: vec![left_location, right_location],
         expected_result,
         combined_values,
     }

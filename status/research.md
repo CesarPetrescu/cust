@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-25 — Three-token numeric-escape string concatenation
+
+- No external language-semantics research was needed because the established adjacent-string implementation and prior numeric-escape model already define the seam: each lexer token owns one trailing NUL, while parser concatenation removes every intermediate NUL and leaves one final NUL.
+- Rotate one of four bounded octal/hex fragments through first/middle/final positions, independently cross both boundaries over spaces, multibyte block comments, LF, CRLF, and terminated multibyte line comments, and reuse pointer/inferred-array/fixed-array routes. Keep all three lexer token values independent from the one AST byte vector; weighted runtime indexing plus the final-NUL term detects ordering or leaked intermediate NULs. Malformed `\\x`/`\\8` fragments must retain exact opening-quote diagnostics in every position. Existing behavior passed all 1,350 unique sources immediately.
+- A compact test-rendering technique can reuse the verified two-token source builder by embedding the second boundary and third quoted token into its right-token source spelling, then splitting that synthetic expected token into independently modeled second/third token kinds and locations. This preserves the existing generated runtime expression and fixed-array length oracle without deriving expectations from Cust output.
+- The next bounded seam is simultaneous valid numeric escapes in multiple adjacent tokens, using selected balanced pairs/triples rather than an unbounded Cartesian expansion.
+
 ## 2026-07-24 — Numeric escapes across adjacent string tokens
 
 - No external language-semantics research was needed because `Parser::concatenate_adjacent_string_literals()` and `references/cust-adjacent-string-literals.md` already define Cust's supported behavior: each lexer token owns a trailing NUL, and parser concatenation removes each intermediate NUL before extending the combined byte vector.
