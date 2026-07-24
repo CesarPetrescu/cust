@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-24 — Composed literal-fragment runs
+
+- No external language-semantics research was needed. The implementation decision is to cross all 25 ordered pairs and five balanced cyclic triples of `/`, `*`, escaped quote, escaped backslash, and multibyte atoms under LF/CRLF at all four expression/initializer before/after routes, then add five valid and four malformed character forms plus interrupted strings.
+- Build source spellings and decoded scalar vectors independently, append the string NUL explicitly, and validate complete token-kind/location vectors including EOF. Call token, AST, and runtime APIs under independent panic guards for valid programs; malformed programs must report the exact opening quote, source line, and caret through both token and AST APIs. Reject duplicate sources and assert exact composition, atom, character, line-ending, route, valid, and malformed totals. Existing behavior passed immediately as deliberate robustness closure.
+- The next lexical seam is bounded numeric escape composition: octal/hex escape prefixes beside terminators, delimiter atoms, and multibyte text, including missing-hex-digit and unsupported-escape diagnostics.
+
 ## 2026-07-24 — Comment-delimiter/literal boundaries
 
 - No external language-semantics research was needed. The implementation decision is to cross string and character literals with ten bounded `/`, `*`, `//`, `/*`, `*/`, escaped-quote, escaped-backslash, multibyte, unterminated, and embedded-line-ending mutations; LF/CRLF; and expression/initializer boundaries immediately before or after adjacent multibyte block-comment trivia.

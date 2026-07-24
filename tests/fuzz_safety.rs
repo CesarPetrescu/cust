@@ -1838,6 +1838,322 @@ fn assert_literal_boundary_error(
     assert_source_location_invariants(source, message, true, context);
 }
 
+#[derive(Clone, Copy, Debug)]
+enum LiteralFragmentAtom {
+    Slash,
+    Star,
+    EscapedQuote,
+    EscapedBackslash,
+    Multibyte,
+}
+
+impl LiteralFragmentAtom {
+    const ALL: [Self; 5] = [
+        Self::Slash,
+        Self::Star,
+        Self::EscapedQuote,
+        Self::EscapedBackslash,
+        Self::Multibyte,
+    ];
+
+    fn spelling(self) -> &'static str {
+        match self {
+            Self::Slash => "/",
+            Self::Star => "*",
+            Self::EscapedQuote => "\\\"",
+            Self::EscapedBackslash => "\\\\",
+            Self::Multibyte => "多🦀",
+        }
+    }
+
+    fn append_values(self, values: &mut Vec<i64>) {
+        match self {
+            Self::Slash => values.push('/' as i64),
+            Self::Star => values.push('*' as i64),
+            Self::EscapedQuote => values.push('"' as i64),
+            Self::EscapedBackslash => values.push('\\' as i64),
+            Self::Multibyte => values.extend(['多' as i64, '🦀' as i64]),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ComposedCharacterCase {
+    Slash,
+    Star,
+    EscapedQuote,
+    EscapedBackslash,
+    Multibyte,
+    LineCommentDelimiter,
+    BlockCommentOpen,
+    BlockCommentClose,
+    Interrupted,
+}
+
+impl ComposedCharacterCase {
+    const ALL: [Self; 9] = [
+        Self::Slash,
+        Self::Star,
+        Self::EscapedQuote,
+        Self::EscapedBackslash,
+        Self::Multibyte,
+        Self::LineCommentDelimiter,
+        Self::BlockCommentOpen,
+        Self::BlockCommentClose,
+        Self::Interrupted,
+    ];
+
+    fn literal(self, line_ending: &str) -> (String, Option<i64>) {
+        match self {
+            Self::Slash => ("'/'".to_string(), Some('/' as i64)),
+            Self::Star => ("'*'".to_string(), Some('*' as i64)),
+            Self::EscapedQuote => ("'\\''".to_string(), Some('\'' as i64)),
+            Self::EscapedBackslash => ("'\\\\'".to_string(), Some('\\' as i64)),
+            Self::Multibyte => ("'多'".to_string(), Some('多' as i64)),
+            Self::LineCommentDelimiter => ("'//'".to_string(), None),
+            Self::BlockCommentOpen => ("'/*'".to_string(), None),
+            Self::BlockCommentClose => ("'*/'".to_string(), None),
+            Self::Interrupted => (format!("'x{line_ending}'"), None),
+        }
+    }
+}
+
+#[test]
+fn generated_composed_literal_fragment_runs_remain_exact_and_panic_free() {
+    const LINE_ENDINGS: [&str; 2] = ["\n", "\r\n"];
+    const SELECTED_TRIPLES: [[LiteralFragmentAtom; 3]; 5] = [
+        [
+            LiteralFragmentAtom::Slash,
+            LiteralFragmentAtom::Star,
+            LiteralFragmentAtom::EscapedQuote,
+        ],
+        [
+            LiteralFragmentAtom::Star,
+            LiteralFragmentAtom::EscapedQuote,
+            LiteralFragmentAtom::EscapedBackslash,
+        ],
+        [
+            LiteralFragmentAtom::EscapedQuote,
+            LiteralFragmentAtom::EscapedBackslash,
+            LiteralFragmentAtom::Multibyte,
+        ],
+        [
+            LiteralFragmentAtom::EscapedBackslash,
+            LiteralFragmentAtom::Multibyte,
+            LiteralFragmentAtom::Slash,
+        ],
+        [
+            LiteralFragmentAtom::Multibyte,
+            LiteralFragmentAtom::Slash,
+            LiteralFragmentAtom::Star,
+        ],
+    ];
+
+    let mut compositions = Vec::new();
+    for left in LiteralFragmentAtom::ALL {
+        for right in LiteralFragmentAtom::ALL {
+            compositions.push(vec![left, right]);
+        }
+    }
+    compositions.extend(SELECTED_TRIPLES.map(Vec::from));
+
+    let mut composition_counts = vec![0; compositions.len()];
+    let mut atom_counts = [0; LiteralFragmentAtom::ALL.len()];
+    let mut line_ending_counts = [0; LINE_ENDINGS.len()];
+    let mut route_counts = [0; LiteralBoundaryRoute::ALL.len()];
+    let mut character_counts = [0; ComposedCharacterCase::ALL.len()];
+    let mut pair_count = 0;
+    let mut triple_count = 0;
+    let mut string_interruption_count = 0;
+    let mut valid_character_count = 0;
+    let mut malformed_character_count = 0;
+    let mut valid_count = 0;
+    let mut malformed_count = 0;
+    let mut sources = HashSet::new();
+
+    for (composition_index, composition) in compositions.iter().enumerate() {
+        let mut content = String::new();
+        let mut values = Vec::new();
+        for atom in composition {
+            content.push_str(atom.spelling());
+            atom.append_values(&mut values);
+            atom_counts[*atom as usize] += LINE_ENDINGS.len() * LiteralBoundaryRoute::ALL.len();
+        }
+        values.push(0);
+        let expected_kind = format!("StringLiteral({values:?})");
+        let literal = format!("\"{content}\"");
+
+        for (line_ending_index, line_ending) in LINE_ENDINGS.into_iter().enumerate() {
+            for (route_index, route) in LiteralBoundaryRoute::ALL.into_iter().enumerate() {
+                let rendered = render_literal_boundary_source(
+                    LiteralBoundaryKind::String,
+                    route,
+                    line_ending,
+                    &literal,
+                    Some(&expected_kind),
+                );
+                let context = format!(
+                    "composition {composition:?}, line ending {line_ending:?}, route {route:?}, source {:?}",
+                    rendered.source
+                );
+                assert!(
+                    sources.insert(rendered.source.clone()),
+                    "duplicate composed-string source for {context}"
+                );
+                assert_valid_literal_render(&rendered, values[0], &context);
+
+                composition_counts[composition_index] += 1;
+                line_ending_counts[line_ending_index] += 1;
+                route_counts[route_index] += 1;
+                valid_count += 1;
+                if composition.len() == 2 {
+                    pair_count += 1;
+                } else {
+                    triple_count += 1;
+                }
+            }
+        }
+    }
+
+    for (line_ending_index, line_ending) in LINE_ENDINGS.into_iter().enumerate() {
+        for (route_index, route) in LiteralBoundaryRoute::ALL.into_iter().enumerate() {
+            let literal = format!("\"left{line_ending}right\"");
+            let rendered = render_literal_boundary_source(
+                LiteralBoundaryKind::String,
+                route,
+                line_ending,
+                &literal,
+                None,
+            );
+            let context = format!(
+                "interrupted string, line ending {line_ending:?}, route {route:?}, source {:?}",
+                rendered.source
+            );
+            assert!(
+                sources.insert(rendered.source.clone()),
+                "duplicate interrupted-string source for {context}"
+            );
+            assert_malformed_literal_render(&rendered, LiteralBoundaryKind::String, &context);
+            line_ending_counts[line_ending_index] += 1;
+            route_counts[route_index] += 1;
+            string_interruption_count += 1;
+            malformed_count += 1;
+        }
+    }
+
+    for (case_index, character_case) in ComposedCharacterCase::ALL.into_iter().enumerate() {
+        for (line_ending_index, line_ending) in LINE_ENDINGS.into_iter().enumerate() {
+            for (route_index, route) in LiteralBoundaryRoute::ALL.into_iter().enumerate() {
+                let (literal, expected_value) = character_case.literal(line_ending);
+                let expected_kind = expected_value.map(|value| format!("Number({value})"));
+                let rendered = render_literal_boundary_source(
+                    LiteralBoundaryKind::Character,
+                    route,
+                    line_ending,
+                    &literal,
+                    expected_kind.as_deref(),
+                );
+                let context = format!(
+                    "character case {character_case:?}, line ending {line_ending:?}, route {route:?}, source {:?}",
+                    rendered.source
+                );
+                assert!(
+                    sources.insert(rendered.source.clone()),
+                    "duplicate composed-character source for {context}"
+                );
+                if let Some(expected_value) = expected_value {
+                    assert_valid_literal_render(&rendered, expected_value, &context);
+                    valid_character_count += 1;
+                    valid_count += 1;
+                } else {
+                    assert_malformed_literal_render(
+                        &rendered,
+                        LiteralBoundaryKind::Character,
+                        &context,
+                    );
+                    malformed_character_count += 1;
+                    malformed_count += 1;
+                }
+
+                character_counts[case_index] += 1;
+                line_ending_counts[line_ending_index] += 1;
+                route_counts[route_index] += 1;
+            }
+        }
+    }
+
+    assert_eq!(compositions.len(), 30);
+    assert_eq!(composition_counts, [8; 30]);
+    assert_eq!(atom_counts, [104; LiteralFragmentAtom::ALL.len()]);
+    assert_eq!(character_counts, [8; ComposedCharacterCase::ALL.len()]);
+    assert_eq!(line_ending_counts, [160, 160]);
+    assert_eq!(route_counts, [80; LiteralBoundaryRoute::ALL.len()]);
+    assert_eq!(pair_count, 200);
+    assert_eq!(triple_count, 40);
+    assert_eq!(string_interruption_count, 8);
+    assert_eq!(valid_character_count, 40);
+    assert_eq!(malformed_character_count, 32);
+    assert_eq!(valid_count, 280);
+    assert_eq!(malformed_count, 40);
+    assert_eq!(sources.len(), 320);
+}
+
+fn assert_valid_literal_render(
+    rendered: &RenderedLiteralBoundary,
+    expected_value: i64,
+    context: &str,
+) {
+    let token_output = panic::catch_unwind(|| format_tokens(&rendered.source))
+        .unwrap_or_else(|_| panic!("format_tokens panicked for {context}"))
+        .unwrap_or_else(|error| panic!("valid literal did not tokenize for {context}: {error}"));
+    assert_eq!(
+        formatted_token_kinds(&token_output),
+        rendered
+            .expected_kinds
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        "{context}"
+    );
+    assert_eq!(
+        formatted_token_locations(&token_output, context),
+        rendered.expected_locations,
+        "{context}"
+    );
+    panic::catch_unwind(|| format_ast(&rendered.source))
+        .unwrap_or_else(|_| panic!("format_ast panicked for {context}"))
+        .unwrap_or_else(|error| panic!("valid literal did not parse for {context}: {error}"));
+    let value = panic::catch_unwind(|| interpret(&rendered.source))
+        .unwrap_or_else(|_| panic!("interpret panicked for {context}"))
+        .unwrap_or_else(|error| panic!("valid literal did not execute for {context}: {error}"));
+    assert_eq!(value, expected_value, "{context}");
+}
+
+fn assert_malformed_literal_render(
+    rendered: &RenderedLiteralBoundary,
+    literal_kind: LiteralBoundaryKind,
+    context: &str,
+) {
+    let token_error = panic::catch_unwind(|| format_tokens(&rendered.source))
+        .unwrap_or_else(|_| panic!("format_tokens panicked for {context}"))
+        .unwrap_err()
+        .to_string();
+    let ast_error = panic::catch_unwind(|| format_ast(&rendered.source))
+        .unwrap_or_else(|_| panic!("format_ast panicked for {context}"))
+        .unwrap_err()
+        .to_string();
+    for error in [&token_error, &ast_error] {
+        assert_literal_boundary_error(
+            &rendered.source,
+            error,
+            literal_kind,
+            rendered.literal_location.0,
+            rendered.literal_location.1,
+            context,
+        );
+    }
+}
+
 #[test]
 fn generated_pointer_expression_values_match_model_without_panics() {
     const SEEDS: [u64; 3] = [0xC057_5101, 0xC057_5102, 0xC057_5103];
