@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-25 — Four-token multiple-malformed numeric-escape precedence
+
+- No external language-semantics research was needed because the established source-order lexer contract and exact diagnostic helper already define the expected behavior independently of Cust output.
+- Use pair masks `[0,3]`, `[1,3]`, `[2,3]` and triple masks `[0,1,3]`, `[1,2,3]` so positions 0, 1, and 2 all become the first malformed token. Rotate `\x`/`\8` by absolute position. Five masks × two rotations × ten trivia triples × three routes produce 300 unique sources; first-error positions are `[120, 120, 60, 0]`, pair/triple routes are `[180, 120]`, and both first-error families occur 150 times.
+- Build ten balanced trivia triples from two cyclic layouts at each of five starts. Every space/comment/LF/CRLF/terminated-line-comment family appears twice at each of the three boundaries before mask/rotation/route expansion, yielding 60 uses per boundary/family. Reuse the verified three-token renderer by structurally embedding and then splitting the fourth literal; derive its opening location one Unicode scalar at a time. Existing behavior passed immediately. A five-token chain is the next bounded extension because it can make position 3 first when at least two tokens are malformed.
+
 ## 2026-07-25 — Multiple-malformed-token numeric-escape precedence
 
 - No external language-semantics research was needed because the lexer contract is source ordered: public tokenization stops at the first malformed string literal, and `format_ast()` forwards that lexer error unchanged.
