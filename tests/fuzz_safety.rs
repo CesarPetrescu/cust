@@ -2967,6 +2967,134 @@ fn generated_simultaneous_numeric_escape_adjacent_strings_remain_exact_and_panic
     assert_eq!(sources.len(), 1_200);
 }
 
+#[test]
+fn generated_multiple_malformed_numeric_escape_tokens_report_first_error_without_panics() {
+    const POSITION_MASKS: [[bool; 3]; 4] = [
+        [true, true, false],
+        [true, false, true],
+        [false, true, true],
+        [true, true, true],
+    ];
+
+    let mut composition_counts =
+        [0; POSITION_MASKS.len() * MalformedAdjacentStringNumericEscape::ALL.len()];
+    let mut position_mask_counts = [0; POSITION_MASKS.len()];
+    let mut rotation_counts = [0; MalformedAdjacentStringNumericEscape::ALL.len()];
+    let mut malformed_family_counts = [0; MalformedAdjacentStringNumericEscape::ALL.len()];
+    let mut malformed_position_counts = [0; 3];
+    let mut first_error_position_counts = [0; 3];
+    let mut arity_counts = [0; 2];
+    let mut trivia_pair_counts =
+        [0; ThreeTokenAdjacentStringTrivia::ALL.len() * ThreeTokenAdjacentStringTrivia::ALL.len()];
+    let mut route_counts = [0; AdjacentStringRoute::ALL.len()];
+    let mut sources = HashSet::new();
+
+    let ordinary_fragments = ["a0", "b1", "c2"];
+    let ordinary_values = [
+        vec!['a' as i64, '0' as i64],
+        vec!['b' as i64, '1' as i64],
+        vec!['c' as i64, '2' as i64],
+    ];
+
+    for (position_mask_index, position_mask) in POSITION_MASKS.into_iter().enumerate() {
+        let arity = position_mask.into_iter().filter(|active| *active).count();
+        let first_error_position = position_mask
+            .into_iter()
+            .position(|active| active)
+            .expect("each malformed-token mask has an active position");
+
+        for (rotation, rotation_count) in rotation_counts.iter_mut().enumerate() {
+            let composition_index =
+                position_mask_index * MalformedAdjacentStringNumericEscape::ALL.len() + rotation;
+            let mut fragments = ordinary_fragments;
+            let mut values = ordinary_values.clone().map(Some);
+            let mut composition_family_indexes = Vec::new();
+
+            for (position, active) in position_mask.into_iter().enumerate() {
+                if active {
+                    let family_index =
+                        (rotation + position) % MalformedAdjacentStringNumericEscape::ALL.len();
+                    let malformed = MalformedAdjacentStringNumericEscape::ALL[family_index];
+                    fragments[position] = malformed.fragment();
+                    values[position] = None;
+                    composition_family_indexes.push(family_index);
+                }
+            }
+
+            let first_error_family_index =
+                (rotation + first_error_position) % MalformedAdjacentStringNumericEscape::ALL.len();
+            let first_error = MalformedAdjacentStringNumericEscape::ALL[first_error_family_index];
+
+            for (first_trivia_index, first_trivia) in
+                ThreeTokenAdjacentStringTrivia::ALL.into_iter().enumerate()
+            {
+                for (second_trivia_index, second_trivia) in
+                    ThreeTokenAdjacentStringTrivia::ALL.into_iter().enumerate()
+                {
+                    let trivia_pair_index = first_trivia_index
+                        * ThreeTokenAdjacentStringTrivia::ALL.len()
+                        + second_trivia_index;
+                    for (route_index, route) in AdjacentStringRoute::ALL.into_iter().enumerate() {
+                        let rendered = render_three_token_numeric_escape_adjacent_program(
+                            route,
+                            [first_trivia, second_trivia],
+                            fragments,
+                            values.clone(),
+                        );
+                        let context = format!(
+                            "multiple malformed tokens, position mask {position_mask:?}, rotation {rotation}, trivia {first_trivia:?}/{second_trivia:?}, route {route:?}, source {:?}",
+                            rendered.source
+                        );
+                        assert!(
+                            sources.insert(rendered.source.clone()),
+                            "duplicate multiple-malformed-token source for {context}"
+                        );
+                        assert_numeric_escape_error_at(
+                            &rendered.source,
+                            rendered.literal_locations[first_error_position],
+                            first_error.error_message(),
+                            &context,
+                        );
+
+                        composition_counts[composition_index] += 1;
+                        position_mask_counts[position_mask_index] += 1;
+                        *rotation_count += 1;
+                        for family_index in &composition_family_indexes {
+                            malformed_family_counts[*family_index] += 1;
+                        }
+                        for (position, active) in position_mask.into_iter().enumerate() {
+                            if active {
+                                malformed_position_counts[position] += 1;
+                            }
+                        }
+                        first_error_position_counts[first_error_position] += 1;
+                        arity_counts[arity - 2] += 1;
+                        trivia_pair_counts[trivia_pair_index] += 1;
+                        route_counts[route_index] += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    assert_eq!(composition_counts, [75; 8]);
+    assert_eq!(position_mask_counts, [150; POSITION_MASKS.len()]);
+    assert_eq!(
+        rotation_counts,
+        [300; MalformedAdjacentStringNumericEscape::ALL.len()]
+    );
+    assert_eq!(
+        malformed_family_counts,
+        [675; MalformedAdjacentStringNumericEscape::ALL.len()]
+    );
+    assert_eq!(malformed_position_counts, [450; 3]);
+    assert_eq!(first_error_position_counts, [450, 150, 0]);
+    assert_eq!(arity_counts, [450, 150]);
+    assert_eq!(trivia_pair_counts, [24; 25]);
+    assert_eq!(route_counts, [200; AdjacentStringRoute::ALL.len()]);
+    assert_eq!(sources.len(), 600);
+}
+
 fn render_three_token_numeric_escape_adjacent_program(
     route: AdjacentStringRoute,
     trivia: [ThreeTokenAdjacentStringTrivia; 2],

@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-25 — Multiple-malformed-token numeric-escape precedence
+
+- No external language-semantics research was needed because the lexer contract is source ordered: public tokenization stops at the first malformed string literal, and `format_ast()` forwards that lexer error unchanged.
+- Reuse the four pair/triple position masks from simultaneous valid coverage, but rotate the two malformed families (`\x` and `\8`) by token position. Eight compositions crossed with all 25 trivia pairs and three routes produce 600 unique sources while balancing both families and every malformed-token position. Derive the first error from the earliest active mask position, not from Cust output, and assert its exact opening-quote line/column plus source line/caret through both APIs.
+- In a three-token chain containing at least two malformed literals, position 2 cannot be the first error. The next bounded extension should use four tokens and selected masks that make positions 0, 1, and 2 each first, with a balanced bounded set of three-boundary trivia compositions rather than an exhaustive expansion.
+
 ## 2026-07-25 — Simultaneous multi-token numeric-escape concatenation
 
 - No external language-semantics research was needed because the preceding one-escape three-token model already establishes the lexer/parser contract: each string token retains its own trailing NUL, while parser concatenation removes intermediate NULs and retains one final NUL.
