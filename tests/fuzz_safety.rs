@@ -3251,6 +3251,167 @@ fn generated_four_token_multiple_malformed_numeric_escapes_report_first_error_wi
     assert_eq!(sources.len(), 300);
 }
 
+#[test]
+fn generated_five_token_multiple_malformed_numeric_escapes_report_first_error_without_panics() {
+    const POSITION_MASKS: [[bool; 5]; 7] = [
+        [true, false, false, false, true],
+        [false, true, false, false, true],
+        [false, false, true, false, true],
+        [false, false, false, true, true],
+        [true, true, false, false, true],
+        [false, true, true, false, true],
+        [false, false, true, true, true],
+    ];
+    const TRIVIA_COMPOSITION_COUNT: usize = 10;
+
+    let trivia_compositions = (0..ThreeTokenAdjacentStringTrivia::ALL.len())
+        .flat_map(|start| {
+            [
+                [
+                    ThreeTokenAdjacentStringTrivia::ALL[start],
+                    ThreeTokenAdjacentStringTrivia::ALL[(start + 1) % 5],
+                    ThreeTokenAdjacentStringTrivia::ALL[(start + 2) % 5],
+                    ThreeTokenAdjacentStringTrivia::ALL[(start + 3) % 5],
+                ],
+                [
+                    ThreeTokenAdjacentStringTrivia::ALL[start],
+                    ThreeTokenAdjacentStringTrivia::ALL[(start + 2) % 5],
+                    ThreeTokenAdjacentStringTrivia::ALL[(start + 4) % 5],
+                    ThreeTokenAdjacentStringTrivia::ALL[(start + 1) % 5],
+                ],
+            ]
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(trivia_compositions.len(), TRIVIA_COMPOSITION_COUNT);
+
+    let mut composition_counts =
+        [0; POSITION_MASKS.len() * MalformedAdjacentStringNumericEscape::ALL.len()];
+    let mut position_mask_counts = [0; POSITION_MASKS.len()];
+    let mut rotation_counts = [0; MalformedAdjacentStringNumericEscape::ALL.len()];
+    let mut malformed_family_counts = [0; MalformedAdjacentStringNumericEscape::ALL.len()];
+    let mut first_error_family_counts = [0; MalformedAdjacentStringNumericEscape::ALL.len()];
+    let mut malformed_position_counts = [0; 5];
+    let mut first_error_position_counts = [0; 5];
+    let mut arity_counts = [0; 2];
+    let mut trivia_composition_counts = [0; TRIVIA_COMPOSITION_COUNT];
+    let mut trivia_boundary_family_counts = [[0; ThreeTokenAdjacentStringTrivia::ALL.len()]; 4];
+    let mut route_counts = [0; AdjacentStringRoute::ALL.len()];
+    let mut sources = HashSet::new();
+
+    let ordinary_fragments = ["a0", "b1", "c2", "d3", "e4"];
+    let ordinary_values = [
+        vec!['a' as i64, '0' as i64],
+        vec!['b' as i64, '1' as i64],
+        vec!['c' as i64, '2' as i64],
+        vec!['d' as i64, '3' as i64],
+        vec!['e' as i64, '4' as i64],
+    ];
+
+    for (position_mask_index, position_mask) in POSITION_MASKS.into_iter().enumerate() {
+        let arity = position_mask.into_iter().filter(|active| *active).count();
+        let first_error_position = position_mask
+            .into_iter()
+            .position(|active| active)
+            .expect("each five-token malformed mask has an active position");
+
+        for (rotation, rotation_count) in rotation_counts.iter_mut().enumerate() {
+            let composition_index =
+                position_mask_index * MalformedAdjacentStringNumericEscape::ALL.len() + rotation;
+            let mut fragments = ordinary_fragments;
+            let mut values = ordinary_values.clone().map(Some);
+            let mut composition_family_indexes = Vec::new();
+
+            for (position, active) in position_mask.into_iter().enumerate() {
+                if active {
+                    let family_index =
+                        (rotation + position) % MalformedAdjacentStringNumericEscape::ALL.len();
+                    let malformed = MalformedAdjacentStringNumericEscape::ALL[family_index];
+                    fragments[position] = malformed.fragment();
+                    values[position] = None;
+                    composition_family_indexes.push(family_index);
+                }
+            }
+
+            let first_error_family_index =
+                (rotation + first_error_position) % MalformedAdjacentStringNumericEscape::ALL.len();
+            let first_error = MalformedAdjacentStringNumericEscape::ALL[first_error_family_index];
+
+            for (trivia_composition_index, trivia) in
+                trivia_compositions.iter().copied().enumerate()
+            {
+                for (route_index, route) in AdjacentStringRoute::ALL.into_iter().enumerate() {
+                    let rendered = render_five_token_numeric_escape_adjacent_program(
+                        route,
+                        trivia,
+                        fragments,
+                        values.clone(),
+                    );
+                    let context = format!(
+                        "five tokens, position mask {position_mask:?}, rotation {rotation}, trivia {:?}/{:?}/{:?}/{:?}, route {route:?}, source {:?}",
+                        trivia[0], trivia[1], trivia[2], trivia[3], rendered.source
+                    );
+                    assert!(
+                        sources.insert(rendered.source.clone()),
+                        "duplicate five-token multiple-malformed source for {context}"
+                    );
+                    assert_numeric_escape_error_at(
+                        &rendered.source,
+                        rendered.literal_locations[first_error_position],
+                        first_error.error_message(),
+                        &context,
+                    );
+
+                    composition_counts[composition_index] += 1;
+                    position_mask_counts[position_mask_index] += 1;
+                    *rotation_count += 1;
+                    for family_index in &composition_family_indexes {
+                        malformed_family_counts[*family_index] += 1;
+                    }
+                    first_error_family_counts[first_error_family_index] += 1;
+                    for (position, active) in position_mask.into_iter().enumerate() {
+                        if active {
+                            malformed_position_counts[position] += 1;
+                        }
+                    }
+                    first_error_position_counts[first_error_position] += 1;
+                    arity_counts[arity - 2] += 1;
+                    trivia_composition_counts[trivia_composition_index] += 1;
+                    for (boundary, trivia_family) in trivia.into_iter().enumerate() {
+                        let family_index = ThreeTokenAdjacentStringTrivia::ALL
+                            .iter()
+                            .position(|candidate| candidate.text() == trivia_family.text())
+                            .expect("generated trivia belongs to the bounded family");
+                        trivia_boundary_family_counts[boundary][family_index] += 1;
+                    }
+                    route_counts[route_index] += 1;
+                }
+            }
+        }
+    }
+
+    assert_eq!(composition_counts, [30; 14]);
+    assert_eq!(position_mask_counts, [60; POSITION_MASKS.len()]);
+    assert_eq!(
+        rotation_counts,
+        [210; MalformedAdjacentStringNumericEscape::ALL.len()]
+    );
+    assert_eq!(
+        malformed_family_counts,
+        [510; MalformedAdjacentStringNumericEscape::ALL.len()]
+    );
+    assert_eq!(
+        first_error_family_counts,
+        [210; MalformedAdjacentStringNumericEscape::ALL.len()]
+    );
+    assert_eq!(malformed_position_counts, [120, 180, 180, 120, 420]);
+    assert_eq!(first_error_position_counts, [120, 120, 120, 60, 0]);
+    assert_eq!(arity_counts, [240, 180]);
+    assert_eq!(trivia_composition_counts, [42; TRIVIA_COMPOSITION_COUNT]);
+    assert_eq!(trivia_boundary_family_counts, [[84; 5]; 4]);
+    assert_eq!(route_counts, [140; AdjacentStringRoute::ALL.len()]);
+    assert_eq!(sources.len(), 420);
+}
+
 fn render_three_token_numeric_escape_adjacent_program(
     route: AdjacentStringRoute,
     trivia: [ThreeTokenAdjacentStringTrivia; 2],
@@ -3390,6 +3551,85 @@ fn render_four_token_numeric_escape_adjacent_program(
         rendered.literal_locations[1],
         third_location,
         fourth_location,
+    ];
+    rendered
+}
+
+fn render_five_token_numeric_escape_adjacent_program(
+    route: AdjacentStringRoute,
+    trivia: [ThreeTokenAdjacentStringTrivia; 4],
+    fragments: [&str; 5],
+    values: [Option<Vec<i64>>; 5],
+) -> RenderedAdjacentStrings {
+    let fourth_and_fifth_fragment =
+        format!("{}\"{}\"{}", fragments[3], trivia[3].text(), fragments[4]);
+    let trailing_values =
+        values[3]
+            .as_ref()
+            .zip(values[4].as_ref())
+            .map(|(fourth_values, fifth_values)| {
+                fourth_values
+                    .iter()
+                    .chain(fifth_values)
+                    .copied()
+                    .collect::<Vec<_>>()
+            });
+    let mut rendered = render_four_token_numeric_escape_adjacent_program(
+        route,
+        [trivia[0], trivia[1], trivia[2]],
+        [
+            fragments[0],
+            fragments[1],
+            fragments[2],
+            &fourth_and_fifth_fragment,
+        ],
+        [
+            values[0].clone(),
+            values[1].clone(),
+            values[2].clone(),
+            trailing_values,
+        ],
+    );
+
+    let fourth_location = rendered.literal_locations[3];
+    let fourth_literal = format!("\"{}\"", fragments[3]);
+    let mut discarded = String::new();
+    let mut line = fourth_location.0;
+    let mut column = fourth_location.1;
+    push_source_fragment(&mut discarded, &mut line, &mut column, &fourth_literal);
+    push_source_fragment(&mut discarded, &mut line, &mut column, trivia[3].text());
+    let fifth_location = (line, column);
+    let fourth_token_index = rendered
+        .expected_locations
+        .iter()
+        .position(|location| *location == fourth_location)
+        .expect("fourth literal token location");
+    rendered.expected_kinds[fourth_token_index] = format!(
+        "StringLiteral({:?})",
+        values[3]
+            .as_ref()
+            .map(|values| values.iter().copied().chain([0]).collect::<Vec<_>>())
+            .unwrap_or_default()
+    );
+    rendered
+        .expected_locations
+        .insert(fourth_token_index + 1, fifth_location);
+    rendered.expected_kinds.insert(
+        fourth_token_index + 1,
+        format!(
+            "StringLiteral({:?})",
+            values[4]
+                .as_ref()
+                .map(|values| values.iter().copied().chain([0]).collect::<Vec<_>>())
+                .unwrap_or_default()
+        ),
+    );
+    rendered.literal_locations = vec![
+        rendered.literal_locations[0],
+        rendered.literal_locations[1],
+        rendered.literal_locations[2],
+        fourth_location,
+        fifth_location,
     ];
     rendered
 }

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-25 deterministic four-token multiple-malformed numeric-escape precedence run after 300 unique programs, five selected pair/triple masks, two balanced malformed-family rotations, ten balanced cyclic trivia triples, three routes, exact first-error source-context and counter checks, 95 passing fuzz-safety tests, 875 passing interpreter tests (981 total), a warning-free full Clippy gate, and both Docker gates. Five-token precedence that can make position 3 the first malformed literal is the next bounded tooling slice, not an external blocker.
+None. Last reviewed in the 2026-07-25 deterministic five-token multiple-malformed numeric-escape precedence run after 420 unique programs, four pair masks plus three triple masks, two balanced malformed-family rotations, ten balanced cyclic trivia quadruples, three routes, exact first-error source-context and counter checks, 96 passing fuzz-safety tests, 875 passing interpreter tests (982 total), a warning-free full Clippy gate, and both Docker gates. Generic bounded long-chain adjacent-string conformance is the next tooling slice, not an external blocker.
 
 ## Blocker template
 
