@@ -193,16 +193,16 @@ docker compose run --rm test
 docker compose run --rm cust
 ```
 
-## v0.2 limitations
+## Current limitations
 
-Cust is not a full C implementation. Unsupported areas include preprocessing/includes/macros, standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic calls, variable-length and multidimensional arrays, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
+Cust is not a full C implementation. Fixed two-dimensional `int[R][C]` and `char[R][C]` objects are supported for local/global/static storage, nested initialization, double indexing, scalar element updates, and full-object `sizeof`; pointer-to-row decay, multidimensional parameters/fields, and third dimensions remain unsupported. Other unsupported areas include preprocessing/includes/macros, standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic calls, variable-length arrays, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
 
 See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](docs/v0.1.md) for the historical v0.1 foundation notes.
 
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next language design: choose the next larger C-subset area from `status/todo.md` and define acceptance fixtures before implementation.
+- Next language slice: extend fixed two-dimensional scalar arrays into named and anonymous aggregate fields while preserving explicit pointer-to-row and multidimensional-parameter boundaries.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: consider preprocessor support, includes, standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures.
 

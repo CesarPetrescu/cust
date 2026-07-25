@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-25 — Fixed two-dimensional scalar-array implementation boundary
+
+- No external semantics research was needed because the backlog already fixed the acceptance boundary and the native compiler oracle validates defined C behavior. `src/lib.rs` stores each fixed `T[R][C]` object as a flat interpreter-owned scalar vector plus explicit `(rows, columns)` metadata; row-major offset calculation is `row * columns + column` only after separate exact bounds checks.
+- Dedicated `Array2DGet`/set/compound-set AST routes keep both index expressions available for one-time evaluation and preserve ordinary scalar conversion, `_Bool` normalization, const, increment, and compound-assignment behavior. Full-object `sizeof(variable)` naturally uses the flattened element count, while element `sizeof(matrix[i][j])` uses the scalar element type without evaluation.
+- This first slice deliberately rejects scalar-pointer decay of the full object and scalar use of a singly indexed row, because correct C behavior requires pointer-to-row metadata that Cust's one-level scalar-pointer model does not yet represent. Third dimensions retain a source-located parser diagnostic; multidimensional parameters and aggregate fields retain their established unsupported diagnostics. The next bounded extension should add two-dimensional scalar fields without silently flattening row pointers.
+
 ## 2026-07-25 — v0.2.0 release metadata
 
 - No external semantics research was needed. `env!("CARGO_PKG_VERSION")` remains the single executable version source; changing `Cargo.toml` and regenerating `Cargo.lock` updates local and multi-stage Docker binaries because the Dockerfile builds the same Cargo package.

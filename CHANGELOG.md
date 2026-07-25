@@ -4,7 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
-No changes yet.
+### Language subset
+
+- Added fixed local, global, file-static, and block-static `int[R][C]` / `char[R][C]` objects with nested row initialization and zero filling, double-index reads, scalar replacement/compound/prefix/postfix writes, const-root protection, exact per-dimension bounds diagnostics, and deterministic full-object `sizeof`.
+- Preserved explicit boundaries for scalar-pointer/row decay, multidimensional parameters and aggregate fields, variable-length dimensions, and arrays with more than two dimensions.
+
+### Verification
+
+- Added focused interpreter regressions and a warning-free native compiler-oracle fixture; the suite now has 992 passing tests.
 
 ## v0.2.0 — 2026-07-25
 

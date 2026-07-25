@@ -1,4 +1,4 @@
 int main(void) {
-  int matrix[2][3];
+  int cube[2][3][4];
   return 0;
 }

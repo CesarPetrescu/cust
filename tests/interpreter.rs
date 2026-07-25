@@ -7979,7 +7979,7 @@ fn rejects_multidimensional_array_declarations_with_context() {
 
     assert_eq!(
         err.to_string(),
-        "multidimensional array declarations are not supported at line 2, column 16"
+        "arrays with more than two dimensions are not supported at line 2, column 17"
     );
 }
 
@@ -8516,6 +8516,114 @@ fn supports_one_dimensional_arrays_indexing_and_parameters() {
     let program = include_str!("fixtures/valid/arrays.c");
 
     assert_eq!(interpret(program).unwrap(), 195);
+}
+
+#[test]
+fn supports_fixed_two_dimensional_scalar_array_reads() {
+    let program = r#"
+        int global[2][3] = {{1, 2, 3}, {4, 5}};
+
+        int main(void) {
+            char local[2][2] = {{'A'}, {'B', 'C'}};
+            return global[0][2] + global[1][0] + global[1][2]
+                + local[0][0] + local[0][1] + local[1][1];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 139);
+}
+
+#[test]
+fn supports_two_dimensional_array_updates_static_storage_and_sizeof() {
+    let program = r#"
+        int touch(void) {
+            static int persistent[1][2] = {{3, 4}};
+            persistent[0][1] += 2;
+            return persistent[0][1];
+        }
+
+        int main(void) {
+            int matrix[2][3];
+            char bytes[2][2] = {{'a'}, {'b'}};
+            int row = 0;
+            int column = 0;
+            matrix[row++][column++] = 5;
+            matrix[1][2] = 7;
+            matrix[1][2] *= 2;
+            int before = matrix[1][2]++;
+            int after = ++matrix[1][2];
+            return touch() + touch() + matrix[0][0] + row + column + before + after
+                + (sizeof(matrix) == 6 * sizeof(int))
+                + (sizeof(bytes) == 4 * sizeof(char));
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 53);
+}
+
+#[test]
+fn fixed_two_dimensional_scalar_arrays_match_fixture() {
+    let program = include_str!("fixtures/valid/fixed_two_dimensional_scalar_arrays.c");
+
+    assert_eq!(interpret(program).unwrap(), 210);
+}
+
+#[test]
+fn rejects_writes_to_const_two_dimensional_arrays() {
+    let program =
+        "int main(void) { const int matrix[2][2] = {{1, 2}, {3, 4}}; matrix[1][0] = 9; return 0; }";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "cannot modify read-only array 'matrix'");
+}
+
+#[test]
+fn reports_first_dimension_bounds_for_two_dimensional_arrays() {
+    let program = "int main(void) { int matrix[2][3]; return matrix[2][0]; }";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array 'matrix' first dimension index 2 out of bounds for length 2"
+    );
+}
+
+#[test]
+fn reports_second_dimension_bounds_for_two_dimensional_arrays() {
+    let program = "int main(void) { int matrix[2][3]; return matrix[0][-1]; }";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "array 'matrix' second dimension index -1 out of bounds for length 3"
+    );
+}
+
+#[test]
+fn rejects_two_dimensional_array_decay_to_scalar_pointers() {
+    let program = "int main(void) { int matrix[2][3]; int *slot = matrix; return 0; }";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "two-dimensional array 'matrix' does not decay to a scalar pointer"
+    );
+}
+
+#[test]
+fn rejects_two_dimensional_array_rows_without_a_second_index() {
+    let program = "int main(void) { int matrix[2][3]; return matrix[0]; }";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "two-dimensional array 'matrix' requires a second index"
+    );
 }
 
 #[test]

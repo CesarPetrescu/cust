@@ -203,6 +203,11 @@ enum Expr {
         name: String,
         index: Box<Expr>,
     },
+    Array2DGet {
+        name: String,
+        row: Box<Expr>,
+        column: Box<Expr>,
+    },
     StringGet {
         values: Vec<i64>,
         index: Box<Expr>,
@@ -251,6 +256,12 @@ enum Expr {
         index: Box<Expr>,
         value: Box<Expr>,
     },
+    Array2DSet {
+        name: String,
+        row: Box<Expr>,
+        column: Box<Expr>,
+        value: Box<Expr>,
+    },
     DerefSet {
         pointer: Box<Expr>,
         value: Box<Expr>,
@@ -292,6 +303,13 @@ enum Expr {
     ArrayCompoundSet {
         name: String,
         index: Box<Expr>,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
+    Array2DCompoundSet {
+        name: String,
+        row: Box<Expr>,
+        column: Box<Expr>,
         op: CompoundOp,
         value: Box<Expr>,
     },
@@ -527,6 +545,8 @@ enum ArrayInitializer {
     Designated { index: usize, value: Expr },
     StringLiteral(Vec<i64>),
 }
+
+type Array2DInitializer = Vec<Vec<ArrayInitializer>>;
 
 impl StructFieldType {
     fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
@@ -866,6 +886,14 @@ enum Stmt {
         elem_type: CType,
         len: usize,
         init: Vec<ArrayInitializer>,
+        is_const: bool,
+    },
+    Array2DDecl {
+        name: String,
+        elem_type: CType,
+        rows: usize,
+        columns: usize,
+        init: Array2DInitializer,
         is_const: bool,
     },
     StructVarDecl {
@@ -4285,6 +4313,7 @@ impl Parser {
             declaration @ (Stmt::VarDecl { .. }
             | Stmt::PointerDecl { .. }
             | Stmt::ArrayDecl { .. }
+            | Stmt::Array2DDecl { .. }
             | Stmt::StructVarDecl { .. }
             | Stmt::StructArrayDecl { .. }) => {
                 let id = *next_id;
@@ -4786,11 +4815,39 @@ impl Parser {
             } else {
                 let len = self.expect_array_len()?;
                 self.expect_closing_bracket_after("array length")?;
-                if self.check(&Token::LBracket) {
-                    return Err(Self::error_at(
-                        "multidimensional array declarations are not supported".to_string(),
-                        self.peek_located(),
-                    ));
+                if self.matches(&Token::LBracket) {
+                    let columns = self.expect_array_len()?;
+                    self.expect_closing_bracket_after("second array dimension")?;
+                    if self.check(&Token::LBracket) {
+                        return Err(Self::error_at(
+                            "arrays with more than two dimensions are not supported".to_string(),
+                            self.peek_located(),
+                        ));
+                    }
+                    let init = if self.matches(&Token::Assign) {
+                        self.last_decl_had_initializer = true;
+                        self.parse_two_dimensional_array_initializer(&name, len, columns)?
+                    } else {
+                        Vec::new()
+                    };
+                    let stmt = Stmt::Array2DDecl {
+                        name,
+                        elem_type: ty,
+                        rows: len,
+                        columns,
+                        init,
+                        is_const: leading_const,
+                    };
+                    if require_semi && self.matches(&Token::Comma) {
+                        return Err(Self::error_at(
+                            "two-dimensional array declaration lists are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
+                    if require_semi {
+                        self.expect_semicolon_after("two-dimensional array declaration")?;
+                    }
+                    return Ok(stmt);
                 }
                 let init = if self.matches(&Token::Assign) {
                     self.last_decl_had_initializer = true;
@@ -5245,6 +5302,46 @@ impl Parser {
         }
 
         self.parse_array_initializer(name, len)
+    }
+
+    fn parse_two_dimensional_array_initializer(
+        &mut self,
+        name: &str,
+        rows: usize,
+        columns: usize,
+    ) -> CustResult<Array2DInitializer> {
+        self.expect_opening_brace_after("two-dimensional array initializer")?;
+        let mut values = Vec::new();
+        if self.matches(&Token::RBrace) {
+            return Ok(values);
+        }
+        loop {
+            if values.len() == rows {
+                return Err(Self::error_at(
+                    format!("too many row initializers for array '{name}'"),
+                    self.peek_located(),
+                ));
+            }
+            if !self.check(&Token::LBrace) {
+                return Err(Self::error_at(
+                    format!("expected nested row initializer for array '{name}'"),
+                    self.peek_located(),
+                ));
+            }
+            let row_name = format!("{name}[{}]", values.len());
+            values.push(self.parse_array_initializer(&row_name, columns)?);
+            if self.matches(&Token::RBrace) {
+                break;
+            }
+            if self.matches(&Token::Comma) {
+                if self.matches(&Token::RBrace) {
+                    break;
+                }
+                continue;
+            }
+            self.expect_closing_brace_after("two-dimensional array initializer")?;
+        }
+        Ok(values)
     }
 
     fn parse_inferred_array_initializer_or_string(
@@ -8045,6 +8142,13 @@ impl Parser {
                     op,
                     value: Box::new(value),
                 }),
+                Expr::Array2DGet { name, row, column } => Ok(Expr::Array2DCompoundSet {
+                    name,
+                    row,
+                    column,
+                    op,
+                    value: Box::new(value),
+                }),
                 Expr::StructArrayGet {
                     name,
                     fields,
@@ -8154,6 +8258,12 @@ impl Parser {
                 Expr::ArrayGet { name, index } => Ok(Expr::ArraySet {
                     name,
                     index,
+                    value: Box::new(value),
+                }),
+                Expr::Array2DGet { name, row, column } => Ok(Expr::Array2DSet {
+                    name,
+                    row,
+                    column,
                     value: Box::new(value),
                 }),
                 Expr::StructArrayGet {
@@ -9560,6 +9670,18 @@ impl Parser {
                         name,
                         index: Box::new(index),
                     },
+                    Expr::ArrayGet { name, index: row } => Expr::Array2DGet {
+                        name,
+                        row,
+                        column: Box::new(index),
+                    },
+                    Expr::Array2DGet { .. } => {
+                        return Err(Self::error_at(
+                            "array expressions with more than two dimensions are not supported"
+                                .to_string(),
+                            self.previous(),
+                        ));
+                    }
                     Expr::StructGet { name, fields } => Expr::StructArrayGet {
                         name,
                         fields,
@@ -9736,6 +9858,7 @@ impl Parser {
         match target {
             Expr::Var(_)
             | Expr::ArrayGet { .. }
+            | Expr::Array2DGet { .. }
             | Expr::StructArrayGet { .. }
             | Expr::StructFieldArrayElementGet { .. }
             | Expr::StructElementGet { .. }
@@ -10654,6 +10777,7 @@ struct ArrayValue {
     elements: Vec<i64>,
     elem_type: CType,
     read_only: bool,
+    dimensions: Option<(usize, usize)>,
 }
 
 impl ArrayValue {
@@ -10662,6 +10786,16 @@ impl ArrayValue {
             elements: vec![0; len],
             elem_type,
             read_only: false,
+            dimensions: None,
+        }
+    }
+
+    fn mutable_zeroed_2d(rows: usize, columns: usize, elem_type: CType) -> Self {
+        Self {
+            elements: vec![0; rows * columns],
+            elem_type,
+            read_only: false,
+            dimensions: Some((rows, columns)),
         }
     }
 
@@ -10670,6 +10804,7 @@ impl ArrayValue {
             elements,
             elem_type: CType::Char,
             read_only: true,
+            dimensions: None,
         }
     }
 }
@@ -12337,6 +12472,42 @@ impl Interpreter {
                         array.elements[index] = *value;
                     }
                     next_positional_index = values.len().min(len);
+                }
+            }
+        }
+        array.read_only = read_only;
+        Ok(Value::Array(Rc::new(RefCell::new(array))))
+    }
+
+    fn make_two_dimensional_array_value(
+        &mut self,
+        rows: usize,
+        columns: usize,
+        elem_type: CType,
+        init: &Array2DInitializer,
+        read_only: bool,
+    ) -> CustResult<Value> {
+        let mut array = ArrayValue::mutable_zeroed_2d(rows, columns, elem_type);
+        for (row_index, row) in init.iter().enumerate() {
+            let mut next_column = 0usize;
+            for initializer in row {
+                match initializer {
+                    ArrayInitializer::Expr(expr) => {
+                        array.elements[row_index * columns + next_column] =
+                            self.eval_scalar_conversion(elem_type, expr)?;
+                        next_column += 1;
+                    }
+                    ArrayInitializer::Designated { index, value } => {
+                        array.elements[row_index * columns + *index] =
+                            self.eval_scalar_conversion(elem_type, value)?;
+                        next_column = *index + 1;
+                    }
+                    ArrayInitializer::StringLiteral(values) => {
+                        for (column, value) in values.iter().take(columns).enumerate() {
+                            array.elements[row_index * columns + column] = *value;
+                        }
+                        next_column = values.len().min(columns);
+                    }
                 }
             }
         }
@@ -16018,6 +16189,11 @@ impl Interpreter {
             },
             Expr::Var(name) => match self.find_variable(name) {
                 Some(Value::Pointer { pointer, .. }) => Ok(pointer.clone()),
+                Some(Value::Array(array)) if array.borrow().dimensions.is_some() => {
+                    Err(CustError::new(format!(
+                        "two-dimensional array '{name}' does not decay to a scalar pointer"
+                    )))
+                }
                 Some(Value::Array(array)) => Ok(PointerValue::ArrayBase {
                     array: Rc::clone(array),
                     source_name: Some(name.clone()),
@@ -16983,6 +17159,11 @@ impl Interpreter {
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
         let index_value = self.eval(index)?;
         let array = self.find_array(name)?;
+        if array.borrow().dimensions.is_some() {
+            return Err(CustError::new(format!(
+                "two-dimensional array '{name}' requires a second index"
+            )));
+        }
         let len = array.borrow().elements.len();
         let Ok(index) = usize::try_from(index_value) else {
             return Err(CustError::new(format!(
@@ -16995,6 +17176,42 @@ impl Interpreter {
             )));
         }
         Ok((array, index))
+    }
+
+    fn checked_two_dimensional_array_index(
+        &mut self,
+        name: &str,
+        row: &Expr,
+        column: &Expr,
+    ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
+        let row_value = self.eval(row)?;
+        let column_value = self.eval(column)?;
+        let array = self.find_array(name)?;
+        let (rows, columns) = array
+            .borrow()
+            .dimensions
+            .ok_or_else(|| CustError::new(format!("array '{name}' is not two-dimensional")))?;
+        let Ok(row_index) = usize::try_from(row_value) else {
+            return Err(CustError::new(format!(
+                "array '{name}' first dimension index {row_value} out of bounds for length {rows}"
+            )));
+        };
+        if row_index >= rows {
+            return Err(CustError::new(format!(
+                "array '{name}' first dimension index {row_value} out of bounds for length {rows}"
+            )));
+        }
+        let Ok(column_index) = usize::try_from(column_value) else {
+            return Err(CustError::new(format!(
+                "array '{name}' second dimension index {column_value} out of bounds for length {columns}"
+            )));
+        };
+        if column_index >= columns {
+            return Err(CustError::new(format!(
+                "array '{name}' second dimension index {column_value} out of bounds for length {columns}"
+            )));
+        }
+        Ok((array, row_index * columns + column_index))
     }
 
     fn consume_loop_iteration(&mut self) -> CustResult<()> {
@@ -17536,6 +17753,9 @@ impl Interpreter {
             | Expr::ArrayGet { .. }
             | Expr::ArraySet { .. }
             | Expr::ArrayCompoundSet { .. }
+            | Expr::Array2DGet { .. }
+            | Expr::Array2DSet { .. }
+            | Expr::Array2DCompoundSet { .. }
             | Expr::StructArrayGet { .. }
             | Expr::StructFieldArrayElementGet { .. }
             | Expr::StructFieldArrayElementSet { .. }
@@ -18130,6 +18350,9 @@ impl Interpreter {
                     _ => self.sizeof_indexed_value(name),
                 }
             }
+            Expr::Array2DGet { name, .. }
+            | Expr::Array2DSet { name, .. }
+            | Expr::Array2DCompoundSet { name, .. } => self.sizeof_indexed_value(name),
             Expr::StringGet { .. } => Ok(CHAR_SIZE),
             Expr::AddressOf(_)
             | Expr::AddressOfArray { .. }
@@ -18837,6 +19060,22 @@ impl Interpreter {
                 array.elements[index] = updated;
                 Ok(Self::increment_result(current, updated, prefix))
             }
+            Expr::Array2DGet { name, row, column } => {
+                let (array, index) = self.checked_two_dimensional_array_index(name, row, column)?;
+                let current = array.borrow().elements[index];
+                let updated = array
+                    .borrow()
+                    .elem_type
+                    .normalize(Self::apply_increment_op(current, op));
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new(format!(
+                        "cannot modify read-only array '{name}'"
+                    )));
+                }
+                array.elements[index] = updated;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
             Expr::StructArrayGet {
                 name,
                 fields,
@@ -19303,6 +19542,7 @@ impl Interpreter {
             Stmt::VarDecl { name, is_const, .. }
             | Stmt::PointerDecl { name, is_const, .. }
             | Stmt::ArrayDecl { name, is_const, .. }
+            | Stmt::Array2DDecl { name, is_const, .. }
             | Stmt::StructVarDecl { name, is_const, .. }
             | Stmt::StructArrayDecl { name, is_const, .. } => Ok((name, *is_const)),
             _ => Err(CustError::new(
@@ -19339,6 +19579,16 @@ impl Interpreter {
                 is_const,
                 ..
             } => self.make_array_value(*len, *elem_type, init, *is_const),
+            Stmt::Array2DDecl {
+                elem_type,
+                rows,
+                columns,
+                init,
+                is_const,
+                ..
+            } => {
+                self.make_two_dimensional_array_value(*rows, *columns, *elem_type, init, *is_const)
+            }
             Stmt::StructVarDecl {
                 type_name, init, ..
             } => self.make_struct_value(type_name, init.as_ref()),
@@ -19459,6 +19709,28 @@ impl Interpreter {
                     )));
                 }
                 let value = self.make_array_value(*len, *elem_type, init, *is_const)?;
+                self.current_scope_mut().insert(name.clone(), value);
+                if *is_const {
+                    self.mark_current_variable_const(name);
+                }
+                Ok(ExecFlow::None)
+            }
+            Stmt::Array2DDecl {
+                name,
+                elem_type,
+                rows,
+                columns,
+                init,
+                is_const,
+            } => {
+                if self.current_scope_has_identifier(name) {
+                    return Err(CustError::new(format!(
+                        "variable '{name}' already declared in this scope"
+                    )));
+                }
+                let value = self.make_two_dimensional_array_value(
+                    *rows, *columns, *elem_type, init, *is_const,
+                )?;
                 self.current_scope_mut().insert(name.clone(), value);
                 if *is_const {
                     self.mark_current_variable_const(name);
@@ -20072,6 +20344,45 @@ impl Interpreter {
                 op,
                 value,
             } => self.eval_array_compound_set(name, index, *op, value),
+            Expr::Array2DSet {
+                name,
+                row,
+                column,
+                value,
+            } => {
+                let (array, index) = self.checked_two_dimensional_array_index(name, row, column)?;
+                let elem_type = array.borrow().elem_type;
+                let value = self.eval_scalar_conversion(elem_type, value)?;
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new(format!(
+                        "cannot modify read-only array '{name}'"
+                    )));
+                }
+                array.elements[index] = value;
+                Ok(value)
+            }
+            Expr::Array2DCompoundSet {
+                name,
+                row,
+                column,
+                op,
+                value,
+            } => {
+                let (array, index) = self.checked_two_dimensional_array_index(name, row, column)?;
+                let current = array.borrow().elements[index];
+                let elem_type = array.borrow().elem_type;
+                let rhs = self.eval(value)?;
+                let result = elem_type.normalize(Self::apply_compound_op(current, *op, rhs)?);
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new(format!(
+                        "cannot modify read-only array '{name}'"
+                    )));
+                }
+                array.elements[index] = result;
+                Ok(result)
+            }
             Expr::StructArraySet {
                 name,
                 fields,
@@ -20260,6 +20571,10 @@ impl Interpreter {
                         }
                     }
                 }
+            }
+            Expr::Array2DGet { name, row, column } => {
+                let (array, index) = self.checked_two_dimensional_array_index(name, row, column)?;
+                Ok(array.borrow().elements[index])
             }
             Expr::StringGet { values, index } => {
                 let index_value = self.eval(index)?;

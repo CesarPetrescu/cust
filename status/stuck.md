@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-25 v0.2.0 release-metadata run after exact Cargo/lock, Docker image-tag, local CLI, and rebuilt-container version checks; 984 passing tests; warning-free Clippy; and both canonical Docker gates. Fixed two-dimensional scalar arrays are the next roadmap package, not an external blocker.
+None. Last reviewed in the 2026-07-25 fixed two-dimensional scalar-array run after 992 passing tests, warning-free Clippy, compiler-oracle exit-code parity, and both canonical Docker gates. Fixed two-dimensional scalar-array aggregate fields are the next roadmap package, not an external blocker.
 
 ## Blocker template
 
