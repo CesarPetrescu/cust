@@ -4,7 +4,36 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+No changes yet.
+
+## v0.2.0 — 2026-07-25
+
+### Language subset
+
+- Added a deterministic aggregate model for named and anonymous structs/unions, enums, typedef-backed aggregate types, nested aggregate fields, scalar and aggregate arrays, pointer fields, aggregate parameters/returns, deep-copy assignment, designated initializers, and scalar/array/aggregate compound literals.
+- Expanded declarations with comma-separated declarators and typedef aliases, inferred arrays, function prototypes, static/extern/thread-local storage-class syntax, `inline`/`_Noreturn`, `const`/`volatile`/`restrict`/`_Atomic`, `_Bool`, standard signed/unsigned/short/long scalar spellings, and C99 `__func__`.
+- Expanded expressions with assignment and compound-assignment results, prefix/postfix increment and decrement, bitwise and shift operators, the conditional and comma operators, scalar/pointer/void casts, reverse subscripting, `sizeof`, `_Alignof`, and `_Static_assert`.
+- Expanded the safe one-level typed pointer model with pointer-returning functions, scalar and aggregate array decay, aggregate/field/compound-literal storage roots, bounded arithmetic, same-array subtraction and ordering, address-of for supported lvalues, const-preserving conversions, and deterministic lifetime/type/bounds diagnostics.
+- Added `do`/`while`, `switch`/`case`/`default` fallthrough, local function prototypes, block-scoped aggregate and enum definitions, C integer literal bases/suffixes, standard/numeric escapes, adjacent string-literal concatenation, and C line/block comments.
+
+### Diagnostics and safety
+
+- Added source-located diagnostics for unsupported preprocessor directives, floating/complex types, `void *`, function pointers/types, variadics, old-style parameters, `goto`/labels, `_Generic`, VLAs, multidimensional arrays, flexible array fields, bit-fields, forward declarations, and unsupported abstract declarator suffixes.
+- Hardened parser boundaries with exact contextual diagnostics for malformed declarations, parameters, calls, control-flow headers, operators, type queries, array lengths/indexes/designators, initializers, casts, and unmatched delimiters.
+- Added deterministic model-based coverage for pointer provenance/qualification/lifetime, aggregate and scalar expression classification, `_Bool` conversion boundaries, lexer/parser mutation matrices, comments/trivia, literals, adjacent strings, and first-error precedence.
+
+### CLI, packaging, and verification
+
+- Added `--tokens`, `--ast`, and `--max-steps`; retained `--version` with an exact `cust 0.2.0` release assertion.
 - Added GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`) licensing so distributed and network-served modified versions remain open-source.
+- Versioned the Cargo package and Docker Compose runtime/test images as `0.2.0`.
+- Verified 984 tests at release time: 875 interpreter tests, 97 deterministic fuzz-safety tests, and 12 CLI, Docker, compiler-oracle, and repository tests.
+- Continued using native C compilers only as external compatibility oracles for warning-free supported fixtures; Cust never delegates runtime execution to a native compiler.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Unsupported areas include preprocessing/includes/macros, standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic calls, VLAs and multidimensional arrays, flexible array members and bit-fields, `goto`, and host ABI layout/promotion rules.
 
 ## v0.1 — 2026-05-05
 

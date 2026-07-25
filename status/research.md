@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-25 — v0.2.0 release metadata
+
+- No external semantics research was needed. `env!("CARGO_PKG_VERSION")` remains the single executable version source; changing `Cargo.toml` and regenerating `Cargo.lock` updates local and multi-stage Docker binaries because the Dockerfile builds the same Cargo package.
+- Release consistency is now executable: `tests/cli.rs` pins both package metadata and stdout to `0.2.0`, while `tests/docker_compose.rs` pins runtime/test image names to `cust:v0.2.0` and `cust-test:v0.2.0`. `docker compose run --rm cust --version` verifies the rebuilt runtime image rather than only the host target.
+- Release tags must follow the verified release commit: commit and push `main`, create annotated `v0.2.0` at that exact commit, push the tag, then confirm local/remote tag targets and a clean tree. This avoids publishing a tag whose release metadata was never on `origin/main`.
+
 ## 2026-07-25 — Generic adjacent-string chain oracle
 
 - `tests/fuzz_safety.rs`: render arbitrary bounded adjacent-string chains directly from `&[trivia]`, `&[fragment]`, and `&[Option<Vec<i64>>]` rather than recursively combining the final tokens and retroactively splitting expected locations. Emitting every literal token and source fragment in order gives one independent character-location model for three through six tokens, naturally removes every intermediate token NUL from the expected concatenated AST, and keeps malformed-token opening locations available for first-error precedence checks.

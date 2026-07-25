@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-25 bounded six-token adjacent-string conformance run after 420 unique programs, exact valid token/AST/runtime NUL checks, every first-error position 0 through 4, balanced five-boundary trivia/family/route checks, 97 passing fuzz-safety tests, 875 passing interpreter tests (983 total), a warning-free full Clippy gate, and both Docker gates. The v0.2 release-metadata package is next, not an external blocker.
+None. Last reviewed in the 2026-07-25 v0.2.0 release-metadata run after exact Cargo/lock, Docker image-tag, local CLI, and rebuilt-container version checks; 984 passing tests; warning-free Clippy; and both canonical Docker gates. Fixed two-dimensional scalar arrays are the next roadmap package, not an external blocker.
 
 ## Blocker template
 
