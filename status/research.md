@@ -18,6 +18,11 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-25 — Generic adjacent-string chain oracle
+
+- `tests/fuzz_safety.rs`: render arbitrary bounded adjacent-string chains directly from `&[trivia]`, `&[fragment]`, and `&[Option<Vec<i64>>]` rather than recursively combining the final tokens and retroactively splitting expected locations. Emitting every literal token and source fragment in order gives one independent character-location model for three through six tokens, naturally removes every intermediate token NUL from the expected concatenated AST, and keeps malformed-token opening locations available for first-error precedence checks.
+- Long-chain generators should reject duplicate sources and assert independently derived per-rotation, per-position, per-boundary trivia-family, mask, first-error, and route totals. This catches generator imbalance separately from lexer/parser behavior.
+
 ## 2026-07-25 — Five-token multiple-malformed numeric-escape precedence
 
 - No external language-semantics research was needed because the established source-order lexer contract and exact diagnostic helper already define the expected behavior independently of Cust output.

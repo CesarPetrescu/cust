@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-25 deterministic five-token multiple-malformed numeric-escape precedence run after 420 unique programs, four pair masks plus three triple masks, two balanced malformed-family rotations, ten balanced cyclic trivia quadruples, three routes, exact first-error source-context and counter checks, 96 passing fuzz-safety tests, 875 passing interpreter tests (982 total), a warning-free full Clippy gate, and both Docker gates. Generic bounded long-chain adjacent-string conformance is the next tooling slice, not an external blocker.
+None. Last reviewed in the 2026-07-25 bounded six-token adjacent-string conformance run after 420 unique programs, exact valid token/AST/runtime NUL checks, every first-error position 0 through 4, balanced five-boundary trivia/family/route checks, 97 passing fuzz-safety tests, 875 passing interpreter tests (983 total), a warning-free full Clippy gate, and both Docker gates. The v0.2 release-metadata package is next, not an external blocker.
 
 ## Blocker template
 
