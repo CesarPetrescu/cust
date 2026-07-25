@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-26 — Fixed two-dimensional scalar-array aggregate fields
+
+- No external semantics research was needed because the direct-object two-dimensional array design and warning-free native compiler oracle already define this bounded C behavior. `StructFieldType::Array2D` reuses `ArrayValue` flat row-major storage plus explicit `(rows, columns)` metadata, so aggregate deep-copy behavior follows the existing array-field clone path without host ABI layout assumptions.
+- Dedicated `StructArray2DGet`/set/compound-set routes retain direct aggregate, aggregate-array element, and aggregate-pointer targets while preserving outer/row/column source-order evaluation. Metadata-only field lookup supplies recursive const checks and non-evaluating scalar-element/full-field `sizeof`; pointer-to-row decay and aggregate-valued multidimensional elements remain deliberately unsupported.
+- Enabling a formerly unsupported syntax can make an old negative fixture valid. The full suite exposed `multidimensional_array_field.c` still expecting rejection for a two-dimensional field; it now covers the true boundary `int matrix[2][3][4]` and asserts the source-located dimensions-beyond-two diagnostic.
+
 ## 2026-07-25 — Fixed two-dimensional scalar-array implementation boundary
 
 - No external semantics research was needed because the backlog already fixed the acceptance boundary and the native compiler oracle validates defined C behavior. `src/lib.rs` stores each fixed `T[R][C]` object as a flat interpreter-owned scalar vector plus explicit `(rows, columns)` metadata; row-major offset calculation is `row * columns + column` only after separate exact bounds checks.

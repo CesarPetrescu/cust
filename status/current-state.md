@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-25
+Last updated: 2026-07-26
 
 ## Latest autonomous verification
+
+All required verification passed for the 2026-07-26 fixed two-dimensional scalar-array aggregate-field run. Named/anonymous struct and union containers now accept fixed `int[R][C]` / `char[R][C]` fields with nested initialization and zero filling, direct/aggregate-array/arrow double-index reads, replacement/compound/prefix/postfix writes, one-time outer/row/column index evaluation, recursive const-container enforcement, exact outer/row/column bounds diagnostics, deterministic field-object and element `sizeof`, and deep-copy isolation. Storage reuses interpreter-owned flat scalar arrays with explicit dimensions; aggregate-valued multidimensional elements, pointer-to-row decay, and dimensions beyond two remain unsupported. The warning-free compiler-oracle fixture returns 0 under Cust and native C. The suite now has 888 interpreter tests, 97 fuzz-safety tests, and 12 CLI/Docker/compiler-oracle/license tests (997 total).
+
+Verified commands: resumed inherited-diff inspection; focused 13-test `two_dimensional` coverage; focused obsolete multidimensional-field regression RED and corrected three-dimensional diagnostic GREEN; canonical `c_compat`; native `cc -std=c11 -Wall -Wextra -Werror` fixture execution (0); recursion-depth regression; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust` (output 10); and `git diff --check`.
 
 All required verification passed for the 2026-07-25 fixed two-dimensional scalar-array run. Cust now supports fixed local, global, file-static, and block-static `int[R][C]` / `char[R][C]` objects with nested row initializers, zero filling, double-index reads, replacement/compound/prefix/postfix writes, one-time row/column index evaluation, const-root protection, exact per-dimension bounds errors, and deterministic full-object `sizeof`. Runtime storage remains one interpreter-owned flat scalar vector with explicit `(rows, columns)` metadata; unsupported row decay, scalar-pointer decay, and third dimensions retain targeted diagnostics while multidimensional parameters/fields remain unsupported. A warning-free compiler-oracle fixture returns 210 under Cust and native C. The suite now has 883 interpreter tests, 97 fuzz-safety tests, and 12 CLI/Docker/compiler-oracle/license tests (992 total).
 

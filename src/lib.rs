@@ -208,6 +208,11 @@ enum Expr {
         row: Box<Expr>,
         column: Box<Expr>,
     },
+    StructArray2DGet {
+        target: Array2DFieldTarget,
+        row: Box<Expr>,
+        column: Box<Expr>,
+    },
     StringGet {
         values: Vec<i64>,
         index: Box<Expr>,
@@ -262,6 +267,12 @@ enum Expr {
         column: Box<Expr>,
         value: Box<Expr>,
     },
+    StructArray2DSet {
+        target: Array2DFieldTarget,
+        row: Box<Expr>,
+        column: Box<Expr>,
+        value: Box<Expr>,
+    },
     DerefSet {
         pointer: Box<Expr>,
         value: Box<Expr>,
@@ -308,6 +319,13 @@ enum Expr {
     },
     Array2DCompoundSet {
         name: String,
+        row: Box<Expr>,
+        column: Box<Expr>,
+        op: CompoundOp,
+        value: Box<Expr>,
+    },
+    StructArray2DCompoundSet {
+        target: Array2DFieldTarget,
         row: Box<Expr>,
         column: Box<Expr>,
         op: CompoundOp,
@@ -445,6 +463,23 @@ enum Expr {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum Array2DFieldTarget {
+    Direct {
+        name: String,
+        fields: Vec<String>,
+    },
+    Element {
+        name: String,
+        index: Box<Expr>,
+        fields: Vec<String>,
+    },
+    Pointer {
+        pointer: Box<Expr>,
+        fields: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Program {
     globals: Vec<Stmt>,
     functions: HashMap<String, Function>,
@@ -507,6 +542,7 @@ struct StructFieldDef {
 enum StructFieldType {
     Scalar(CType),
     Array(CType, usize),
+    Array2D(CType, usize, usize),
     Struct(String),
     StructArray(String, usize),
     Pointer(PointeeType),
@@ -516,6 +552,7 @@ enum StructFieldType {
 enum StructInitializer {
     Expr(Expr),
     Array(Vec<ArrayInitializer>),
+    Array2D(Array2DInitializer),
     Struct(Vec<StructInitializer>),
     StructArray(Vec<StructArrayInitializer>),
     Designated {
@@ -553,6 +590,9 @@ impl StructFieldType {
         match self {
             StructFieldType::Scalar(ty) => Ok(ty.size()),
             StructFieldType::Array(ty, len) => Ok(*len as i64 * ty.size()),
+            StructFieldType::Array2D(ty, rows, columns) => {
+                Ok(*rows as i64 * *columns as i64 * ty.size())
+            }
             StructFieldType::Struct(type_name) => struct_types
                 .get(type_name)
                 .map(|struct_type| struct_type.size(struct_types))
@@ -574,7 +614,9 @@ impl StructFieldType {
     fn alignment(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
         match self {
             StructFieldType::Scalar(ty) => Ok(ty.alignment()),
-            StructFieldType::Array(ty, _) => Ok(ty.alignment()),
+            StructFieldType::Array(ty, _) | StructFieldType::Array2D(ty, _, _) => {
+                Ok(ty.alignment())
+            }
             StructFieldType::Struct(type_name) | StructFieldType::StructArray(type_name, _) => {
                 struct_types
                     .get(type_name)
@@ -5868,6 +5910,11 @@ impl Parser {
         field: &StructFieldDef,
     ) -> CustResult<StructInitializer> {
         match &field.ty {
+            StructFieldType::Array2D(elem_type, rows, columns) if self.check(&Token::LBrace) => {
+                Ok(StructInitializer::Array2D(
+                    self.parse_two_dimensional_array_initializer(&field.name, *rows, *columns)?,
+                ))
+            }
             StructFieldType::Array(elem_type, len) if self.check(&Token::LBrace) => Ok(
                 StructInitializer::Array(self.parse_array_initializer(&field.name, *len)?),
             ),
@@ -6319,17 +6366,25 @@ impl Parser {
                     }
                     match ty {
                         StructFieldType::Scalar(elem_type) => {
-                            let len = self.expect_array_len()?;
+                            let rows = self.expect_array_len()?;
                             self.expect_closing_bracket_after("struct array field length")?;
-                            if self.check(&Token::LBracket) {
-                                return Err(Self::error_at(
-                                    format!(
-                                        "multidimensional array {keyword} fields are not supported"
-                                    ),
-                                    self.peek_located(),
-                                ));
+                            if self.matches(&Token::LBracket) {
+                                let columns = self.expect_array_len()?;
+                                self.expect_closing_bracket_after(
+                                    "second struct array field dimension",
+                                )?;
+                                if self.check(&Token::LBracket) {
+                                    return Err(Self::error_at(
+                                        format!(
+                                            "array {keyword} fields with more than two dimensions are not supported"
+                                        ),
+                                        self.peek_located(),
+                                    ));
+                                }
+                                StructFieldType::Array2D(elem_type, rows, columns)
+                            } else {
+                                StructFieldType::Array(elem_type, rows)
                             }
-                            StructFieldType::Array(elem_type, len)
                         }
                         StructFieldType::Struct(type_name) => {
                             let len = self.expect_array_len()?;
@@ -6350,7 +6405,9 @@ impl Parser {
                                 self.previous(),
                             ));
                         }
-                        StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => {
+                        StructFieldType::Array(_, _)
+                        | StructFieldType::Array2D(_, _, _)
+                        | StructFieldType::StructArray(_, _) => {
                             unreachable!("array field not built yet")
                         }
                     }
@@ -8149,6 +8206,17 @@ impl Parser {
                     op,
                     value: Box::new(value),
                 }),
+                Expr::StructArray2DGet {
+                    target,
+                    row,
+                    column,
+                } => Ok(Expr::StructArray2DCompoundSet {
+                    target,
+                    row,
+                    column,
+                    op,
+                    value: Box::new(value),
+                }),
                 Expr::StructArrayGet {
                     name,
                     fields,
@@ -8262,6 +8330,16 @@ impl Parser {
                 }),
                 Expr::Array2DGet { name, row, column } => Ok(Expr::Array2DSet {
                     name,
+                    row,
+                    column,
+                    value: Box::new(value),
+                }),
+                Expr::StructArray2DGet {
+                    target,
+                    row,
+                    column,
+                } => Ok(Expr::StructArray2DSet {
+                    target,
                     row,
                     column,
                     value: Box::new(value),
@@ -9675,13 +9753,45 @@ impl Parser {
                         row,
                         column: Box::new(index),
                     },
-                    Expr::Array2DGet { .. } => {
+                    Expr::Array2DGet { .. } | Expr::StructArray2DGet { .. } => {
                         return Err(Self::error_at(
                             "array expressions with more than two dimensions are not supported"
                                 .to_string(),
                             self.previous(),
                         ));
                     }
+                    Expr::StructArrayGet {
+                        name,
+                        fields,
+                        index: row,
+                    } => Expr::StructArray2DGet {
+                        target: Array2DFieldTarget::Direct { name, fields },
+                        row,
+                        column: Box::new(index),
+                    },
+                    Expr::StructElementArrayGet {
+                        name,
+                        index: element_index,
+                        fields,
+                        array_index: row,
+                    } => Expr::StructArray2DGet {
+                        target: Array2DFieldTarget::Element {
+                            name,
+                            index: element_index,
+                            fields,
+                        },
+                        row,
+                        column: Box::new(index),
+                    },
+                    Expr::StructPtrArrayGet {
+                        pointer,
+                        fields,
+                        index: row,
+                    } => Expr::StructArray2DGet {
+                        target: Array2DFieldTarget::Pointer { pointer, fields },
+                        row,
+                        column: Box::new(index),
+                    },
                     Expr::StructGet { name, fields } => Expr::StructArrayGet {
                         name,
                         fields,
@@ -9859,6 +9969,7 @@ impl Parser {
             Expr::Var(_)
             | Expr::ArrayGet { .. }
             | Expr::Array2DGet { .. }
+            | Expr::StructArray2DGet { .. }
             | Expr::StructArrayGet { .. }
             | Expr::StructFieldArrayElementGet { .. }
             | Expr::StructElementGet { .. }
@@ -11347,6 +11458,7 @@ impl Interpreter {
                     Some((StructFieldType::Array(elem_type, _), _, _)) => {
                         Ok(Some(PointeeType::Scalar(elem_type)))
                     }
+                    Some((StructFieldType::Array2D(_, _, _), _, _)) => Ok(None),
                     Some((StructFieldType::Struct(type_name), _, _)) => {
                         Ok(Some(PointeeType::Struct(type_name)))
                     }
@@ -11420,6 +11532,7 @@ impl Interpreter {
                     Some((StructFieldType::Array(elem_type, _), _, _)) => {
                         Ok(Some(PointeeType::Scalar(elem_type)))
                     }
+                    Some((StructFieldType::Array2D(_, _, _), _, _)) => Ok(None),
                     Some((StructFieldType::Struct(type_name), _, _)) => {
                         Ok(Some(PointeeType::Struct(type_name)))
                     }
@@ -11691,7 +11804,9 @@ impl Interpreter {
                 .flatten()
                 .map(|(field_type, is_const, points_to_const)| match field_type {
                     StructFieldType::Pointer(_) => points_to_const,
-                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => {
+                    StructFieldType::Array(_, _)
+                    | StructFieldType::Array2D(_, _, _)
+                    | StructFieldType::StructArray(_, _) => {
                         self.struct_array_element_field_points_to_const(name, fields) || is_const
                     }
                     StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
@@ -11706,7 +11821,9 @@ impl Interpreter {
                 .ok()
                 .flatten()
                 .map(|(field_type, is_const, points_to_const)| match field_type {
-                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => is_const,
+                    StructFieldType::Array(_, _)
+                    | StructFieldType::Array2D(_, _, _)
+                    | StructFieldType::StructArray(_, _) => is_const,
                     StructFieldType::Pointer(_) => points_to_const,
                     StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
                 })
@@ -11737,7 +11854,9 @@ impl Interpreter {
                 .ok()
                 .flatten()
                 .map(|(field_type, is_const, points_to_const)| match field_type {
-                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => is_const,
+                    StructFieldType::Array(_, _)
+                    | StructFieldType::Array2D(_, _, _)
+                    | StructFieldType::StructArray(_, _) => is_const,
                     StructFieldType::Pointer(_) => points_to_const,
                     StructFieldType::Scalar(_) | StructFieldType::Struct(_) => is_const,
                 })
@@ -11749,7 +11868,9 @@ impl Interpreter {
                 .flatten()
                 .map(|(field_type, is_const, points_to_const)| match field_type {
                     StructFieldType::Pointer(_) => points_to_const,
-                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => {
+                    StructFieldType::Array(_, _)
+                    | StructFieldType::Array2D(_, _, _)
+                    | StructFieldType::StructArray(_, _) => {
                         self.struct_array_element_field_points_to_const(name, fields) || is_const
                     }
                     StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
@@ -11761,7 +11882,9 @@ impl Interpreter {
                 .flatten()
                 .map(|(field_type, is_const, points_to_const)| match field_type {
                     StructFieldType::Pointer(_) => points_to_const,
-                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _) => {
+                    StructFieldType::Array(_, _)
+                    | StructFieldType::Array2D(_, _, _)
+                    | StructFieldType::StructArray(_, _) => {
                         self.struct_array_element_field_points_to_const(name, fields) || is_const
                     }
                     StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
@@ -11791,7 +11914,9 @@ impl Interpreter {
                 match self.struct_pointer_expr_field_metadata(pointer, fields) {
                     Ok(Some((StructFieldType::Pointer(_), _, points_to_const))) => points_to_const,
                     Ok(Some((
-                        StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _),
+                        StructFieldType::Array(_, _)
+                        | StructFieldType::Array2D(_, _, _)
+                        | StructFieldType::StructArray(_, _),
                         is_const,
                         _,
                     ))) => self.pointer_expr_points_to_const(pointer) || is_const,
@@ -11819,7 +11944,9 @@ impl Interpreter {
             } => match self.struct_pointer_expr_field_metadata(pointer, fields) {
                 Ok(Some((StructFieldType::Pointer(_), _, points_to_const))) => points_to_const,
                 Ok(Some((
-                    StructFieldType::Array(_, _) | StructFieldType::StructArray(_, _),
+                    StructFieldType::Array(_, _)
+                    | StructFieldType::Array2D(_, _, _)
+                    | StructFieldType::StructArray(_, _),
                     is_const,
                     _,
                 ))) => self.pointer_expr_points_to_const(pointer) || is_const,
@@ -12310,6 +12437,7 @@ impl Interpreter {
                 StructFieldType::Struct(nested_type) => current_type = nested_type,
                 StructFieldType::Scalar(_)
                 | StructFieldType::Array(_, _)
+                | StructFieldType::Array2D(_, _, _)
                 | StructFieldType::StructArray(_, _)
                 | StructFieldType::Pointer(_) => return None,
             }
@@ -12831,6 +12959,14 @@ impl Interpreter {
                     is_const: field.is_const,
                 })
             }
+            StructFieldType::Array2D(elem_type, rows, columns) => {
+                let mut array = ArrayValue::mutable_zeroed_2d(*rows, *columns, *elem_type);
+                array.read_only = field.is_const;
+                Ok(StructFieldValue::Array {
+                    value: Rc::new(RefCell::new(array)),
+                    is_const: field.is_const,
+                })
+            }
             StructFieldType::Struct(nested_type) => Ok(StructFieldValue::Struct {
                 type_name: nested_type.clone(),
                 fields: self.make_struct_fields(nested_type, &[])?,
@@ -12880,6 +13016,48 @@ impl Interpreter {
             ) => {
                 return Err(CustError::new(format!(
                     "nested initializer for scalar field '{}' is not supported",
+                    field.name
+                )));
+            }
+            (
+                StructFieldType::Array2D(elem_type, _, columns),
+                StructFieldValue::Array { value, .. },
+                StructInitializer::Array2D(array_init),
+            ) => {
+                let mut array = value.borrow_mut();
+                for (row_index, row) in array_init.iter().enumerate() {
+                    let mut next_column = 0usize;
+                    for initializer in row {
+                        match initializer {
+                            ArrayInitializer::Expr(expr) => {
+                                array.elements[row_index * *columns + next_column] =
+                                    self.eval_scalar_conversion(*elem_type, expr)?;
+                                next_column += 1;
+                            }
+                            ArrayInitializer::Designated { index, value } => {
+                                array.elements[row_index * *columns + *index] =
+                                    self.eval_scalar_conversion(*elem_type, value)?;
+                                next_column = *index + 1;
+                            }
+                            ArrayInitializer::StringLiteral(values) => {
+                                for (column, value) in values.iter().take(*columns).enumerate() {
+                                    array.elements[row_index * *columns + column] = *value;
+                                }
+                                next_column = values.len().min(*columns);
+                            }
+                        }
+                    }
+                }
+            }
+            (
+                StructFieldType::Array2D(_, _, _),
+                _,
+                StructInitializer::Expr(_)
+                | StructInitializer::Array(_)
+                | StructInitializer::Struct(_),
+            ) => {
+                return Err(CustError::new(format!(
+                    "expected two-dimensional array initializer for struct field '{}'",
                     field.name
                 )));
             }
@@ -17214,6 +17392,109 @@ impl Interpreter {
         Ok((array, row_index * columns + column_index))
     }
 
+    fn checked_two_dimensional_struct_field_index(
+        &mut self,
+        target: &Array2DFieldTarget,
+        row: &Expr,
+        column: &Expr,
+    ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
+        let (array, label) = match target {
+            Array2DFieldTarget::Direct { name, fields } => (
+                self.find_struct_array_field(name, fields)?,
+                Self::field_path_label(fields).to_string(),
+            ),
+            Array2DFieldTarget::Element {
+                name,
+                index,
+                fields,
+            } => (
+                self.find_struct_element_array_field(name, index, fields)?,
+                Self::field_path_label(fields).to_string(),
+            ),
+            Array2DFieldTarget::Pointer { pointer, fields } => {
+                let pointer = self.eval_pointer(pointer)?;
+                (
+                    self.find_struct_pointer_array_field(&pointer, fields)?,
+                    Self::field_path_label(fields).to_string(),
+                )
+            }
+        };
+        let row_value = self.eval(row)?;
+        let column_value = self.eval(column)?;
+        let (rows, columns) = array.borrow().dimensions.ok_or_else(|| {
+            CustError::new(format!("array field '{label}' is not two-dimensional"))
+        })?;
+        let Ok(row_index) = usize::try_from(row_value) else {
+            return Err(CustError::new(format!(
+                "array field '{label}' first dimension index {row_value} out of bounds for length {rows}"
+            )));
+        };
+        if row_index >= rows {
+            return Err(CustError::new(format!(
+                "array field '{label}' first dimension index {row_value} out of bounds for length {rows}"
+            )));
+        }
+        let Ok(column_index) = usize::try_from(column_value) else {
+            return Err(CustError::new(format!(
+                "array field '{label}' second dimension index {column_value} out of bounds for length {columns}"
+            )));
+        };
+        if column_index >= columns {
+            return Err(CustError::new(format!(
+                "array field '{label}' second dimension index {column_value} out of bounds for length {columns}"
+            )));
+        }
+        Ok((array, row_index * columns + column_index))
+    }
+
+    fn ensure_two_dimensional_struct_field_target_mutable(
+        &self,
+        target: &Array2DFieldTarget,
+    ) -> CustResult<()> {
+        match target {
+            Array2DFieldTarget::Direct { name, fields } => {
+                self.ensure_variable_mutable(name)?;
+                if self.direct_struct_array_field_points_to_const(name, fields) {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
+            }
+            Array2DFieldTarget::Element { name, fields, .. } => {
+                match self.find_variable(name) {
+                    Some(Value::StructArray {
+                        read_only: true, ..
+                    }) => {
+                        return Err(CustError::new(format!(
+                            "cannot assign to const variable '{name}'"
+                        )));
+                    }
+                    Some(Value::Pointer {
+                        points_to_const: true,
+                        ..
+                    }) => return Err(CustError::new("cannot assign through pointer to const")),
+                    _ => {}
+                }
+                if self.struct_array_element_field_points_to_const(name, fields) {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        Self::field_path_label(fields)
+                    )));
+                }
+            }
+            Array2DFieldTarget::Pointer { pointer, fields } => {
+                let field_is_const = self
+                    .struct_pointer_expr_field_metadata(pointer, fields)?
+                    .is_some_and(|(_, is_const, _)| is_const);
+                if self.pointer_expr_points_to_const(pointer) || field_is_const {
+                    return Err(CustError::new("cannot assign through pointer to const"));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn consume_loop_iteration(&mut self) -> CustResult<()> {
         match self.max_loop_iterations {
             Some(max) if self.loop_iterations >= max => {
@@ -17754,8 +18035,11 @@ impl Interpreter {
             | Expr::ArraySet { .. }
             | Expr::ArrayCompoundSet { .. }
             | Expr::Array2DGet { .. }
+            | Expr::StructArray2DGet { .. }
             | Expr::Array2DSet { .. }
             | Expr::Array2DCompoundSet { .. }
+            | Expr::StructArray2DSet { .. }
+            | Expr::StructArray2DCompoundSet { .. }
             | Expr::StructArrayGet { .. }
             | Expr::StructFieldArrayElementGet { .. }
             | Expr::StructFieldArrayElementSet { .. }
@@ -18223,6 +18507,34 @@ impl Interpreter {
             .transpose()
     }
 
+    fn sizeof_two_dimensional_struct_field_element(
+        &self,
+        target: &Array2DFieldTarget,
+    ) -> CustResult<i64> {
+        let metadata = match target {
+            Array2DFieldTarget::Direct { name, fields } => match self.find_variable(name) {
+                Some(Value::Struct { type_name, .. }) => {
+                    self.aggregate_type_field_metadata(type_name, fields)?
+                }
+                Some(_) => {
+                    return Err(CustError::new(format!("variable '{name}' is not a struct")));
+                }
+                None => return Err(CustError::new(format!("undefined variable '{name}'"))),
+            },
+            Array2DFieldTarget::Element { name, fields, .. } => {
+                self.struct_element_field_metadata(name, fields)?
+            }
+            Array2DFieldTarget::Pointer { pointer, fields } => {
+                self.struct_pointer_expr_field_metadata(pointer, fields)?
+            }
+        };
+        match metadata {
+            Some((StructFieldType::Array2D(elem_type, _, _), _, _)) => Ok(elem_type.size()),
+            Some(_) => Err(CustError::new("array field is not two-dimensional")),
+            None => Err(CustError::new("undefined two-dimensional array field")),
+        }
+    }
+
     fn sizeof_expr(&self, expr: &Expr) -> CustResult<i64> {
         match expr {
             Expr::Number(_) => Ok(INT_SIZE),
@@ -18353,6 +18665,13 @@ impl Interpreter {
             Expr::Array2DGet { name, .. }
             | Expr::Array2DSet { name, .. }
             | Expr::Array2DCompoundSet { name, .. } => self.sizeof_indexed_value(name),
+            Expr::StructArray2DGet { target, .. } => {
+                self.sizeof_two_dimensional_struct_field_element(target)
+            }
+            Expr::StructArray2DSet { target, .. }
+            | Expr::StructArray2DCompoundSet { target, .. } => {
+                self.sizeof_two_dimensional_struct_field_element(target)
+            }
             Expr::StringGet { .. } => Ok(CHAR_SIZE),
             Expr::AddressOf(_)
             | Expr::AddressOfArray { .. }
@@ -18647,6 +18966,9 @@ impl Interpreter {
                 StructFieldType::Array(elem_type, len) if is_last => {
                     return Ok(*len as i64 * elem_type.size());
                 }
+                StructFieldType::Array2D(elem_type, rows, columns) if is_last => {
+                    return Ok(*rows as i64 * *columns as i64 * elem_type.size());
+                }
                 StructFieldType::Struct(nested_type) if is_last => {
                     return self
                         .struct_types
@@ -18858,6 +19180,10 @@ impl Interpreter {
                 ..
             }) => match self.aggregate_type_field_metadata(type_name, path)? {
                 Some((StructFieldType::Array(elem_type, _), _, _)) => Ok(elem_type.size()),
+                Some((StructFieldType::Array2D(_, _, _), _, _)) => Err(CustError::new(format!(
+                    "two-dimensional array field '{}' requires a second index",
+                    Self::field_path_label(path)
+                ))),
                 Some((StructFieldType::StructArray(type_name, _), _, _)) => self
                     .struct_types
                     .get(&type_name)
@@ -19072,6 +19398,26 @@ impl Interpreter {
                     return Err(CustError::new(format!(
                         "cannot modify read-only array '{name}'"
                     )));
+                }
+                array.elements[index] = updated;
+                Ok(Self::increment_result(current, updated, prefix))
+            }
+            Expr::StructArray2DGet {
+                target,
+                row,
+                column,
+            } => {
+                self.ensure_two_dimensional_struct_field_target_mutable(target)?;
+                let (array, index) =
+                    self.checked_two_dimensional_struct_field_index(target, row, column)?;
+                let current = array.borrow().elements[index];
+                let updated = array
+                    .borrow()
+                    .elem_type
+                    .normalize(Self::apply_increment_op(current, op));
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new("cannot modify read-only array field"));
                 }
                 array.elements[index] = updated;
                 Ok(Self::increment_result(current, updated, prefix))
@@ -20383,6 +20729,45 @@ impl Interpreter {
                 array.elements[index] = result;
                 Ok(result)
             }
+            Expr::StructArray2DSet {
+                target,
+                row,
+                column,
+                value,
+            } => {
+                self.ensure_two_dimensional_struct_field_target_mutable(target)?;
+                let (array, index) =
+                    self.checked_two_dimensional_struct_field_index(target, row, column)?;
+                let elem_type = array.borrow().elem_type;
+                let value = self.eval_scalar_conversion(elem_type, value)?;
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new("cannot modify read-only array field"));
+                }
+                array.elements[index] = value;
+                Ok(value)
+            }
+            Expr::StructArray2DCompoundSet {
+                target,
+                row,
+                column,
+                op,
+                value,
+            } => {
+                self.ensure_two_dimensional_struct_field_target_mutable(target)?;
+                let (array, index) =
+                    self.checked_two_dimensional_struct_field_index(target, row, column)?;
+                let current = array.borrow().elements[index];
+                let elem_type = array.borrow().elem_type;
+                let rhs = self.eval(value)?;
+                let result = elem_type.normalize(Self::apply_compound_op(current, *op, rhs)?);
+                let mut array = array.borrow_mut();
+                if array.read_only {
+                    return Err(CustError::new("cannot modify read-only array field"));
+                }
+                array.elements[index] = result;
+                Ok(result)
+            }
             Expr::StructArraySet {
                 name,
                 fields,
@@ -20574,6 +20959,15 @@ impl Interpreter {
             }
             Expr::Array2DGet { name, row, column } => {
                 let (array, index) = self.checked_two_dimensional_array_index(name, row, column)?;
+                Ok(array.borrow().elements[index])
+            }
+            Expr::StructArray2DGet {
+                target,
+                row,
+                column,
+            } => {
+                let (array, index) =
+                    self.checked_two_dimensional_struct_field_index(target, row, column)?;
                 Ok(array.borrow().elements[index])
             }
             Expr::StringGet { values, index } => {

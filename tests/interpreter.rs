@@ -8003,7 +8003,7 @@ fn rejects_multidimensional_array_fields_with_context() {
 
     assert_eq!(
         err.to_string(),
-        "multidimensional array struct fields are not supported at line 2, column 16"
+        "array struct fields with more than two dimensions are not supported at line 2, column 19"
     );
 }
 
@@ -8569,13 +8569,147 @@ fn fixed_two_dimensional_scalar_arrays_match_fixture() {
 }
 
 #[test]
-fn rejects_writes_to_const_two_dimensional_arrays() {
-    let program =
-        "int main(void) { const int matrix[2][2] = {{1, 2}, {3, 4}}; matrix[1][0] = 9; return 0; }";
+fn supports_two_dimensional_scalar_array_fields_reads_and_sizeof() {
+    let program = r#"
+        struct Packet {
+            int matrix[2][3];
+            char labels[2][2];
+        };
 
-    let err = interpret(program).unwrap_err();
+        int main(void) {
+            struct Packet packet = {{{1, 2, 3}, {4, 5}}, {{'A'}, {'B', 'C'}}};
+            struct Packet packets[2] = {
+                {{{6}, {7, 8}}},
+                {{{9, 10}, {11, 12}}}
+            };
+            struct Packet *slot = &packets[1];
+            return packet.matrix[0][2] + packet.matrix[1][1]
+                + packet.labels[0][1] + packet.labels[1][1]
+                + packets[0].matrix[1][1] + slot->matrix[0][1]
+                + (sizeof(packet.matrix) == 6 * sizeof(int))
+                + (sizeof(slot->labels) == 4 * sizeof(char));
+        }
+    "#;
 
-    assert_eq!(err.to_string(), "cannot modify read-only array 'matrix'");
+    assert_eq!(interpret(program).unwrap(), 95);
+}
+
+#[test]
+fn fixed_two_dimensional_scalar_array_fields_match_fixture() {
+    let program = include_str!("fixtures/valid/fixed_two_dimensional_scalar_array_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn updates_two_dimensional_scalar_array_fields_and_evaluates_indexes_once() {
+    let program = r#"
+        struct Packet { int matrix[2][2]; };
+
+        int main(void) {
+            struct Packet packet = {{{1, 2}, {3, 4}}};
+            struct Packet packets[1] = {{{{5, 6}, {7, 8}}}};
+            struct Packet *slot = &packets[0];
+            int row = 0;
+            int column = 0;
+            int outer = 0;
+            int before;
+            int after;
+
+            packet.matrix[row++][column++] = 9;
+            packets[outer++].matrix[1][0] += 3;
+            before = slot->matrix[1][1]++;
+            after = ++slot->matrix[0][1];
+
+            return packet.matrix[0][0] + packets[0].matrix[1][0]
+                + before + after + row + column + outer;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 37);
+}
+
+#[test]
+fn rejects_writes_to_const_two_dimensional_array_fields() {
+    let program = r#"
+        struct Frame { const int matrix[2][2]; };
+
+        int main(void) {
+            struct Frame frame = {{{1, 2}, {3, 4}}};
+            frame.matrix[1][0] = 9;
+            return 0;
+        }
+    "#;
+
+    let error = interpret(program).unwrap_err().to_string();
+    assert_eq!(error, "cannot assign to const struct field 'matrix'");
+}
+
+#[test]
+fn rejects_two_dimensional_array_field_writes_through_const_element_and_pointer_routes() {
+    let cases = [
+        (
+            r#"
+                struct Frame { const int matrix[2][2]; };
+                int main(void) {
+                    struct Frame frames[1] = {{{{1, 2}, {3, 4}}}};
+                    frames[0].matrix[0][1] = 9;
+                    return 0;
+                }
+            "#,
+            "cannot assign to const struct field 'matrix'",
+        ),
+        (
+            r#"
+                struct Frame { int matrix[2][2]; };
+                int main(void) {
+                    struct Frame frame = {{{1, 2}, {3, 4}}};
+                    const struct Frame *slot = &frame;
+                    slot->matrix[0][1] = 9;
+                    return 0;
+                }
+            "#,
+            "cannot assign through pointer to const",
+        ),
+        (
+            r#"
+                struct Inner { int matrix[2][2]; };
+                struct Outer { const struct Inner inner; };
+                int main(void) {
+                    struct Outer outer = {{{{1, 2}, {3, 4}}}};
+                    outer.inner.matrix[0][1] = 9;
+                    return 0;
+                }
+            "#,
+            "cannot assign to const struct field 'matrix'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn reports_dimension_specific_bounds_for_two_dimensional_array_fields() {
+    let cases = [
+        (
+            "struct Frame { int matrix[2][3]; }; int main(void) { struct Frame frames[1] = {{{{0, 0, 0}, {0, 0, 0}}}}; return frames[1].matrix[0][0]; }",
+            "struct array 'frames' index 1 out of bounds for length 1",
+        ),
+        (
+            "struct Frame { int matrix[2][3]; }; int main(void) { struct Frame frame = {{{0, 0, 0}, {0, 0, 0}}}; return frame.matrix[2][0]; }",
+            "array field 'matrix' first dimension index 2 out of bounds for length 2",
+        ),
+        (
+            "struct Frame { int matrix[2][3]; }; int main(void) { struct Frame frame = {{{0, 0, 0}, {0, 0, 0}}}; return frame.matrix[1][3]; }",
+            "array field 'matrix' second dimension index 3 out of bounds for length 3",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
 }
 
 #[test]
