@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 
 ## Latest autonomous verification
+
+All required verification passed during the 2026-07-27 resumed closure of the inherited two-dimensional array-field row-pointer work. Generic call/conditional/comma row expressions support replacement, compound, prefix, and postfix scalar lvalue updates with one-time target/index evaluation. Fixed 2D scalar-array fields decay to row pointers through direct aggregate variables, aggregate-array elements, struct pointers, nested paths, and aggregate compound literals; row arithmetic, adjusted-parameter calls, and returned views preserve element type, column width, backing storage, constness, bounds, and escaped-local diagnostics. A 48-route deterministic property matrix balances four roots, four update operations, and three wrappers under panic guards, while a warning-free compiler-oracle fixture returns 0. The suite has 929 interpreter tests, 98 fuzz-safety tests, and 12 CLI/Docker/compiler-oracle/license tests (1,039 total).
+
+Current-run verification: inspected the inherited dirty worktree and its test/implementation/status diff; observed focused GREEN for four generic-row-expression tests, eight 2D-array-field tests, the 48-route generated property matrix, canonical `c_compat`, and the recursion-depth regression; directly compiled and ran the warning-free native fixture (0); then passed `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `docker compose run --rm test`, `docker compose run --rm cust` (output 10), and `git diff --check`. RED evidence belongs to the inherited implementation run and was not re-claimed by this resumed closure.
 
 All required verification passed for the 2026-07-26 pointer-to-row typedef-alias run. Scalar `typedef T (*Row)[C]` aliases now preserve element type, fixed column width, pointee constness, and pointer-slot constness through ordinary/global/static declarations, comma declarator lists, parameters, prototypes, function returns, reassignment, row arithmetic, double indexing, and pointer-sized `sizeof`/`_Alignof`. Row-pointer slot assignment now validates replacement views against the slot's row element type and width instead of flattening them to scalar pointers. Exact regressions retain const-discard, const-slot, width, unsupported third-rank, row-pointer-array, and aggregate-field diagnostics; a warning-free compiler-oracle fixture returns 0. Generic row-expression replacement/compound/increment lvalues and compatible non-variable 2D roots remain follow-up slices. The suite now has 919 interpreter tests, 97 fuzz-safety tests, and 12 CLI/Docker/compiler-oracle/license tests (1,028 total).
 

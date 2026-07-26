@@ -18,11 +18,22 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-27 — Resumed 2D field row-pointer closure
+
+- No new external semantics research was needed. Inspection confirmed that the inherited implementation follows Cust's existing interpreter-owned `PointerValue::Array2DRow` model rather than introducing host addresses: field decay branches on stored dimensions, and metadata classifiers recognize `StructFieldType::Array2D` without evaluating side-effecting roots or indexes.
+- Current-run focused and canonical verification corrected only the recorded suite count: the interpreter target has 929 tests, so the full repository total is 1,039 rather than 1,038. The inherited RED evidence was not available in this resumed run and is not re-claimed.
+
 ## 2026-07-26 — Pointer-to-row typedef aliases
 
 - `typedef T (*Row)[C]` needs distinct alias metadata rather than lowering to Cust's ordinary one-level `T *`: the alias denotes a pointer whose arithmetic unit and compatibility boundary are a complete `T[C]` row. `TypeAlias::Array2DPointer` / `DeclType::Array2DPointer` preserve `T`, `C`, and pointee constness, while the existing const-alias scope independently preserves `typedef T (* const FixedRow)[C]` pointer-slot constness.
 - Alias-spelled objects reuse `Stmt::Array2DPointerDecl` and `PointerValue::Array2DRow`, and alias parameters normalize to `ParamType::Array2D(T, C)`. Function returns retain dedicated row-pointer return metadata. Assignment must validate a replacement against the current row pointer's backing-array dimensions; ordinary `PointeeType::Scalar(T)` validation would incorrectly reject every non-null row view.
 - The narrow parenthesized typedef parser now accepts exactly one pointer plus one fixed row width, while preserving targeted diagnostics for function pointers, rank-three forms, row-pointer arrays, and aggregate fields. The warning-free native fixture uses same-array operations and ABI-independent pointer `sizeof`/`_Alignof` relationships.
+
+## 2026-07-26 — Two-dimensional array-field row-pointer decay and generic lvalues
+
+- Existing generic double-index parsing already lowers the final scalar element to ordinary dereference lvalues, so replacement, compound assignment, and prefix/postfix updates over call/conditional/comma row expressions were coverage-complete and evaluated targets once without production changes.
+- The actual missing seam was runtime shape preservation: 2D scalar-array fields used `StructFieldValue::Array` with `dimensions`, but field decay emitted one-dimensional `PointerValue::ArrayBase`. Direct, struct-element, struct-pointer, and aggregate-compound-literal field routes must emit `PointerValue::Array2DRow` whenever dimensions are present, while metadata-only row-expression classification must recognize `StructFieldType::Array2D` without evaluating an initializer or index.
+- A fixed 48-route model crosses four storage roots (direct, indexed, arrow, aggregate compound literal), four update operations, and three direct/conditional/comma wrappers. Native coverage stays within defined same-root arithmetic and uses `cc -std=c11 -Wall -Wextra -Werror`; escaped-local, width, const-discard, and row-bounds cases remain Cust-only diagnostics.
 
 ## 2026-07-26 — Explicit two-dimensional row-pointer declarations and parameters
 

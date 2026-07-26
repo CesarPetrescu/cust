@@ -8919,6 +8919,219 @@ fn generic_row_pointer_expressions_support_double_index_reads() {
 }
 
 #[test]
+fn generic_row_pointer_expression_replacement_evaluates_target_once() {
+    let program = r#"
+        int calls = 0;
+
+        int (*select(int (*rows)[3], int offset))[3] {
+            calls += 1;
+            return rows + offset;
+        }
+
+        int main(void) {
+            int values[3][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+            int row = 0;
+            int column = 1;
+            select(values, 1)[row++][column++] = 20;
+            return values[1][1] + calls * 10 + row * 3 + column;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 35);
+}
+
+#[test]
+fn generic_row_pointer_expression_compound_updates_evaluate_targets_once() {
+    let program = r#"
+        int calls = 0;
+
+        int (*select(int (*rows)[3], int offset))[3] {
+            calls += 1;
+            return rows + offset;
+        }
+
+        int main(void) {
+            int values[3][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+            int row = 0;
+            int column = 0;
+            int first = select(values, 1)[row++][column++] += 10;
+            int second = (0 ? values : select(values, 2))[0][1] *= 2;
+            int third = (calls += 0, select(values, 0))[0][2] -= 1;
+            return first + second + third + calls * 10 + row + column;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 64);
+}
+
+#[test]
+fn generic_row_pointer_expression_increments_evaluate_targets_once() {
+    let program = r#"
+        int calls = 0;
+
+        int (*select(int (*rows)[3], int offset))[3] {
+            calls += 1;
+            return rows + offset;
+        }
+
+        int main(void) {
+            int values[3][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+            int row = 0;
+            int column = 2;
+            int first = select(values, 1)[0][0]++;
+            int second = ++select(values, 2)[0][1];
+            int third = (calls += 0, select(values, 0))[row++][column++]--;
+            int fourth = --(0 ? values : select(values, 1))[0][2];
+            return first + second + third + fourth + calls * 10 + row + column;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 65);
+}
+
+#[test]
+fn two_dimensional_array_fields_decay_to_row_pointers() {
+    let program = r#"
+        struct Frame { int matrix[2][3]; };
+
+        int read(int rows[][3]) {
+            return rows[0][1] + rows[1][2];
+        }
+
+        int main(void) {
+            struct Frame frame = {{{1, 2, 3}, {4, 5, 6}}};
+            int (*row)[3] = frame.matrix;
+            row[1][0] += 10;
+            return read(frame.matrix) + row[1][0];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 22);
+}
+
+#[test]
+fn two_dimensional_array_field_row_pointer_expressions_support_reads_and_updates() {
+    let program = r#"
+        struct Frame { int matrix[3][3]; };
+
+        int main(void) {
+            struct Frame frame = {{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}};
+            int marker = 0;
+            int selected = (marker ? frame.matrix : frame.matrix + 1)[0][1];
+            (marker += 1, frame.matrix + 1)[0][0] += 10;
+            int updated = ++(frame.matrix + 2)[0][2];
+            return selected + frame.matrix[1][0] + updated + marker;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 30);
+}
+
+#[test]
+fn indexed_and_arrow_two_dimensional_array_fields_decay_to_row_pointers() {
+    let program = r#"
+        struct Frame { int matrix[2][2]; };
+
+        int read(int rows[][2]) {
+            return rows[0][0] + rows[1][1];
+        }
+
+        int main(void) {
+            struct Frame frames[2] = {
+                {{{1, 2}, {3, 4}}},
+                {{{5, 6}, {7, 8}}}
+            };
+            struct Frame *slot = &frames[1];
+            int outer = 0;
+            int first = read(frames[outer++].matrix);
+            int (*row)[2] = slot->matrix;
+            row[0][0] += 10;
+            int second = (slot->matrix + 1)[0][1]++;
+            return first + second + row[0][0] + slot->matrix[1][1] + outer;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 38);
+}
+
+#[test]
+fn embedded_aggregate_array_element_two_dimensional_fields_decay_to_row_pointers() {
+    let program = r#"
+        struct Tile { int matrix[2][2]; };
+        struct Board { struct Tile tiles[2]; };
+
+        int main(void) {
+            struct Board board = {{
+                {{{1, 2}, {3, 4}}},
+                {{{5, 6}, {7, 8}}}
+            }};
+            int outer = 1;
+            int (*row)[2] = board.tiles[outer--].matrix;
+            int first = (board.tiles[outer++].matrix + 1)[0][1]++;
+            struct Board *slot = &board;
+            int second = (slot->tiles[outer].matrix + 1)[0][0] += 10;
+            return row[1][0] + first + second + outer;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 39);
+}
+
+#[test]
+fn aggregate_compound_literal_two_dimensional_fields_decay_to_row_pointers() {
+    let program = r#"
+        struct Frame { int matrix[2][2]; };
+
+        int read(int rows[][2]) {
+            return rows[0][0] + rows[1][1];
+        }
+
+        int main(void) {
+            int first = read(((struct Frame){{{1, 2}, {3, 4}}}).matrix);
+            int second = (((struct Frame){{{5, 6}, {7, 8}}}).matrix + 1)[0][1]++;
+            int (*row)[2] = ((struct Frame){{{1, 2}, {3, 4}}}).matrix;
+            row[1][0] += 10;
+            return first + second + row[1][0];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 26);
+}
+
+#[test]
+fn two_dimensional_array_field_row_pointer_decay_matches_fixture() {
+    let program = include_str!("fixtures/valid/two_dimensional_array_field_row_pointer_decay.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn two_dimensional_array_field_row_pointers_preserve_safety_diagnostics() {
+    let cases = [
+        (
+            "struct Frame { int matrix[2][2]; }; int main(void) { struct Frame frame; int (*row)[3] = frame.matrix; return 0; }",
+            "row pointer expected a two-dimensional int array with 3 columns",
+        ),
+        (
+            "struct Frame { const int matrix[2][2]; }; int main(void) { struct Frame frame; int (*row)[2] = frame.matrix; return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "struct Frame { int matrix[2][2]; }; int main(void) { struct Frame frame; return (frame.matrix + 2)[0][0]; }",
+            "two-dimensional array row pointer index 2 out of bounds for length 2",
+        ),
+        (
+            "struct Frame { int matrix[2][2]; }; int (*escape(void))[2] { struct Frame local = {{{1, 2}, {3, 4}}}; return local.matrix; } int main(void) { return escape()[0][0]; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
 fn row_pointer_returning_functions_match_fixture() {
     let program = include_str!("fixtures/valid/row_pointer_returning_functions.c");
 

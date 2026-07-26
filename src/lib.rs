@@ -12415,6 +12415,9 @@ impl Interpreter {
                 fields,
             )? {
                 Some((StructFieldType::Pointer(ty), _, _)) => Ok(Some(ty)),
+                Some((StructFieldType::Array2D(elem_type, _, _), _, _)) => {
+                    Ok(Some(PointeeType::Scalar(elem_type)))
+                }
                 _ => Ok(None),
             },
             Expr::StringLiteral(_) => Ok(Some(PointeeType::Scalar(CType::Char))),
@@ -12481,6 +12484,59 @@ impl Interpreter {
                 }) => Some(array.borrow().elem_type),
                 _ => None,
             },
+            Expr::StructGet { name, fields } => match self.find_variable(name) {
+                Some(Value::Struct {
+                    type_name,
+                    fields: field_map,
+                }) => Self::nested_field_value(type_name, field_map, fields)
+                    .ok()
+                    .and_then(|(_, field)| match field {
+                        StructFieldValue::Array { value, .. }
+                            if value.borrow().dimensions.is_some() =>
+                        {
+                            Some(value.borrow().elem_type)
+                        }
+                        _ => None,
+                    }),
+                _ => None,
+            },
+            Expr::StructElementGet { name, fields, .. } => self
+                .struct_element_field_metadata(name, fields)
+                .ok()
+                .flatten()
+                .and_then(|(field_type, _, _)| match field_type {
+                    StructFieldType::Array2D(elem_type, _, _) => Some(elem_type),
+                    _ => None,
+                }),
+            Expr::StructPtrGet { pointer, fields } => self
+                .struct_pointer_expr_field_metadata(pointer, fields)
+                .ok()
+                .flatten()
+                .and_then(|(field_type, _, _)| match field_type {
+                    StructFieldType::Array2D(elem_type, _, _) => Some(elem_type),
+                    _ => None,
+                }),
+            Expr::AggregateFieldGet { aggregate, fields } => self
+                .aggregate_literal_field_metadata(aggregate, fields)
+                .ok()
+                .flatten()
+                .and_then(|(field_type, _, _)| match field_type {
+                    StructFieldType::Array2D(elem_type, _, _) => Some(elem_type),
+                    _ => None,
+                }),
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            } => self
+                .struct_field_array_element_field_metadata(name, array_fields, index, fields)
+                .ok()
+                .flatten()
+                .and_then(|(field_type, _, _)| match field_type {
+                    StructFieldType::Array2D(elem_type, _, _) => Some(elem_type),
+                    _ => None,
+                }),
             Expr::Call { name, .. } => self.functions.get(name).and_then(|function| {
                 if let ReturnType::Array2DPointer { elem_type, .. } = function.return_type {
                     Some(elem_type)
@@ -14545,6 +14601,7 @@ impl Interpreter {
             Ok(Some((
                 StructFieldType::Pointer(_)
                     | StructFieldType::Array(_, _)
+                    | StructFieldType::Array2D(_, _, _)
                     | StructFieldType::StructArray(_, _),
                 _,
                 _
@@ -14589,6 +14646,7 @@ impl Interpreter {
             match &field.ty {
                 StructFieldType::Pointer(_)
                 | StructFieldType::Array(_, _)
+                | StructFieldType::Array2D(_, _, _)
                 | StructFieldType::StructArray(_, _)
                     if is_last =>
                 {
@@ -15009,9 +15067,18 @@ impl Interpreter {
             });
         }
         let array = self.find_struct_array_field(name, fields)?;
+        let source_name = Some(Self::field_path_label(fields).to_string());
+        if array.borrow().dimensions.is_some() {
+            return Ok(PointerValue::Array2DRow {
+                array,
+                source_name,
+                row: 0,
+                owner: None,
+            });
+        }
         Ok(PointerValue::ArrayBase {
             array,
-            source_name: Some(Self::field_path_label(fields).to_string()),
+            source_name,
             owner: None,
         })
     }
@@ -15357,9 +15424,18 @@ impl Interpreter {
             return Ok(pointer);
         }
         let array = self.find_struct_pointer_array_field(pointer, fields)?;
+        let source_name = Some(Self::field_path_label(fields).to_string());
+        if array.borrow().dimensions.is_some() {
+            return Ok(PointerValue::Array2DRow {
+                array,
+                source_name,
+                row: 0,
+                owner: None,
+            });
+        }
         Ok(PointerValue::ArrayBase {
             array,
-            source_name: Some(Self::field_path_label(fields).to_string()),
+            source_name,
             owner: None,
         })
     }
@@ -18608,6 +18684,7 @@ impl Interpreter {
                 Ok(Some((
                     StructFieldType::Pointer(_)
                         | StructFieldType::Array(_, _)
+                        | StructFieldType::Array2D(_, _, _)
                         | StructFieldType::StructArray(_, _),
                     _,
                     _
@@ -18641,6 +18718,7 @@ impl Interpreter {
                 Ok(Some((
                     StructFieldType::Pointer(_)
                         | StructFieldType::Array(_, _)
+                        | StructFieldType::Array2D(_, _, _)
                         | StructFieldType::StructArray(_, _),
                     _,
                     _
@@ -19435,11 +19513,23 @@ impl Interpreter {
                 let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
                 match field_value {
                     StructFieldValue::Pointer { pointer, .. } => Ok(pointer.clone()),
-                    StructFieldValue::Array { value, .. } => Ok(PointerValue::ArrayBase {
-                        array: Rc::clone(value),
-                        source_name: None,
-                        owner: None,
-                    }),
+                    StructFieldValue::Array { value, .. } => {
+                        let array = Rc::clone(value);
+                        if array.borrow().dimensions.is_some() {
+                            Ok(PointerValue::Array2DRow {
+                                array,
+                                source_name: None,
+                                row: 0,
+                                owner: None,
+                            })
+                        } else {
+                            Ok(PointerValue::ArrayBase {
+                                array,
+                                source_name: None,
+                                owner: None,
+                            })
+                        }
+                    }
                     StructFieldValue::StructArray {
                         type_name,
                         elements,

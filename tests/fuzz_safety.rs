@@ -27351,3 +27351,92 @@ fn derived_inner_const_pointer_callee_return_type_mismatch_program() -> String {
         argument = direct_derived_inner_pointer_const_promotion_argument(),
     )
 }
+
+#[test]
+fn generated_two_dimensional_field_row_pointer_updates_match_model_without_panics() {
+    let roots = [
+        (
+            "direct",
+            "struct Frame frame = {{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}};",
+            "frame.matrix",
+            0,
+        ),
+        (
+            "indexed",
+            "struct Frame frames[1] = {{{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}}};",
+            "frames[outer++].matrix",
+            1,
+        ),
+        (
+            "arrow",
+            "struct Frame frame = {{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}}; struct Frame *slot = &frame;",
+            "slot->matrix",
+            0,
+        ),
+        (
+            "literal",
+            "",
+            "((struct Frame){{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}}).matrix",
+            0,
+        ),
+    ];
+    let operations = [
+        ("replacement", "{target}[1][1] = 20", 20),
+        ("compound", "{target}[1][1] += 10", 15),
+        ("postfix", "{target}[1][1]++", 5),
+        ("prefix", "++{target}[1][1]", 6),
+    ];
+    let wrappers = [
+        ("direct", "{root}", 0),
+        (
+            "conditional",
+            "(marker ? frame_fallback.matrix : {root})",
+            0,
+        ),
+        ("comma", "(marker += 1, {root})", 1),
+    ];
+    let mut root_counts = [0; 4];
+    let mut operation_counts = [0; 4];
+    let mut wrapper_counts = [0; 3];
+    let mut sources = HashSet::new();
+
+    for (root_index, (root_name, declarations, root, outer_delta)) in roots.iter().enumerate() {
+        for (operation_index, (operation_name, operation, operation_result)) in
+            operations.iter().enumerate()
+        {
+            for (wrapper_index, (wrapper_name, wrapper, marker_delta)) in
+                wrappers.iter().enumerate()
+            {
+                let target = wrapper.replace("{root}", root);
+                let update = operation.replace("{target}", &target);
+                let source = format!(
+                    "struct Frame {{ int matrix[3][3]; }};\n\
+                     int main(void) {{\n\
+                         struct Frame frame_fallback = {{{{{{1, 2, 3}}, {{4, 5, 6}}, {{7, 8, 9}}}}}};\n\
+                         {declarations}\n\
+                         int marker = 0; int outer = 0;\n\
+                         int result = {update};\n\
+                         return result + marker + outer;\n\
+                     }}\n"
+                );
+                assert!(
+                    sources.insert(source.clone()),
+                    "duplicate 2D field row-pointer source for {root_name}/{operation_name}/{wrapper_name}"
+                );
+                assert_interpretation(
+                    &source,
+                    ExpectedInterpretation::Value(operation_result + marker_delta + outer_delta),
+                    &format!("2D field row-pointer {root_name}/{operation_name}/{wrapper_name}"),
+                );
+                root_counts[root_index] += 1;
+                operation_counts[operation_index] += 1;
+                wrapper_counts[wrapper_index] += 1;
+            }
+        }
+    }
+
+    assert_eq!(sources.len(), 48);
+    assert_eq!(root_counts, [12, 12, 12, 12]);
+    assert_eq!(operation_counts, [12, 12, 12, 12]);
+    assert_eq!(wrapper_counts, [16, 16, 16]);
+}

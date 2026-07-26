@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-26 pointer-to-row typedef-alias run after 1,028 passing tests, warning-free Clippy, compiler-oracle exit-code parity, and both canonical Docker gates. Generic row-expression lvalue updates and non-variable 2D roots are roadmap work, not external blockers.
+None. Last reviewed during the 2026-07-27 resumed two-dimensional array-field row-pointer closure after 1,039 passing tests, warning-free Clippy, compiler-oracle exit-code parity, and both canonical Docker gates. The fixed two-dimensional scalar-array/row-pointer roadmap is complete; v0.3.0 release metadata is the next product task, not an external blocker.
 
 ## Blocker template
 
