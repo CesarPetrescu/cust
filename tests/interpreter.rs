@@ -8744,6 +8744,50 @@ fn adjusted_two_dimensional_scalar_array_parameters_match_fixture() {
 }
 
 #[test]
+fn adjusted_two_dimensional_array_parameters_accept_offset_row_pointers() {
+    let program = r#"
+        int read_pair(int matrix[][3]) {
+            return matrix[0][0] * 10 + matrix[1][2];
+        }
+
+        int forward(int matrix[][3]) {
+            return read_pair(matrix + 1) + ((matrix + 2) - matrix);
+        }
+
+        int main(void) {
+            int values[3][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+            return forward(values);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 51);
+}
+
+#[test]
+fn adjusted_two_dimensional_array_row_pointer_arithmetic_matches_fixture() {
+    let program =
+        include_str!("fixtures/valid/adjusted_two_dimensional_array_row_pointer_arithmetic.c",);
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn adjusted_two_dimensional_array_row_pointer_arithmetic_preserves_row_bounds_diagnostics() {
+    let program = r#"
+        int read(int matrix[][2]) { return matrix[0][0]; }
+        int main(void) {
+            int values[2][2] = {{1, 2}, {3, 4}};
+            return read(values + 2);
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "two-dimensional array row pointer index 2 out of bounds for length 2"
+    );
+}
+
+#[test]
 fn rejects_writes_through_const_adjusted_two_dimensional_array_parameters() {
     let program = r#"
         int update(const int matrix[][2]) {

@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-26 — Two-dimensional row-pointer arithmetic and forwarding
+
+- C two-dimensional array decay is row-scaled, not scalar-element-scaled: adding one to `T matrix[R][C]` advances by one complete `T[C]` row, and subtracting two same-root row pointers returns a row count. Cust models this with `PointerValue::Array2DRow { array, row, owner, ... }` over the existing flat row-major `ArrayValue`; it never exposes host addresses.
+- Adjusted-parameter binding now evaluates pointer-valued arguments, requires the row-pointer runtime shape and matching element type/column width, and stores the row view in the callee pointer slot. `checked_two_dimensional_array_index()` adds the callee-relative row to the preserved base row, so offset forwarding mutates caller storage while retaining remaining-row bounds and lexical-owner liveness.
+- Keep pointer-expression classification separate from evaluation when selecting diagnostics. A non-pointer argument still gets the contextual “requires a two-dimensional array argument” error, while a classified row-pointer expression that fails during offset evaluation must preserve its exact row-bounds/lifetime error rather than being collapsed into the generic call diagnostic. The warning-free oracle uses same-root arithmetic/comparison only; cross-root ordering/subtraction is undefined in native C and belongs in Cust-only negative coverage.
+
 ## 2026-07-26 — Adjusted fixed two-dimensional scalar-array parameters
 
 - C array-parameter adjustment ignores the first bound but preserves the inner column width. Cust models this with `ParamType::Array2D(CType, columns)` / `ParamKind::Array2D`, while call binding clones the caller's interpreter-owned `Rc<RefCell<ArrayValue>>` into the parameter scope rather than copying elements or using host pointers. Existing `Array2DGet`/set/update routes therefore retain caller storage identity and exact actual-row/declared-column bounds.

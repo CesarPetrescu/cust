@@ -11073,6 +11073,12 @@ enum PointerValue {
         index: usize,
         owner: Option<ArrayPointerOwner>,
     },
+    Array2DRow {
+        array: Rc<RefCell<ArrayValue>>,
+        source_name: Option<String>,
+        row: usize,
+        owner: Option<ArrayPointerOwner>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11279,19 +11285,26 @@ impl Interpreter {
                             "internal two-dimensional array parameter type mismatch",
                         ));
                     };
-                    let Expr::Var(argument_name) = arg_expr else {
+                    if !self.expr_is_pointer_value(arg_expr) {
+                        return Err(CustError::new(format!(
+                            "function '{name}' parameter '{}' requires a two-dimensional array argument",
+                            param.name
+                        )));
+                    }
+                    let pointer = self.eval_pointer(arg_expr)?;
+                    let pointer = self.attach_array_pointer_owner(pointer);
+                    let PointerValue::Array2DRow {
+                        array,
+                        source_name,
+                        row,
+                        owner,
+                    } = pointer
+                    else {
                         return Err(CustError::new(format!(
                             "function '{name}' parameter '{}' requires a two-dimensional array argument",
                             param.name
                         )));
                     };
-                    let Some(Value::Array(array)) = self.find_variable(argument_name) else {
-                        return Err(CustError::new(format!(
-                            "function '{name}' parameter '{}' requires a two-dimensional array argument",
-                            param.name
-                        )));
-                    };
-                    let array = Rc::clone(array);
                     let (actual_type, actual_columns, read_only) = {
                         let array = array.borrow();
                         let Some((_, columns)) = array.dimensions else {
@@ -11302,9 +11315,18 @@ impl Interpreter {
                         };
                         (array.elem_type, columns, array.read_only)
                     };
-                    if read_only && !param.points_to_const {
+                    let argument_points_to_const =
+                        read_only || self.pointer_expr_points_to_const(arg_expr);
+                    if argument_points_to_const && !param.points_to_const {
+                        let argument_label = source_name
+                            .as_deref()
+                            .or(match arg_expr {
+                                Expr::Var(argument_name) => Some(argument_name.as_str()),
+                                _ => None,
+                            })
+                            .unwrap_or("expression");
                         return Err(CustError::new(format!(
-                            "cannot discard const qualifier from two-dimensional array argument '{argument_name}'"
+                            "cannot discard const qualifier from two-dimensional array argument '{argument_label}'"
                         )));
                     }
                     if actual_type != *expected_type || actual_columns != *expected_columns {
@@ -11318,7 +11340,16 @@ impl Interpreter {
                             param.name
                         )));
                     }
-                    Value::Array(array)
+                    Value::Pointer {
+                        pointer: PointerValue::Array2DRow {
+                            array,
+                            source_name,
+                            row,
+                            owner,
+                        },
+                        ty: PointeeType::Scalar(*expected_type),
+                        points_to_const: param.points_to_const,
+                    }
                 }
             };
             if param_scope.insert(param.name.clone(), arg).is_some() {
@@ -12464,6 +12495,20 @@ impl Interpreter {
                     owner,
                 }
             }
+            PointerValue::Array2DRow {
+                array,
+                source_name,
+                row,
+                owner: None,
+            } => {
+                let owner = self.find_array_pointer_owner(&array);
+                PointerValue::Array2DRow {
+                    array,
+                    source_name,
+                    row,
+                    owner,
+                }
+            }
             pointer => pointer,
         }
     }
@@ -12498,6 +12543,18 @@ impl Interpreter {
             | PointerValue::ArrayElement { array, owner, .. } => {
                 self.ensure_array_pointer_owner_live(owner.as_ref())?;
                 Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
+            }
+            PointerValue::Array2DRow {
+                source_name, owner, ..
+            } => {
+                self.ensure_array_pointer_owner_live(owner.as_ref())?;
+                Err(CustError::new(match source_name {
+                    Some(name) => {
+                        format!("two-dimensional array '{name}' does not decay to a scalar pointer")
+                    }
+                    None => "pointer to two-dimensional array row cannot convert to scalar pointer"
+                        .to_string(),
+                }))
             }
             PointerValue::Struct { scope_id, name } => {
                 let value = self
@@ -16624,9 +16681,12 @@ impl Interpreter {
             Expr::Var(name) => match self.find_variable(name) {
                 Some(Value::Pointer { pointer, .. }) => Ok(pointer.clone()),
                 Some(Value::Array(array)) if array.borrow().dimensions.is_some() => {
-                    Err(CustError::new(format!(
-                        "two-dimensional array '{name}' does not decay to a scalar pointer"
-                    )))
+                    Ok(PointerValue::Array2DRow {
+                        array: Rc::clone(array),
+                        source_name: Some(name.clone()),
+                        row: 0,
+                        owner: None,
+                    })
                 }
                 Some(Value::Array(array)) => Ok(PointerValue::ArrayBase {
                     array: Rc::clone(array),
@@ -17148,7 +17208,49 @@ impl Interpreter {
                 owner.clone(),
                 *index as i64 + offset,
             ),
+            PointerValue::Array2DRow {
+                array,
+                source_name,
+                row,
+                owner,
+            } => self.two_dimensional_array_row_pointer_at(
+                array,
+                source_name.clone(),
+                owner.clone(),
+                *row as i64 + offset,
+            ),
         }
+    }
+
+    fn two_dimensional_array_row_pointer_at(
+        &self,
+        array: &Rc<RefCell<ArrayValue>>,
+        source_name: Option<String>,
+        owner: Option<ArrayPointerOwner>,
+        row: i64,
+    ) -> CustResult<PointerValue> {
+        self.ensure_array_pointer_owner_live(owner.as_ref())?;
+        let rows = array
+            .borrow()
+            .dimensions
+            .map(|(rows, _)| rows)
+            .ok_or_else(|| CustError::new("pointer does not reference a two-dimensional array"))?;
+        let Ok(row_index) = usize::try_from(row) else {
+            return Err(CustError::new(format!(
+                "two-dimensional array row pointer index {row} out of bounds for length {rows}"
+            )));
+        };
+        if row_index >= rows {
+            return Err(CustError::new(format!(
+                "two-dimensional array row pointer index {row} out of bounds for length {rows}"
+            )));
+        }
+        Ok(PointerValue::Array2DRow {
+            array: Rc::clone(array),
+            source_name,
+            row: row_index,
+            owner,
+        })
     }
 
     fn nested_struct_array_pointer_at(
@@ -17313,6 +17415,9 @@ impl Interpreter {
                 self.ensure_array_pointer_owner_live(owner.as_ref())?;
                 Ok(array.borrow().elements[*index])
             }
+            PointerValue::Array2DRow { .. } => Err(CustError::new(
+                "two-dimensional array row pointer used as scalar",
+            )),
         }
     }
 
@@ -17369,6 +17474,9 @@ impl Interpreter {
             PointerValue::ArrayBase { .. } | PointerValue::ArrayElement { .. } => {
                 self.assign_pointer_index(pointer, 0, value)
             }
+            PointerValue::Array2DRow { .. } => Err(CustError::new(
+                "cannot assign a scalar through a two-dimensional array row pointer",
+            )),
             PointerValue::Struct { .. }
             | PointerValue::StructElement { .. }
             | PointerValue::StructFieldElement { .. }
@@ -17564,6 +17672,9 @@ impl Interpreter {
                 }
                 Ok((Rc::clone(array), source_name.clone(), index, owner.clone()))
             }
+            PointerValue::Array2DRow { .. } => Err(CustError::new(
+                "two-dimensional array row pointer requires two-dimensional indexing",
+            )),
         }
     }
 
@@ -17620,19 +17731,48 @@ impl Interpreter {
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
         let row_value = self.eval(row)?;
         let column_value = self.eval(column)?;
-        let array = self.find_array(name)?;
+        let (array, base_row, owner) = match self.find_variable(name) {
+            Some(Value::Array(array)) => (Rc::clone(array), 0, None),
+            Some(Value::Pointer {
+                pointer:
+                    PointerValue::Array2DRow {
+                        array, row, owner, ..
+                    },
+                ..
+            }) => (Rc::clone(array), *row, owner.clone()),
+            Some(Value::Pointer { .. }) => {
+                return Err(CustError::new(format!(
+                    "pointer '{name}' does not reference a two-dimensional array"
+                )));
+            }
+            Some(_) => {
+                return Err(CustError::new(format!(
+                    "variable '{name}' is not a two-dimensional array"
+                )));
+            }
+            None => return Err(CustError::new(format!("undefined variable '{name}'"))),
+        };
+        self.ensure_array_pointer_owner_live(owner.as_ref())?;
         let (rows, columns) = array
             .borrow()
             .dimensions
             .ok_or_else(|| CustError::new(format!("array '{name}' is not two-dimensional")))?;
-        let Ok(row_index) = usize::try_from(row_value) else {
+        let Ok(relative_row) = usize::try_from(row_value) else {
             return Err(CustError::new(format!(
-                "array '{name}' first dimension index {row_value} out of bounds for length {rows}"
+                "array '{name}' first dimension index {row_value} out of bounds for length {}",
+                rows - base_row
+            )));
+        };
+        let Some(row_index) = base_row.checked_add(relative_row) else {
+            return Err(CustError::new(format!(
+                "array '{name}' first dimension index {row_value} out of bounds for length {}",
+                rows - base_row
             )));
         };
         if row_index >= rows {
             return Err(CustError::new(format!(
-                "array '{name}' first dimension index {row_value} out of bounds for length {rows}"
+                "array '{name}' first dimension index {row_value} out of bounds for length {}",
+                rows - base_row
             )));
         }
         let Ok(column_index) = usize::try_from(column_value) else {
@@ -18052,6 +18192,18 @@ impl Interpreter {
                     ..
                 },
             ) => left_index == right_index && Rc::ptr_eq(left, right),
+            (
+                PointerValue::Array2DRow {
+                    array: left,
+                    row: left_row,
+                    ..
+                },
+                PointerValue::Array2DRow {
+                    array: right,
+                    row: right_row,
+                    ..
+                },
+            ) => left_row == right_row && Rc::ptr_eq(left, right),
             (PointerValue::Scalar { .. }, PointerValue::ArrayBase { .. })
             | (PointerValue::Scalar { .. }, PointerValue::ArrayElement { .. })
             | (PointerValue::Scalar { .. }, PointerValue::Struct { .. })
@@ -18070,6 +18222,7 @@ impl Interpreter {
         match pointer {
             PointerValue::ArrayBase { array, .. } => Ok((array, 0)),
             PointerValue::ArrayElement { array, index, .. } => Ok((array, *index as i64)),
+            PointerValue::Array2DRow { array, row, .. } => Ok((array, *row as i64)),
             PointerValue::Null => Err(CustError::new("null pointer arithmetic is not supported")),
             PointerValue::Scalar { .. }
             | PointerValue::Struct { .. }
@@ -18114,6 +18267,32 @@ impl Interpreter {
 
     fn pointer_difference(&self, left: &PointerValue, right: &PointerValue) -> CustResult<i64> {
         match (left, right) {
+            (
+                PointerValue::Array2DRow {
+                    array: left_array,
+                    row: left_row,
+                    owner: left_owner,
+                    ..
+                },
+                PointerValue::Array2DRow {
+                    array: right_array,
+                    row: right_row,
+                    owner: right_owner,
+                    ..
+                },
+            ) => {
+                self.ensure_array_pointer_owner_live(left_owner.as_ref())?;
+                self.ensure_array_pointer_owner_live(right_owner.as_ref())?;
+                if !Rc::ptr_eq(left_array, right_array) {
+                    return Err(CustError::new(
+                        "cannot subtract pointers to different arrays",
+                    ));
+                }
+                Ok(*left_row as i64 - *right_row as i64)
+            }
+            (PointerValue::Array2DRow { .. }, _) | (_, PointerValue::Array2DRow { .. }) => Err(
+                CustError::new("cannot subtract pointers to different arrays"),
+            ),
             (
                 PointerValue::NestedStructArrayElement {
                     pointer: left_pointer,
