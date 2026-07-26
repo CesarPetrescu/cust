@@ -1,4 +1,4 @@
-int sum(int (*row)[3]) {
+int sum(int (*row)[3][4]) {
     return 0;
 }
 

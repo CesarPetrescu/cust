@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-26 — Explicit two-dimensional row-pointer declarations and parameters
+
+- C's `T (*row)[C]` declarator separates pointer-slot qualifiers inside `(* ... )` from element/pointee qualifiers before `T`. Cust represents the declaration with `Stmt::Array2DPointerDecl` but stores the value in the existing interpreter-owned `PointerValue::Array2DRow`; it validates element type and column width without introducing host addresses.
+- Explicit row-pointer parameters normalize to the existing `ParamType::Array2D(T, C)` / `ParamKind::Array2D` signature, so prototypes using `T (*row)[C]` are compatible with definitions using adjusted `T row[][C]`. The parameter pointer slot may be const independently of the shared row elements.
+- Top-level scalar `T (*row)[C]` declarations resemble malformed function headers to conservative lookahead. Exclude the exact `(` `*` qualifiers/name `)` `[` prefix from `starts_malformed_function_definition()` before routing to ordinary object parsing; keep `(*name)(...)` function pointers rejected. Mutation checks must inspect `Value::Pointer::points_to_const` for row-pointer variables instead of treating a const pointer slot as a read-only pointee.
+
 ## 2026-07-26 — Two-dimensional row-pointer arithmetic and forwarding
 
 - C two-dimensional array decay is row-scaled, not scalar-element-scaled: adding one to `T matrix[R][C]` advances by one complete `T[C]` row, and subtracting two same-root row pointers returns a row count. Cust models this with `PointerValue::Array2DRow { array, row, owner, ... }` over the existing flat row-major `ArrayValue`; it never exposes host addresses.

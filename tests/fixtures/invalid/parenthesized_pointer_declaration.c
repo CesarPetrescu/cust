@@ -1,4 +1,4 @@
 int main(void) {
-    int (*row)[3];
+    int (*row)[3][4];
     return 0;
 }

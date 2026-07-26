@@ -7960,14 +7960,14 @@ fn rejects_pointer_array_declarations_with_context() {
 }
 
 #[test]
-fn rejects_parenthesized_pointer_parameters_with_context() {
+fn rejects_row_pointer_parameters_with_more_than_two_dimensions() {
     let program = include_str!("fixtures/invalid/parenthesized_pointer_parameter.c");
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "parenthesized pointer parameters are not supported at line 1, column 13"
+        "row pointer parameters with more than two dimensions are not supported at line 1, column 22"
     );
 }
 
@@ -8008,14 +8008,14 @@ fn rejects_multidimensional_array_fields_with_context() {
 }
 
 #[test]
-fn rejects_parenthesized_pointer_declarations_with_context() {
+fn rejects_row_pointer_declarations_with_more_than_two_dimensions() {
     let program = include_str!("fixtures/invalid/parenthesized_pointer_declaration.c");
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "parenthesized pointer declarations are not supported at line 2, column 9"
+        "row pointers with more than two dimensions are not supported at line 2, column 18"
     );
 }
 
@@ -8769,6 +8769,74 @@ fn adjusted_two_dimensional_array_row_pointer_arithmetic_matches_fixture() {
         include_str!("fixtures/valid/adjusted_two_dimensional_array_row_pointer_arithmetic.c",);
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn explicit_two_dimensional_row_pointer_declarations_support_reads_writes_and_offsets() {
+    let program = r#"
+        int main(void) {
+            int values[3][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+            int (*row)[3] = values + 1;
+            row[1][0] += 5;
+            return row[0][2] + values[2][0] + (row - values);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 19);
+}
+
+#[test]
+fn explicit_two_dimensional_row_pointer_parameters_preserve_caller_storage() {
+    let program = r#"
+        int update(int (*row)[3]) {
+            row[1][1] += 5;
+            return row[0][2] + row[1][1];
+        }
+
+        int main(void) {
+            int values[3][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+            return update(values + 1) + values[2][1];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 32);
+}
+
+#[test]
+fn explicit_two_dimensional_row_pointers_match_fixture() {
+    let program = include_str!("fixtures/valid/explicit_two_dimensional_row_pointers.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn explicit_two_dimensional_row_pointers_preserve_type_and_const_diagnostics() {
+    let cases = [
+        (
+            "int main(void) { int values[2][3]; int (*row)[2] = values; return 0; }",
+            "row pointer expected a two-dimensional int array with 2 columns",
+        ),
+        (
+            "int main(void) { const int values[2][2]; int (*row)[2] = values; return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "int main(void) { int values[2][2]; const int (*row)[2] = values; row[0][0] = 9; return 0; }",
+            "cannot modify read-only array 'row'",
+        ),
+        (
+            "int main(void) { int values[2][2]; int (* const row)[2] = values; row += 1; return 0; }",
+            "cannot assign to const variable 'row'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = match interpret(program) {
+            Ok(value) => panic!("expected diagnostic for `{program}`, got exit value {value}"),
+            Err(err) => err,
+        };
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
 }
 
 #[test]

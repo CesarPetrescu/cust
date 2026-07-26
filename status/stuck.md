@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-26 two-dimensional row-pointer arithmetic/forwarding run after 1,016 passing tests, warning-free Clippy, compiler-oracle exit-code parity, and both canonical Docker gates. Explicit pointer-to-row declarators, generic row expressions, and returned row views are the next roadmap package, not an external blocker.
+None. Last reviewed in the 2026-07-26 explicit two-dimensional row-pointer declaration/parameter run after 1,020 passing tests, warning-free Clippy, compiler-oracle exit-code parity, and both canonical Docker gates. Generic conditional/comma/call row indexing, explicit row-pointer function returns, typedef/declaration-list forms, and non-variable 2D roots are roadmap work, not external blockers.
 
 ## Blocker template
 
