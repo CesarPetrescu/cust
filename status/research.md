@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-26 — Pointer-to-row typedef aliases
+
+- `typedef T (*Row)[C]` needs distinct alias metadata rather than lowering to Cust's ordinary one-level `T *`: the alias denotes a pointer whose arithmetic unit and compatibility boundary are a complete `T[C]` row. `TypeAlias::Array2DPointer` / `DeclType::Array2DPointer` preserve `T`, `C`, and pointee constness, while the existing const-alias scope independently preserves `typedef T (* const FixedRow)[C]` pointer-slot constness.
+- Alias-spelled objects reuse `Stmt::Array2DPointerDecl` and `PointerValue::Array2DRow`, and alias parameters normalize to `ParamType::Array2D(T, C)`. Function returns retain dedicated row-pointer return metadata. Assignment must validate a replacement against the current row pointer's backing-array dimensions; ordinary `PointeeType::Scalar(T)` validation would incorrectly reject every non-null row view.
+- The narrow parenthesized typedef parser now accepts exactly one pointer plus one fixed row width, while preserving targeted diagnostics for function pointers, rank-three forms, row-pointer arrays, and aggregate fields. The warning-free native fixture uses same-array operations and ABI-independent pointer `sizeof`/`_Alignof` relationships.
+
 ## 2026-07-26 — Explicit two-dimensional row-pointer declarations and parameters
 
 - C's `T (*row)[C]` declarator separates pointer-slot qualifiers inside `(* ... )` from element/pointee qualifiers before `T`. Cust represents the declaration with `Stmt::Array2DPointerDecl` but stores the value in the existing interpreter-owned `PointerValue::Array2DRow`; it validates element type and column width without introducing host addresses.

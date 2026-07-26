@@ -8067,14 +8067,14 @@ fn rejects_function_pointer_typedef_aliases_with_context() {
 }
 
 #[test]
-fn rejects_parenthesized_pointer_typedef_aliases_with_context() {
+fn rejects_pointer_to_row_typedef_aliases_with_more_than_two_dimensions() {
     let program = include_str!("fixtures/invalid/parenthesized_pointer_typedef_alias.c");
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "parenthesized pointer typedef aliases are not supported at line 1, column 13"
+        "pointer-to-row typedef aliases with more than two dimensions are not supported at line 1, column 22"
     );
 }
 
@@ -8807,6 +8807,75 @@ fn explicit_two_dimensional_row_pointers_match_fixture() {
     let program = include_str!("fixtures/valid/explicit_two_dimensional_row_pointers.c");
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn pointer_to_row_typedef_aliases_support_object_declarations() {
+    let program = r#"
+        typedef int (*Row)[3];
+
+        int main(void) {
+            int values[3][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+            Row row = values + 1;
+            row[0][1] += 10;
+            return row[1][2] + values[1][1];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 24);
+}
+
+#[test]
+fn pointer_to_row_typedef_aliases_support_parameters_returns_and_declaration_lists() {
+    let program = r#"
+        typedef int (*Row)[3];
+
+        Row tail(Row rows) {
+            return rows + 1;
+        }
+
+        int main(void) {
+            int values[3][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+            Row first = values, second = tail(values);
+            second[0][1] += 10;
+            return first[2][2] + values[1][1] + (second - first);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 25);
+}
+
+#[test]
+fn pointer_to_row_typedef_aliases_match_fixture() {
+    let program = include_str!("fixtures/valid/pointer_to_row_typedef_aliases.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn pointer_to_row_typedef_aliases_preserve_width_and_const_diagnostics() {
+    let cases = [
+        (
+            "typedef int (*Row)[2]; int main(void) { int values[2][3]; Row row = values; return 0; }",
+            "row pointer expected a two-dimensional int array with 2 columns",
+        ),
+        (
+            "typedef int (*Row)[2]; int main(void) { const int values[2][2]; Row row = values; return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "typedef const int (*ConstRow)[2]; int main(void) { int values[2][2]; ConstRow row = values; row[0][0] = 1; return 0; }",
+            "cannot modify read-only array 'row'",
+        ),
+        (
+            "typedef int (* const FixedRow)[2]; int main(void) { int values[2][2]; FixedRow row = values; row += 1; return 0; }",
+            "cannot assign to const variable 'row'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
 }
 
 #[test]

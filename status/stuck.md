@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-26 row-pointer function-return/generic-read run after 1,024 passing tests, warning-free Clippy, compiler-oracle exit-code parity, and both canonical Docker gates. Pointer-to-row typedef/declaration-list forms, generic row-expression lvalue updates, and non-variable 2D roots are roadmap work, not external blockers.
+None. Last reviewed in the 2026-07-26 pointer-to-row typedef-alias run after 1,028 passing tests, warning-free Clippy, compiler-oracle exit-code parity, and both canonical Docker gates. Generic row-expression lvalue updates and non-variable 2D roots are roadmap work, not external blockers.
 
 ## Blocker template
 

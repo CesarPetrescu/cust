@@ -496,6 +496,11 @@ enum TypeAlias {
     },
     Array(PointeeType, usize),
     Array2D(CType, usize, usize),
+    Array2DPointer {
+        elem_type: CType,
+        columns: usize,
+        points_to_const: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -508,6 +513,11 @@ enum DeclType {
     },
     Array(PointeeType, usize),
     Array2D(CType, usize, usize),
+    Array2DPointer {
+        elem_type: CType,
+        columns: usize,
+        points_to_const: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2537,7 +2547,7 @@ impl Parser {
                     let pointee = match decl_type {
                         DeclType::Scalar(ty) => PointeeType::Scalar(ty),
                         DeclType::Struct(type_name) => PointeeType::Struct(type_name),
-                        DeclType::Pointer { .. } => {
+                        DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
                             return Err(Self::error_at(
                                 "pointer-to-pointer _Atomic types are not supported".to_string(),
                                 self.previous(),
@@ -2687,6 +2697,21 @@ impl Parser {
                 Some(TypeAlias::Array2D(ty, rows, columns)) => {
                     saw_const |= self.consume_type_qualifiers();
                     Ok((saw_const, DeclType::Array2D(ty, rows, columns)))
+                }
+                Some(TypeAlias::Array2DPointer {
+                    elem_type,
+                    columns,
+                    points_to_const,
+                }) => {
+                    saw_const |= self.consume_type_qualifiers();
+                    Ok((
+                        saw_const,
+                        DeclType::Array2DPointer {
+                            elem_type,
+                            columns,
+                            points_to_const,
+                        },
+                    ))
                 }
                 None => Err(Self::error_at(
                     format!("expected {context}, found Ident(\"{name}\")"),
@@ -2962,6 +2987,15 @@ impl Parser {
                 ty: pointee,
                 points_to_const,
             },
+            DeclType::Array2DPointer {
+                elem_type,
+                columns,
+                points_to_const,
+            } => ReturnType::Array2DPointer {
+                elem_type,
+                columns,
+                points_to_const,
+            },
             DeclType::Array(_, _) | DeclType::Array2D(_, _, _) => {
                 unreachable!("array aliases are not valid return types")
             }
@@ -2981,6 +3015,9 @@ impl Parser {
                 PointeeType::Struct(type_name) => ParamType::Struct(type_name.clone()),
             },
             DeclType::Array2D(ty, _, columns) => ParamType::Array2D(*ty, *columns),
+            DeclType::Array2DPointer {
+                elem_type, columns, ..
+            } => ParamType::Array2D(*elem_type, *columns),
         }
     }
 
@@ -2990,7 +3027,7 @@ impl Parser {
             DeclType::Struct(type_name) => PointeeType::Struct(type_name.clone()),
             DeclType::Pointer { pointee, .. } => pointee.clone(),
             DeclType::Array(pointee, _) => pointee.clone(),
-            DeclType::Array2D(_, _, _) => {
+            DeclType::Array2D(_, _, _) | DeclType::Array2DPointer { .. } => {
                 unreachable!("two-dimensional arrays do not decay to scalar pointers")
             }
         }
@@ -2999,6 +3036,9 @@ impl Parser {
     fn decl_type_points_to_const(decl_type: &DeclType) -> bool {
         match decl_type {
             DeclType::Pointer {
+                points_to_const, ..
+            }
+            | DeclType::Array2DPointer {
                 points_to_const, ..
             } => *points_to_const,
             _ => false,
@@ -3104,6 +3144,34 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
+            if let DeclType::Scalar(elem_type) = base_type {
+                self.expect(Token::LParen)?;
+                self.expect(Token::Star)?;
+                let post_star_qualified = self.leading_type_qualifier_token().is_some();
+                let post_star_const = self.consume_type_qualifiers();
+                let alias_name = self.parse_declarator_name(alias_context)?;
+                self.expect_closing_paren_after("pointer-to-row typedef declarator")?;
+                self.expect(Token::LBracket)?;
+                let columns = self.expect_array_len()?;
+                self.expect_closing_bracket_after("pointer-to-row typedef width")?;
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "pointer-to-row typedef aliases with more than two dimensions are not supported"
+                            .to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                return Ok((
+                    alias_name,
+                    TypeAlias::Array2DPointer {
+                        elem_type,
+                        columns,
+                        points_to_const: leading_const,
+                    },
+                    post_star_const,
+                    post_star_qualified,
+                ));
+            }
             return Err(Self::error_at(
                 "parenthesized pointer typedef aliases are not supported".to_string(),
                 self.peek_located(),
@@ -3115,7 +3183,11 @@ impl Parser {
             None
         };
         let has_explicit_star = explicit_star_token.is_some();
-        if matches!(base_type, DeclType::Pointer { .. }) && has_explicit_star {
+        if matches!(
+            base_type,
+            DeclType::Pointer { .. } | DeclType::Array2DPointer { .. }
+        ) && has_explicit_star
+        {
             return Err(Self::error_at(
                 "pointer-to-pointer typedef aliases are not supported".to_string(),
                 self.previous(),
@@ -3141,7 +3213,9 @@ impl Parser {
                     pointee: PointeeType::Struct(type_name),
                     points_to_const: leading_const,
                 },
-                DeclType::Pointer { .. } => unreachable!("pointer aliases with stars return above"),
+                DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
+                    unreachable!("pointer aliases with stars return above")
+                }
                 DeclType::Array(_, _) | DeclType::Array2D(_, _, _) => {
                     return Err(Self::error_at(
                         "pointer-to-array typedef aliases are not supported".to_string(),
@@ -3164,6 +3238,15 @@ impl Parser {
                 },
                 DeclType::Array(pointee, len) => TypeAlias::Array(pointee, len),
                 DeclType::Array2D(ty, rows, columns) => TypeAlias::Array2D(ty, rows, columns),
+                DeclType::Array2DPointer {
+                    elem_type,
+                    columns,
+                    points_to_const,
+                } => TypeAlias::Array2DPointer {
+                    elem_type,
+                    columns,
+                    points_to_const,
+                },
             }
         };
         let alias_is_const = if has_explicit_star {
@@ -3199,7 +3282,7 @@ impl Parser {
                     }
                     TypeAlias::Array(PointeeType::Struct(type_name), len)
                 }
-                TypeAlias::Pointer { .. } => {
+                TypeAlias::Pointer { .. } | TypeAlias::Array2DPointer { .. } => {
                     return Err(Self::error_at(
                         "pointer array typedef aliases are not supported".to_string(),
                         self.previous(),
@@ -3942,6 +4025,15 @@ impl Parser {
                 self.parse_const_qualified_decl_type("parameter type")?;
             let mut array_2d_param_type = match &decl_type {
                 DeclType::Array2D(ty, _, columns) => Some((*ty, *columns)),
+                DeclType::Array2DPointer {
+                    elem_type, columns, ..
+                } => Some((*elem_type, *columns)),
+                _ => None,
+            };
+            let row_pointer_alias_points_to_const = match &decl_type {
+                DeclType::Array2DPointer {
+                    points_to_const, ..
+                } => Some(*points_to_const),
                 _ => None,
             };
             let mut explicit_row_pointer_param = None;
@@ -4015,7 +4107,12 @@ impl Parser {
                 ));
             }
             let is_pointer = has_explicit_star
-                || matches!(decl_type, DeclType::Pointer { .. } | DeclType::Array(_, _));
+                || matches!(
+                    decl_type,
+                    DeclType::Pointer { .. }
+                        | DeclType::Array(_, _)
+                        | DeclType::Array2DPointer { .. }
+                );
             let name = if let Some((name, _)) = &explicit_row_pointer_param {
                 name.clone()
             } else if allow_unnamed
@@ -4039,6 +4136,9 @@ impl Parser {
                     DeclType::Array2D(_, _, _) => {
                         unreachable!("two-dimensional array aliases return above")
                     }
+                    DeclType::Array2DPointer { .. } => {
+                        unreachable!("row pointer aliases with explicit stars return above")
+                    }
                 }
             } else {
                 match &decl_type {
@@ -4056,6 +4156,9 @@ impl Parser {
                     }
                     DeclType::Array2D(_, _, _) => self
                         .parse_declarator_name("two-dimensional array parameter name after type")?,
+                    DeclType::Array2DPointer { .. } => {
+                        self.parse_declarator_name("row pointer parameter name after type")?
+                    }
                 }
             };
             let mut array_parameter_const = false;
@@ -4125,12 +4228,16 @@ impl Parser {
                     (array_parameter_const, leading_const)
                 }
             } else if matches!(kind, ParamKind::Array2D) {
-                (
-                    explicit_row_pointer_param
-                        .as_ref()
-                        .is_some_and(|(_, is_const)| *is_const),
-                    leading_const,
-                )
+                if let Some(points_to_const) = row_pointer_alias_points_to_const {
+                    (leading_const, points_to_const)
+                } else {
+                    (
+                        explicit_row_pointer_param
+                            .as_ref()
+                            .is_some_and(|(_, is_const)| *is_const),
+                        leading_const,
+                    )
+                }
             } else {
                 (leading_const, false)
             };
@@ -4847,7 +4954,11 @@ impl Parser {
         }
         let has_explicit_star = self.matches(&Token::Star);
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
-        if matches!(decl_type, DeclType::Pointer { .. }) && has_explicit_star {
+        if matches!(
+            decl_type,
+            DeclType::Pointer { .. } | DeclType::Array2DPointer { .. }
+        ) && has_explicit_star
+        {
             return Err(Self::error_at(
                 "pointer-to-pointer declarations are not supported".to_string(),
                 self.previous(),
@@ -4874,7 +4985,11 @@ impl Parser {
                 self.peek_located(),
             ));
         }
-        let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer { .. });
+        let is_pointer = has_explicit_star
+            || matches!(
+                decl_type,
+                DeclType::Pointer { .. } | DeclType::Array2DPointer { .. }
+            );
         let name = if has_explicit_star {
             match &decl_type {
                 DeclType::Scalar(_) => self.parse_declarator_name("pointer name after '*'")?,
@@ -4890,6 +5005,9 @@ impl Parser {
                 DeclType::Pointer { .. } => {
                     unreachable!("pointer aliases with explicit stars return above")
                 }
+                DeclType::Array2DPointer { .. } => {
+                    unreachable!("row pointer aliases with explicit stars return above")
+                }
             }
         } else {
             match &decl_type {
@@ -4898,11 +5016,41 @@ impl Parser {
                 DeclType::Pointer { .. } => {
                     self.parse_declarator_name("pointer name after type")?
                 }
+                DeclType::Array2DPointer { .. } => {
+                    self.parse_declarator_name("row pointer name after type")?
+                }
                 DeclType::Array(_, _) | DeclType::Array2D(_, _, _) => {
                     self.parse_declarator_name("array name after type")?
                 }
             }
         };
+        if let DeclType::Array2DPointer {
+            elem_type,
+            columns,
+            points_to_const,
+        } = decl_type.clone()
+        {
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "row pointer array declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            let stmt = self.parse_two_dimensional_row_pointer_alias_decl_tail(
+                name,
+                elem_type,
+                columns,
+                leading_const,
+                points_to_const,
+            )?;
+            if require_semi && self.matches(&Token::Comma) {
+                return self.parse_declarator_list_tail(stmt, decl_type, leading_const);
+            }
+            if require_semi {
+                self.expect_semicolon_after("two-dimensional row pointer declaration")?;
+            }
+            return Ok(stmt);
+        }
         if let DeclType::Array2D(ty, rows, columns) = decl_type.clone() {
             if self.check(&Token::LBracket) {
                 return Err(Self::error_at(
@@ -5028,7 +5176,9 @@ impl Parser {
                         pointee: PointeeType::Struct(_),
                         ..
                     } => "struct pointer declaration",
-                    DeclType::Array(_, _) | DeclType::Array2D(_, _, _) => {
+                    DeclType::Array(_, _)
+                    | DeclType::Array2D(_, _, _)
+                    | DeclType::Array2DPointer { .. } => {
                         unreachable!("array aliases return before pointer declarations")
                     }
                 };
@@ -5057,7 +5207,9 @@ impl Parser {
                         pointee: PointeeType::Struct(_),
                         ..
                     } => "struct pointer declaration",
-                    DeclType::Array(_, _) | DeclType::Array2D(_, _, _) => {
+                    DeclType::Array(_, _)
+                    | DeclType::Array2D(_, _, _)
+                    | DeclType::Array2DPointer { .. } => {
                         unreachable!("array aliases return before pointer declarations")
                     }
                 };
@@ -5247,6 +5399,36 @@ impl Parser {
         Ok(first_decl)
     }
 
+    fn parse_two_dimensional_row_pointer_alias_decl_tail(
+        &mut self,
+        name: String,
+        elem_type: CType,
+        columns: usize,
+        is_const: bool,
+        points_to_const: bool,
+    ) -> CustResult<Stmt> {
+        let expr = if self.matches(&Token::Assign) {
+            self.last_decl_had_initializer = true;
+            self.reject_missing_declaration_initializer_expr(
+                "two-dimensional row pointer declaration",
+            )?;
+            self.parse_assignment_expr()?
+        } else if matches!(self.peek(), Token::Semi | Token::Comma) {
+            Expr::Number(0)
+        } else {
+            self.expect_assign_after("two-dimensional row pointer declaration")?;
+            unreachable!("expect_assign_after only returns Ok after consuming '='")
+        };
+        Ok(Stmt::Array2DPointerDecl {
+            name,
+            elem_type,
+            columns,
+            expr,
+            is_const,
+            points_to_const,
+        })
+    }
+
     fn parse_two_dimensional_row_pointer_decl(
         &mut self,
         elem_type: CType,
@@ -5328,7 +5510,11 @@ impl Parser {
         }
         let has_explicit_star = self.matches(&Token::Star);
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
-        if matches!(base_type, DeclType::Pointer { .. }) && has_explicit_star {
+        if matches!(
+            base_type,
+            DeclType::Pointer { .. } | DeclType::Array2DPointer { .. }
+        ) && has_explicit_star
+        {
             return Err(Self::error_at(
                 "pointer-to-pointer declarations are not supported".to_string(),
                 self.previous(),
@@ -5340,7 +5526,11 @@ impl Parser {
                 self.peek_located(),
             ));
         }
-        let is_pointer = has_explicit_star || matches!(base_type, DeclType::Pointer { .. });
+        let is_pointer = has_explicit_star
+            || matches!(
+                base_type,
+                DeclType::Pointer { .. } | DeclType::Array2DPointer { .. }
+            );
         let name = if has_explicit_star {
             match &base_type {
                 DeclType::Scalar(_) => self.parse_declarator_name("pointer name after '*'")?,
@@ -5360,6 +5550,9 @@ impl Parser {
                     ));
                 }
                 DeclType::Pointer { .. } => unreachable!("pointer aliases with stars return above"),
+                DeclType::Array2DPointer { .. } => {
+                    unreachable!("row pointer aliases with stars return above")
+                }
             }
         } else {
             match &base_type {
@@ -5368,10 +5561,34 @@ impl Parser {
                     self.parse_declarator_name("struct variable name after ','")?
                 }
                 DeclType::Pointer { .. } => self.parse_declarator_name("pointer name after ','")?,
+                DeclType::Array2DPointer { .. } => {
+                    self.parse_declarator_name("row pointer name after ','")?
+                }
                 DeclType::Array(_, _) => self.parse_declarator_name("array name after ','")?,
                 DeclType::Array2D(_, _, _) => self.parse_declarator_name("array name after ','")?,
             }
         };
+
+        if let DeclType::Array2DPointer {
+            elem_type,
+            columns,
+            points_to_const,
+        } = base_type.clone()
+        {
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "row pointer array declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            return self.parse_two_dimensional_row_pointer_alias_decl_tail(
+                name,
+                elem_type,
+                columns,
+                leading_const,
+                points_to_const,
+            );
+        }
 
         if let DeclType::Array(pointee, len) = base_type.clone() {
             if self.check(&Token::LBracket) {
@@ -5467,7 +5684,9 @@ impl Parser {
                         pointee: PointeeType::Struct(_),
                         ..
                     } => "struct pointer declaration",
-                    DeclType::Array(_, _) | DeclType::Array2D(_, _, _) => {
+                    DeclType::Array(_, _)
+                    | DeclType::Array2D(_, _, _)
+                    | DeclType::Array2DPointer { .. } => {
                         unreachable!("array aliases return before pointer declarations")
                     }
                 };
@@ -5608,7 +5827,10 @@ impl Parser {
                     })
                 }
             }
-            DeclType::Pointer { .. } | DeclType::Array(_, _) | DeclType::Array2D(_, _, _) => {
+            DeclType::Pointer { .. }
+            | DeclType::Array(_, _)
+            | DeclType::Array2D(_, _, _)
+            | DeclType::Array2DPointer { .. } => {
                 unreachable!("handled above")
             }
         }
@@ -6743,6 +6965,12 @@ impl Parser {
                     DeclType::Array2D(ty, rows, columns) => {
                         StructFieldType::Array2D(ty, rows, columns)
                     }
+                    DeclType::Array2DPointer { .. } => {
+                        return Err(Self::error_at(
+                            "pointer-to-row aggregate fields are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
                     DeclType::Scalar(ty) => StructFieldType::Scalar(ty),
                     DeclType::Struct(type_name) => StructFieldType::Struct(type_name),
                 };
@@ -7500,7 +7728,10 @@ impl Parser {
                     &type_token,
                 ));
             }
-            DeclType::Pointer { .. } | DeclType::Array(_, _) | DeclType::Array2D(_, _, _) => {
+            DeclType::Pointer { .. }
+            | DeclType::Array(_, _)
+            | DeclType::Array2D(_, _, _)
+            | DeclType::Array2DPointer { .. } => {
                 return Err(Self::error_at(
                     "pointer casts are not supported".to_string(),
                     &type_token,
@@ -9457,7 +9688,7 @@ impl Parser {
             let pointee = match decl_type {
                 DeclType::Scalar(ty) => PointeeType::Scalar(ty),
                 DeclType::Struct(type_name) => PointeeType::Struct(type_name),
-                DeclType::Pointer { .. } => {
+                DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
                     return Err(Self::error_at(
                         "pointer-to-pointer casts are not supported".to_string(),
                         self.previous(),
@@ -9578,6 +9809,12 @@ impl Parser {
             DeclType::Array2D(_, _, _) => {
                 return Err(Self::error_at(
                     "multidimensional array casts are not supported".to_string(),
+                    &type_token,
+                ));
+            }
+            DeclType::Array2DPointer { .. } => {
+                return Err(Self::error_at(
+                    "pointer-to-row casts are not supported".to_string(),
                     &type_token,
                 ));
             }
@@ -10092,7 +10329,7 @@ impl Parser {
                     Ok(SizeOfType::Struct(type_name))
                 }
             }
-            DeclType::Pointer { .. } => {
+            DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
                 if self.matches(&Token::Star) {
                     return Err(Self::error_at(
                         format!("pointer-to-pointer {operator} types are not supported"),
@@ -13001,6 +13238,29 @@ impl Interpreter {
             )));
         }
         Ok(())
+    }
+
+    fn ensure_pointer_slot_type_matches(
+        &self,
+        current: &PointerValue,
+        expected: &PointeeType,
+        replacement: &PointerValue,
+    ) -> CustResult<()> {
+        if let PointerValue::Array2DRow { array, .. } = current {
+            let array = array.borrow();
+            let Some((_, columns)) = array.dimensions else {
+                return Err(CustError::new(
+                    "internal two-dimensional row pointer storage mismatch",
+                ));
+            };
+            self.ensure_two_dimensional_row_pointer_type_matches(
+                array.elem_type,
+                columns,
+                replacement,
+            )
+        } else {
+            self.ensure_pointer_type_matches(expected, replacement)
+        }
     }
 
     fn ensure_two_dimensional_row_pointer_type_matches(
@@ -17033,14 +17293,14 @@ impl Interpreter {
             },
             Expr::Assign { name, value } => match self.find_variable(name).cloned() {
                 Some(Value::Pointer {
+                    pointer: current_pointer,
                     ty,
                     points_to_const,
-                    ..
                 }) => {
                     self.ensure_variable_mutable(name)?;
                     self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
                     let pointer = self.eval_pointer(value)?;
-                    self.ensure_pointer_type_matches(&ty, &pointer)?;
+                    self.ensure_pointer_slot_type_matches(&current_pointer, &ty, &pointer)?;
                     if let Some(Value::Pointer { pointer: slot, .. }) = self.find_variable_mut(name)
                     {
                         *slot = pointer.clone();
@@ -21052,14 +21312,28 @@ impl Interpreter {
                         Ok(ExecFlow::None)
                     }
                     Some(Value::Pointer {
+                        pointer: current_pointer,
                         ty,
                         points_to_const,
-                        ..
                     }) => {
                         self.ensure_variable_mutable(name)?;
                         self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
                         let pointer = self.eval_pointer(expr)?;
-                        self.ensure_pointer_type_matches(&ty, &pointer)?;
+                        if let PointerValue::Array2DRow { array, .. } = &current_pointer {
+                            let array = array.borrow();
+                            let Some((_, columns)) = array.dimensions else {
+                                return Err(CustError::new(
+                                    "internal two-dimensional row pointer storage mismatch",
+                                ));
+                            };
+                            self.ensure_two_dimensional_row_pointer_type_matches(
+                                array.elem_type,
+                                columns,
+                                &pointer,
+                            )?;
+                        } else {
+                            self.ensure_pointer_type_matches(&ty, &pointer)?;
+                        }
                         if let Some(Value::Pointer { pointer: slot, .. }) =
                             self.find_variable_mut(name)
                         {
