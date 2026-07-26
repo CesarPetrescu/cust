@@ -24,6 +24,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Dedicated `StructArray2DGet`/set/compound-set routes retain direct aggregate, aggregate-array element, and aggregate-pointer targets while preserving outer/row/column source-order evaluation. Metadata-only field lookup supplies recursive const checks and non-evaluating scalar-element/full-field `sizeof`; pointer-to-row decay and aggregate-valued multidimensional elements remain deliberately unsupported.
 - Enabling a formerly unsupported syntax can make an old negative fixture valid. The full suite exposed `multidimensional_array_field.c` still expecting rejection for a two-dimensional field; it now covers the true boundary `int matrix[2][3][4]` and asserts the source-located dimensions-beyond-two diagnostic.
 
+## 2026-07-26 — Fixed two-dimensional scalar-array typedef aliases
+
+- No external semantics research was needed because direct two-dimensional objects/fields already define Cust's bounded row-major behavior and the warning-free native fixture validates the selected C forms. Explicit `TypeAlias::Array2D`, `DeclType::Array2D`, and `SizeOfType::Array2D` metadata preserves element type and both dimensions rather than flattening the alias before declaration/type-query routing.
+- Array aliases must dispatch into existing `Stmt::Array2DDecl` and `StructFieldType::Array2D` routes before ordinary scalar/pointer declaration logic. Alias-carried `const` applies to elements and recursively protects aggregate fields; deterministic `sizeof` multiplies scalar size by both dimensions and `_Alignof` remains scalar-element alignment.
+- Preserve the consumed `*` token before parsing a typedef declarator name. Otherwise a pointer-to-array typedef diagnostic emitted after name parsing points at the alias identifier instead of the unsupported `*`; the focused RED exposed and fixed this source-location bug. This slice continues to reject multidimensional parameters because correct C adjustment requires pointer-to-row metadata, not scalar-pointer flattening.
+
 ## 2026-07-25 — Fixed two-dimensional scalar-array implementation boundary
 
 - No external semantics research was needed because the backlog already fixed the acceptance boundary and the native compiler oracle validates defined C behavior. `src/lib.rs` stores each fixed `T[R][C]` object as a flat interpreter-owned scalar vector plus explicit `(rows, columns)` metadata; row-major offset calculation is `row * columns + column` only after separate exact bounds checks.

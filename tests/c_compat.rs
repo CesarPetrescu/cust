@@ -43,6 +43,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/extern_function_storage_class.c",
     "tests/fixtures/compat/valid/function_specifiers.c",
     "tests/fixtures/compat/valid/fixed_two_dimensional_scalar_arrays.c",
+    "tests/fixtures/compat/valid/fixed_two_dimensional_scalar_array_typedefs.c",
     "tests/fixtures/compat/valid/predefined_func_name.c",
     "tests/fixtures/compat/valid/extern_global_declarations.c",
     "tests/fixtures/compat/valid/volatile_type_qualifiers.c",

@@ -8569,6 +8569,123 @@ fn fixed_two_dimensional_scalar_arrays_match_fixture() {
 }
 
 #[test]
+fn two_dimensional_array_typedef_supports_local_objects() {
+    let program = r#"
+        typedef int Matrix[2][3];
+
+        int main(void) {
+            Matrix matrix = {{1, 2, 3}, {4, 5}};
+            return matrix[0][2] + matrix[1][0] + matrix[1][2]
+                + (sizeof(matrix) == 6 * sizeof(int));
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn two_dimensional_array_typedefs_match_fixture() {
+    let program = include_str!("fixtures/valid/fixed_two_dimensional_scalar_array_typedefs.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn two_dimensional_array_typedef_supports_global_static_field_const_and_sizeof_routes() {
+    let program = r#"
+        typedef int Matrix[2][3];
+        typedef char Labels[2][2];
+        typedef const int ConstMatrix[2][2];
+
+        Matrix global = {{1, 2, 3}, {4, 5}};
+        static Labels file_labels = {{'A'}, {'B', 'C'}};
+
+        struct Frame {
+            Matrix matrix;
+            Labels labels;
+        };
+
+        int touch(void) {
+            static Matrix persistent = {{6}, {7, 8}};
+            persistent[1][2] += 2;
+            return persistent[1][2];
+        }
+
+        int main(void) {
+            struct Frame frame = {{{9, 10}, {11}}, {{'D'}, {'E', 'F'}}};
+            ConstMatrix fixed = {{12}, {14, 15}};
+            int before = frame.matrix[1][0]++;
+            global[1][2] = 16;
+
+            if (touch() != 2 || touch() != 4) return 1;
+            if (global[0][2] != 3 || global[1][2] != 16) return 2;
+            if (file_labels[0][1] != 0 || file_labels[1][1] != 'C') return 3;
+            if (before != 11 || frame.matrix[1][0] != 12 || frame.labels[1][0] != 'E') return 4;
+            if (fixed[0][1] != 0 || fixed[1][1] != 15) return 5;
+            if (sizeof(Matrix) != 6 * sizeof(int)
+                || sizeof(Labels) != 4 * sizeof(char)
+                || sizeof(frame.matrix) != sizeof(Matrix)
+                || sizeof(frame.labels[1][0]) != sizeof(char)) return 6;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn two_dimensional_array_typedef_preserves_const_and_bounds_diagnostics() {
+    let cases = [
+        (
+            "typedef const int Matrix[2][2]; int main(void) { Matrix matrix = {{1, 2}, {3, 4}}; matrix[0][1] = 9; return 0; }",
+            "cannot modify read-only array 'matrix'",
+        ),
+        (
+            "typedef const int Matrix[2][2]; struct Frame { Matrix matrix; }; int main(void) { struct Frame frame = {{{1, 2}, {3, 4}}}; frame.matrix[0][1] = 9; return 0; }",
+            "cannot assign to const struct field 'matrix'",
+        ),
+        (
+            "typedef int Matrix[2][3]; int main(void) { Matrix matrix; return matrix[2][0]; }",
+            "array 'matrix' first dimension index 2 out of bounds for length 2",
+        ),
+        (
+            "typedef char Labels[2][3]; int main(void) { Labels labels; return labels[0][-1]; }",
+            "array 'labels' second dimension index -1 out of bounds for length 3",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn two_dimensional_array_typedef_rejects_unsupported_deeper_pointer_and_parameter_forms() {
+    let cases = [
+        (
+            "typedef int Cube[2][3][4];\nint main(void) { return 0; }",
+            "array typedef aliases with more than two dimensions are not supported at line 1, column 23",
+        ),
+        (
+            "typedef int Matrix[2][3];\nint sum(Matrix matrix) { return 0; }\nint main(void) { return 0; }",
+            "multidimensional array parameters are not supported at line 2, column 9",
+        ),
+        (
+            "typedef int Matrix[2][3];\ntypedef Matrix *MatrixPtr;\nint main(void) { return 0; }",
+            "pointer-to-array typedef aliases are not supported at line 2, column 16",
+        ),
+        (
+            "typedef int Matrix[2][3];\nint main(void) { Matrix cubes[2]; return 0; }",
+            "arrays with more than two dimensions are not supported at line 2, column 30",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
 fn supports_two_dimensional_scalar_array_fields_reads_and_sizeof() {
     let program = r#"
         struct Packet {
