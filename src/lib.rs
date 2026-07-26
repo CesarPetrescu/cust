@@ -4708,10 +4708,11 @@ impl Parser {
                 is_const: leading_const,
             };
             if require_semi && self.matches(&Token::Comma) {
-                return Err(Self::error_at(
-                    "two-dimensional array declaration lists are not supported".to_string(),
-                    self.previous(),
-                ));
+                return self.parse_declarator_list_tail(
+                    stmt,
+                    DeclType::Array2D(ty, rows, columns),
+                    leading_const,
+                );
             }
             if require_semi {
                 self.expect_semicolon_after("two-dimensional array declaration")?;
@@ -4981,10 +4982,11 @@ impl Parser {
                         is_const: leading_const,
                     };
                     if require_semi && self.matches(&Token::Comma) {
-                        return Err(Self::error_at(
-                            "two-dimensional array declaration lists are not supported".to_string(),
-                            self.previous(),
-                        ));
+                        return self.parse_declarator_list_tail(
+                            stmt,
+                            DeclType::Scalar(ty),
+                            leading_const,
+                        );
                     }
                     if require_semi {
                         self.expect_semicolon_after("two-dimensional array declaration")?;
@@ -5150,6 +5152,29 @@ impl Parser {
             };
         }
 
+        if let DeclType::Array2D(ty, rows, columns) = base_type.clone() {
+            if self.check(&Token::LBracket) {
+                return Err(Self::error_at(
+                    "arrays with more than two dimensions are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            let init = if self.matches(&Token::Assign) {
+                self.last_decl_had_initializer = true;
+                self.parse_two_dimensional_array_initializer(&name, rows, columns)?
+            } else {
+                Vec::new()
+            };
+            return Ok(Stmt::Array2DDecl {
+                name,
+                elem_type: ty,
+                rows,
+                columns,
+                init,
+                is_const: leading_const,
+            });
+        }
+
         if is_pointer {
             let (is_const, points_to_const) = if has_explicit_star {
                 (post_star_const, leading_const)
@@ -5214,11 +5239,30 @@ impl Parser {
                     } else {
                         let len = self.expect_array_len()?;
                         self.expect_closing_bracket_after("array length")?;
-                        if self.check(&Token::LBracket) {
-                            return Err(Self::error_at(
-                                "multidimensional array declarations are not supported".to_string(),
-                                self.peek_located(),
-                            ));
+                        if self.matches(&Token::LBracket) {
+                            let columns = self.expect_array_len()?;
+                            self.expect_closing_bracket_after("second array dimension")?;
+                            if self.check(&Token::LBracket) {
+                                return Err(Self::error_at(
+                                    "arrays with more than two dimensions are not supported"
+                                        .to_string(),
+                                    self.peek_located(),
+                                ));
+                            }
+                            let init = if self.matches(&Token::Assign) {
+                                self.last_decl_had_initializer = true;
+                                self.parse_two_dimensional_array_initializer(&name, len, columns)?
+                            } else {
+                                Vec::new()
+                            };
+                            return Ok(Stmt::Array2DDecl {
+                                name,
+                                elem_type: ty,
+                                rows: len,
+                                columns,
+                                init,
+                                is_const: leading_const,
+                            });
                         }
                         let init = if self.matches(&Token::Assign) {
                             self.last_decl_had_initializer = true;

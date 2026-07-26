@@ -18,6 +18,11 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-26 — Comma-separated fixed two-dimensional scalar-array declarations
+
+- No external semantics research was needed because Cust's existing declaration-list lowering and completed `Array2D` object/field/typedef metadata define this bounded syntax slice, while the warning-free native fixture validates the selected ordinary C declarations. A direct first 2D declarator must pass the original scalar base type into `parse_declarator_list_tail()` so each later declarator parses its own dimensions; a 2D typedef first declarator instead passes `DeclType::Array2D` so every later bare alias declarator retains the alias shape.
+- `parse_additional_declarator()` is the shared seam: scalar-base tails now parse an optional second fixed dimension into `Stmt::Array2DDecl`, while `DeclType::Array2D` tails build another declaration from the preserved alias dimensions. This reuses `Stmt::Many` execution and static-local wrapping, preserving source order and assigning independent static ids without new runtime storage variants. Existing explicit-star, parenthesized-pointer, and suffix guards retain source-located pointer-to-array and dimensions-beyond-two diagnostics.
+
 ## 2026-07-26 — Fixed two-dimensional scalar-array aggregate fields
 
 - No external semantics research was needed because the direct-object two-dimensional array design and warning-free native compiler oracle already define this bounded C behavior. `StructFieldType::Array2D` reuses `ArrayValue` flat row-major storage plus explicit `(rows, columns)` metadata, so aggregate deep-copy behavior follows the existing array-field clone path without host ABI layout assumptions.

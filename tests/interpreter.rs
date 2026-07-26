@@ -8569,6 +8569,91 @@ fn fixed_two_dimensional_scalar_arrays_match_fixture() {
 }
 
 #[test]
+fn two_dimensional_array_declaration_lists_support_direct_local_objects() {
+    let program = r#"
+        int main(void) {
+            int first[1][2] = {{1, 2}}, second[2][1] = {{3}, {4}};
+            return first[0][1] + second[1][0];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 6);
+}
+
+#[test]
+fn two_dimensional_array_declaration_lists_support_typedef_local_objects() {
+    let program = r#"
+        typedef int Matrix[2][2];
+
+        int main(void) {
+            Matrix first = {{1, 2}, {3, 4}}, second = {{5, 6}, {7, 8}};
+            return first[1][0] + second[0][1];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 9);
+}
+
+#[test]
+fn two_dimensional_array_declaration_lists_evaluate_initializers_once_in_source_order() {
+    let program = r#"
+        typedef int Matrix[1][2];
+
+        int main(void) {
+            int marker = 0;
+            int first[1][2] = {{marker = marker + 1, marker = marker + 1}},
+                second[1][2] = {{marker = marker + 1, marker = marker + 1}};
+            Matrix third = {{marker = marker + 1, marker = marker + 1}},
+                fourth = {{marker = marker + 1, marker = marker + 1}};
+            return marker * 10000000 + first[0][0] * 1000000 + first[0][1] * 100000
+                + second[0][0] * 10000 + second[0][1] * 1000
+                + third[0][0] * 100 + third[0][1] * 10 + fourth[0][0]
+                + fourth[0][1];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 81_234_575);
+}
+
+#[test]
+fn two_dimensional_array_declaration_lists_match_fixture() {
+    let program =
+        include_str!("fixtures/valid/fixed_two_dimensional_scalar_array_declaration_lists.c",);
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn two_dimensional_array_declaration_lists_preserve_unsupported_declarator_diagnostics() {
+    let cases = [
+        (
+            "typedef int Matrix[2][2];\nint main(void) { Matrix first, *row; return 0; }",
+            "pointer-to-array declarations are not supported at line 2, column 32",
+        ),
+        (
+            "int main(void) { int first[2][2], (*row)[2]; return 0; }",
+            "parenthesized pointer declarations are not supported at line 1, column 35",
+        ),
+        (
+            "typedef int Matrix[2][2];\nint main(void) { Matrix first, cube[2]; return 0; }",
+            "arrays with more than two dimensions are not supported at line 2, column 36",
+        ),
+        (
+            "int main(void) { int first[1][1], second[2][1]; return second[2][0]; }",
+            "array 'second' first dimension index 2 out of bounds for length 2",
+        ),
+        (
+            "int main(void) { const int first[1][1] = {{1}}, second[1][1] = {{2}}; second[0][0] = 3; return 0; }",
+            "cannot modify read-only array 'second'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
 fn two_dimensional_array_typedef_supports_local_objects() {
     let program = r#"
         typedef int Matrix[2][3];
