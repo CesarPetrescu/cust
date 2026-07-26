@@ -7991,7 +7991,7 @@ fn rejects_multidimensional_array_parameters_with_context() {
 
     assert_eq!(
         err.to_string(),
-        "multidimensional array parameters are not supported at line 1, column 22"
+        "array parameters with more than two dimensions are not supported at line 1, column 25"
     );
 }
 
@@ -8719,6 +8719,124 @@ fn two_dimensional_array_typedef_supports_global_static_field_const_and_sizeof_r
 }
 
 #[test]
+fn supports_adjusted_two_dimensional_scalar_array_parameters() {
+    let program = r#"
+        int update(int matrix[2][3]) {
+            matrix[1][2] += 4;
+            return matrix[0][1] + matrix[1][2];
+        }
+
+        int main(void) {
+            int values[2][3] = {{1, 2, 3}, {4, 5, 6}};
+            int result = update(values);
+            return result + values[1][2];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 22);
+}
+
+#[test]
+fn adjusted_two_dimensional_scalar_array_parameters_match_fixture() {
+    let program = include_str!("fixtures/valid/adjusted_two_dimensional_scalar_array_parameters.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_writes_through_const_adjusted_two_dimensional_array_parameters() {
+    let program = r#"
+        int update(const int matrix[][2]) {
+            matrix[0][1] = 9;
+            return 0;
+        }
+
+        int main(void) {
+            int values[1][2] = {{1, 2}};
+            return update(values);
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot modify read-only array 'matrix'"
+    );
+}
+
+#[test]
+fn rejects_const_two_dimensional_array_arguments_for_mutable_parameters() {
+    let program = r#"
+        int read(int matrix[][2]) {
+            return matrix[0][0];
+        }
+
+        int main(void) {
+            const int values[1][2] = {{1, 2}};
+            return read(values);
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from two-dimensional array argument 'values'"
+    );
+}
+
+#[test]
+fn adjusted_two_dimensional_array_parameters_support_typedefs_and_prototypes() {
+    let program = r#"
+        typedef int Matrix[2][3];
+
+        int update(Matrix);
+        int update(Matrix matrix) {
+            matrix[0][1]++;
+            return matrix[1][2];
+        }
+
+        int read(int [][3]);
+        int read(int matrix[99][3]) {
+            return matrix[0][1];
+        }
+
+        int main(void) {
+            Matrix values = {{1, 2, 3}, {4, 5, 6}};
+            if (update(values) != 6) return 1;
+            if (values[0][1] != 3) return 2;
+            if (read(values) != 3) return 3;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn adjusted_two_dimensional_array_parameters_preserve_type_width_and_bounds_diagnostics() {
+    let cases = [
+        (
+            "int read(int matrix[][3]) { return 0; } int main(void) { int values[2][2]; return read(values); }",
+            "function 'read' parameter 'matrix' expected a two-dimensional int array with 3 columns",
+        ),
+        (
+            "int read(int matrix[][3]) { return 0; } int main(void) { char values[2][3]; return read(values); }",
+            "function 'read' parameter 'matrix' expected a two-dimensional int array with 3 columns",
+        ),
+        (
+            "int read(int matrix[][3]) { return matrix[2][0]; } int main(void) { int values[2][3]; return read(values); }",
+            "array 'matrix' first dimension index 2 out of bounds for length 2",
+        ),
+        (
+            "int read(int matrix[][3]) { return matrix[0][3]; } int main(void) { int values[2][3]; return read(values); }",
+            "array 'matrix' second dimension index 3 out of bounds for length 3",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
 fn two_dimensional_array_typedef_preserves_const_and_bounds_diagnostics() {
     let cases = [
         (
@@ -8752,8 +8870,8 @@ fn two_dimensional_array_typedef_rejects_unsupported_deeper_pointer_and_paramete
             "array typedef aliases with more than two dimensions are not supported at line 1, column 23",
         ),
         (
-            "typedef int Matrix[2][3];\nint sum(Matrix matrix) { return 0; }\nint main(void) { return 0; }",
-            "multidimensional array parameters are not supported at line 2, column 9",
+            "typedef int Matrix[2][3];\nint sum(Matrix matrix[2]) { return 0; }\nint main(void) { return 0; }",
+            "array parameters with more than two dimensions are not supported at line 2, column 22",
         ),
         (
             "typedef int Matrix[2][3];\ntypedef Matrix *MatrixPtr;\nint main(void) { return 0; }",

@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-26 — Adjusted fixed two-dimensional scalar-array parameters
+
+- C array-parameter adjustment ignores the first bound but preserves the inner column width. Cust models this with `ParamType::Array2D(CType, columns)` / `ParamKind::Array2D`, while call binding clones the caller's interpreter-owned `Rc<RefCell<ArrayValue>>` into the parameter scope rather than copying elements or using host pointers. Existing `Array2DGet`/set/update routes therefore retain caller storage identity and exact actual-row/declared-column bounds.
+- Direct `T matrix[R][C]`, unsized-first-bound `T matrix[][C]`, and typedef-backed `Matrix matrix` spellings normalize to the same signature metadata. Leading or alias-carried `const` qualifies the shared element view: mutable arrays may flow to const parameters, writes through the const parameter are rejected, and read-only roots cannot flow to mutable parameters.
+- Native `cc -std=c11 -Wall -Wextra -Werror` enables `-Warray-parameter`: although different first bounds are type-compatible after adjustment, a prototype using `[][C]` and a definition using `[R][C]` triggers a warning. Keep compiler-oracle prototype/definition spellings aligned; test first-bound normalization in interpreter-only coverage. Explicit parenthesized pointer-to-row declarators, row expressions/arithmetic, and non-variable 2D arguments remain the next slice.
+
 ## 2026-07-26 — Comma-separated fixed two-dimensional scalar-array declarations
 
 - No external semantics research was needed because Cust's existing declaration-list lowering and completed `Array2D` object/field/typedef metadata define this bounded syntax slice, while the warning-free native fixture validates the selected ordinary C declarations. A direct first 2D declarator must pass the original scalar base type into `parse_declarator_list_tail()` so each later declarator parses its own dimensions; a 2D typedef first declarator instead passes `DeclType::Array2D` so every later bare alias declarator retains the alias shape.

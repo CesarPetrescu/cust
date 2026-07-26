@@ -837,6 +837,7 @@ struct Param {
 enum ParamType {
     Scalar(CType),
     Struct(String),
+    Array2D(CType, usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -850,6 +851,7 @@ enum ParamKind {
     Scalar,
     Pointer,
     Struct,
+    Array2D,
 }
 
 impl FunctionSignature {
@@ -2965,9 +2967,7 @@ impl Parser {
                 PointeeType::Scalar(ty) => ParamType::Scalar(*ty),
                 PointeeType::Struct(type_name) => ParamType::Struct(type_name.clone()),
             },
-            DeclType::Array2D(_, _, _) => {
-                unreachable!("two-dimensional array aliases are not valid parameters")
-            }
+            DeclType::Array2D(ty, _, columns) => ParamType::Array2D(*ty, *columns),
         }
     }
 
@@ -3807,12 +3807,10 @@ impl Parser {
             }
             let (leading_const, decl_type) =
                 self.parse_const_qualified_decl_type("parameter type")?;
-            if matches!(decl_type, DeclType::Array2D(_, _, _)) {
-                return Err(Self::error_at(
-                    "multidimensional array parameters are not supported".to_string(),
-                    self.previous(),
-                ));
-            }
+            let mut array_2d_param_type = match &decl_type {
+                DeclType::Array2D(ty, _, columns) => Some((*ty, *columns)),
+                _ => None,
+            };
             let has_explicit_star = self.matches(&Token::Star);
             let post_star_const = has_explicit_star && self.consume_type_qualifiers();
             if matches!(decl_type, DeclType::Pointer { .. }) && has_explicit_star {
@@ -3821,7 +3819,11 @@ impl Parser {
                     self.previous(),
                 ));
             }
-            if matches!(decl_type, DeclType::Array(_, _)) && has_explicit_star {
+            if matches!(
+                decl_type,
+                DeclType::Array(_, _) | DeclType::Array2D(_, _, _)
+            ) && has_explicit_star
+            {
                 return Err(Self::error_at(
                     "pointer-to-array parameters are not supported".to_string(),
                     self.previous(),
@@ -3886,13 +3888,21 @@ impl Parser {
                     DeclType::Array(_, _) => {
                         self.parse_declarator_name("array parameter name after type")?
                     }
-                    DeclType::Array2D(_, _, _) => {
-                        unreachable!("two-dimensional array aliases return above")
-                    }
+                    DeclType::Array2D(_, _, _) => self
+                        .parse_declarator_name("two-dimensional array parameter name after type")?,
                 }
             };
             let mut array_parameter_const = false;
-            let kind = if is_pointer {
+            let kind = if array_2d_param_type.is_some() {
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "array parameters with more than two dimensions are not supported"
+                            .to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                ParamKind::Array2D
+            } else if is_pointer {
                 if self.check(&Token::LBracket) {
                     return Err(Self::error_at(
                         "pointer array parameters are not supported".to_string(),
@@ -3917,13 +3927,24 @@ impl Parser {
             } else if self.matches(&Token::LBracket) {
                 array_parameter_const = self.parse_array_parameter_length_and_qualifiers()?;
                 self.expect_closing_bracket_after("array parameter length")?;
-                if self.check(&Token::LBracket) {
-                    return Err(Self::error_at(
-                        "multidimensional array parameters are not supported".to_string(),
-                        self.peek_located(),
-                    ));
+                if self.matches(&Token::LBracket) {
+                    let columns = self.expect_array_len()?;
+                    self.expect_closing_bracket_after("second array parameter length")?;
+                    if self.check(&Token::LBracket) {
+                        return Err(Self::error_at(
+                            "array parameters with more than two dimensions are not supported"
+                                .to_string(),
+                            self.peek_located(),
+                        ));
+                    }
+                    let DeclType::Scalar(ty) = &decl_type else {
+                        unreachable!("scalar array parameters have scalar declaration types")
+                    };
+                    array_2d_param_type = Some((*ty, columns));
+                    ParamKind::Array2D
+                } else {
+                    ParamKind::Pointer
                 }
-                ParamKind::Pointer
             } else {
                 ParamKind::Scalar
             };
@@ -3937,11 +3958,16 @@ impl Parser {
                 } else {
                     (array_parameter_const, leading_const)
                 }
+            } else if matches!(kind, ParamKind::Array2D) {
+                (false, leading_const)
             } else {
                 (leading_const, false)
             };
+            let param_type = array_2d_param_type
+                .map(|(ty, columns)| ParamType::Array2D(ty, columns))
+                .unwrap_or_else(|| Self::decl_type_to_param_type(&decl_type));
             params.push(Param {
-                ty: Self::decl_type_to_param_type(&decl_type),
+                ty: param_type,
                 name,
                 kind,
                 is_const,
@@ -11225,6 +11251,9 @@ impl Interpreter {
                     let ty = match &param.ty {
                         ParamType::Scalar(ty) => PointeeType::Scalar(*ty),
                         ParamType::Struct(type_name) => PointeeType::Struct(type_name.clone()),
+                        ParamType::Array2D(_, _) => {
+                            return Err(CustError::new("internal pointer parameter type mismatch"));
+                        }
                     };
                     self.ensure_pointer_conversion_preserves_const(
                         param.points_to_const,
@@ -11244,6 +11273,53 @@ impl Interpreter {
                     };
                     self.eval_struct_argument(name, &param.name, type_name, arg_expr)?
                 }
+                ParamKind::Array2D => {
+                    let ParamType::Array2D(expected_type, expected_columns) = &param.ty else {
+                        return Err(CustError::new(
+                            "internal two-dimensional array parameter type mismatch",
+                        ));
+                    };
+                    let Expr::Var(argument_name) = arg_expr else {
+                        return Err(CustError::new(format!(
+                            "function '{name}' parameter '{}' requires a two-dimensional array argument",
+                            param.name
+                        )));
+                    };
+                    let Some(Value::Array(array)) = self.find_variable(argument_name) else {
+                        return Err(CustError::new(format!(
+                            "function '{name}' parameter '{}' requires a two-dimensional array argument",
+                            param.name
+                        )));
+                    };
+                    let array = Rc::clone(array);
+                    let (actual_type, actual_columns, read_only) = {
+                        let array = array.borrow();
+                        let Some((_, columns)) = array.dimensions else {
+                            return Err(CustError::new(format!(
+                                "function '{name}' parameter '{}' requires a two-dimensional array argument",
+                                param.name
+                            )));
+                        };
+                        (array.elem_type, columns, array.read_only)
+                    };
+                    if read_only && !param.points_to_const {
+                        return Err(CustError::new(format!(
+                            "cannot discard const qualifier from two-dimensional array argument '{argument_name}'"
+                        )));
+                    }
+                    if actual_type != *expected_type || actual_columns != *expected_columns {
+                        let expected_label = match expected_type {
+                            CType::Int => "int",
+                            CType::Char => "char",
+                            CType::Bool => "_Bool",
+                        };
+                        return Err(CustError::new(format!(
+                            "function '{name}' parameter '{}' expected a two-dimensional {expected_label} array with {expected_columns} columns",
+                            param.name
+                        )));
+                    }
+                    Value::Array(array)
+                }
             };
             if param_scope.insert(param.name.clone(), arg).is_some() {
                 return Err(CustError::new(format!(
@@ -11251,7 +11327,8 @@ impl Interpreter {
                     param.name
                 )));
             }
-            if param.is_const {
+            if param.is_const || (matches!(param.kind, ParamKind::Array2D) && param.points_to_const)
+            {
                 const_params.insert(param.name.clone());
             }
         }
@@ -17571,6 +17648,15 @@ impl Interpreter {
         Ok((array, row_index * columns + column_index))
     }
 
+    fn ensure_two_dimensional_array_mutable(&self, name: &str) -> CustResult<()> {
+        if self.is_const_variable(name) {
+            return Err(CustError::new(format!(
+                "cannot modify read-only array '{name}'"
+            )));
+        }
+        Ok(())
+    }
+
     fn checked_two_dimensional_struct_field_index(
         &mut self,
         target: &Array2DFieldTarget,
@@ -19567,6 +19653,7 @@ impl Interpreter {
             }
             Expr::Array2DGet { name, row, column } => {
                 let (array, index) = self.checked_two_dimensional_array_index(name, row, column)?;
+                self.ensure_two_dimensional_array_mutable(name)?;
                 let current = array.borrow().elements[index];
                 let updated = array
                     .borrow()
@@ -20876,6 +20963,7 @@ impl Interpreter {
                 value,
             } => {
                 let (array, index) = self.checked_two_dimensional_array_index(name, row, column)?;
+                self.ensure_two_dimensional_array_mutable(name)?;
                 let elem_type = array.borrow().elem_type;
                 let value = self.eval_scalar_conversion(elem_type, value)?;
                 let mut array = array.borrow_mut();
@@ -20895,6 +20983,7 @@ impl Interpreter {
                 value,
             } => {
                 let (array, index) = self.checked_two_dimensional_array_index(name, row, column)?;
+                self.ensure_two_dimensional_array_mutable(name)?;
                 let current = array.borrow().elements[index];
                 let elem_type = array.borrow().elem_type;
                 let rhs = self.eval(value)?;

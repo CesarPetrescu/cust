@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed in the 2026-07-26 comma-separated fixed two-dimensional scalar-array declaration-list run after 1,007 passing tests, warning-free Clippy, compiler-oracle exit-code parity, and both canonical Docker gates. Pointer-to-row decay and adjusted multidimensional parameters are the next roadmap package, not an external blocker.
+None. Last reviewed in the 2026-07-26 adjusted fixed two-dimensional scalar-array parameter run after 1,013 passing tests, warning-free Clippy, compiler-oracle exit-code parity, and both canonical Docker gates. Explicit pointer-to-row decay/arithmetic and returned row views are the next roadmap package, not an external blocker.
 
 ## Blocker template
 
