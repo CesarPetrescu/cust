@@ -8810,6 +8810,99 @@ fn explicit_two_dimensional_row_pointers_match_fixture() {
 }
 
 #[test]
+fn row_pointer_returning_functions_preserve_returned_views() {
+    let program = r#"
+        int (*tail(int (*)[3]))[3];
+
+        int (*tail(int (*rows)[3]))[3] {
+            return rows + 1;
+        }
+
+        int main(void) {
+            int values[3][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+            int (*row)[3] = tail(values);
+            row[0][1] += 10;
+            return row[1][2] + values[1][1];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 24);
+}
+
+#[test]
+fn generic_row_pointer_expressions_support_double_index_reads() {
+    let program = r#"
+        int (*tail(int (*rows)[3]))[3] {
+            return rows + 1;
+        }
+
+        int main(void) {
+            int values[3][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
+            int marker = 0;
+            int direct = tail(values)[1][2];
+            int conditional = (marker ? values : tail(values))[0][1];
+            int comma = (marker += 1, tail(values))[0][0];
+            return direct + conditional + comma + marker;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 19);
+}
+
+#[test]
+fn row_pointer_returning_functions_match_fixture() {
+    let program = include_str!("fixtures/valid/row_pointer_returning_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn row_pointer_returning_functions_preserve_width_const_and_lifetime_diagnostics() {
+    let cases = [
+        (
+            r#"
+                int (*bad(int (*rows)[2]))[3] { return rows; }
+                int main(void) {
+                    int values[2][2];
+                    int (*row)[3] = bad(values);
+                    return row[0][0];
+                }
+            "#,
+            "row pointer expected a two-dimensional int array with 3 columns",
+        ),
+        (
+            r#"
+                const int (*view(const int (*rows)[3]))[3] { return rows; }
+                int main(void) {
+                    int values[2][3];
+                    int (*row)[3] = view(values);
+                    return row[0][0];
+                }
+            "#,
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            r#"
+                int (*bad(void))[2] {
+                    int local[2][2] = {{1, 2}, {3, 4}};
+                    return local;
+                }
+                int main(void) { return bad()[0][0]; }
+            "#,
+            "pointer to out-of-scope variable 'local'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
+}
+
+#[test]
 fn explicit_two_dimensional_row_pointers_preserve_type_and_const_diagnostics() {
     let cases = [
         (

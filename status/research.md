@@ -24,6 +24,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Explicit row-pointer parameters normalize to the existing `ParamType::Array2D(T, C)` / `ParamKind::Array2D` signature, so prototypes using `T (*row)[C]` are compatible with definitions using adjusted `T row[][C]`. The parameter pointer slot may be const independently of the shared row elements.
 - Top-level scalar `T (*row)[C]` declarations resemble malformed function headers to conservative lookahead. Exclude the exact `(` `*` qualifiers/name `)` `[` prefix from `starts_malformed_function_definition()` before routing to ordinary object parsing; keep `(*name)(...)` function pointers rejected. Mutation checks must inspect `Value::Pointer::points_to_const` for row-pointer variables instead of treating a const pointer slot as a read-only pointee.
 
+## 2026-07-26 — Row-pointer function returns and generic double indexing
+
+- C's function-returning-pointer-to-array declarator nests the parameter list inside the pointer declarator: `T (*function(params))[C]`. It differs from an unsupported function-pointer object `T (*object)(params)` because the function name is followed immediately by its own `(` before the pointer declarator closes. Cust records a dedicated `ReturnType::Array2DPointer` so prototypes compare element type, width, and pointee constness instead of flattening the return to `T *`.
+- A returned `PointerValue::Array2DRow` already carries interpreter-owned root/row/owner metadata. Generic `call[i][j]`, conditional, and comma indexing can preserve C decay semantics by treating the first dereference of a row pointer as an `ArrayElement` at `row * columns`, then reusing existing scalar pointer offset/dereference paths; owner liveness is checked before decay.
+- Prototype detection must balance nested parentheses. The first `)` in `int (*pick(int (*)[3]))[3];` closes the unnamed parameter's pointer declarator, not the function parameter list. After the depth-zero parameter close, the `)` `[` ... `]` `;` suffix identifies a row-pointer-returning prototype and enables unnamed parameters.
+
 ## 2026-07-26 — Two-dimensional row-pointer arithmetic and forwarding
 
 - C two-dimensional array decay is row-scaled, not scalar-element-scaled: adding one to `T matrix[R][C]` advances by one complete `T[C]` row, and subtracting two same-root row pointers returns a row count. Cust models this with `PointerValue::Array2DRow { array, row, owner, ... }` over the existing flat row-major `ArrayValue`; it never exposes host addresses.

@@ -689,6 +689,11 @@ enum ReturnType {
         ty: PointeeType,
         points_to_const: bool,
     },
+    Array2DPointer {
+        elem_type: CType,
+        columns: usize,
+        points_to_const: bool,
+    },
     Struct(String),
     Void,
 }
@@ -699,7 +704,7 @@ impl ReturnType {
             ReturnType::Scalar(CType::Int) => "int",
             ReturnType::Scalar(CType::Char) => "char",
             ReturnType::Scalar(CType::Bool) => "_Bool",
-            ReturnType::Pointer { .. } => "pointer",
+            ReturnType::Pointer { .. } | ReturnType::Array2DPointer { .. } => "pointer",
             ReturnType::Struct(_) => "struct",
             ReturnType::Void => "void",
         }
@@ -708,7 +713,7 @@ impl ReturnType {
     fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> Option<i64> {
         match self {
             ReturnType::Scalar(ty) => Some(ty.size()),
-            ReturnType::Pointer { .. } => Some(POINTER_SIZE),
+            ReturnType::Pointer { .. } | ReturnType::Array2DPointer { .. } => Some(POINTER_SIZE),
             ReturnType::Struct(type_name) => struct_types
                 .get(type_name)
                 .map(|struct_type| struct_type.size(struct_types))
@@ -3330,6 +3335,23 @@ impl Parser {
             return true;
         }
 
+        if matches!(
+            (
+                self.tokens.get(index).map(|token| &token.kind),
+                self.tokens.get(index + 1).map(|token| &token.kind),
+                self.tokens.get(index + 2).map(|token| &token.kind),
+                self.tokens.get(index + 3).map(|token| &token.kind)
+            ),
+            (
+                Some(Token::LParen),
+                Some(Token::Star),
+                Some(Token::Ident(_)),
+                Some(Token::LParen)
+            )
+        ) {
+            return true;
+        }
+
         matches!(
             (
                 self.tokens.get(index).map(|token| &token.kind),
@@ -3580,23 +3602,58 @@ impl Parser {
         &mut self,
     ) -> CustResult<(String, TopLevelFunction, Option<Stmt>)> {
         self.pending_inline_enum_constants = None;
-        let return_type = self.parse_function_return_type()?;
+        let (mut return_type, leading_return_const) = self.parse_function_return_type()?;
         let inline_return_enum_decl = self.take_pending_inline_enum_decl();
-        if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
-            return Err(Self::error_at(
-                "function pointer declarations are not supported".to_string(),
-                self.peek_located(),
-            ));
-        }
-        let name = self.parse_function_declarator_name()?;
-        self.expect_opening_paren_after("function name")?;
+        let row_pointer_return = self.check(&Token::LParen)
+            && matches!(self.peek_next(), Token::Star)
+            && matches!(
+                self.tokens.get(self.pos + 2).map(|token| &token.kind),
+                Some(Token::Ident(_))
+            )
+            && matches!(
+                self.tokens.get(self.pos + 3).map(|token| &token.kind),
+                Some(Token::LParen)
+            );
+        let name = if row_pointer_return {
+            self.advance();
+            self.advance();
+            let name = self.expect_ident_after("row-pointer function name after '*'")?;
+            self.expect_opening_paren_after("row-pointer function name")?;
+            name
+        } else {
+            if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
+                return Err(Self::error_at(
+                    "function pointer declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            let name = self.parse_function_declarator_name()?;
+            self.expect_opening_paren_after("function name")?;
+            name
+        };
         let allow_unnamed_params = self.parameter_list_is_prototype();
         self.aggregate_type_scopes.push(HashMap::new());
         let parsed = (|| {
             let params = self.parse_params(allow_unnamed_params)?;
             let inline_param_enum_decl = self.take_pending_inline_enum_decl();
             self.expect_closing_paren_after("function parameters")?;
-            if self.check(&Token::LBracket) {
+            if row_pointer_return {
+                self.expect_closing_paren_after("row-pointer function declarator")?;
+                self.expect(Token::LBracket)?;
+                let columns = self.expect_array_len()?;
+                self.expect_closing_bracket_after("row-pointer function return type")?;
+                let ReturnType::Scalar(elem_type) = return_type else {
+                    return Err(Self::error_at(
+                        "row-pointer function returns require a scalar element type".to_string(),
+                        self.previous(),
+                    ));
+                };
+                return_type = ReturnType::Array2DPointer {
+                    elem_type,
+                    columns,
+                    points_to_const: leading_return_const,
+                };
+            } else if self.check(&Token::LBracket) {
                 return Err(Self::error_at(
                     "array return types are not supported".to_string(),
                     self.peek_located(),
@@ -3655,13 +3712,46 @@ impl Parser {
 
     fn parameter_list_is_prototype(&self) -> bool {
         let mut cursor = self.pos;
+        let mut depth = 0usize;
         while let Some(token) = self.tokens.get(cursor) {
             match token.kind {
+                Token::LParen => {
+                    depth += 1;
+                    cursor += 1;
+                }
+                Token::RParen if depth > 0 => {
+                    depth -= 1;
+                    cursor += 1;
+                }
                 Token::RParen => {
-                    return matches!(
+                    if matches!(
                         self.tokens.get(cursor + 1).map(|next| &next.kind),
                         Some(Token::Semi)
-                    );
+                    ) {
+                        return true;
+                    }
+                    if matches!(
+                        (
+                            self.tokens.get(cursor + 1).map(|next| &next.kind),
+                            self.tokens.get(cursor + 2).map(|next| &next.kind)
+                        ),
+                        (Some(Token::RParen), Some(Token::LBracket))
+                    ) {
+                        let mut suffix = cursor + 3;
+                        while let Some(token) = self.tokens.get(suffix) {
+                            match token.kind {
+                                Token::RBracket => {
+                                    return matches!(
+                                        self.tokens.get(suffix + 1).map(|next| &next.kind),
+                                        Some(Token::Semi)
+                                    );
+                                }
+                                Token::Eof => return false,
+                                _ => suffix += 1,
+                            }
+                        }
+                    }
+                    return false;
                 }
                 Token::Eof => return false,
                 _ => cursor += 1,
@@ -3670,7 +3760,7 @@ impl Parser {
         false
     }
 
-    fn parse_function_return_type(&mut self) -> CustResult<ReturnType> {
+    fn parse_function_return_type(&mut self) -> CustResult<(ReturnType, bool)> {
         if self.check(&Token::Void) {
             if let Some(token) = self.void_pointer_star_token_at_current() {
                 return Err(Self::error_at(
@@ -3679,7 +3769,7 @@ impl Parser {
                 ));
             }
             self.advance();
-            return Ok(ReturnType::Void);
+            return Ok((ReturnType::Void, false));
         }
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("function return type")?;
@@ -3691,20 +3781,26 @@ impl Parser {
                 ));
             }
             self.consume_type_qualifiers();
-            return Ok(ReturnType::Pointer {
-                ty: Self::decl_type_to_pointee_type(&decl_type),
-                points_to_const: leading_const,
-            });
+            return Ok((
+                ReturnType::Pointer {
+                    ty: Self::decl_type_to_pointee_type(&decl_type),
+                    points_to_const: leading_const,
+                },
+                false,
+            ));
         }
         if let DeclType::Pointer {
             pointee,
             points_to_const,
         } = decl_type
         {
-            return Ok(ReturnType::Pointer {
-                ty: pointee,
-                points_to_const: leading_const || points_to_const,
-            });
+            return Ok((
+                ReturnType::Pointer {
+                    ty: pointee,
+                    points_to_const: leading_const || points_to_const,
+                },
+                false,
+            ));
         }
         if matches!(decl_type, DeclType::Array(_, _)) {
             return Err(Self::error_at(
@@ -3712,7 +3808,7 @@ impl Parser {
                 self.previous(),
             ));
         }
-        Ok(Self::decl_type_to_return_type(decl_type))
+        Ok((Self::decl_type_to_return_type(decl_type), leading_const))
     }
 
     fn anonymous_aggregate_parameter_token(&self) -> Option<&LocatedToken> {
@@ -11515,9 +11611,9 @@ impl Interpreter {
                 ReturnType::Scalar(_) => Err(CustError::new(format!(
                     "function '{name}' finished without return"
                 ))),
-                ReturnType::Pointer { .. } => Err(CustError::new(format!(
-                    "function '{name}' finished without return"
-                ))),
+                ReturnType::Pointer { .. } | ReturnType::Array2DPointer { .. } => Err(
+                    CustError::new(format!("function '{name}' finished without return")),
+                ),
                 ReturnType::Struct(_) => Err(CustError::new(format!(
                     "function '{name}' finished without return"
                 ))),
@@ -11590,6 +11686,39 @@ impl Interpreter {
                 format!("pointer function '{function_name}' requires a pointer return value"),
             )),
             (ReturnType::Pointer { .. }, None) => Err(CustError::new(format!(
+                "pointer function '{function_name}' returned without a value"
+            ))),
+            (
+                ReturnType::Array2DPointer {
+                    elem_type,
+                    columns,
+                    points_to_const: expected_const,
+                },
+                Some(ReturnValue::Pointer {
+                    pointer,
+                    ty,
+                    points_to_const,
+                }),
+            ) if ty == PointeeType::Scalar(*elem_type) && (!points_to_const || *expected_const) => {
+                self.ensure_two_dimensional_row_pointer_type_matches(
+                    *elem_type, *columns, &pointer,
+                )?;
+                Ok(Some(ReturnValue::Pointer {
+                    pointer,
+                    ty,
+                    points_to_const,
+                }))
+            }
+            (ReturnType::Array2DPointer { .. }, Some(ReturnValue::Pointer { .. })) => Err(
+                CustError::new("cannot return an incompatible two-dimensional row pointer"),
+            ),
+            (ReturnType::Array2DPointer { .. }, Some(ReturnValue::Scalar(_)))
+            | (ReturnType::Array2DPointer { .. }, Some(ReturnValue::Struct { .. })) => {
+                Err(CustError::new(format!(
+                    "pointer function '{function_name}' requires a pointer return value"
+                )))
+            }
+            (ReturnType::Array2DPointer { .. }, None) => Err(CustError::new(format!(
                 "pointer function '{function_name}' returned without a value"
             ))),
             (
@@ -12057,12 +12186,18 @@ impl Interpreter {
                 Ok(Some(PointeeType::Struct(type_name.clone())))
             }
             Expr::PointerCast { pointee, .. } => Ok(Some(pointee.clone())),
+            Expr::Deref(pointer) => Ok(self
+                .array2d_row_pointer_element_type(pointer)
+                .map(PointeeType::Scalar)),
             Expr::Call { name, .. } => match self
                 .functions
                 .get(name)
                 .map(|function| &function.return_type)
             {
                 Some(ReturnType::Pointer { ty, .. }) => Ok(Some(ty.clone())),
+                Some(ReturnType::Array2DPointer { elem_type, .. }) => {
+                    Ok(Some(PointeeType::Scalar(*elem_type)))
+                }
                 _ => Ok(None),
             },
             Expr::Conditional {
@@ -12094,6 +12229,45 @@ impl Interpreter {
             }
             Expr::Increment { target, .. } => self.pointer_expr_pointee_type(target),
             _ => Ok(None),
+        }
+    }
+
+    fn array2d_row_pointer_element_type(&self, expr: &Expr) -> Option<CType> {
+        match expr {
+            Expr::Var(name) => match self.find_variable(name) {
+                Some(Value::Array(array)) if array.borrow().dimensions.is_some() => {
+                    Some(array.borrow().elem_type)
+                }
+                Some(Value::Pointer {
+                    pointer: PointerValue::Array2DRow { array, .. },
+                    ..
+                }) => Some(array.borrow().elem_type),
+                _ => None,
+            },
+            Expr::Call { name, .. } => self.functions.get(name).and_then(|function| {
+                if let ReturnType::Array2DPointer { elem_type, .. } = function.return_type {
+                    Some(elem_type)
+                } else {
+                    None
+                }
+            }),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => self
+                .array2d_row_pointer_element_type(then_expr)
+                .or_else(|| self.array2d_row_pointer_element_type(else_expr)),
+            Expr::Comma(_, right) => self.array2d_row_pointer_element_type(right),
+            Expr::Binary(left, BinaryOp::Add, right) => self
+                .array2d_row_pointer_element_type(left)
+                .or_else(|| self.array2d_row_pointer_element_type(right)),
+            Expr::Binary(left, BinaryOp::Sub, right)
+                if self.array2d_row_pointer_element_type(right).is_none() =>
+            {
+                self.array2d_row_pointer_element_type(left)
+            }
+            _ => None,
         }
     }
 
@@ -12395,6 +12569,9 @@ impl Interpreter {
                 expr,
                 ..
             } => *points_to_const || self.pointer_expr_points_to_const(expr),
+            Expr::Deref(pointer) if self.array2d_row_pointer_element_type(pointer).is_some() => {
+                self.pointer_expr_points_to_const(pointer)
+            }
             Expr::Conditional {
                 then_expr,
                 else_expr,
@@ -12424,6 +12601,9 @@ impl Interpreter {
                 .get(name)
                 .and_then(|function| match function.return_type {
                     ReturnType::Pointer {
+                        points_to_const, ..
+                    }
+                    | ReturnType::Array2DPointer {
                         points_to_const, ..
                     } => Some(points_to_const),
                     _ => None,
@@ -16611,6 +16791,34 @@ impl Interpreter {
     fn eval_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
         match expr {
             Expr::Number(0) => Ok(PointerValue::Null),
+            Expr::Deref(pointer) if self.array2d_row_pointer_element_type(pointer).is_some() => {
+                let pointer = self.eval_pointer(pointer)?;
+                let PointerValue::Array2DRow {
+                    array,
+                    source_name,
+                    row,
+                    owner,
+                } = pointer
+                else {
+                    return Err(CustError::new(
+                        "pointer does not reference a two-dimensional array row",
+                    ));
+                };
+                self.ensure_array_pointer_owner_live(owner.as_ref())?;
+                let columns = array
+                    .borrow()
+                    .dimensions
+                    .map(|(_, columns)| columns)
+                    .ok_or_else(|| {
+                        CustError::new("pointer does not reference a two-dimensional array row")
+                    })?;
+                Ok(PointerValue::ArrayElement {
+                    array,
+                    source_name,
+                    index: row * columns,
+                    owner,
+                })
+            }
             Expr::PointerCast { expr, .. } => {
                 if self.expr_is_pointer_value(expr) {
                     self.eval_pointer(expr)
@@ -18196,11 +18404,12 @@ impl Interpreter {
                 Ok(Some((StructFieldType::Pointer(_), _, _)))
             ),
             Expr::Increment { target, .. } => self.expr_is_pointer_value(target),
+            Expr::Deref(pointer) => self.array2d_row_pointer_element_type(pointer).is_some(),
             Expr::Call { name, .. } => matches!(
                 self.functions
                     .get(name)
                     .map(|function| &function.return_type),
-                Some(ReturnType::Pointer { .. })
+                Some(ReturnType::Pointer { .. } | ReturnType::Array2DPointer { .. })
             ),
             Expr::Conditional {
                 then_expr,
@@ -18691,7 +18900,7 @@ impl Interpreter {
                     self.functions
                         .get(name)
                         .map(|function| &function.return_type),
-                    Some(ReturnType::Pointer { .. })
+                    Some(ReturnType::Pointer { .. } | ReturnType::Array2DPointer { .. })
                 ) =>
             {
                 Ok(Self::pointer_truthy(&self.eval_pointer(expr)?))
@@ -19515,9 +19724,11 @@ impl Interpreter {
                     ReturnType::Scalar(_) => Err(CustError::new(format!(
                         "scalar function '{name}' used as struct expression"
                     ))),
-                    ReturnType::Pointer { .. } => Err(CustError::new(format!(
-                        "pointer function '{name}' used as struct expression"
-                    ))),
+                    ReturnType::Pointer { .. } | ReturnType::Array2DPointer { .. } => {
+                        Err(CustError::new(format!(
+                            "pointer function '{name}' used as struct expression"
+                        )))
+                    }
                     ReturnType::Void => Err(CustError::new(format!(
                         "void function '{name}' used as struct expression"
                     ))),
@@ -20497,6 +20708,21 @@ impl Interpreter {
                 Ok(Some(ReturnValue::Pointer {
                     pointer,
                     ty,
+                    points_to_const,
+                }))
+            }
+            Some(ReturnType::Array2DPointer {
+                elem_type,
+                columns,
+                points_to_const,
+            }) => {
+                self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
+                let pointer = self.eval_pointer(expr)?;
+                let pointer = self.attach_array_pointer_owner(pointer);
+                self.ensure_two_dimensional_row_pointer_type_matches(elem_type, columns, &pointer)?;
+                Ok(Some(ReturnValue::Pointer {
+                    pointer,
+                    ty: PointeeType::Scalar(elem_type),
                     points_to_const,
                 }))
             }
