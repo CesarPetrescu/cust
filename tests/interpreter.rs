@@ -227,11 +227,229 @@ fn supports_undefining_and_redefining_object_like_macros() {
 }
 
 #[test]
+fn supports_ifdef_ifndef_nested_else_and_inactive_skipping() {
+    let program = include_str!("fixtures/compat/valid/object_like_macro_conditionals.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn inactive_conditional_text_tracks_multiline_comments() {
+    let program = r#"
+#ifdef NEVER
+ignored tokens /* start
+#else
+still comment */
+int main(void) { return 1; }
+#else
+int main(void) { return 0; }
+#endif
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    let program = r#"
+#ifdef NEVER
+ignored tokens /* start
+*/ #else
+int main(void) { return 1; }
+#else
+int main(void) { return 0; }
+#endif
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    let program = r#"
+#ifdef NEVER
+ignored tokens /* first
+*/ /* second
+*/ #else
+int main(void) { return 1; }
+#else
+int main(void) { return 0; }
+#endif
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    let program = r#"
+#ifdef NEVER
+#unsupported ignored /* start
+#else
+still comment */
+int main(void) { return 1; }
+#else
+int main(void) { return 0; }
+#endif
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    let program = r#"
+#ifdef NEVER
+# /* start
+#else
+still comment */ unsupported ignored
+#else
+int main(void) { return 0; }
+#endif
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    let program = r#"
+#ifdef NEVER
+# /* comment
+*/ ifdef INNER
+#else
+#endif
+#else
+int main(void) { return 0; }
+#endif
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn inactive_conditionals_skip_ignored_directive_names() {
+    let program = r#"
+#ifdef NEVER
+#_ignored
+#else
+int main(void) { return 0; }
+#endif
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_inactive_conditional_line_continuations() {
+    let program = "#define RESULT 1\n#ifdef NEVER\nignored \\\n#else\n#undef RESULT\n#define RESULT 0\n#endif\nint main(void) { return RESULT; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "preprocessor line continuations are not supported at line 3, column 9\nignored \\\n        ^"
+    );
+
+    let program = "#ifdef NEVER\n// ignored \\\n#else\nint main(void) { return 7; }\n#endif\n";
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "preprocessor line continuations are not supported at line 2, column 12\n// ignored \\\n           ^"
+    );
+}
+
+#[test]
+fn rejects_duplicate_conditional_else_with_context() {
+    let program = include_str!("fixtures/invalid/duplicate_conditional_else.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "duplicate '#else' conditional directive at line 6, column 1\n#else\n^"
+    );
+}
+
+#[test]
+fn rejects_malformed_conditional_directives_with_context() {
+    let cases = [
+        (
+            "#ifdef\nint main(void) { return 0; }\n#endif\n",
+            "expected macro name after '#ifdef' at line 1, column 7\n#ifdef\n      ^",
+        ),
+        (
+            include_str!("fixtures/invalid/conditional_trailing_tokens.c"),
+            "unexpected tokens after '#ifdef' macro name at line 1, column 16\n#ifdef ENABLED extra\n               ^",
+        ),
+        (
+            "#else\nint main(void) { return 0; }\n",
+            "unmatched '#else' conditional directive at line 1, column 1\n#else\n^",
+        ),
+        (
+            "#endif\nint main(void) { return 0; }\n",
+            "unmatched '#endif' conditional directive at line 1, column 1\n#endif\n^",
+        ),
+        (
+            "#ifdef UNKNOWN\n#else extra\nint main(void) { return 0; }\n#endif\n",
+            "unexpected tokens after '#else' at line 2, column 7\n#else extra\n      ^",
+        ),
+        (
+            "#ifdef UNKNOWN\n#else\nint main(void) { return 0; }\n#endif extra\n",
+            "unexpected tokens after '#endif' at line 4, column 8\n#endif extra\n       ^",
+        ),
+        (
+            "#ifdef NEVER\n#ifdef\n#endif\n#else\nint main(void) { return 0; }\n#endif\n",
+            "expected macro name after '#ifdef' at line 2, column 7\n#ifdef\n      ^",
+        ),
+        (
+            "#ifdef NEVER\n#ifdef INNER\n#else extra\n#endif\n#else\nint main(void) { return 0; }\n#endif\n",
+            "unexpected tokens after '#else' at line 3, column 7\n#else extra\n      ^",
+        ),
+        (
+            "#ifdef NEVER\n# /* first\n*/ ifdef INNER /* second\n#else\nint main(void) { return 0; }\n#endif\n",
+            "unterminated block comment at line 3, column 16\n*/ ifdef INNER /* second\n               ^",
+        ),
+        (
+            "#ifdef UNKNOWN\n#elif 1\n#endif\nint main(void) { return 0; }\n",
+            "'#elif' conditional directives are not supported at line 2, column 1\n#elif 1\n^",
+        ),
+        (
+            "#ifdef NEVER\n#if 0\n#else\nint main(void) { return 7; }\n#endif\n",
+            "'#if' conditional directives are not supported at line 2, column 1\n#if 0\n^",
+        ),
+        (
+            "#ifdef NEVER\n# /* comment\n*/ else extra\nint main(void) { return 0; }\n#endif\n",
+            "unexpected tokens after '#else' at line 3, column 9\n*/ else extra\n        ^",
+        ),
+        (
+            "int value = 0; /* start\n*/ #ifdef NEVER\n#endif\nint main(void) { return value; }\n",
+            "preprocessor directives must begin on a new line at line 2, column 4\n*/ #ifdef NEVER\n   ^",
+        ),
+        (
+            include_str!("fixtures/invalid/unterminated_conditional_directive.c"),
+            "unterminated '#ifdef' conditional directive at line 1, column 1\n#ifdef ENABLED\n^",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_excessive_conditional_preprocessing_nesting() {
+    let mut accepted = "#ifdef NEVER\n".repeat(128);
+    accepted.push_str(&"#endif\n".repeat(128));
+    accepted.push_str("int main(void) { return 0; }\n");
+    assert_eq!(interpret(&accepted).unwrap(), 0);
+
+    let program = "#ifdef NEVER\n".repeat(129);
+
+    let err = interpret(&program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "preprocessor conditional nesting limit exceeded at line 129, column 1\n#ifdef NEVER\n^"
+    );
+}
+
+#[test]
 fn rejects_malformed_undef_directives_with_context() {
     let cases = [
         (
             "#undef\nint main(void) { return 0; }\n",
             "expected macro name after '#undef' at line 1, column 7\n#undef\n      ^",
+        ),
+        (
+            "#undef /* first\n*/ 42\nint main(void) { return 0; }\n",
+            "expected macro name after '#undef' at line 2, column 4\n*/ 42\n   ^",
         ),
         (
             include_str!("fixtures/invalid/malformed_undef_directive.c"),
@@ -267,6 +485,21 @@ int main(void) {
 "#;
 
     assert_eq!(interpret(program).unwrap(), 4);
+}
+
+#[test]
+fn supports_multiline_block_comments_in_macro_replacements() {
+    let program = r#"
+#define struct 2
+#define X 01 /* one
+*/ + struct
+#define X 01 + struct
+int main(void) {
+    return X - 3;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]
@@ -393,6 +626,10 @@ fn rejects_unsupported_and_malformed_preprocessor_directives_with_context() {
         (
             include_str!("fixtures/invalid/malformed_define_directive.c"),
             "expected macro name after '#define' at line 1, column 9\n#define 42\n        ^",
+        ),
+        (
+            "#define /* first\n*/ 42\nint main(void) { return 0; }\n",
+            "expected macro name after '#define' at line 2, column 4\n*/ 42\n   ^",
         ),
         (
             include_str!("fixtures/invalid/macro_replacement_lexer_error.c"),

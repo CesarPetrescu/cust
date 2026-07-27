@@ -198,16 +198,16 @@ docker compose run --rm cust
 
 ## Current limitations
 
-Cust is not a full C implementation. Fixed two-dimensional scalar arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported, but variable-length arrays, arrays with more than two dimensions, and aggregate-valued multidimensional elements remain unsupported. Preprocessing is limited to one-line object-like `#define` and `#undef` directives; includes, function-like macros, line continuations, and conditional compilation remain unsupported. Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic calls, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
+Cust is not a full C implementation. Fixed two-dimensional scalar arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported, but variable-length arrays, arrays with more than two dimensions, and aggregate-valued multidimensional elements remain unsupported. Preprocessing supports object-like `#define`/`#undef` plus bounded nested `#ifdef`/`#ifndef`/`#else`/`#endif`; includes, function-like macros, physical-line continuations, and expression-form `#if`/`#elif` remain unsupported. Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic calls, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
 
 See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](docs/v0.1.md) for the historical v0.1 foundation notes.
 
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next language slice: add bounded `#ifdef` / `#ifndef` conditional preprocessing with nested branch selection, inactive-branch skipping, and exact unmatched/duplicate directive diagnostics.
+- Next language slice: add bounded expression-form `#if` / `#elif` preprocessing with definedness and integer-constant branch selection while preserving the conditional stack's exact diagnostics and resource limits.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
-- Longer term: consider expression-form conditional preprocessing, includes, function-like macros, standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures.
+- Longer term: consider includes, function-like macros, standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures.
 
 ## License
 

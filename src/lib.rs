@@ -158,9 +158,19 @@ struct MacroExpansionBudget {
     work: usize,
 }
 
+struct ConditionalFrame {
+    parent_active: bool,
+    active: bool,
+    else_seen: bool,
+    directive_name: String,
+    line: usize,
+    column: usize,
+}
+
 const MAX_OBJECT_MACRO_EXPANSION_DEPTH: usize = 128;
 const MAX_OBJECT_MACRO_EXPANSION_TOKENS: usize = 8_192;
 const MAX_OBJECT_MACRO_EXPANSION_WORK: usize = 65_536;
+const MAX_PREPROCESSOR_CONDITIONAL_DEPTH: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Expr {
@@ -1170,9 +1180,13 @@ fn lex_with_context(
     allow_preprocessor_directives: bool,
 ) -> CustResult<Vec<LocatedToken>> {
     let chars: Vec<char> = input.chars().collect();
+    if allow_preprocessor_directives {
+        reject_preprocessor_line_continuations(source, &chars, initial_line, initial_column)?;
+    }
     let mut tokens = Vec::new();
     let mut macros = HashMap::<String, ObjectMacro>::new();
     let mut macro_expansion_budget = MacroExpansionBudget::default();
+    let mut conditional_stack = Vec::<ConditionalFrame>::new();
     let mut i = 0;
     let mut line = initial_line;
     let mut column = initial_column;
@@ -1180,6 +1194,78 @@ fn lex_with_context(
 
     while i < chars.len() {
         let c = chars[i];
+        let conditional_active = conditional_stack.last().is_none_or(|frame| frame.active);
+        if !conditional_active {
+            match c {
+                c if c.is_whitespace() => {
+                    if c == '\n' {
+                        line_has_preprocessing_token = false;
+                    }
+                    advance_position(c, &mut line, &mut column, &mut i);
+                }
+                '/' if chars.get(i + 1) == Some(&'/') => {
+                    while i < chars.len() && chars[i] != '\n' {
+                        advance_position(chars[i], &mut line, &mut column, &mut i);
+                    }
+                }
+                '/' if chars.get(i + 1) == Some(&'*') => {
+                    let start_line = line;
+                    let start_column = column;
+                    advance_position('/', &mut line, &mut column, &mut i);
+                    advance_position('*', &mut line, &mut column, &mut i);
+                    let mut closed = false;
+                    while i < chars.len() {
+                        if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                            advance_position('*', &mut line, &mut column, &mut i);
+                            advance_position('/', &mut line, &mut column, &mut i);
+                            closed = true;
+                            break;
+                        }
+                        advance_position(chars[i], &mut line, &mut column, &mut i);
+                    }
+                    if !closed {
+                        return Err(lexer_error_with_context(
+                            "unterminated block comment",
+                            source,
+                            start_line,
+                            start_column,
+                        ));
+                    }
+                }
+                '#' if !line_has_preprocessing_token => {
+                    let consumed = process_preprocessor_directive(
+                        source,
+                        &chars,
+                        &mut i,
+                        &mut line,
+                        &mut column,
+                        &mut macros,
+                        &mut conditional_stack,
+                    )?;
+                    if !consumed {
+                        skip_inactive_text_line(
+                            source,
+                            &chars,
+                            &mut i,
+                            &mut line,
+                            &mut column,
+                            &mut line_has_preprocessing_token,
+                        )?;
+                    }
+                }
+                _ => {
+                    skip_inactive_text_line(
+                        source,
+                        &chars,
+                        &mut i,
+                        &mut line,
+                        &mut column,
+                        &mut line_has_preprocessing_token,
+                    )?;
+                }
+            }
+            continue;
+        }
         if c == '\n' {
             line_has_preprocessing_token = false;
         } else if !c.is_whitespace()
@@ -1221,9 +1307,6 @@ fn lex_with_context(
                         start_line,
                         start_column,
                     ));
-                }
-                if line != start_line {
-                    line_has_preprocessing_token = false;
                 }
             }
             '0'..='9' => {
@@ -1633,9 +1716,10 @@ fn lex_with_context(
                     source,
                     &chars,
                     &mut i,
-                    line,
+                    &mut line,
                     &mut column,
                     &mut macros,
+                    &mut conditional_stack,
                 )?;
             }
             other => {
@@ -1649,8 +1733,44 @@ fn lex_with_context(
         }
     }
 
+    if let Some(frame) = conditional_stack.last() {
+        return Err(lexer_error_with_context(
+            format!(
+                "unterminated '#{}' conditional directive",
+                frame.directive_name
+            ),
+            source,
+            frame.line,
+            frame.column,
+        ));
+    }
+
     tokens.push(LocatedToken::new(Token::Eof, line, column));
     Ok(tokens)
+}
+
+fn reject_preprocessor_line_continuations(
+    source: &str,
+    chars: &[char],
+    mut line: usize,
+    mut column: usize,
+) -> CustResult<()> {
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\'
+            && (chars.get(i + 1) == Some(&'\n')
+                || (chars.get(i + 1) == Some(&'\r') && chars.get(i + 2) == Some(&'\n')))
+        {
+            return Err(lexer_error_with_context(
+                "preprocessor line continuations are not supported",
+                source,
+                line,
+                column,
+            ));
+        }
+        advance_position(chars[i], &mut line, &mut column, &mut i);
+    }
+    Ok(())
 }
 
 fn identifier_token(text: String) -> Token {
@@ -1706,9 +1826,8 @@ fn identifier_token(text: String) -> Token {
 fn macro_replacement_token(
     token: LocatedToken,
     chars: &[char],
-    initial_column: usize,
+    start: usize,
 ) -> MacroReplacementToken {
-    let start = token.column.saturating_sub(initial_column);
     if chars
         .get(start)
         .is_some_and(|c| c.is_ascii_alphabetic() || *c == '_')
@@ -1756,30 +1875,23 @@ fn process_preprocessor_directive(
     source: &str,
     chars: &[char],
     i: &mut usize,
-    line: usize,
+    current_line: &mut usize,
     column: &mut usize,
     macros: &mut HashMap<String, ObjectMacro>,
-) -> CustResult<()> {
+    conditional_stack: &mut Vec<ConditionalFrame>,
+) -> CustResult<bool> {
     let directive_start = *i;
+    let line = *current_line;
     let directive_column = *column;
-    let line_end = chars[*i..]
-        .iter()
-        .position(|c| *c == '\n')
-        .map_or(chars.len(), |offset| *i + offset);
+    let line_end = preprocessor_directive_line_end(chars, *i);
     let content_end = if line_end > directive_start && chars[line_end - 1] == '\r' {
         line_end - 1
     } else {
         line_end
     };
-
-    if content_end > directive_start && chars[content_end - 1] == '\\' {
-        let continuation_column = directive_column + content_end - directive_start - 1;
-        return Err(lexer_error_with_context(
-            "preprocessor line continuations are not supported",
-            source,
-            line,
-            continuation_column,
-        ));
+    let active = conditional_stack.last().is_none_or(|frame| frame.active);
+    if !active && !inactive_directive_has_name_on_line(chars, directive_start + 1, content_end) {
+        return Ok(false);
     }
 
     let mut cursor = directive_start + 1;
@@ -1796,7 +1908,10 @@ fn process_preprocessor_directive(
     while cursor < content_end && (chars[cursor].is_ascii_alphanumeric() || chars[cursor] == '_') {
         cursor += 1;
     }
-    if directive_name_start == cursor || !chars[directive_name_start].is_ascii_alphabetic() {
+    if directive_name_start == cursor
+        || !(chars[directive_name_start].is_ascii_alphabetic()
+            || chars[directive_name_start] == '_')
+    {
         return Err(lexer_error_with_context(
             "expected preprocessor directive name after '#'",
             source,
@@ -1807,6 +1922,178 @@ fn process_preprocessor_directive(
     let directive_name: String = chars[directive_name_start..cursor].iter().collect();
 
     match directive_name.as_str() {
+        "ifdef" | "ifndef" => {
+            if conditional_stack.len() >= MAX_PREPROCESSOR_CONDITIONAL_DEPTH {
+                return Err(lexer_error_with_context(
+                    "preprocessor conditional nesting limit exceeded",
+                    source,
+                    line,
+                    directive_column,
+                ));
+            }
+            let parent_active = active;
+            let has_name_separator = skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if !has_name_separator
+                || cursor >= content_end
+                || !(chars[cursor].is_ascii_alphabetic() || chars[cursor] == '_')
+            {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    format!("expected macro name after '#{directive_name}'"),
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            let macro_name_start = cursor;
+            cursor += 1;
+            while cursor < content_end
+                && (chars[cursor].is_ascii_alphanumeric() || chars[cursor] == '_')
+            {
+                cursor += 1;
+            }
+            let macro_name: String = chars[macro_name_start..cursor].iter().collect();
+            skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if cursor < content_end {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    format!("unexpected tokens after '#{directive_name}' macro name"),
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            let is_defined = macros.contains_key(&macro_name);
+            let condition = if directive_name == "ifndef" {
+                !is_defined
+            } else {
+                is_defined
+            };
+            conditional_stack.push(ConditionalFrame {
+                parent_active,
+                active: parent_active && condition,
+                else_seen: false,
+                directive_name,
+                line,
+                column: directive_column,
+            });
+        }
+        "else" => {
+            let Some(frame) = conditional_stack.last_mut() else {
+                return Err(lexer_error_with_context(
+                    "unmatched '#else' conditional directive",
+                    source,
+                    line,
+                    directive_column,
+                ));
+            };
+            skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if cursor < content_end {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    "unexpected tokens after '#else'",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            if frame.else_seen {
+                return Err(lexer_error_with_context(
+                    "duplicate '#else' conditional directive",
+                    source,
+                    line,
+                    directive_column,
+                ));
+            }
+            frame.else_seen = true;
+            frame.active = frame.parent_active && !frame.active;
+        }
+        "endif" => {
+            if conditional_stack.is_empty() {
+                return Err(lexer_error_with_context(
+                    "unmatched '#endif' conditional directive",
+                    source,
+                    line,
+                    directive_column,
+                ));
+            }
+            skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if cursor < content_end {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    "unexpected tokens after '#endif'",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            conditional_stack.pop();
+        }
+        "if" | "elif" => {
+            return Err(lexer_error_with_context(
+                format!("'#{directive_name}' conditional directives are not supported"),
+                source,
+                line,
+                directive_column,
+            ));
+        }
+        _ if !active => return Ok(false),
         "include" => {
             return Err(lexer_error_with_context(
                 "include directives are not supported",
@@ -1826,22 +2113,36 @@ fn process_preprocessor_directive(
                 directive_column,
             )?;
             if !has_name_separator || cursor == content_end {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
                 return Err(lexer_error_with_context(
                     "expected macro name after '#define'",
                     source,
-                    line,
-                    directive_column + cursor - directive_start,
+                    error_line,
+                    error_column,
                 ));
             }
             let macro_name_start = cursor;
             if cursor >= content_end
                 || !(chars[cursor].is_ascii_alphabetic() || chars[cursor] == '_')
             {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
                 return Err(lexer_error_with_context(
                     "expected macro name after '#define'",
                     source,
-                    line,
-                    directive_column + cursor - directive_start,
+                    error_line,
+                    error_column,
                 ));
             }
             cursor += 1;
@@ -1851,14 +2152,27 @@ fn process_preprocessor_directive(
                 cursor += 1;
             }
             let macro_name: String = chars[macro_name_start..cursor].iter().collect();
-            let macro_column = directive_column + macro_name_start - directive_start;
+            let (macro_line, macro_column) = preprocessor_position_at(
+                chars,
+                directive_start,
+                line,
+                directive_column,
+                macro_name_start,
+            );
 
             if cursor < content_end && chars[cursor] == '(' {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
                 return Err(lexer_error_with_context(
                     "function-like macros are not supported",
                     source,
-                    line,
-                    directive_column + cursor - directive_start,
+                    error_line,
+                    error_column,
                 ));
             }
             let has_replacement_separator = skip_preprocessor_whitespace(
@@ -1871,11 +2185,18 @@ fn process_preprocessor_directive(
                 directive_column,
             )?;
             if cursor < content_end && !has_replacement_separator {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
                 return Err(lexer_error_with_context(
                     format!("malformed object-like macro definition for '{macro_name}'"),
                     source,
-                    line,
-                    directive_column + cursor - directive_start,
+                    error_line,
+                    error_column,
                 ));
             }
 
@@ -1884,18 +2205,42 @@ fn process_preprocessor_directive(
                 replacement_end -= 1;
             }
             let replacement_source: String = chars[cursor..replacement_end].iter().collect();
-            let replacement_column = directive_column + cursor - directive_start;
+            let (replacement_line, replacement_column) =
+                preprocessor_position_at(chars, directive_start, line, directive_column, cursor);
             let replacement = if replacement_source.is_empty() {
                 Vec::new()
             } else {
-                let mut replacement_tokens =
-                    lex_with_context(&replacement_source, source, line, replacement_column, false)?;
+                let mut replacement_tokens = lex_with_context(
+                    &replacement_source,
+                    source,
+                    replacement_line,
+                    replacement_column,
+                    false,
+                )?;
                 replacement_tokens.pop();
                 let replacement_chars: Vec<char> = replacement_source.chars().collect();
+                let mut spelling_cursor = 0;
+                let mut spelling_line = replacement_line;
+                let mut spelling_column = replacement_column;
                 replacement_tokens
                     .into_iter()
                     .map(|token| {
-                        macro_replacement_token(token, &replacement_chars, replacement_column)
+                        while spelling_cursor < replacement_chars.len()
+                            && (spelling_line, spelling_column) != (token.line, token.column)
+                        {
+                            advance_position(
+                                replacement_chars[spelling_cursor],
+                                &mut spelling_line,
+                                &mut spelling_column,
+                                &mut spelling_cursor,
+                            );
+                        }
+                        assert_eq!(
+                            (spelling_line, spelling_column),
+                            (token.line, token.column),
+                            "macro replacement token location must belong to its source"
+                        );
+                        macro_replacement_token(token, &replacement_chars, spelling_cursor)
                     })
                     .collect()
             };
@@ -1906,7 +2251,7 @@ fn process_preprocessor_directive(
                     return Err(lexer_error_with_context(
                         format!("conflicting object-like macro redefinition for '{macro_name}'"),
                         source,
-                        line,
+                        macro_line,
                         macro_column,
                     ));
                 }
@@ -1929,11 +2274,18 @@ fn process_preprocessor_directive(
                 || cursor >= content_end
                 || !(chars[cursor].is_ascii_alphabetic() || chars[cursor] == '_')
             {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
                 return Err(lexer_error_with_context(
                     "expected macro name after '#undef'",
                     source,
-                    line,
-                    directive_column + cursor - directive_start,
+                    error_line,
+                    error_column,
                 ));
             }
             cursor += 1;
@@ -1953,11 +2305,18 @@ fn process_preprocessor_directive(
                 directive_column,
             )?;
             if cursor < content_end {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
                 return Err(lexer_error_with_context(
                     "unexpected tokens after '#undef' macro name",
                     source,
-                    line,
-                    directive_column + cursor - directive_start,
+                    error_line,
+                    error_column,
                 ));
             }
             macros.remove(&macro_name);
@@ -1972,11 +2331,87 @@ fn process_preprocessor_directive(
         }
     }
 
-    let mut consumed_line = line;
     while *i < line_end {
-        advance_position(chars[*i], &mut consumed_line, column, i);
+        advance_position(chars[*i], current_line, column, i);
     }
-    Ok(())
+    Ok(true)
+}
+
+fn preprocessor_directive_line_end(chars: &[char], mut cursor: usize) -> usize {
+    while cursor < chars.len() {
+        match chars[cursor] {
+            '\n' => return cursor,
+            quote @ ('\'' | '"') => {
+                cursor += 1;
+                while cursor < chars.len() && chars[cursor] != '\n' {
+                    if chars[cursor] == '\\' && cursor + 1 < chars.len() {
+                        cursor += 2;
+                    } else {
+                        let closes_literal = chars[cursor] == quote;
+                        cursor += 1;
+                        if closes_literal {
+                            break;
+                        }
+                    }
+                }
+            }
+            '/' if chars.get(cursor + 1) == Some(&'/') => {
+                while cursor < chars.len() && chars[cursor] != '\n' {
+                    cursor += 1;
+                }
+            }
+            '/' if chars.get(cursor + 1) == Some(&'*') => {
+                cursor += 2;
+                while cursor + 1 < chars.len()
+                    && !(chars[cursor] == '*' && chars[cursor + 1] == '/')
+                {
+                    cursor += 1;
+                }
+                cursor = (cursor + 2).min(chars.len());
+            }
+            _ => cursor += 1,
+        }
+    }
+    chars.len()
+}
+
+fn preprocessor_position_at(
+    chars: &[char],
+    mut cursor: usize,
+    mut line: usize,
+    mut column: usize,
+    target: usize,
+) -> (usize, usize) {
+    while cursor < target {
+        advance_position(chars[cursor], &mut line, &mut column, &mut cursor);
+    }
+    (line, column)
+}
+
+fn inactive_directive_has_name_on_line(chars: &[char], mut cursor: usize, end: usize) -> bool {
+    loop {
+        while cursor < end && matches!(chars[cursor], ' ' | '\t' | '\u{b}' | '\u{c}' | '\r') {
+            cursor += 1;
+        }
+        if cursor + 1 >= end || chars[cursor] != '/' {
+            break;
+        }
+        if chars[cursor + 1] == '/' {
+            return false;
+        }
+        if chars[cursor + 1] != '*' {
+            break;
+        }
+        cursor += 2;
+        while cursor + 1 < end && !(chars[cursor] == '*' && chars[cursor + 1] == '/') {
+            cursor += 1;
+        }
+        if cursor + 1 >= end {
+            return false;
+        }
+        cursor += 2;
+    }
+    cursor < end && (chars[cursor].is_ascii_alphabetic() || chars[cursor] == '_')
 }
 
 fn skip_preprocessor_whitespace(
@@ -2007,16 +2442,84 @@ fn skip_preprocessor_whitespace(
             *cursor += 1;
         }
         if *cursor + 1 >= end {
+            let (error_line, error_column) = preprocessor_position_at(
+                chars,
+                directive_start,
+                line,
+                directive_column,
+                comment_start,
+            );
             return Err(lexer_error_with_context(
                 "unterminated block comment",
                 source,
-                line,
-                directive_column + comment_start - directive_start,
+                error_line,
+                error_column,
             ));
         }
         *cursor += 2;
     }
     Ok(*cursor != start)
+}
+
+fn skip_inactive_text_line(
+    source: &str,
+    chars: &[char],
+    i: &mut usize,
+    line: &mut usize,
+    column: &mut usize,
+    line_has_preprocessing_token: &mut bool,
+) -> CustResult<()> {
+    *line_has_preprocessing_token = true;
+    while *i < chars.len() && chars[*i] != '\n' {
+        match chars[*i] {
+            quote @ ('\'' | '"') => {
+                advance_position(quote, line, column, i);
+                while *i < chars.len() && chars[*i] != '\n' {
+                    let current = chars[*i];
+                    advance_position(current, line, column, i);
+                    if current == '\\' && *i < chars.len() && chars[*i] != '\n' {
+                        advance_position(chars[*i], line, column, i);
+                    } else if current == quote {
+                        break;
+                    }
+                }
+            }
+            '/' if chars.get(*i + 1) == Some(&'/') => {
+                while *i < chars.len() && chars[*i] != '\n' {
+                    advance_position(chars[*i], line, column, i);
+                }
+            }
+            '/' if chars.get(*i + 1) == Some(&'*') => {
+                let start_line = *line;
+                let start_column = *column;
+                advance_position('/', line, column, i);
+                advance_position('*', line, column, i);
+                let mut closed = false;
+                while *i < chars.len() {
+                    if chars[*i] == '*' && chars.get(*i + 1) == Some(&'/') {
+                        advance_position('*', line, column, i);
+                        advance_position('/', line, column, i);
+                        closed = true;
+                        break;
+                    }
+                    advance_position(chars[*i], line, column, i);
+                }
+                if !closed {
+                    return Err(lexer_error_with_context(
+                        "unterminated block comment",
+                        source,
+                        start_line,
+                        start_column,
+                    ));
+                }
+                if *line != start_line {
+                    return Ok(());
+                }
+            }
+            current => advance_position(current, line, column, i),
+        }
+    }
+    Ok(())
 }
 
 fn expand_object_macro(

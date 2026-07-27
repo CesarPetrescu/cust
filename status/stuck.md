@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-27 bounded `#undef` closure after three focused RED/GREEN cycles, independent review with no blocking findings, a warning-free native C11 oracle, 1,053 passing local tests, warning-free Clippy, and both canonical Docker gates. Bounded `#ifdef` / `#ifndef` branching is the next backlog item, not an external blocker.
+None. Last reviewed during the 2026-07-27 bounded conditional-preprocessing closure after targeted RED/GREEN review fixes, a final independent review with no blocking findings, a warning-free native C11 oracle, 1,061 passing local tests, warning-free Clippy, and both canonical Docker gates. Bounded expression-form `#if` / `#elif` is the next backlog item, not an external blocker.
 
 ## Blocker template
 
