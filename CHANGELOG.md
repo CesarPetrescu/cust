@@ -7,11 +7,13 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Language subset
 
 - Added one-line object-like `#define` macros with deterministic nested expansion across declarations, enum/array integer constant expressions, and runtime expressions. Macro names inside comments and string/character literals remain untouched.
+- Added bounded `#undef` directives: known definitions expire before subsequent tokens, unknown names are harmless, and removed names may be redefined with different replacement lists.
 
 ### Diagnostics and verification
 
 - Added exact source-context diagnostics for recursive expansion, conflicting object-like redefinitions, malformed definitions, unsupported replacement `#`, unsupported `#include`, function-like macros, preprocessing line continuations, and bounded expansion depth/token/work exhaustion.
-- Added focused interpreter tests and a warning-free native compiler-oracle fixture; the full local and Docker verification gates cover 1,050 tests.
+- Added exact source-context diagnostics for missing/invalid `#undef` names and trailing tokens after the identifier.
+- Added focused interpreter tests and warning-free native compiler-oracle fixtures; the full local and Docker verification gates cover 1,053 tests.
 
 ## v0.3.0 — 2026-07-27
 

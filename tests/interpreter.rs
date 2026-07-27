@@ -220,6 +220,44 @@ fn supports_nested_object_like_macros_across_c_contexts() {
 }
 
 #[test]
+fn supports_undefining_and_redefining_object_like_macros() {
+    let program = include_str!("fixtures/compat/valid/object_like_macro_undef.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_malformed_undef_directives_with_context() {
+    let cases = [
+        (
+            "#undef\nint main(void) { return 0; }\n",
+            "expected macro name after '#undef' at line 1, column 7\n#undef\n      ^",
+        ),
+        (
+            include_str!("fixtures/invalid/malformed_undef_directive.c"),
+            "expected macro name after '#undef' at line 1, column 8\n#undef 42\n       ^",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_trailing_tokens_after_undef_with_context() {
+    let program = include_str!("fixtures/invalid/undef_trailing_tokens.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unexpected tokens after '#undef' macro name at line 1, column 14\n#undef VALUE extra\n             ^"
+    );
+}
+
+#[test]
 fn supports_block_comments_as_preprocessor_directive_whitespace() {
     let program = r#"
 #define/*before name*/ VALUE/*before replacement*/ 4

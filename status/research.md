@@ -18,6 +18,11 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-27 — Object-like macro undefinition
+
+- ISO C11 draft N1570 §6.10.3.5 states that `#undef identifier` makes the identifier no longer defined as a macro name and is ignored when the identifier is not currently defined. Cust therefore removes the name from its translation-unit macro table without error for unknown names; later alias rescanning observes the current table, and a later `#define` starts a fresh definition lifetime.
+- The bounded one-line grammar requires exactly one identifier after directive whitespace and permits only preprocessing whitespace/comments afterward. Cust validates the complete directive before mutating the macro table so malformed/trailing-token directives cannot partially change state. See `references/cust-object-like-macro-undef.md`.
+
 ## 2026-07-27 — Object-like macro preprocessing
 
 - ISO C11 draft N1570 §6.10.3 defines object-like replacement lists and permits compatible redefinition; §6.10.3.4 requires the resulting preprocessing token sequence to be rescanned for more macro names. Cust therefore stores unexpanded replacement token kinds and recursively resolves them against the macro table at each later use rather than eagerly freezing only definitions already seen.

@@ -1914,6 +1914,54 @@ fn process_preprocessor_directive(
                 macros.insert(macro_name, definition);
             }
         }
+        "undef" => {
+            let has_name_separator = skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            let macro_name_start = cursor;
+            if !has_name_separator
+                || cursor >= content_end
+                || !(chars[cursor].is_ascii_alphabetic() || chars[cursor] == '_')
+            {
+                return Err(lexer_error_with_context(
+                    "expected macro name after '#undef'",
+                    source,
+                    line,
+                    directive_column + cursor - directive_start,
+                ));
+            }
+            cursor += 1;
+            while cursor < content_end
+                && (chars[cursor].is_ascii_alphanumeric() || chars[cursor] == '_')
+            {
+                cursor += 1;
+            }
+            let macro_name: String = chars[macro_name_start..cursor].iter().collect();
+            skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if cursor < content_end {
+                return Err(lexer_error_with_context(
+                    "unexpected tokens after '#undef' macro name",
+                    source,
+                    line,
+                    directive_column + cursor - directive_start,
+                ));
+            }
+            macros.remove(&macro_name);
+        }
         _ => {
             return Err(lexer_error_with_context(
                 format!("preprocessor directive '#{directive_name}' is not supported"),
