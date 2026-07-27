@@ -79,6 +79,7 @@ enum Token {
     Goto,
     Ident(String),
     Number(i64),
+    PreprocessorNumber(PreprocessorInteger),
     StringLiteral(Vec<i64>),
     Plus,
     Minus,
@@ -128,6 +129,32 @@ enum Token {
     Eof,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreprocessorInteger {
+    bits: u64,
+    unsigned: bool,
+}
+
+impl PreprocessorInteger {
+    fn signed(value: i64) -> Self {
+        Self {
+            bits: value as u64,
+            unsigned: false,
+        }
+    }
+
+    fn unsigned(value: u64) -> Self {
+        Self {
+            bits: value,
+            unsigned: true,
+        }
+    }
+
+    fn truthy(self) -> bool {
+        self.bits != 0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LocatedToken {
     kind: Token,
@@ -161,6 +188,7 @@ struct MacroExpansionBudget {
 struct ConditionalFrame {
     parent_active: bool,
     active: bool,
+    branch_taken: bool,
     else_seen: bool,
     directive_name: String,
     line: usize,
@@ -171,6 +199,8 @@ const MAX_OBJECT_MACRO_EXPANSION_DEPTH: usize = 128;
 const MAX_OBJECT_MACRO_EXPANSION_TOKENS: usize = 8_192;
 const MAX_OBJECT_MACRO_EXPANSION_WORK: usize = 65_536;
 const MAX_PREPROCESSOR_CONDITIONAL_DEPTH: usize = 128;
+const MAX_PREPROCESSOR_CONDITION_DEPTH: usize = 128;
+const MAX_PREPROCESSOR_CONDITION_TOKENS: usize = 8_192;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Expr {
@@ -1169,7 +1199,7 @@ pub fn format_ast(source: &str) -> CustResult<String> {
 }
 
 fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
-    lex_with_context(source, source, 1, 1, true)
+    lex_with_context(source, source, 1, 1, true, false, None)
 }
 
 fn lex_with_context(
@@ -1178,6 +1208,8 @@ fn lex_with_context(
     initial_line: usize,
     initial_column: usize,
     allow_preprocessor_directives: bool,
+    preserve_preprocessor_integers: bool,
+    token_limit: Option<(usize, &str)>,
 ) -> CustResult<Vec<LocatedToken>> {
     let chars: Vec<char> = input.chars().collect();
     if allow_preprocessor_directives {
@@ -1240,6 +1272,7 @@ fn lex_with_context(
                         &mut line,
                         &mut column,
                         &mut macros,
+                        &mut macro_expansion_budget,
                         &mut conditional_stack,
                     )?;
                     if !consumed {
@@ -1353,8 +1386,9 @@ fn lex_with_context(
                     (start, 10)
                 };
                 let text: String = chars[digits_start..i].iter().collect();
-                consume_integer_suffix(&chars, &mut line, &mut column, &mut i);
-                let value = i64::from_str_radix(&text, radix).map_err(|_| {
+                let unsigned_suffix =
+                    consume_integer_suffix(source, &chars, &mut line, &mut column, &mut i)?;
+                let value = u64::from_str_radix(&text, radix).map_err(|_| {
                     lexer_error_with_context(
                         "integer literal out of range",
                         source,
@@ -1362,11 +1396,20 @@ fn lex_with_context(
                         start_column,
                     )
                 })?;
-                tokens.push(LocatedToken::new(
-                    Token::Number(value),
-                    start_line,
-                    start_column,
-                ));
+                let unsigned = unsigned_suffix || (radix != 10 && value > i64::MAX as u64);
+                let token = if preserve_preprocessor_integers && unsigned {
+                    Token::PreprocessorNumber(PreprocessorInteger::unsigned(value))
+                } else if value <= i64::MAX as u64 {
+                    Token::Number(value as i64)
+                } else {
+                    return Err(lexer_error_with_context(
+                        "integer literal out of range",
+                        source,
+                        start_line,
+                        start_column,
+                    ));
+                };
+                tokens.push(LocatedToken::new(token, start_line, start_column));
             }
             '"' => {
                 let start_line = line;
@@ -1478,7 +1521,7 @@ fn lex_with_context(
                 }
                 let text: String = chars[start..i].iter().collect();
                 if macros.contains_key(&text) {
-                    tokens.extend(expand_object_macro(
+                    let expanded = expand_object_macro(
                         &text,
                         &macros,
                         &mut Vec::new(),
@@ -1486,7 +1529,8 @@ fn lex_with_context(
                         source,
                         start_line,
                         start_column,
-                    )?);
+                    )?;
+                    tokens.extend(normalize_expanded_integer_tokens(expanded, source)?);
                     continue;
                 }
                 let kind = identifier_token(text);
@@ -1719,6 +1763,7 @@ fn lex_with_context(
                     &mut line,
                     &mut column,
                     &mut macros,
+                    &mut macro_expansion_budget,
                     &mut conditional_stack,
                 )?;
             }
@@ -1730,6 +1775,16 @@ fn lex_with_context(
                     column,
                 ));
             }
+        }
+        if let Some((directive_name, token)) = token_limit.and_then(|(limit, directive_name)| {
+            tokens.get(limit).map(|token| (directive_name, token))
+        }) {
+            return Err(lexer_error_with_context(
+                format!("'#{directive_name}' expression token limit exceeded"),
+                source,
+                token.line,
+                token.column,
+            ));
         }
     }
 
@@ -1871,6 +1926,7 @@ fn macro_replacement_token(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_preprocessor_directive(
     source: &str,
     chars: &[char],
@@ -1878,6 +1934,7 @@ fn process_preprocessor_directive(
     current_line: &mut usize,
     column: &mut usize,
     macros: &mut HashMap<String, ObjectMacro>,
+    macro_expansion_budget: &mut MacroExpansionBudget,
     conditional_stack: &mut Vec<ConditionalFrame>,
 ) -> CustResult<bool> {
     let directive_start = *i;
@@ -2000,6 +2057,7 @@ fn process_preprocessor_directive(
             conditional_stack.push(ConditionalFrame {
                 parent_active,
                 active: parent_active && condition,
+                branch_taken: parent_active && condition,
                 else_seen: false,
                 directive_name,
                 line,
@@ -2048,7 +2106,8 @@ fn process_preprocessor_directive(
                 ));
             }
             frame.else_seen = true;
-            frame.active = frame.parent_active && !frame.active;
+            frame.active = frame.parent_active && !frame.branch_taken;
+            frame.branch_taken = true;
         }
         "endif" => {
             if conditional_stack.is_empty() {
@@ -2085,13 +2144,78 @@ fn process_preprocessor_directive(
             }
             conditional_stack.pop();
         }
-        "if" | "elif" => {
-            return Err(lexer_error_with_context(
-                format!("'#{directive_name}' conditional directives are not supported"),
-                source,
+        "if" => {
+            if conditional_stack.len() >= MAX_PREPROCESSOR_CONDITIONAL_DEPTH {
+                return Err(lexer_error_with_context(
+                    "preprocessor conditional nesting limit exceeded",
+                    source,
+                    line,
+                    directive_column,
+                ));
+            }
+            let parent_active = active;
+            let condition = if parent_active {
+                evaluate_preprocessor_condition(
+                    source,
+                    chars,
+                    cursor,
+                    content_end,
+                    line,
+                    directive_start,
+                    directive_column,
+                    macros,
+                    macro_expansion_budget,
+                    "if",
+                )? != 0
+            } else {
+                false
+            };
+            conditional_stack.push(ConditionalFrame {
+                parent_active,
+                active: parent_active && condition,
+                branch_taken: parent_active && condition,
+                else_seen: false,
+                directive_name,
                 line,
-                directive_column,
-            ));
+                column: directive_column,
+            });
+        }
+        "elif" => {
+            let Some(frame) = conditional_stack.last_mut() else {
+                return Err(lexer_error_with_context(
+                    "unmatched '#elif' conditional directive",
+                    source,
+                    line,
+                    directive_column,
+                ));
+            };
+            if frame.else_seen {
+                return Err(lexer_error_with_context(
+                    "'#elif' conditional directive after '#else'",
+                    source,
+                    line,
+                    directive_column,
+                ));
+            }
+            let should_evaluate = frame.parent_active && !frame.branch_taken;
+            let condition = if should_evaluate {
+                evaluate_preprocessor_condition(
+                    source,
+                    chars,
+                    cursor,
+                    content_end,
+                    line,
+                    directive_start,
+                    directive_column,
+                    macros,
+                    macro_expansion_budget,
+                    "elif",
+                )? != 0
+            } else {
+                false
+            };
+            frame.active = should_evaluate && condition;
+            frame.branch_taken |= frame.active;
         }
         _ if !active => return Ok(false),
         "include" => {
@@ -2216,6 +2340,8 @@ fn process_preprocessor_directive(
                     replacement_line,
                     replacement_column,
                     false,
+                    true,
+                    None,
                 )?;
                 replacement_tokens.pop();
                 let replacement_chars: Vec<char> = replacement_source.chars().collect();
@@ -2335,6 +2461,555 @@ fn process_preprocessor_directive(
         advance_position(chars[*i], current_line, column, i);
     }
     Ok(true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_preprocessor_condition(
+    source: &str,
+    chars: &[char],
+    mut cursor: usize,
+    content_end: usize,
+    line: usize,
+    directive_start: usize,
+    directive_column: usize,
+    macros: &HashMap<String, ObjectMacro>,
+    macro_expansion_budget: &mut MacroExpansionBudget,
+    directive_name: &str,
+) -> CustResult<i64> {
+    skip_preprocessor_whitespace(
+        source,
+        chars,
+        &mut cursor,
+        content_end,
+        line,
+        directive_start,
+        directive_column,
+    )?;
+    if cursor >= content_end {
+        let (error_line, error_column) =
+            preprocessor_position_at(chars, directive_start, line, directive_column, cursor);
+        return Err(lexer_error_with_context(
+            format!("expected expression after '#{directive_name}'"),
+            source,
+            error_line,
+            error_column,
+        ));
+    }
+
+    let (condition_line, condition_column) =
+        preprocessor_position_at(chars, directive_start, line, directive_column, cursor);
+    let condition_source: String = chars[cursor..content_end].iter().collect();
+    let raw_tokens = lex_with_context(
+        &condition_source,
+        source,
+        condition_line,
+        condition_column,
+        false,
+        true,
+        Some((MAX_PREPROCESSOR_CONDITION_TOKENS, directive_name)),
+    )?;
+    let tokens = prepare_preprocessor_condition_tokens(
+        source,
+        raw_tokens,
+        macros,
+        macro_expansion_budget,
+        directive_name,
+    )?;
+    PreprocessorConditionParser::new(tokens, source, directive_name).parse()
+}
+
+fn prepare_preprocessor_condition_tokens(
+    source: &str,
+    raw_tokens: Vec<LocatedToken>,
+    macros: &HashMap<String, ObjectMacro>,
+    macro_expansion_budget: &mut MacroExpansionBudget,
+    directive_name: &str,
+) -> CustResult<Vec<LocatedToken>> {
+    let mut prepared = Vec::new();
+    let mut cursor = 0;
+    while cursor < raw_tokens.len() && raw_tokens[cursor].kind != Token::Eof {
+        let token = &raw_tokens[cursor];
+        if preprocessor_identifier_name(&token.kind) == Some("defined") {
+            let defined_token = token.clone();
+            cursor += 1;
+            let parenthesized = raw_tokens
+                .get(cursor)
+                .is_some_and(|token| token.kind == Token::LParen);
+            if parenthesized {
+                cursor += 1;
+            }
+            let Some(name_token) = raw_tokens.get(cursor) else {
+                return Err(lexer_error_with_context(
+                    "expected macro name after 'defined'",
+                    source,
+                    defined_token.line,
+                    defined_token.column,
+                ));
+            };
+            let Some(name) = preprocessor_identifier_name(&name_token.kind) else {
+                return Err(lexer_error_with_context(
+                    "expected macro name after 'defined'",
+                    source,
+                    name_token.line,
+                    name_token.column,
+                ));
+            };
+            cursor += 1;
+            if parenthesized {
+                let Some(closing) = raw_tokens.get(cursor) else {
+                    return Err(lexer_error_with_context(
+                        "expected ')' after 'defined' macro name",
+                        source,
+                        name_token.line,
+                        name_token.column,
+                    ));
+                };
+                if closing.kind != Token::RParen {
+                    return Err(lexer_error_with_context(
+                        "expected ')' after 'defined' macro name",
+                        source,
+                        closing.line,
+                        closing.column,
+                    ));
+                }
+                cursor += 1;
+            }
+            push_preprocessor_condition_token(
+                &mut prepared,
+                LocatedToken::new(
+                    Token::Number(i64::from(macros.contains_key(name))),
+                    defined_token.line,
+                    defined_token.column,
+                ),
+                source,
+                directive_name,
+            )?;
+            continue;
+        }
+
+        if let Some(name) = preprocessor_identifier_name(&token.kind) {
+            if macros.contains_key(name) {
+                let expanded = expand_object_macro(
+                    name,
+                    macros,
+                    &mut Vec::new(),
+                    macro_expansion_budget,
+                    source,
+                    token.line,
+                    token.column,
+                )?;
+                for mut expanded_token in expanded {
+                    if preprocessor_identifier_name(&expanded_token.kind).is_some() {
+                        expanded_token.kind = Token::Number(0);
+                    }
+                    push_preprocessor_condition_token(
+                        &mut prepared,
+                        expanded_token,
+                        source,
+                        directive_name,
+                    )?;
+                }
+            } else {
+                push_preprocessor_condition_token(
+                    &mut prepared,
+                    LocatedToken::new(Token::Number(0), token.line, token.column),
+                    source,
+                    directive_name,
+                )?;
+            }
+        } else {
+            push_preprocessor_condition_token(
+                &mut prepared,
+                token.clone(),
+                source,
+                directive_name,
+            )?;
+        }
+        cursor += 1;
+    }
+
+    let eof = raw_tokens
+        .last()
+        .expect("condition lexer always appends an EOF token");
+    prepared.push(eof.clone());
+    Ok(prepared)
+}
+
+fn push_preprocessor_condition_token(
+    tokens: &mut Vec<LocatedToken>,
+    token: LocatedToken,
+    source: &str,
+    directive_name: &str,
+) -> CustResult<()> {
+    if tokens.len() >= MAX_PREPROCESSOR_CONDITION_TOKENS {
+        return Err(lexer_error_with_context(
+            format!("'#{directive_name}' expression token limit exceeded"),
+            source,
+            token.line,
+            token.column,
+        ));
+    }
+    tokens.push(token);
+    Ok(())
+}
+
+fn preprocessor_identifier_name(token: &Token) -> Option<&str> {
+    match token {
+        Token::Ident(name) => Some(name),
+        Token::Int => Some("int"),
+        Token::Char => Some("char"),
+        Token::Bool => Some("_Bool"),
+        Token::Float => Some("float"),
+        Token::Double => Some("double"),
+        Token::Complex => Some("_Complex"),
+        Token::Imaginary => Some("_Imaginary"),
+        Token::Signed => Some("signed"),
+        Token::Unsigned => Some("unsigned"),
+        Token::Long => Some("long"),
+        Token::Short => Some("short"),
+        Token::Const => Some("const"),
+        Token::Volatile => Some("volatile"),
+        Token::Restrict => Some("restrict"),
+        Token::Atomic => Some("_Atomic"),
+        Token::Static => Some("static"),
+        Token::Extern => Some("extern"),
+        Token::ThreadLocal => Some("_Thread_local"),
+        Token::Inline => Some("inline"),
+        Token::Noreturn => Some("_Noreturn"),
+        Token::Auto => Some("auto"),
+        Token::Register => Some("register"),
+        Token::Void => Some("void"),
+        Token::Enum => Some("enum"),
+        Token::Struct => Some("struct"),
+        Token::Union => Some("union"),
+        Token::Typedef => Some("typedef"),
+        Token::Sizeof => Some("sizeof"),
+        Token::Alignof => Some("_Alignof"),
+        Token::Alignas => Some("_Alignas"),
+        Token::StaticAssert => Some("_Static_assert"),
+        Token::Generic => Some("_Generic"),
+        Token::Return => Some("return"),
+        Token::If => Some("if"),
+        Token::Else => Some("else"),
+        Token::While => Some("while"),
+        Token::Do => Some("do"),
+        Token::For => Some("for"),
+        Token::Switch => Some("switch"),
+        Token::Case => Some("case"),
+        Token::Default => Some("default"),
+        Token::Break => Some("break"),
+        Token::Continue => Some("continue"),
+        Token::Goto => Some("goto"),
+        _ => None,
+    }
+}
+
+struct PreprocessorConditionParser<'a> {
+    tokens: Vec<LocatedToken>,
+    pos: usize,
+    depth: usize,
+    source: &'a str,
+    directive_name: &'a str,
+}
+
+impl<'a> PreprocessorConditionParser<'a> {
+    fn new(tokens: Vec<LocatedToken>, source: &'a str, directive_name: &'a str) -> Self {
+        Self {
+            tokens,
+            pos: 0,
+            depth: 0,
+            source,
+            directive_name,
+        }
+    }
+
+    fn parse(mut self) -> CustResult<i64> {
+        let value = self.parse_conditional(true)?;
+        if self.peek().kind != Token::Eof {
+            return Err(self.error_at(
+                self.peek(),
+                format!("unexpected token in '#{}' expression", self.directive_name),
+            ));
+        }
+        Ok(i64::from(value.truthy()))
+    }
+
+    fn parse_conditional(&mut self, evaluate: bool) -> CustResult<PreprocessorInteger> {
+        let condition = self.parse_binary(1, evaluate)?;
+        if self.matches(&Token::Question) {
+            self.enter_depth()?;
+            let then_value = self.parse_conditional(evaluate && condition.truthy())?;
+            self.leave_depth();
+            if !self.matches(&Token::Colon) {
+                return Err(self.error_at(
+                    self.peek(),
+                    format!(
+                        "expected ':' in '#{}' conditional expression",
+                        self.directive_name
+                    ),
+                ));
+            }
+            self.enter_depth()?;
+            let else_value = self.parse_conditional(evaluate && !condition.truthy())?;
+            self.leave_depth();
+            let unsigned = then_value.unsigned || else_value.unsigned;
+            let selected = if evaluate && condition.truthy() {
+                then_value
+            } else {
+                else_value
+            };
+            return Ok(PreprocessorInteger {
+                bits: if evaluate { selected.bits } else { 0 },
+                unsigned,
+            });
+        }
+        Ok(condition)
+    }
+
+    fn parse_binary(
+        &mut self,
+        min_precedence: u8,
+        evaluate: bool,
+    ) -> CustResult<PreprocessorInteger> {
+        let mut value = self.parse_unary(evaluate)?;
+        loop {
+            let Some(precedence) = Self::binary_precedence(&self.peek().kind) else {
+                break;
+            };
+            if precedence < min_precedence {
+                break;
+            }
+            let operator = self.advance();
+            let evaluate_rhs = match operator.kind {
+                Token::AndAnd => evaluate && value.truthy(),
+                Token::OrOr => evaluate && !value.truthy(),
+                _ => evaluate,
+            };
+            let rhs = self.parse_binary(precedence + 1, evaluate_rhs)?;
+            value = self.apply_binary(value, &operator, rhs, evaluate)?;
+        }
+        Ok(value)
+    }
+
+    fn parse_unary(&mut self, evaluate: bool) -> CustResult<PreprocessorInteger> {
+        if matches!(
+            self.peek().kind,
+            Token::Plus | Token::Minus | Token::Tilde | Token::Bang
+        ) {
+            let operator = self.advance();
+            self.enter_depth()?;
+            let value = self.parse_unary(evaluate)?;
+            self.leave_depth();
+            if !evaluate {
+                return Ok(PreprocessorInteger {
+                    bits: 0,
+                    unsigned: value.unsigned,
+                });
+            }
+            return Ok(match operator.kind {
+                Token::Plus => value,
+                Token::Minus => PreprocessorInteger {
+                    bits: value.bits.wrapping_neg(),
+                    unsigned: value.unsigned,
+                },
+                Token::Tilde => PreprocessorInteger {
+                    bits: !value.bits,
+                    unsigned: value.unsigned,
+                },
+                Token::Bang => PreprocessorInteger::signed(i64::from(!value.truthy())),
+                _ => unreachable!("only unary operators are consumed above"),
+            });
+        }
+        self.parse_primary(evaluate)
+    }
+
+    fn parse_primary(&mut self, evaluate: bool) -> CustResult<PreprocessorInteger> {
+        if self.matches(&Token::LParen) {
+            self.enter_depth()?;
+            let value = self.parse_conditional(evaluate)?;
+            self.leave_depth();
+            if !self.matches(&Token::RParen) {
+                return Err(self.error_at(
+                    self.peek(),
+                    format!("expected ')' in '#{}' expression", self.directive_name),
+                ));
+            }
+            return Ok(value);
+        }
+        let token = self.advance();
+        match token.kind {
+            Token::Number(value) => Ok(PreprocessorInteger::signed(if evaluate {
+                value
+            } else {
+                0
+            })),
+            Token::PreprocessorNumber(value) => Ok(PreprocessorInteger {
+                bits: if evaluate { value.bits } else { 0 },
+                unsigned: value.unsigned,
+            }),
+            _ => Err(self.error_at(
+                &token,
+                format!(
+                    "expected integer constant in '#{}' expression",
+                    self.directive_name
+                ),
+            )),
+        }
+    }
+
+    fn apply_binary(
+        &self,
+        left: PreprocessorInteger,
+        operator: &LocatedToken,
+        right: PreprocessorInteger,
+        evaluate: bool,
+    ) -> CustResult<PreprocessorInteger> {
+        let common_unsigned = left.unsigned || right.unsigned;
+        let result_unsigned = match operator.kind {
+            Token::OrOr
+            | Token::AndAnd
+            | Token::Eq
+            | Token::Ne
+            | Token::Lt
+            | Token::Le
+            | Token::Gt
+            | Token::Ge => false,
+            Token::ShiftLeft | Token::ShiftRight => left.unsigned,
+            _ => common_unsigned,
+        };
+        if !evaluate {
+            return Ok(PreprocessorInteger {
+                bits: 0,
+                unsigned: result_unsigned,
+            });
+        }
+
+        let boolean = |value| PreprocessorInteger::signed(i64::from(value));
+        let bits = match operator.kind {
+            Token::OrOr => return Ok(boolean(left.truthy() || right.truthy())),
+            Token::AndAnd => return Ok(boolean(left.truthy() && right.truthy())),
+            Token::Pipe => left.bits | right.bits,
+            Token::Caret => left.bits ^ right.bits,
+            Token::Amp => left.bits & right.bits,
+            Token::Eq => return Ok(boolean(left.bits == right.bits)),
+            Token::Ne => return Ok(boolean(left.bits != right.bits)),
+            Token::Lt | Token::Le | Token::Gt | Token::Ge => {
+                let ordering = if common_unsigned {
+                    left.bits.cmp(&right.bits)
+                } else {
+                    (left.bits as i64).cmp(&(right.bits as i64))
+                };
+                let result = match operator.kind {
+                    Token::Lt => ordering.is_lt(),
+                    Token::Le => ordering.is_le(),
+                    Token::Gt => ordering.is_gt(),
+                    Token::Ge => ordering.is_ge(),
+                    _ => unreachable!("only relational operators are matched above"),
+                };
+                return Ok(boolean(result));
+            }
+            Token::ShiftLeft | Token::ShiftRight => {
+                if right.bits >= u64::from(i64::BITS) {
+                    return Err(self.error_at(operator, "preprocessor shift count is out of range"));
+                }
+                let shift = right.bits as u32;
+                if operator.kind == Token::ShiftLeft {
+                    left.bits.wrapping_shl(shift)
+                } else if left.unsigned {
+                    left.bits.wrapping_shr(shift)
+                } else {
+                    (left.bits as i64).wrapping_shr(shift) as u64
+                }
+            }
+            Token::Plus => left.bits.wrapping_add(right.bits),
+            Token::Minus => left.bits.wrapping_sub(right.bits),
+            Token::Star => left.bits.wrapping_mul(right.bits),
+            Token::Slash | Token::Percent => {
+                if right.bits == 0 {
+                    return Err(
+                        self.error_at(operator, "division by zero in preprocessor expression")
+                    );
+                }
+                if common_unsigned {
+                    if operator.kind == Token::Slash {
+                        left.bits / right.bits
+                    } else {
+                        left.bits % right.bits
+                    }
+                } else if operator.kind == Token::Slash {
+                    (left.bits as i64).wrapping_div(right.bits as i64) as u64
+                } else {
+                    (left.bits as i64).wrapping_rem(right.bits as i64) as u64
+                }
+            }
+            _ => unreachable!("only binary operators are passed to apply_binary"),
+        };
+        Ok(PreprocessorInteger {
+            bits,
+            unsigned: result_unsigned,
+        })
+    }
+
+    fn binary_precedence(token: &Token) -> Option<u8> {
+        match token {
+            Token::OrOr => Some(1),
+            Token::AndAnd => Some(2),
+            Token::Pipe => Some(3),
+            Token::Caret => Some(4),
+            Token::Amp => Some(5),
+            Token::Eq | Token::Ne => Some(6),
+            Token::Lt | Token::Le | Token::Gt | Token::Ge => Some(7),
+            Token::ShiftLeft | Token::ShiftRight => Some(8),
+            Token::Plus | Token::Minus => Some(9),
+            Token::Star | Token::Slash | Token::Percent => Some(10),
+            _ => None,
+        }
+    }
+
+    fn enter_depth(&mut self) -> CustResult<()> {
+        if self.depth >= MAX_PREPROCESSOR_CONDITION_DEPTH {
+            return Err(self.error_at(
+                self.peek(),
+                format!(
+                    "'#{}' expression nesting limit exceeded",
+                    self.directive_name
+                ),
+            ));
+        }
+        self.depth += 1;
+        Ok(())
+    }
+
+    fn leave_depth(&mut self) {
+        self.depth -= 1;
+    }
+
+    fn matches(&mut self, expected: &Token) -> bool {
+        if self.peek().kind == *expected {
+            self.pos += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn advance(&mut self) -> LocatedToken {
+        let token = self.peek().clone();
+        if token.kind != Token::Eof {
+            self.pos += 1;
+        }
+        token
+    }
+
+    fn peek(&self) -> &LocatedToken {
+        self.tokens
+            .get(self.pos)
+            .expect("condition lexer always appends an EOF token")
+    }
+
+    fn error_at(&self, token: &LocatedToken, message: impl Into<String>) -> CustError {
+        lexer_error_with_context(message, self.source, token.line, token.column)
+    }
 }
 
 fn preprocessor_directive_line_end(chars: &[char], mut cursor: usize) -> usize {
@@ -2622,6 +3297,26 @@ fn push_expanded_macro_token(
     Ok(())
 }
 
+fn normalize_expanded_integer_tokens(
+    mut tokens: Vec<LocatedToken>,
+    source: &str,
+) -> CustResult<Vec<LocatedToken>> {
+    for token in &mut tokens {
+        if let Token::PreprocessorNumber(value) = token.kind {
+            if value.bits > i64::MAX as u64 {
+                return Err(lexer_error_with_context(
+                    "integer literal out of range",
+                    source,
+                    token.line,
+                    token.column,
+                ));
+            }
+            token.kind = Token::Number(value.bits as i64);
+        }
+    }
+    Ok(tokens)
+}
+
 fn lexer_error_with_context(
     message: impl Into<String>,
     source: &str,
@@ -2757,25 +3452,47 @@ fn parse_escape_sequence(
     }
 }
 
-fn consume_integer_suffix(chars: &[char], line: &mut usize, column: &mut usize, i: &mut usize) {
-    if matches!(chars.get(*i), Some('u') | Some('U')) {
-        let suffix = chars[*i];
-        advance_position(suffix, line, column, i);
+fn consume_integer_suffix(
+    source: &str,
+    chars: &[char],
+    line: &mut usize,
+    column: &mut usize,
+    i: &mut usize,
+) -> CustResult<bool> {
+    let suffix_start = *i;
+    let suffix_line = *line;
+    let suffix_column = *column;
+    while chars
+        .get(*i)
+        .is_some_and(|character| character.is_ascii_alphanumeric() || *character == '_')
+    {
+        let character = chars[*i];
+        advance_position(character, line, column, i);
+    }
+    if suffix_start == *i {
+        return Ok(false);
     }
 
-    if matches!(chars.get(*i), Some('l') | Some('L')) {
-        let suffix = chars[*i];
-        advance_position(suffix, line, column, i);
-        if matches!(chars.get(*i), Some('l') | Some('L')) {
-            let suffix = chars[*i];
-            advance_position(suffix, line, column, i);
-        }
+    let suffix: String = chars[suffix_start..*i].iter().collect();
+    let is_unsigned = |part: &str| matches!(part, "u" | "U");
+    let is_long = |part: &str| matches!(part, "l" | "L" | "ll" | "LL");
+    let valid = is_unsigned(&suffix)
+        || is_long(&suffix)
+        || suffix
+            .get(1..)
+            .is_some_and(|long| is_unsigned(&suffix[..1]) && is_long(long))
+        || suffix
+            .get(..suffix.len().saturating_sub(1))
+            .is_some_and(|long| is_long(long) && is_unsigned(&suffix[suffix.len() - 1..]));
+    if !valid {
+        return Err(lexer_error_with_context(
+            "invalid integer literal suffix",
+            source,
+            suffix_line,
+            suffix_column,
+        ));
     }
-
-    if matches!(chars.get(*i), Some('u') | Some('U')) {
-        let suffix = chars[*i];
-        advance_position(suffix, line, column, i);
-    }
+    Ok(suffix.contains(['u', 'U']))
 }
 
 fn advance_position(c: char, line: &mut usize, column: &mut usize, i: &mut usize) {
@@ -5550,6 +6267,7 @@ impl Parser {
             }
             Token::Ident(_)
             | Token::Number(_)
+            | Token::PreprocessorNumber(_)
             | Token::StringLiteral(_)
             | Token::Plus
             | Token::Minus
@@ -9001,6 +9719,13 @@ impl Parser {
         let found = self.advance();
         match &found.kind {
             Token::Number(value) => Ok((*value, found)),
+            Token::PreprocessorNumber(value) if value.bits <= i64::MAX as u64 => {
+                Ok((value.bits as i64, found))
+            }
+            Token::PreprocessorNumber(_) => Err(Self::error_at(
+                "integer literal out of range".to_string(),
+                &found,
+            )),
             Token::Ident(name) => local_constants
                 .get(name)
                 .copied()
@@ -9768,8 +10493,9 @@ impl Parser {
 
     fn parse_index_expr(&mut self) -> CustResult<Expr> {
         self.reject_missing_index_expr("array index expression")?;
-        let preserve_missing_bracket_diagnostic = matches!(self.peek(), Token::Number(_))
-            && Self::is_assignment_operator(self.peek_next());
+        let preserve_missing_bracket_diagnostic =
+            matches!(self.peek(), Token::Number(_) | Token::PreprocessorNumber(_))
+                && Self::is_assignment_operator(self.peek_next());
         let mut expr = if preserve_missing_bracket_diagnostic {
             self.parse_logical_or()?
         } else {
@@ -11671,6 +12397,13 @@ impl Parser {
         let found = self.advance();
         match found.kind.clone() {
             Token::Number(value) => Ok(Expr::Number(value)),
+            Token::PreprocessorNumber(value) if value.bits <= i64::MAX as u64 => {
+                Ok(Expr::Number(value.bits as i64))
+            }
+            Token::PreprocessorNumber(_) => Err(Self::error_at(
+                "integer literal out of range".to_string(),
+                &found,
+            )),
             Token::StringLiteral(values) => {
                 let values = self.concatenate_adjacent_string_literals(values);
                 if self.matches(&Token::LBracket) {
@@ -12063,6 +12796,7 @@ impl Parser {
             token,
             Token::Ident(_)
                 | Token::Number(_)
+                | Token::PreprocessorNumber(_)
                 | Token::StringLiteral(_)
                 | Token::Plus
                 | Token::Minus
@@ -12081,6 +12815,7 @@ impl Parser {
             token,
             Token::Ident(_)
                 | Token::Number(_)
+                | Token::PreprocessorNumber(_)
                 | Token::StringLiteral(_)
                 | Token::Star
                 | Token::Amp

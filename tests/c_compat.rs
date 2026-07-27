@@ -213,6 +213,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/nested_struct_initializers.c",
     "tests/fixtures/compat/valid/numeric_escape_sequences.c",
     "tests/fixtures/compat/valid/object_like_macro_conditionals.c",
+    "tests/fixtures/compat/valid/object_like_macro_if_elif.c",
     "tests/fixtures/compat/valid/object_like_macro_undef.c",
     "tests/fixtures/compat/valid/object_like_macros.c",
     "tests/fixtures/compat/valid/pointer_array_elements.c",

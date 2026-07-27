@@ -1,4 +1,4 @@
-use cust::interpret;
+use cust::{format_tokens, interpret};
 
 #[test]
 fn runs_integer_arithmetic_and_return() {
@@ -220,6 +220,28 @@ fn supports_nested_object_like_macros_across_c_contexts() {
 }
 
 #[test]
+fn macro_expansion_keeps_ordinary_integer_tokens_public() {
+    let program = "#define X 1U\nint main(void) { return X; }\n";
+
+    assert_eq!(
+        format_tokens(program).unwrap(),
+        concat!(
+            "2:1 Int\n",
+            "2:5 Ident(\"main\")\n",
+            "2:9 LParen\n",
+            "2:10 Void\n",
+            "2:14 RParen\n",
+            "2:16 LBrace\n",
+            "2:18 Return\n",
+            "2:25 Number(1)\n",
+            "2:26 Semi\n",
+            "2:28 RBrace\n",
+            "3:1 Eof\n",
+        )
+    );
+}
+
+#[test]
 fn supports_undefining_and_redefining_object_like_macros() {
     let program = include_str!("fixtures/compat/valid/object_like_macro_undef.c");
 
@@ -231,6 +253,186 @@ fn supports_ifdef_ifndef_nested_else_and_inactive_skipping() {
     let program = include_str!("fixtures/compat/valid/object_like_macro_conditionals.c");
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn supports_if_integer_macros_and_defined_conditions() {
+    let program = r#"
+#define VERSION 3
+#define ENABLED
+#define COUNT 7U
+#if VERSION == 3 && defined(ENABLED) && !defined DISABLED
+int main(void) { return COUNT - 7; }
+#else
+int main(void) { return 1; }
+#endif
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn object_like_macro_if_elif_fixture_matches_expected_result() {
+    let program = include_str!("fixtures/compat/valid/object_like_macro_if_elif.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn supports_if_integer_expression_precedence_and_short_circuiting() {
+    let program = r#"
+#define LEFT 5
+#define RIGHT (LEFT * 2)
+#if (RIGHT == 10) && ((1 << 3) == 8) && ((7 & 3) == 3) && ((8 >> 2) == 2) && (UNKNOWN == 0) && (1 ? 4 : (1 / 0)) == 4 && (0 && (1 / 0)) == 0 && (1 || (1 / 0)) == 1
+int main(void) { return 0; }
+#else
+int main(void) { return 1; }
+#endif
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn if_expressions_preserve_intmax_uintmax_conversions() {
+    let program = r#"
+#define MAX_UNSIGNED 0xffffffffffffffffULL
+#if -1 < 1U
+#define SIGNED_UNSIGNED_ORDER 1
+#else
+#define SIGNED_UNSIGNED_ORDER 0
+#endif
+#if MAX_UNSIGNED > 0 && (MAX_UNSIGNED >> 63) == 1
+#define WIDE_UNSIGNED 0
+#else
+#define WIDE_UNSIGNED 2
+#endif
+int main(void) { return SIGNED_UNSIGNED_ORDER + WIDE_UNSIGNED; }
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_malformed_integer_suffixes_in_if_expressions() {
+    let cases = [
+        (
+            "#if 1ULU == 1\nint main(void) { return 0; }\n#endif\n",
+            "invalid integer literal suffix at line 1, column 6\n#if 1ULU == 1\n     ^",
+        ),
+        (
+            "#if 1lL == 1\nint main(void) { return 0; }\n#endif\n",
+            "invalid integer literal suffix at line 1, column 6\n#if 1lL == 1\n     ^",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn bounds_raw_if_expression_tokens_before_parsing() {
+    let expression = format!("{}1", "1 + ".repeat(4_096));
+    let program = format!("#if {expression}\nint main(void) {{ return 0; }}\n#endif\n");
+
+    let err = interpret(&program).unwrap_err();
+    assert!(
+        err.to_string()
+            .starts_with("'#if' expression token limit exceeded at line 1, column "),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn bounds_if_expression_nesting() {
+    let accepted_expression = format!("{}1{}", "(".repeat(128), ")".repeat(128));
+    let accepted = format!(
+        "#if {accepted_expression}\nint main(void) {{ return 0; }}\n#else\nint main(void) {{ return 1; }}\n#endif\n"
+    );
+    assert_eq!(interpret(&accepted).unwrap(), 0);
+
+    let rejected_expression = format!("{}1", "!".repeat(129));
+    let rejected = format!("#if {rejected_expression}\nint main(void) {{ return 0; }}\n#endif\n");
+    let err = interpret(&rejected).unwrap_err();
+    assert!(
+        err.to_string()
+            .starts_with("'#if' expression nesting limit exceeded at line 1, column 134"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn supports_ordered_elif_chains_and_skips_unselected_conditions() {
+    let program = r#"
+#define VERSION 2
+#if VERSION == 1
+#define RESULT 10
+#elif VERSION == 2
+#define RESULT 0
+#elif 1 / 0
+#define RESULT 20
+#else
+#define RESULT 30
+#endif
+
+#if 0
+#if malformed tokens are ignored
+#endif
+#elif defined(RESULT)
+#define NESTED 0
+#else
+#define NESTED 1
+#endif
+
+int main(void) { return RESULT + NESTED; }
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_malformed_if_elif_expressions_and_ordering_with_context() {
+    let cases = [
+        (
+            "#if\nint main(void) { return 0; }\n#endif\n",
+            "expected expression after '#if' at line 1, column 4\n#if\n   ^",
+        ),
+        (
+            include_str!("fixtures/invalid/malformed_if_defined_condition.c"),
+            "expected macro name after 'defined' at line 1, column 13\n#if defined()\n            ^",
+        ),
+        (
+            "#if defined(NAME\nint main(void) { return 0; }\n#endif\n",
+            "expected ')' after 'defined' macro name at line 1, column 17\n#if defined(NAME\n                ^",
+        ),
+        (
+            "#if 1, 2\nint main(void) { return 0; }\n#endif\n",
+            "unexpected token in '#if' expression at line 1, column 6\n#if 1, 2\n     ^",
+        ),
+        (
+            "#if 1 / 0\nint main(void) { return 0; }\n#endif\n",
+            "division by zero in preprocessor expression at line 1, column 7\n#if 1 / 0\n      ^",
+        ),
+        (
+            "#elif 1\nint main(void) { return 0; }\n",
+            "unmatched '#elif' conditional directive at line 1, column 1\n#elif 1\n^",
+        ),
+        (
+            "#if 0\n#else\n#elif 1\n#endif\nint main(void) { return 0; }\n",
+            "'#elif' conditional directive after '#else' at line 3, column 1\n#elif 1\n^",
+        ),
+        (
+            "#if 0\n#elif\nint main(void) { return 0; }\n#endif\n",
+            "expected expression after '#elif' at line 2, column 6\n#elif\n     ^",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
 }
 
 #[test]
@@ -396,12 +598,8 @@ fn rejects_malformed_conditional_directives_with_context() {
             "unterminated block comment at line 3, column 16\n*/ ifdef INNER /* second\n               ^",
         ),
         (
-            "#ifdef UNKNOWN\n#elif 1\n#endif\nint main(void) { return 0; }\n",
-            "'#elif' conditional directives are not supported at line 2, column 1\n#elif 1\n^",
-        ),
-        (
             "#ifdef NEVER\n#if 0\n#else\nint main(void) { return 7; }\n#endif\n",
-            "'#if' conditional directives are not supported at line 2, column 1\n#if 0\n^",
+            "unterminated '#ifdef' conditional directive at line 1, column 1\n#ifdef NEVER\n^",
         ),
         (
             "#ifdef NEVER\n# /* comment\n*/ else extra\nint main(void) { return 0; }\n#endif\n",

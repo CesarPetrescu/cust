@@ -9,13 +9,15 @@ All notable changes to Cust are documented here. Cust is still a small education
 - Added one-line object-like `#define` macros with deterministic nested expansion across declarations, enum/array integer constant expressions, and runtime expressions. Macro names inside comments and string/character literals remain untouched.
 - Added bounded `#undef` directives: known definitions expire before subsequent tokens, unknown names are harmless, and removed names may be redefined with different replacement lists.
 - Added bounded nested `#ifdef` / `#ifndef` conditional preprocessing with one `#else`, inactive-token/directive skipping, current macro-table definedness, and a 128-group nesting limit.
+- Added bounded expression-form `#if` / `#elif` preprocessing with object-macro expansion, both `defined` spellings, ordered branch selection, C-style `intmax_t`/`uintmax_t` condition arithmetic, short-circuiting, and separate expression token/depth limits.
 
 ### Diagnostics and verification
 
 - Added exact source-context diagnostics for recursive expansion, conflicting object-like redefinitions, malformed definitions, unsupported replacement `#`, unsupported `#include`, function-like macros, preprocessing line continuations, and bounded expansion depth/token/work exhaustion.
 - Added exact source-context diagnostics for missing/invalid `#undef` names and trailing tokens after the identifier.
 - Added exact source-context diagnostics for malformed, unmatched, duplicate, unterminated, and unsupported conditional directives, including multiline-comment and inactive-branch locations.
-- Added focused interpreter tests and warning-free native compiler-oracle fixtures; the full local and Docker verification gates cover 1,061 tests.
+- Added exact condition diagnostics for malformed `defined`, invalid integer suffixes, division by zero, invalid shift counts, unexpected tokens, and excessive token/depth expansion; internal preprocessing integer metadata is normalized before public ordinary token output.
+- Added focused interpreter tests and warning-free native compiler-oracle fixtures; the full local and Docker verification gates cover 1,071 tests.
 
 ## v0.3.0 — 2026-07-27
 

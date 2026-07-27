@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-27 — Expression-form conditional preprocessing
+
+- ISO C11 draft N1570 §6.10.1 defines `defined identifier` / `defined(identifier)`, macro expansion followed by replacement of remaining identifiers with zero, and evaluation using `intmax_t`/`uintmax_t` semantics. Cust consequently keeps condition-only signedness/wide-value metadata, applies same-rank signed/unsigned conversions, and suppresses evaluation errors in unselected `&&`, `||`, and `?:` operands while still parsing their syntax.
+- Integer suffix grammar is case-sensitive within the doubled-long part: `ll` and `LL` are valid, while mixed `lL`/`Ll` are not; `u`/`U` may vary independently and may precede or follow the long part. Independent GCC `-std=c11 -pedantic-errors` probes confirmed the boundary.
+- Internal condition integer metadata must not leak through `format_tokens`/`--tokens`. Macro replacement tokens retain it for `#if`, but ordinary translation-unit expansion normalizes representable values to `Number` and reports a located range error otherwise. Raw and expanded condition token counts plus expression depth are bounded before unbounded growth. See `references/cust-if-elif-preprocessing.md`.
+
 ## 2026-07-27 — Bounded conditional preprocessing
 
 - ISO C11 draft N1570 §6.10.1 defines conditional groups and requires directives in skipped groups to remain preprocessing structure. Cust therefore keeps a bounded frame stack with parent/current activity and one-`#else` state, while rejecting unsupported structural `#if`/`#elif` rather than silently letting their later delimiters mutate a supported outer group.
