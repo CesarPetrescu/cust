@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-28 — C11 physical source-line splicing
+
+- ISO C11 draft N1570 §5.1.1.2 translation phase 2 states that every backslash immediately followed by a new-line is deleted, splicing physical source lines into logical lines before preprocessing-token decomposition. Deletion cannot be modeled as whitespace: it must form identifiers, numbers, punctuators, comment delimiters, literals, and escapes across the boundary.
+- Physical diagnostics therefore need data independent of the logical character stream. `SplicedSourceChars` stores spliced values plus one original `(line, column)` per retained character and EOF; nested macro replacement and conditional lexing copy both arrays with `slice()` rather than round-tripping through `String`.
+- A private-use sentinel was rejected after independent review: it changed token formation, broke macro replacement spelling/redefinition, and collided with legitimate source/literal text. See `references/cust-physical-line-splicing.md`.
+
 ## 2026-07-27 — Expression-form conditional preprocessing
 
 - ISO C11 draft N1570 §6.10.1 defines `defined identifier` / `defined(identifier)`, macro expansion followed by replacement of remaining identifiers with zero, and evaluation using `intmax_t`/`uintmax_t` semantics. Cust consequently keeps condition-only signedness/wide-value metadata, applies same-rank signed/unsigned conversions, and suppresses evaluation errors in unselected `&&`, `||`, and `?:` operands while still parsing their syntax.

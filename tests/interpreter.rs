@@ -528,21 +528,75 @@ int main(void) { return 0; }
 }
 
 #[test]
-fn rejects_inactive_conditional_line_continuations() {
-    let program = "#define RESULT 1\n#ifdef NEVER\nignored \\\n#else\n#undef RESULT\n#define RESULT 0\n#endif\nint main(void) { return RESULT; }\n";
+fn physical_line_continuations_preserve_inactive_preprocessing_structure() {
+    let programs = [
+        "#ifdef NEVER\nignored \\\n#else\n#else\nint main(void) { return 3; }\n#endif\n",
+        "#ifdef NEVER\n// ignored \\\n#else\n#else\nint main(void) { return 5; }\n#endif\n",
+        "#ifdef NEVER\n\"ignored \\\n#else\"\n#else\nint main(void) { return 7; }\n#endif\n",
+    ];
+
+    for (program, expected) in programs.into_iter().zip([3, 5, 7]) {
+        assert_eq!(interpret(program).unwrap(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn supports_lf_and_crlf_physical_line_continuations_in_directives() {
+    let lf = "#define VALUE 1 \\\n    + 2\n#if VALUE == \\\n    3\nint main(void) { return VALUE; }\n#else\nint main(void) { return 0; }\n#endif\n";
+    assert_eq!(interpret(lf).unwrap(), 3);
+
+    let crlf = "#define VALUE 2 \\\r\n    + 3\r\n#if VALUE == \\\r\n    5\r\nint main(void) { return VALUE; }\r\n#else\r\nint main(void) { return 0; }\r\n#endif\r\n";
+    assert_eq!(interpret(crlf).unwrap(), 5);
+}
+
+#[test]
+fn physical_line_continuations_splice_preprocessing_tokens() {
+    let program = "#defi\\\nne VAL\\\nUE 1\\\n2\n#if VAL\\\nUE == 12\nint main(void) { return VAL\\\nUE; }\n#else\nint main(void) { return 0; }\n#endif\n";
+
+    assert_eq!(interpret(program).unwrap(), 12);
+}
+
+#[test]
+fn physical_line_continuations_are_deleted_before_preprocessing_tokenization() {
+    let program = r#"
+#define A B\
+B
+#define BB 7
+#define TWELVE 1\
+2
+#define TWELVE 12
+#define HEX 0x4\
+1UL
+int main(void) {
+    int value = 1;
+    value +\
+= 2;
+    /\
+/ ignored @ token
+    /\
+* ignored @ token */
+    char letter = '\
+A';
+    char *escape = "\x4\
+1";
+    char *private_use = "";
+    return value == 3 && A == 7 && TWELVE == 12 && HEX == 65
+        && letter == 'A' && escape[0] == 'A' && private_use[0] == 0xe000;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn physical_line_continuation_errors_keep_physical_source_locations() {
+    let program = "#define VALUE 1 \\\n    + @\nint main(void) { return VALUE; }\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "preprocessor line continuations are not supported at line 3, column 9\nignored \\\n        ^"
-    );
-
-    let program = "#ifdef NEVER\n// ignored \\\n#else\nint main(void) { return 7; }\n#endif\n";
-    let err = interpret(program).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "preprocessor line continuations are not supported at line 2, column 12\n// ignored \\\n           ^"
+        "unexpected character '@' at line 2, column 7\n    + @\n      ^"
     );
 }
 
@@ -836,10 +890,6 @@ fn rejects_unsupported_and_malformed_preprocessor_directives_with_context() {
         (
             include_str!("fixtures/invalid/midline_directive_after_empty_macro.c"),
             "preprocessor directives must begin on a new line at line 2, column 7\nEMPTY #define VALUE 7\n      ^",
-        ),
-        (
-            include_str!("fixtures/invalid/macro_line_continuation.c"),
-            "preprocessor line continuations are not supported at line 1, column 17\n#define VALUE 1 \\\n                ^",
         ),
     ];
 

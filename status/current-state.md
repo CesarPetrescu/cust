@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-27
+Last updated: 2026-07-28
 
 ## Latest autonomous verification
+
+Global C11 physical-line splicing is complete. Before preprocessing-token decomposition, Cust deletes every backslash immediately followed by LF or CRLF without inserting whitespace, so continuations join directive and macro names, replacement identifiers/numbers, operators, comment delimiters, ordinary identifiers, character/string literals, and numeric escapes. A parallel physical-position map preserves exact line/column/caret diagnostics after deletion; position-preserving slices keep nested macro-replacement and `#if`/`#elif` lexing source-correct. Inactive ordinary text, line comments, and quoted text retain logical-line directive structure. A warning-free compiler-oracle fixture covers multiline object macros and conditionals. The canonical local and Docker gates pass with 1,075 tests (965 interpreter, 98 fuzz-safety, 8 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test). See `references/cust-physical-line-splicing.md`.
+
+Verified commands: initial four-test continuation RED against the exact unsupported diagnostic; focused GREEN for LF/CRLF, token joining, inactive text/comments/literals, and physical locations; canonical `c_compat`; recursion-depth regression; independent Codex review that exposed sentinel/token-boundary defects; redesign to deletion plus parallel positions; all-boundaries regression and final review; review-driven Clippy fix; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust` (output `10`); and `git diff --check`.
 
 Bounded expression-form `#if` / `#elif` preprocessing is complete. Conditions recognize integer object macros, both `defined NAME` and `defined(NAME)`, remaining identifiers as zero, C-style signed/unsigned `intmax_t`/`uintmax_t` conversions, precedence, short-circuit `&&`/`||`/`?:`, and ordered one-branch `#elif` chains. Raw and expanded condition tokens are capped at 8,192 and expression nesting at 128 independently of the 128-frame conditional stack. Exact malformed/order/division/shift/suffix/resource diagnostics retain source context; ordinary macro expansion normalizes internal preprocessing integers before public token output. `tests/fixtures/compat/valid/object_like_macro_if_elif.c` passes Cust and the warning-free native C11 compiler oracle. The canonical local and Docker gates pass with 1,071 tests (961 interpreter, 98 fuzz-safety, 8 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test). See `references/cust-if-elif-preprocessing.md`.
 

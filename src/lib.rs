@@ -1211,10 +1211,27 @@ fn lex_with_context(
     preserve_preprocessor_integers: bool,
     token_limit: Option<(usize, &str)>,
 ) -> CustResult<Vec<LocatedToken>> {
-    let chars: Vec<char> = input.chars().collect();
-    if allow_preprocessor_directives {
-        reject_preprocessor_line_continuations(source, &chars, initial_line, initial_column)?;
-    }
+    let chars = SplicedSourceChars::new(input, initial_line, initial_column);
+    lex_spliced_with_context(
+        &chars,
+        source,
+        initial_line,
+        initial_column,
+        allow_preprocessor_directives,
+        preserve_preprocessor_integers,
+        token_limit,
+    )
+}
+
+fn lex_spliced_with_context(
+    chars: &SplicedSourceChars,
+    source: &str,
+    initial_line: usize,
+    initial_column: usize,
+    allow_preprocessor_directives: bool,
+    preserve_preprocessor_integers: bool,
+    token_limit: Option<(usize, &str)>,
+) -> CustResult<Vec<LocatedToken>> {
     let mut tokens = Vec::new();
     let mut macros = HashMap::<String, ObjectMacro>::new();
     let mut macro_expansion_budget = MacroExpansionBudget::default();
@@ -1233,27 +1250,27 @@ fn lex_with_context(
                     if c == '\n' {
                         line_has_preprocessing_token = false;
                     }
-                    advance_position(c, &mut line, &mut column, &mut i);
+                    advance_position(chars, c, &mut line, &mut column, &mut i);
                 }
                 '/' if chars.get(i + 1) == Some(&'/') => {
                     while i < chars.len() && chars[i] != '\n' {
-                        advance_position(chars[i], &mut line, &mut column, &mut i);
+                        advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                     }
                 }
                 '/' if chars.get(i + 1) == Some(&'*') => {
                     let start_line = line;
                     let start_column = column;
-                    advance_position('/', &mut line, &mut column, &mut i);
-                    advance_position('*', &mut line, &mut column, &mut i);
+                    advance_position(chars, '/', &mut line, &mut column, &mut i);
+                    advance_position(chars, '*', &mut line, &mut column, &mut i);
                     let mut closed = false;
                     while i < chars.len() {
                         if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
-                            advance_position('*', &mut line, &mut column, &mut i);
-                            advance_position('/', &mut line, &mut column, &mut i);
+                            advance_position(chars, '*', &mut line, &mut column, &mut i);
+                            advance_position(chars, '/', &mut line, &mut column, &mut i);
                             closed = true;
                             break;
                         }
-                        advance_position(chars[i], &mut line, &mut column, &mut i);
+                        advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                     }
                     if !closed {
                         return Err(lexer_error_with_context(
@@ -1267,7 +1284,7 @@ fn lex_with_context(
                 '#' if !line_has_preprocessing_token => {
                     let consumed = process_preprocessor_directive(
                         source,
-                        &chars,
+                        chars,
                         &mut i,
                         &mut line,
                         &mut column,
@@ -1278,7 +1295,7 @@ fn lex_with_context(
                     if !consumed {
                         skip_inactive_text_line(
                             source,
-                            &chars,
+                            chars,
                             &mut i,
                             &mut line,
                             &mut column,
@@ -1289,7 +1306,7 @@ fn lex_with_context(
                 _ => {
                     skip_inactive_text_line(
                         source,
-                        &chars,
+                        chars,
                         &mut i,
                         &mut line,
                         &mut column,
@@ -1308,29 +1325,29 @@ fn lex_with_context(
             line_has_preprocessing_token = true;
         }
         match c {
-            c if c.is_whitespace() => advance_position(c, &mut line, &mut column, &mut i),
+            c if c.is_whitespace() => advance_position(chars, c, &mut line, &mut column, &mut i),
             '/' if chars.get(i + 1) == Some(&'/') => {
-                advance_position('/', &mut line, &mut column, &mut i);
-                advance_position('/', &mut line, &mut column, &mut i);
+                advance_position(chars, '/', &mut line, &mut column, &mut i);
+                advance_position(chars, '/', &mut line, &mut column, &mut i);
                 while i < chars.len() && chars[i] != '\n' {
-                    advance_position(chars[i], &mut line, &mut column, &mut i);
+                    advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                 }
             }
             '/' if chars.get(i + 1) == Some(&'*') => {
                 let start_line = line;
                 let start_column = column;
-                advance_position('/', &mut line, &mut column, &mut i);
-                advance_position('*', &mut line, &mut column, &mut i);
+                advance_position(chars, '/', &mut line, &mut column, &mut i);
+                advance_position(chars, '*', &mut line, &mut column, &mut i);
 
                 let mut closed = false;
                 while i < chars.len() {
                     if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
-                        advance_position('*', &mut line, &mut column, &mut i);
-                        advance_position('/', &mut line, &mut column, &mut i);
+                        advance_position(chars, '*', &mut line, &mut column, &mut i);
+                        advance_position(chars, '/', &mut line, &mut column, &mut i);
                         closed = true;
                         break;
                     }
-                    advance_position(chars[i], &mut line, &mut column, &mut i);
+                    advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                 }
 
                 if !closed {
@@ -1349,12 +1366,12 @@ fn lex_with_context(
                 let (digits_start, radix) = if chars[i] == '0'
                     && matches!(chars.get(i + 1), Some('x') | Some('X'))
                 {
-                    advance_position('0', &mut line, &mut column, &mut i);
+                    advance_position(chars, '0', &mut line, &mut column, &mut i);
                     let prefix = chars[i];
-                    advance_position(prefix, &mut line, &mut column, &mut i);
+                    advance_position(chars, prefix, &mut line, &mut column, &mut i);
                     let digits_start = i;
                     while i < chars.len() && chars[i].is_ascii_hexdigit() {
-                        advance_position(chars[i], &mut line, &mut column, &mut i);
+                        advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                     }
                     if digits_start == i {
                         return Err(lexer_error_with_context(
@@ -1366,7 +1383,7 @@ fn lex_with_context(
                     }
                     (digits_start, 16)
                 } else if chars[i] == '0' {
-                    advance_position('0', &mut line, &mut column, &mut i);
+                    advance_position(chars, '0', &mut line, &mut column, &mut i);
                     while i < chars.len() && chars[i].is_ascii_digit() {
                         if !matches!(chars[i], '0'..='7') {
                             return Err(lexer_error_with_context(
@@ -1376,18 +1393,18 @@ fn lex_with_context(
                                 start_column,
                             ));
                         }
-                        advance_position(chars[i], &mut line, &mut column, &mut i);
+                        advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                     }
                     (start, 8)
                 } else {
                     while i < chars.len() && chars[i].is_ascii_digit() {
-                        advance_position(chars[i], &mut line, &mut column, &mut i);
+                        advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                     }
                     (start, 10)
                 };
                 let text: String = chars[digits_start..i].iter().collect();
                 let unsigned_suffix =
-                    consume_integer_suffix(source, &chars, &mut line, &mut column, &mut i)?;
+                    consume_integer_suffix(source, chars, &mut line, &mut column, &mut i)?;
                 let value = u64::from_str_radix(&text, radix).map_err(|_| {
                     lexer_error_with_context(
                         "integer literal out of range",
@@ -1414,7 +1431,7 @@ fn lex_with_context(
             '"' => {
                 let start_line = line;
                 let start_column = column;
-                advance_position('"', &mut line, &mut column, &mut i);
+                advance_position(chars, '"', &mut line, &mut column, &mut i);
                 let mut values = Vec::new();
 
                 loop {
@@ -1428,7 +1445,7 @@ fn lex_with_context(
                     };
                     match next {
                         '"' => {
-                            advance_position('"', &mut line, &mut column, &mut i);
+                            advance_position(chars, '"', &mut line, &mut column, &mut i);
                             values.push('\0' as i64);
                             tokens.push(LocatedToken::new(
                                 Token::StringLiteral(values),
@@ -1438,10 +1455,10 @@ fn lex_with_context(
                             break;
                         }
                         '\\' => {
-                            advance_position('\\', &mut line, &mut column, &mut i);
+                            advance_position(chars, '\\', &mut line, &mut column, &mut i);
                             let escaped = parse_escape_sequence(
                                 source,
-                                &chars,
+                                chars,
                                 &mut line,
                                 &mut column,
                                 &mut i,
@@ -1459,7 +1476,7 @@ fn lex_with_context(
                             ));
                         }
                         value => {
-                            advance_position(value, &mut line, &mut column, &mut i);
+                            advance_position(chars, value, &mut line, &mut column, &mut i);
                             values.push(value as i64);
                         }
                     }
@@ -1468,14 +1485,14 @@ fn lex_with_context(
             '\'' => {
                 let start_line = line;
                 let start_column = column;
-                advance_position('\'', &mut line, &mut column, &mut i);
+                advance_position(chars, '\'', &mut line, &mut column, &mut i);
 
                 let value = match chars.get(i).copied() {
                     Some('\\') => {
-                        advance_position('\\', &mut line, &mut column, &mut i);
+                        advance_position(chars, '\\', &mut line, &mut column, &mut i);
                         parse_escape_sequence(
                             source,
-                            &chars,
+                            chars,
                             &mut line,
                             &mut column,
                             &mut i,
@@ -1492,7 +1509,7 @@ fn lex_with_context(
                         ));
                     }
                     Some(value) => {
-                        advance_position(value, &mut line, &mut column, &mut i);
+                        advance_position(chars, value, &mut line, &mut column, &mut i);
                         value as i64
                     }
                 };
@@ -1505,7 +1522,7 @@ fn lex_with_context(
                         start_column,
                     ));
                 }
-                advance_position('\'', &mut line, &mut column, &mut i);
+                advance_position(chars, '\'', &mut line, &mut column, &mut i);
                 tokens.push(LocatedToken::new(
                     Token::Number(value),
                     start_line,
@@ -1517,7 +1534,7 @@ fn lex_with_context(
                 let start_line = line;
                 let start_column = column;
                 while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                    advance_position(chars[i], &mut line, &mut column, &mut i);
+                    advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                 }
                 let text: String = chars[start..i].iter().collect();
                 if macros.contains_key(&text) {
@@ -1538,206 +1555,206 @@ fn lex_with_context(
             }
             '+' if chars.get(i + 1) == Some(&'+') => {
                 push_token(&mut tokens, Token::PlusPlus, line, column);
-                advance_position('+', &mut line, &mut column, &mut i);
-                advance_position('+', &mut line, &mut column, &mut i);
+                advance_position(chars, '+', &mut line, &mut column, &mut i);
+                advance_position(chars, '+', &mut line, &mut column, &mut i);
             }
             '+' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::PlusAssign, line, column);
-                advance_position('+', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '+', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '+' => {
                 push_token(&mut tokens, Token::Plus, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '-' if chars.get(i + 1) == Some(&'-') => {
                 push_token(&mut tokens, Token::MinusMinus, line, column);
-                advance_position('-', &mut line, &mut column, &mut i);
-                advance_position('-', &mut line, &mut column, &mut i);
+                advance_position(chars, '-', &mut line, &mut column, &mut i);
+                advance_position(chars, '-', &mut line, &mut column, &mut i);
             }
             '-' if chars.get(i + 1) == Some(&'>') => {
                 push_token(&mut tokens, Token::Arrow, line, column);
-                advance_position('-', &mut line, &mut column, &mut i);
-                advance_position('>', &mut line, &mut column, &mut i);
+                advance_position(chars, '-', &mut line, &mut column, &mut i);
+                advance_position(chars, '>', &mut line, &mut column, &mut i);
             }
             '-' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::MinusAssign, line, column);
-                advance_position('-', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '-', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '-' => {
                 push_token(&mut tokens, Token::Minus, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '*' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::StarAssign, line, column);
-                advance_position('*', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '*', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '*' => {
                 push_token(&mut tokens, Token::Star, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '/' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::SlashAssign, line, column);
-                advance_position('/', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '/', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '/' => {
                 push_token(&mut tokens, Token::Slash, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '%' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::PercentAssign, line, column);
-                advance_position('%', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '%', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '%' => {
                 push_token(&mut tokens, Token::Percent, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '&' if chars.get(i + 1) == Some(&'&') => {
                 push_token(&mut tokens, Token::AndAnd, line, column);
-                advance_position('&', &mut line, &mut column, &mut i);
-                advance_position('&', &mut line, &mut column, &mut i);
+                advance_position(chars, '&', &mut line, &mut column, &mut i);
+                advance_position(chars, '&', &mut line, &mut column, &mut i);
             }
             '&' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::AmpAssign, line, column);
-                advance_position('&', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '&', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '&' => {
                 push_token(&mut tokens, Token::Amp, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '|' if chars.get(i + 1) == Some(&'|') => {
                 push_token(&mut tokens, Token::OrOr, line, column);
-                advance_position('|', &mut line, &mut column, &mut i);
-                advance_position('|', &mut line, &mut column, &mut i);
+                advance_position(chars, '|', &mut line, &mut column, &mut i);
+                advance_position(chars, '|', &mut line, &mut column, &mut i);
             }
             '|' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::PipeAssign, line, column);
-                advance_position('|', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '|', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '|' => {
                 push_token(&mut tokens, Token::Pipe, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '^' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::CaretAssign, line, column);
-                advance_position('^', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '^', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '^' => {
                 push_token(&mut tokens, Token::Caret, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '~' => {
                 push_token(&mut tokens, Token::Tilde, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '(' => {
                 push_token(&mut tokens, Token::LParen, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             ')' => {
                 push_token(&mut tokens, Token::RParen, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '[' => {
                 push_token(&mut tokens, Token::LBracket, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             ']' => {
                 push_token(&mut tokens, Token::RBracket, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '{' => {
                 push_token(&mut tokens, Token::LBrace, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '}' => {
                 push_token(&mut tokens, Token::RBrace, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             ',' => {
                 push_token(&mut tokens, Token::Comma, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             ';' => {
                 push_token(&mut tokens, Token::Semi, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '.' => {
                 push_token(&mut tokens, Token::Dot, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '?' => {
                 push_token(&mut tokens, Token::Question, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             ':' => {
                 push_token(&mut tokens, Token::Colon, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '=' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::Eq, line, column);
-                advance_position('=', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '!' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::Ne, line, column);
-                advance_position('!', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '!', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '!' => {
                 push_token(&mut tokens, Token::Bang, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '<' if chars.get(i + 1) == Some(&'<') && chars.get(i + 2) == Some(&'=') => {
                 push_token(&mut tokens, Token::ShiftLeftAssign, line, column);
-                advance_position('<', &mut line, &mut column, &mut i);
-                advance_position('<', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '<', &mut line, &mut column, &mut i);
+                advance_position(chars, '<', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '<' if chars.get(i + 1) == Some(&'<') => {
                 push_token(&mut tokens, Token::ShiftLeft, line, column);
-                advance_position('<', &mut line, &mut column, &mut i);
-                advance_position('<', &mut line, &mut column, &mut i);
+                advance_position(chars, '<', &mut line, &mut column, &mut i);
+                advance_position(chars, '<', &mut line, &mut column, &mut i);
             }
             '<' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::Le, line, column);
-                advance_position('<', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '<', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '>' if chars.get(i + 1) == Some(&'>') && chars.get(i + 2) == Some(&'=') => {
                 push_token(&mut tokens, Token::ShiftRightAssign, line, column);
-                advance_position('>', &mut line, &mut column, &mut i);
-                advance_position('>', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '>', &mut line, &mut column, &mut i);
+                advance_position(chars, '>', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '>' if chars.get(i + 1) == Some(&'>') => {
                 push_token(&mut tokens, Token::ShiftRight, line, column);
-                advance_position('>', &mut line, &mut column, &mut i);
-                advance_position('>', &mut line, &mut column, &mut i);
+                advance_position(chars, '>', &mut line, &mut column, &mut i);
+                advance_position(chars, '>', &mut line, &mut column, &mut i);
             }
             '>' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::Ge, line, column);
-                advance_position('>', &mut line, &mut column, &mut i);
-                advance_position('=', &mut line, &mut column, &mut i);
+                advance_position(chars, '>', &mut line, &mut column, &mut i);
+                advance_position(chars, '=', &mut line, &mut column, &mut i);
             }
             '=' => {
                 push_token(&mut tokens, Token::Assign, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '<' => {
                 push_token(&mut tokens, Token::Lt, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '>' => {
                 push_token(&mut tokens, Token::Gt, line, column);
-                advance_position(c, &mut line, &mut column, &mut i);
+                advance_position(chars, c, &mut line, &mut column, &mut i);
             }
             '#' => {
                 if !allow_preprocessor_directives {
@@ -1758,7 +1775,7 @@ fn lex_with_context(
                 }
                 process_preprocessor_directive(
                     source,
-                    &chars,
+                    chars,
                     &mut i,
                     &mut line,
                     &mut column,
@@ -1804,28 +1821,69 @@ fn lex_with_context(
     Ok(tokens)
 }
 
-fn reject_preprocessor_line_continuations(
-    source: &str,
-    chars: &[char],
-    mut line: usize,
-    mut column: usize,
-) -> CustResult<()> {
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '\\'
-            && (chars.get(i + 1) == Some(&'\n')
-                || (chars.get(i + 1) == Some(&'\r') && chars.get(i + 2) == Some(&'\n')))
-        {
-            return Err(lexer_error_with_context(
-                "preprocessor line continuations are not supported",
-                source,
-                line,
-                column,
-            ));
+struct SplicedSourceChars {
+    values: Vec<char>,
+    positions: Vec<(usize, usize)>,
+}
+
+impl SplicedSourceChars {
+    fn new(input: &str, mut line: usize, mut column: usize) -> Self {
+        let raw: Vec<char> = input.chars().collect();
+        let mut values = Vec::with_capacity(raw.len());
+        let mut positions = Vec::with_capacity(raw.len() + 1);
+        let mut cursor = 0;
+
+        while cursor < raw.len() {
+            if raw[cursor] == '\\' && raw.get(cursor + 1) == Some(&'\n') {
+                cursor += 2;
+                line += 1;
+                column = 1;
+                continue;
+            }
+            if raw[cursor] == '\\'
+                && raw.get(cursor + 1) == Some(&'\r')
+                && raw.get(cursor + 2) == Some(&'\n')
+            {
+                cursor += 3;
+                line += 1;
+                column = 1;
+                continue;
+            }
+
+            let value = raw[cursor];
+            positions.push((line, column));
+            values.push(value);
+            cursor += 1;
+            if value == '\n' {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
         }
-        advance_position(chars[i], &mut line, &mut column, &mut i);
+        positions.push((line, column));
+
+        Self { values, positions }
     }
-    Ok(())
+
+    fn position(&self, cursor: usize) -> (usize, usize) {
+        self.positions[cursor]
+    }
+
+    fn slice(&self, start: usize, end: usize) -> Self {
+        Self {
+            values: self.values[start..end].to_vec(),
+            positions: self.positions[start..=end].to_vec(),
+        }
+    }
+}
+
+impl std::ops::Deref for SplicedSourceChars {
+    type Target = [char];
+
+    fn deref(&self) -> &Self::Target {
+        &self.values
+    }
 }
 
 fn identifier_token(text: String) -> Token {
@@ -1929,7 +1987,7 @@ fn macro_replacement_token(
 #[allow(clippy::too_many_arguments)]
 fn process_preprocessor_directive(
     source: &str,
-    chars: &[char],
+    chars: &SplicedSourceChars,
     i: &mut usize,
     current_line: &mut usize,
     column: &mut usize,
@@ -2328,14 +2386,14 @@ fn process_preprocessor_directive(
             while replacement_end > cursor && chars[replacement_end - 1].is_whitespace() {
                 replacement_end -= 1;
             }
-            let replacement_source: String = chars[cursor..replacement_end].iter().collect();
+            let replacement_chars = chars.slice(cursor, replacement_end);
             let (replacement_line, replacement_column) =
                 preprocessor_position_at(chars, directive_start, line, directive_column, cursor);
-            let replacement = if replacement_source.is_empty() {
+            let replacement = if replacement_chars.is_empty() {
                 Vec::new()
             } else {
-                let mut replacement_tokens = lex_with_context(
-                    &replacement_source,
+                let mut replacement_tokens = lex_spliced_with_context(
+                    &replacement_chars,
                     source,
                     replacement_line,
                     replacement_column,
@@ -2344,7 +2402,6 @@ fn process_preprocessor_directive(
                     None,
                 )?;
                 replacement_tokens.pop();
-                let replacement_chars: Vec<char> = replacement_source.chars().collect();
                 let mut spelling_cursor = 0;
                 let mut spelling_line = replacement_line;
                 let mut spelling_column = replacement_column;
@@ -2355,6 +2412,7 @@ fn process_preprocessor_directive(
                             && (spelling_line, spelling_column) != (token.line, token.column)
                         {
                             advance_position(
+                                &replacement_chars,
                                 replacement_chars[spelling_cursor],
                                 &mut spelling_line,
                                 &mut spelling_column,
@@ -2458,7 +2516,7 @@ fn process_preprocessor_directive(
     }
 
     while *i < line_end {
-        advance_position(chars[*i], current_line, column, i);
+        advance_position(chars, chars[*i], current_line, column, i);
     }
     Ok(true)
 }
@@ -2466,7 +2524,7 @@ fn process_preprocessor_directive(
 #[allow(clippy::too_many_arguments)]
 fn evaluate_preprocessor_condition(
     source: &str,
-    chars: &[char],
+    chars: &SplicedSourceChars,
     mut cursor: usize,
     content_end: usize,
     line: usize,
@@ -2498,9 +2556,9 @@ fn evaluate_preprocessor_condition(
 
     let (condition_line, condition_column) =
         preprocessor_position_at(chars, directive_start, line, directive_column, cursor);
-    let condition_source: String = chars[cursor..content_end].iter().collect();
-    let raw_tokens = lex_with_context(
-        &condition_source,
+    let condition_chars = chars.slice(cursor, content_end);
+    let raw_tokens = lex_spliced_with_context(
+        &condition_chars,
         source,
         condition_line,
         condition_column,
@@ -3051,14 +3109,14 @@ fn preprocessor_directive_line_end(chars: &[char], mut cursor: usize) -> usize {
 }
 
 fn preprocessor_position_at(
-    chars: &[char],
+    chars: &SplicedSourceChars,
     mut cursor: usize,
     mut line: usize,
     mut column: usize,
     target: usize,
 ) -> (usize, usize) {
     while cursor < target {
-        advance_position(chars[cursor], &mut line, &mut column, &mut cursor);
+        advance_position(chars, chars[cursor], &mut line, &mut column, &mut cursor);
     }
     (line, column)
 }
@@ -3091,7 +3149,7 @@ fn inactive_directive_has_name_on_line(chars: &[char], mut cursor: usize, end: u
 
 fn skip_preprocessor_whitespace(
     source: &str,
-    chars: &[char],
+    chars: &SplicedSourceChars,
     cursor: &mut usize,
     end: usize,
     line: usize,
@@ -3138,7 +3196,7 @@ fn skip_preprocessor_whitespace(
 
 fn skip_inactive_text_line(
     source: &str,
-    chars: &[char],
+    chars: &SplicedSourceChars,
     i: &mut usize,
     line: &mut usize,
     column: &mut usize,
@@ -3148,12 +3206,12 @@ fn skip_inactive_text_line(
     while *i < chars.len() && chars[*i] != '\n' {
         match chars[*i] {
             quote @ ('\'' | '"') => {
-                advance_position(quote, line, column, i);
+                advance_position(chars, quote, line, column, i);
                 while *i < chars.len() && chars[*i] != '\n' {
                     let current = chars[*i];
-                    advance_position(current, line, column, i);
+                    advance_position(chars, current, line, column, i);
                     if current == '\\' && *i < chars.len() && chars[*i] != '\n' {
-                        advance_position(chars[*i], line, column, i);
+                        advance_position(chars, chars[*i], line, column, i);
                     } else if current == quote {
                         break;
                     }
@@ -3161,23 +3219,23 @@ fn skip_inactive_text_line(
             }
             '/' if chars.get(*i + 1) == Some(&'/') => {
                 while *i < chars.len() && chars[*i] != '\n' {
-                    advance_position(chars[*i], line, column, i);
+                    advance_position(chars, chars[*i], line, column, i);
                 }
             }
             '/' if chars.get(*i + 1) == Some(&'*') => {
                 let start_line = *line;
                 let start_column = *column;
-                advance_position('/', line, column, i);
-                advance_position('*', line, column, i);
+                advance_position(chars, '/', line, column, i);
+                advance_position(chars, '*', line, column, i);
                 let mut closed = false;
                 while *i < chars.len() {
                     if chars[*i] == '*' && chars.get(*i + 1) == Some(&'/') {
-                        advance_position('*', line, column, i);
-                        advance_position('/', line, column, i);
+                        advance_position(chars, '*', line, column, i);
+                        advance_position(chars, '/', line, column, i);
                         closed = true;
                         break;
                     }
-                    advance_position(chars[*i], line, column, i);
+                    advance_position(chars, chars[*i], line, column, i);
                 }
                 if !closed {
                     return Err(lexer_error_with_context(
@@ -3191,7 +3249,7 @@ fn skip_inactive_text_line(
                     return Ok(());
                 }
             }
-            current => advance_position(current, line, column, i),
+            current => advance_position(chars, current, line, column, i),
         }
     }
     Ok(())
@@ -3337,7 +3395,7 @@ fn push_token(tokens: &mut Vec<LocatedToken>, kind: Token, line: usize, column: 
 
 fn parse_escape_sequence(
     source: &str,
-    chars: &[char],
+    chars: &SplicedSourceChars,
     line: &mut usize,
     column: &mut usize,
     i: &mut usize,
@@ -3356,51 +3414,51 @@ fn parse_escape_sequence(
 
     match escape_char {
         'a' => {
-            advance_position('a', line, column, i);
+            advance_position(chars, 'a', line, column, i);
             Ok(0x07)
         }
         'b' => {
-            advance_position('b', line, column, i);
+            advance_position(chars, 'b', line, column, i);
             Ok(0x08)
         }
         'f' => {
-            advance_position('f', line, column, i);
+            advance_position(chars, 'f', line, column, i);
             Ok(0x0c)
         }
         'n' => {
-            advance_position('n', line, column, i);
+            advance_position(chars, 'n', line, column, i);
             Ok('\n' as i64)
         }
         'r' => {
-            advance_position('r', line, column, i);
+            advance_position(chars, 'r', line, column, i);
             Ok('\r' as i64)
         }
         't' => {
-            advance_position('t', line, column, i);
+            advance_position(chars, 't', line, column, i);
             Ok('\t' as i64)
         }
         'v' => {
-            advance_position('v', line, column, i);
+            advance_position(chars, 'v', line, column, i);
             Ok(0x0b)
         }
         '\\' => {
-            advance_position('\\', line, column, i);
+            advance_position(chars, '\\', line, column, i);
             Ok('\\' as i64)
         }
         '\'' => {
-            advance_position('\'', line, column, i);
+            advance_position(chars, '\'', line, column, i);
             Ok('\'' as i64)
         }
         '"' => {
-            advance_position('"', line, column, i);
+            advance_position(chars, '"', line, column, i);
             Ok('"' as i64)
         }
         '?' => {
-            advance_position('?', line, column, i);
+            advance_position(chars, '?', line, column, i);
             Ok('?' as i64)
         }
         'x' => {
-            advance_position('x', line, column, i);
+            advance_position(chars, 'x', line, column, i);
             let digits_start = *i;
             let mut value = 0i64;
             while let Some(digit) = chars.get(*i).copied().filter(char::is_ascii_hexdigit) {
@@ -3416,7 +3474,7 @@ fn parse_escape_sequence(
                             literal_start_column,
                         )
                     })?;
-                advance_position(digit, line, column, i);
+                advance_position(chars, digit, line, column, i);
             }
             if *i == digits_start {
                 return Err(lexer_error_with_context(
@@ -3439,7 +3497,7 @@ fn parse_escape_sequence(
                 }
                 let digit_value = digit.to_digit(8).expect("octal digit should have value") as i64;
                 value = value * 8 + digit_value;
-                advance_position(digit, line, column, i);
+                advance_position(chars, digit, line, column, i);
             }
             Ok(value)
         }
@@ -3454,7 +3512,7 @@ fn parse_escape_sequence(
 
 fn consume_integer_suffix(
     source: &str,
-    chars: &[char],
+    chars: &SplicedSourceChars,
     line: &mut usize,
     column: &mut usize,
     i: &mut usize,
@@ -3467,7 +3525,7 @@ fn consume_integer_suffix(
         .is_some_and(|character| character.is_ascii_alphanumeric() || *character == '_')
     {
         let character = chars[*i];
-        advance_position(character, line, column, i);
+        advance_position(chars, character, line, column, i);
     }
     if suffix_start == *i {
         return Ok(false);
@@ -3495,14 +3553,15 @@ fn consume_integer_suffix(
     Ok(suffix.contains(['u', 'U']))
 }
 
-fn advance_position(c: char, line: &mut usize, column: &mut usize, i: &mut usize) {
+fn advance_position(
+    chars: &SplicedSourceChars,
+    _c: char,
+    line: &mut usize,
+    column: &mut usize,
+    i: &mut usize,
+) {
     *i += 1;
-    if c == '\n' {
-        *line += 1;
-        *column = 1;
-    } else {
-        *column += 1;
-    }
+    (*line, *column) = chars.position(*i);
 }
 
 struct Parser {
