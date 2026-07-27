@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-27 resumed two-dimensional array-field row-pointer closure after 1,039 passing tests, warning-free Clippy, compiler-oracle exit-code parity, and both canonical Docker gates. The fixed two-dimensional scalar-array/row-pointer roadmap is complete; v0.3.0 release metadata is the next product task, not an external blocker.
+None. Last reviewed during the 2026-07-27 v0.3.0 release run after 1,039 passing tests, warning-free Clippy, exact local/container `cust 0.3.0` output, and both canonical Docker gates. The fixed two-dimensional scalar-array/pointer-to-row roadmap and release package are complete; object-like macro preprocessing is the next bounded v0.4 task, not an external blocker.
 
 ## Blocker template
 

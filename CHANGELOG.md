@@ -4,14 +4,30 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.3.0 — 2026-07-27
+
 ### Language subset
 
-- Added fixed local, global, file-static, and block-static `int[R][C]` / `char[R][C]` objects with nested row initialization and zero filling, double-index reads, scalar replacement/compound/prefix/postfix writes, const-root protection, exact per-dimension bounds diagnostics, and deterministic full-object `sizeof`.
-- Preserved explicit boundaries for scalar-pointer/row decay, multidimensional parameters and aggregate fields, variable-length dimensions, and arrays with more than two dimensions.
+- Added fixed local, global, file-static, and block-static `int[R][C]` / `char[R][C]` objects and named/anonymous aggregate fields with nested initialization, zero filling, deep-copy isolation, double-index scalar lvalues, const protection, exact per-dimension bounds diagnostics, and deterministic type queries.
+- Added two-dimensional scalar-array typedef aliases and comma-separated direct/typedef-backed object declarations across local, global, and static storage.
+- Added C array-parameter adjustment for direct and typedef-backed two-dimensional scalar arrays while preserving caller-owned storage, element type, fixed column width, qualification, forwarding, and bounds metadata.
+- Added interpreter-owned pointer-to-row values for direct arrays and supported two-dimensional aggregate fields, including explicit `T (*row)[C]` objects/parameters, pointer-to-row typedef aliases, `T (*function(params))[C]` returns, row-scaled arithmetic/difference/equality/ordering, and double indexing through call/conditional/comma expressions.
 
-### Verification
+### Diagnostics and safety
 
-- Added focused interpreter regressions and a warning-free native compiler-oracle fixture; the suite now has 992 passing tests.
+- Added exact type, width, rank, row/column bounds, const-discard/write, and escaped-local diagnostics for two-dimensional arrays and row pointers without exposing host addresses.
+- Preserved explicit boundaries for variable-length arrays, arrays with more than two dimensions, aggregate-valued multidimensional elements, scalar-pointer flattening, and unsupported pointer-to-row declarator shapes.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.3.0`.
+- Added focused interpreter regressions, deterministic row-expression/field property coverage, exact invalid fixtures, and warning-free native compiler-oracle fixtures.
+- Verified 1,039 tests at release time: 929 interpreter tests, 98 deterministic fuzz-safety tests, and 12 CLI, Docker, compiler-oracle, and repository tests.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Unsupported areas include preprocessing/includes/macros, standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, and host ABI layout/promotion rules.
 
 ## v0.2.0 — 2026-07-25
 

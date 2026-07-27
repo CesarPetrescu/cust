@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-27 — v0.3.0 release metadata
+
+- No new external semantics research was needed. `env!("CARGO_PKG_VERSION")` remains the executable version source, and regenerating `Cargo.lock` after changing `Cargo.toml` propagates `0.3.0` into local and multi-stage Docker builds of the same package.
+- Release consistency remains executable: `tests/cli.rs` pins package metadata and exact `cust 0.3.0` output, while `tests/docker_compose.rs` pins `cust:v0.3.0` and `cust-test:v0.3.0`. The rebuilt runtime image independently reports `cust 0.3.0`.
+- The release commit must be pushed before creating the annotated tag. The preflight confirmed neither the local repository nor `origin` had `v0.3.0`; create the annotated tag at the verified pushed commit, push it, and compare local/remote peeled targets.
+
 ## 2026-07-27 — Resumed 2D field row-pointer closure
 
 - No new external semantics research was needed. Inspection confirmed that the inherited implementation follows Cust's existing interpreter-owned `PointerValue::Array2DRow` model rather than introducing host addresses: field decay branches on stored dimensions, and metadata classifiers recognize `StructFieldType::Array2D` without evaluating side-effecting roots or indexes.
