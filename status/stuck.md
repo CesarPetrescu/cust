@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-27 v0.3.0 release run after 1,039 passing tests, warning-free Clippy, exact local/container `cust 0.3.0` output, and both canonical Docker gates. The fixed two-dimensional scalar-array/pointer-to-row roadmap and release package are complete; object-like macro preprocessing is the next bounded v0.4 task, not an external blocker.
+None. Last reviewed during the 2026-07-27 object-like macro closure after focused RED/GREEN for independent-review findings, a warning-free native C11 oracle, 1,050 passing local tests, warning-free Clippy, and both canonical Docker gates. The one-line `#define` slice is complete with bounded expansion resources; `#undef` is the next backlog item, not an external blocker.
 
 ## Blocker template
 

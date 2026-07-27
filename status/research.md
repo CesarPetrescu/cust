@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-27 — Object-like macro preprocessing
+
+- ISO C11 draft N1570 §6.10.3 defines object-like replacement lists and permits compatible redefinition; §6.10.3.4 requires the resulting preprocessing token sequence to be rescanned for more macro names. Cust therefore stores unexpanded replacement token kinds and recursively resolves them against the macro table at each later use rather than eagerly freezing only definitions already seen.
+- N1570 footnote 171 clarifies that character constants and string literals are preprocessing tokens and are not scanned internally for macro names. Cust's lexer naturally preserves this boundary because comments disappear as whitespace and each literal is tokenized before identifier expansion.
+- The bounded milestone deliberately rejects function-like macros, `#include`, and physical-line continuations, and reports recursive object-like expansion rather than modeling the standard's temporarily disabled self-reference behavior. Identical token-sequence redefinitions are accepted; conflicting definitions are rejected at the second name. Implementation and fixture details are in `references/cust-object-like-macro-preprocessing.md`.
+- Independent review exposed three lexer/safety seams: replacement-list lexing must disable directive execution so raw `#` is rejected rather than erased; directive whitespace must include line comments plus vertical-tab/form-feed; and recursive rescanning needs translation-unit-wide depth, emitted-token, and expansion-work budgets. Counting expansion calls separately from emitted tokens bounds exponentially branching empty macros, while shared counters prevent repeated invocations from resetting the quota.
+- The bounded one-physical-line directive model intentionally rejects a block comment that crosses a newline inside a directive as unterminated; full preprocessing-phase comment replacement and line splicing remain future work alongside line-continuation support.
+
 ## 2026-07-27 — v0.3.0 release metadata
 
 - No new external semantics research was needed. `env!("CARGO_PKG_VERSION")` remains the executable version source, and regenerating `Cargo.lock` after changing `Cargo.toml` propagates `0.3.0` into local and multi-stage Docker builds of the same package.

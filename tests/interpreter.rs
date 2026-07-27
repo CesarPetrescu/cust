@@ -213,15 +213,190 @@ fn reports_source_context_for_out_of_range_integer_literal() {
 }
 
 #[test]
-fn rejects_preprocessor_directives_with_context() {
-    let program = include_str!("fixtures/invalid/preprocessor_directive.c");
+fn supports_nested_object_like_macros_across_c_contexts() {
+    let program = include_str!("fixtures/compat/valid/object_like_macros.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn supports_block_comments_as_preprocessor_directive_whitespace() {
+    let program = r#"
+#define/*before name*/ VALUE/*before replacement*/ 4
+int main(void) {
+    return VALUE;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 4);
+}
+
+#[test]
+fn supports_line_comments_and_c_whitespace_in_macro_directives() {
+    let program = "#define\u{b}\u{c}VALUE\u{b}\u{c}6\n#define EMPTY// trailing comment\nint main(void) {\n    return EMPTY VALUE;\n}\n";
+
+    assert_eq!(interpret(program).unwrap(), 6);
+}
+
+#[test]
+fn rejects_macro_replacement_hash_operators_with_context() {
+    let program = include_str!("fixtures/invalid/macro_replacement_hash_operator.c");
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "preprocessor directives are not supported at line 1, column 1\n#include <stdio.h>\n^"
+        "macro replacement '#' operators are not supported at line 1, column 11\n#define X #define Y 1\n          ^"
     );
+}
+
+#[test]
+fn rejects_excessive_object_like_macro_expansion_depth() {
+    let mut program = String::from("#define M0 1\n");
+    for depth in 1..=300 {
+        program.push_str(&format!("#define M{depth} M{}\n", depth - 1));
+    }
+    program.push_str("int main(void) { return M300; }\n");
+
+    let err = interpret(&program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "object-like macro expansion depth limit exceeded at line 302, column 25\nint main(void) { return M300; }\n                        ^"
+    );
+}
+
+#[test]
+fn rejects_excessive_object_like_macro_expansion_tokens() {
+    let mut program = String::from("#define M0 1\n");
+    for depth in 1..=14 {
+        program.push_str(&format!("#define M{depth} M{} M{}\n", depth - 1, depth - 1));
+    }
+    program.push_str("int main(void) { return M14; }\n");
+
+    let err = interpret(&program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "object-like macro expansion token limit exceeded at line 16, column 25\nint main(void) { return M14; }\n                        ^"
+    );
+}
+
+#[test]
+fn rejects_excessive_empty_object_like_macro_expansion_work() {
+    let mut program = String::from("#define M0\n");
+    for depth in 1..=17 {
+        program.push_str(&format!("#define M{depth} M{} M{}\n", depth - 1, depth - 1));
+    }
+    program.push_str("int main(void) { return M17 0; }\n");
+
+    let err = interpret(&program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "object-like macro expansion work limit exceeded at line 19, column 25\nint main(void) { return M17 0; }\n                        ^"
+    );
+}
+
+#[test]
+fn object_like_macro_token_limit_is_shared_across_translation_unit() {
+    let replacement = "1 ".repeat(5_000);
+    let program =
+        format!("#define MANY {replacement}\nMANY MANY\nint main(void) {{ return 0; }}\n");
+
+    let err = interpret(&program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "object-like macro expansion token limit exceeded at line 2, column 6\nMANY MANY\n     ^"
+    );
+}
+
+#[test]
+fn nested_macro_rescanning_preserves_keyword_named_macros() {
+    let program = r#"
+int main(void) {
+#define int char
+#define TYPE int
+    return sizeof(TYPE);
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn object_like_macro_expansion_skips_comments_and_literals() {
+    let program = r#"
+#define NAME 9
+#define LETTER 3
+int main(void) {
+    // NAME LETTER
+    char *text = "NAME";
+    char letter = 'L';
+    return NAME + (text[0] == 'N') + (letter == 'L') + LETTER;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 14);
+}
+
+#[test]
+fn rejects_unsupported_and_malformed_preprocessor_directives_with_context() {
+    let cases = [
+        (
+            include_str!("fixtures/invalid/preprocessor_directive.c"),
+            "include directives are not supported at line 1, column 1\n#include <stdio.h>\n^",
+        ),
+        (
+            include_str!("fixtures/invalid/function_like_macro.c"),
+            "function-like macros are not supported at line 1, column 15\n#define DOUBLE(value) ((value) * 2)\n              ^",
+        ),
+        (
+            include_str!("fixtures/invalid/malformed_define_directive.c"),
+            "expected macro name after '#define' at line 1, column 9\n#define 42\n        ^",
+        ),
+        (
+            include_str!("fixtures/invalid/macro_replacement_lexer_error.c"),
+            "unexpected character '@' at line 2, column 15\n#define VALUE @\n              ^",
+        ),
+        (
+            include_str!("fixtures/invalid/midline_directive_after_empty_macro.c"),
+            "preprocessor directives must begin on a new line at line 2, column 7\nEMPTY #define VALUE 7\n      ^",
+        ),
+        (
+            include_str!("fixtures/invalid/macro_line_continuation.c"),
+            "preprocessor line continuations are not supported at line 1, column 17\n#define VALUE 1 \\\n                ^",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_recursive_and_conflicting_object_like_macros_with_context() {
+    let cases = [
+        (
+            include_str!("fixtures/invalid/recursive_object_like_macro.c"),
+            "recursive object-like macro expansion for 'FIRST' at line 4, column 12\n    return FIRST;\n           ^",
+        ),
+        (
+            include_str!("fixtures/invalid/conflicting_object_like_macro_redefinition.c"),
+            "conflicting object-like macro redefinition for 'VALUE' at line 2, column 9\n#define VALUE 2\n        ^",
+        ),
+        (
+            include_str!("fixtures/invalid/conflicting_lexical_macro_redefinition.c"),
+            "conflicting object-like macro redefinition for 'VALUE' at line 2, column 9\n#define VALUE 'A'\n        ^",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
 }
 
 #[test]

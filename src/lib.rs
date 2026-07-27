@@ -142,6 +142,27 @@ impl LocatedToken {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct ObjectMacro {
+    replacement: Vec<MacroReplacementToken>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MacroReplacementToken {
+    Identifier(String),
+    Other { kind: Token, spelling: String },
+}
+
+#[derive(Default)]
+struct MacroExpansionBudget {
+    emitted_tokens: usize,
+    work: usize,
+}
+
+const MAX_OBJECT_MACRO_EXPANSION_DEPTH: usize = 128;
+const MAX_OBJECT_MACRO_EXPANSION_TOKENS: usize = 8_192;
+const MAX_OBJECT_MACRO_EXPANSION_WORK: usize = 65_536;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Expr {
     Number(i64),
     StringLiteral(Vec<i64>),
@@ -1138,14 +1159,35 @@ pub fn format_ast(source: &str) -> CustResult<String> {
 }
 
 fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
-    let chars: Vec<char> = source.chars().collect();
+    lex_with_context(source, source, 1, 1, true)
+}
+
+fn lex_with_context(
+    input: &str,
+    source: &str,
+    initial_line: usize,
+    initial_column: usize,
+    allow_preprocessor_directives: bool,
+) -> CustResult<Vec<LocatedToken>> {
+    let chars: Vec<char> = input.chars().collect();
     let mut tokens = Vec::new();
+    let mut macros = HashMap::<String, ObjectMacro>::new();
+    let mut macro_expansion_budget = MacroExpansionBudget::default();
     let mut i = 0;
-    let mut line = 1usize;
-    let mut column = 1usize;
+    let mut line = initial_line;
+    let mut column = initial_column;
+    let mut line_has_preprocessing_token = false;
 
     while i < chars.len() {
         let c = chars[i];
+        if c == '\n' {
+            line_has_preprocessing_token = false;
+        } else if !c.is_whitespace()
+            && c != '#'
+            && !(c == '/' && matches!(chars.get(i + 1), Some('/') | Some('*')))
+        {
+            line_has_preprocessing_token = true;
+        }
         match c {
             c if c.is_whitespace() => advance_position(c, &mut line, &mut column, &mut i),
             '/' if chars.get(i + 1) == Some(&'/') => {
@@ -1179,6 +1221,9 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                         start_line,
                         start_column,
                     ));
+                }
+                if line != start_line {
+                    line_has_preprocessing_token = false;
                 }
             }
             '0'..='9' => {
@@ -1349,53 +1394,19 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                     advance_position(chars[i], &mut line, &mut column, &mut i);
                 }
                 let text: String = chars[start..i].iter().collect();
-                let kind = match text.as_str() {
-                    "int" => Token::Int,
-                    "char" => Token::Char,
-                    "_Bool" => Token::Bool,
-                    "float" => Token::Float,
-                    "double" => Token::Double,
-                    "_Complex" => Token::Complex,
-                    "_Imaginary" => Token::Imaginary,
-                    "signed" => Token::Signed,
-                    "unsigned" => Token::Unsigned,
-                    "long" => Token::Long,
-                    "short" => Token::Short,
-                    "const" => Token::Const,
-                    "volatile" => Token::Volatile,
-                    "restrict" => Token::Restrict,
-                    "_Atomic" => Token::Atomic,
-                    "static" => Token::Static,
-                    "extern" => Token::Extern,
-                    "_Thread_local" => Token::ThreadLocal,
-                    "inline" => Token::Inline,
-                    "_Noreturn" => Token::Noreturn,
-                    "auto" => Token::Auto,
-                    "register" => Token::Register,
-                    "void" => Token::Void,
-                    "enum" => Token::Enum,
-                    "struct" => Token::Struct,
-                    "union" => Token::Union,
-                    "typedef" => Token::Typedef,
-                    "sizeof" => Token::Sizeof,
-                    "_Alignof" => Token::Alignof,
-                    "_Alignas" => Token::Alignas,
-                    "_Static_assert" => Token::StaticAssert,
-                    "_Generic" => Token::Generic,
-                    "return" => Token::Return,
-                    "if" => Token::If,
-                    "else" => Token::Else,
-                    "while" => Token::While,
-                    "do" => Token::Do,
-                    "for" => Token::For,
-                    "switch" => Token::Switch,
-                    "case" => Token::Case,
-                    "default" => Token::Default,
-                    "break" => Token::Break,
-                    "continue" => Token::Continue,
-                    "goto" => Token::Goto,
-                    _ => Token::Ident(text),
-                };
+                if macros.contains_key(&text) {
+                    tokens.extend(expand_object_macro(
+                        &text,
+                        &macros,
+                        &mut Vec::new(),
+                        &mut macro_expansion_budget,
+                        source,
+                        start_line,
+                        start_column,
+                    )?);
+                    continue;
+                }
+                let kind = identifier_token(text);
                 tokens.push(LocatedToken::new(kind, start_line, start_column));
             }
             '+' if chars.get(i + 1) == Some(&'+') => {
@@ -1602,12 +1613,30 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
                 advance_position(c, &mut line, &mut column, &mut i);
             }
             '#' => {
-                return Err(lexer_error_with_context(
-                    "preprocessor directives are not supported".to_string(),
+                if !allow_preprocessor_directives {
+                    return Err(lexer_error_with_context(
+                        "macro replacement '#' operators are not supported",
+                        source,
+                        line,
+                        column,
+                    ));
+                }
+                if line_has_preprocessing_token {
+                    return Err(lexer_error_with_context(
+                        "preprocessor directives must begin on a new line",
+                        source,
+                        line,
+                        column,
+                    ));
+                }
+                process_preprocessor_directive(
                     source,
+                    &chars,
+                    &mut i,
                     line,
-                    column,
-                ));
+                    &mut column,
+                    &mut macros,
+                )?;
             }
             other => {
                 return Err(lexer_error_with_context(
@@ -1622,6 +1651,424 @@ fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
 
     tokens.push(LocatedToken::new(Token::Eof, line, column));
     Ok(tokens)
+}
+
+fn identifier_token(text: String) -> Token {
+    match text.as_str() {
+        "int" => Token::Int,
+        "char" => Token::Char,
+        "_Bool" => Token::Bool,
+        "float" => Token::Float,
+        "double" => Token::Double,
+        "_Complex" => Token::Complex,
+        "_Imaginary" => Token::Imaginary,
+        "signed" => Token::Signed,
+        "unsigned" => Token::Unsigned,
+        "long" => Token::Long,
+        "short" => Token::Short,
+        "const" => Token::Const,
+        "volatile" => Token::Volatile,
+        "restrict" => Token::Restrict,
+        "_Atomic" => Token::Atomic,
+        "static" => Token::Static,
+        "extern" => Token::Extern,
+        "_Thread_local" => Token::ThreadLocal,
+        "inline" => Token::Inline,
+        "_Noreturn" => Token::Noreturn,
+        "auto" => Token::Auto,
+        "register" => Token::Register,
+        "void" => Token::Void,
+        "enum" => Token::Enum,
+        "struct" => Token::Struct,
+        "union" => Token::Union,
+        "typedef" => Token::Typedef,
+        "sizeof" => Token::Sizeof,
+        "_Alignof" => Token::Alignof,
+        "_Alignas" => Token::Alignas,
+        "_Static_assert" => Token::StaticAssert,
+        "_Generic" => Token::Generic,
+        "return" => Token::Return,
+        "if" => Token::If,
+        "else" => Token::Else,
+        "while" => Token::While,
+        "do" => Token::Do,
+        "for" => Token::For,
+        "switch" => Token::Switch,
+        "case" => Token::Case,
+        "default" => Token::Default,
+        "break" => Token::Break,
+        "continue" => Token::Continue,
+        "goto" => Token::Goto,
+        _ => Token::Ident(text),
+    }
+}
+
+fn macro_replacement_token(
+    token: LocatedToken,
+    chars: &[char],
+    initial_column: usize,
+) -> MacroReplacementToken {
+    let start = token.column.saturating_sub(initial_column);
+    if chars
+        .get(start)
+        .is_some_and(|c| c.is_ascii_alphabetic() || *c == '_')
+    {
+        let mut end = start + 1;
+        while end < chars.len() && (chars[end].is_ascii_alphanumeric() || chars[end] == '_') {
+            end += 1;
+        }
+        MacroReplacementToken::Identifier(chars[start..end].iter().collect())
+    } else {
+        let spelling = match chars.get(start) {
+            Some(c) if c.is_ascii_digit() => {
+                let mut end = start + 1;
+                while end < chars.len() && chars[end].is_ascii_alphanumeric() {
+                    end += 1;
+                }
+                chars[start..end].iter().collect()
+            }
+            Some('\'') | Some('"') => {
+                let quote = chars[start];
+                let mut end = start + 1;
+                while end < chars.len() {
+                    if chars[end] == '\\' {
+                        end = (end + 2).min(chars.len());
+                    } else {
+                        let closes_literal = chars[end] == quote;
+                        end += 1;
+                        if closes_literal {
+                            break;
+                        }
+                    }
+                }
+                chars[start..end].iter().collect()
+            }
+            _ => String::new(),
+        };
+        MacroReplacementToken::Other {
+            kind: token.kind,
+            spelling,
+        }
+    }
+}
+
+fn process_preprocessor_directive(
+    source: &str,
+    chars: &[char],
+    i: &mut usize,
+    line: usize,
+    column: &mut usize,
+    macros: &mut HashMap<String, ObjectMacro>,
+) -> CustResult<()> {
+    let directive_start = *i;
+    let directive_column = *column;
+    let line_end = chars[*i..]
+        .iter()
+        .position(|c| *c == '\n')
+        .map_or(chars.len(), |offset| *i + offset);
+    let content_end = if line_end > directive_start && chars[line_end - 1] == '\r' {
+        line_end - 1
+    } else {
+        line_end
+    };
+
+    if content_end > directive_start && chars[content_end - 1] == '\\' {
+        let continuation_column = directive_column + content_end - directive_start - 1;
+        return Err(lexer_error_with_context(
+            "preprocessor line continuations are not supported",
+            source,
+            line,
+            continuation_column,
+        ));
+    }
+
+    let mut cursor = directive_start + 1;
+    skip_preprocessor_whitespace(
+        source,
+        chars,
+        &mut cursor,
+        content_end,
+        line,
+        directive_start,
+        directive_column,
+    )?;
+    let directive_name_start = cursor;
+    while cursor < content_end && (chars[cursor].is_ascii_alphanumeric() || chars[cursor] == '_') {
+        cursor += 1;
+    }
+    if directive_name_start == cursor || !chars[directive_name_start].is_ascii_alphabetic() {
+        return Err(lexer_error_with_context(
+            "expected preprocessor directive name after '#'",
+            source,
+            line,
+            directive_column,
+        ));
+    }
+    let directive_name: String = chars[directive_name_start..cursor].iter().collect();
+
+    match directive_name.as_str() {
+        "include" => {
+            return Err(lexer_error_with_context(
+                "include directives are not supported",
+                source,
+                line,
+                directive_column,
+            ));
+        }
+        "define" => {
+            let has_name_separator = skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if !has_name_separator || cursor == content_end {
+                return Err(lexer_error_with_context(
+                    "expected macro name after '#define'",
+                    source,
+                    line,
+                    directive_column + cursor - directive_start,
+                ));
+            }
+            let macro_name_start = cursor;
+            if cursor >= content_end
+                || !(chars[cursor].is_ascii_alphabetic() || chars[cursor] == '_')
+            {
+                return Err(lexer_error_with_context(
+                    "expected macro name after '#define'",
+                    source,
+                    line,
+                    directive_column + cursor - directive_start,
+                ));
+            }
+            cursor += 1;
+            while cursor < content_end
+                && (chars[cursor].is_ascii_alphanumeric() || chars[cursor] == '_')
+            {
+                cursor += 1;
+            }
+            let macro_name: String = chars[macro_name_start..cursor].iter().collect();
+            let macro_column = directive_column + macro_name_start - directive_start;
+
+            if cursor < content_end && chars[cursor] == '(' {
+                return Err(lexer_error_with_context(
+                    "function-like macros are not supported",
+                    source,
+                    line,
+                    directive_column + cursor - directive_start,
+                ));
+            }
+            let has_replacement_separator = skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if cursor < content_end && !has_replacement_separator {
+                return Err(lexer_error_with_context(
+                    format!("malformed object-like macro definition for '{macro_name}'"),
+                    source,
+                    line,
+                    directive_column + cursor - directive_start,
+                ));
+            }
+
+            let mut replacement_end = content_end;
+            while replacement_end > cursor && chars[replacement_end - 1].is_whitespace() {
+                replacement_end -= 1;
+            }
+            let replacement_source: String = chars[cursor..replacement_end].iter().collect();
+            let replacement_column = directive_column + cursor - directive_start;
+            let replacement = if replacement_source.is_empty() {
+                Vec::new()
+            } else {
+                let mut replacement_tokens =
+                    lex_with_context(&replacement_source, source, line, replacement_column, false)?;
+                replacement_tokens.pop();
+                let replacement_chars: Vec<char> = replacement_source.chars().collect();
+                replacement_tokens
+                    .into_iter()
+                    .map(|token| {
+                        macro_replacement_token(token, &replacement_chars, replacement_column)
+                    })
+                    .collect()
+            };
+            let definition = ObjectMacro { replacement };
+
+            if let Some(existing) = macros.get(&macro_name) {
+                if existing != &definition {
+                    return Err(lexer_error_with_context(
+                        format!("conflicting object-like macro redefinition for '{macro_name}'"),
+                        source,
+                        line,
+                        macro_column,
+                    ));
+                }
+            } else {
+                macros.insert(macro_name, definition);
+            }
+        }
+        _ => {
+            return Err(lexer_error_with_context(
+                format!("preprocessor directive '#{directive_name}' is not supported"),
+                source,
+                line,
+                directive_column,
+            ));
+        }
+    }
+
+    let mut consumed_line = line;
+    while *i < line_end {
+        advance_position(chars[*i], &mut consumed_line, column, i);
+    }
+    Ok(())
+}
+
+fn skip_preprocessor_whitespace(
+    source: &str,
+    chars: &[char],
+    cursor: &mut usize,
+    end: usize,
+    line: usize,
+    directive_start: usize,
+    directive_column: usize,
+) -> CustResult<bool> {
+    let start = *cursor;
+    loop {
+        while *cursor < end && matches!(chars[*cursor], ' ' | '\t' | '\u{b}' | '\u{c}' | '\r') {
+            *cursor += 1;
+        }
+        if *cursor + 1 < end && chars[*cursor] == '/' && chars[*cursor + 1] == '/' {
+            *cursor = end;
+            break;
+        }
+        if *cursor + 1 >= end || chars[*cursor] != '/' || chars[*cursor + 1] != '*' {
+            break;
+        }
+
+        let comment_start = *cursor;
+        *cursor += 2;
+        while *cursor + 1 < end && !(chars[*cursor] == '*' && chars[*cursor + 1] == '/') {
+            *cursor += 1;
+        }
+        if *cursor + 1 >= end {
+            return Err(lexer_error_with_context(
+                "unterminated block comment",
+                source,
+                line,
+                directive_column + comment_start - directive_start,
+            ));
+        }
+        *cursor += 2;
+    }
+    Ok(*cursor != start)
+}
+
+fn expand_object_macro(
+    name: &str,
+    macros: &HashMap<String, ObjectMacro>,
+    expansion_stack: &mut Vec<String>,
+    budget: &mut MacroExpansionBudget,
+    source: &str,
+    line: usize,
+    column: usize,
+) -> CustResult<Vec<LocatedToken>> {
+    if expansion_stack.iter().any(|expanded| expanded == name) {
+        return Err(lexer_error_with_context(
+            format!("recursive object-like macro expansion for '{name}'"),
+            source,
+            line,
+            column,
+        ));
+    }
+    if expansion_stack.len() >= MAX_OBJECT_MACRO_EXPANSION_DEPTH {
+        return Err(lexer_error_with_context(
+            "object-like macro expansion depth limit exceeded",
+            source,
+            line,
+            column,
+        ));
+    }
+    if budget.work >= MAX_OBJECT_MACRO_EXPANSION_WORK {
+        return Err(lexer_error_with_context(
+            "object-like macro expansion work limit exceeded",
+            source,
+            line,
+            column,
+        ));
+    }
+    budget.work += 1;
+
+    let definition = macros
+        .get(name)
+        .expect("macro expansion requires a registered definition");
+    expansion_stack.push(name.to_string());
+    let mut expanded = Vec::new();
+    for replacement_token in &definition.replacement {
+        match replacement_token {
+            MacroReplacementToken::Identifier(nested_name) if macros.contains_key(nested_name) => {
+                expanded.extend(expand_object_macro(
+                    nested_name,
+                    macros,
+                    expansion_stack,
+                    budget,
+                    source,
+                    line,
+                    column,
+                )?);
+            }
+            MacroReplacementToken::Identifier(name) => {
+                push_expanded_macro_token(
+                    &mut expanded,
+                    LocatedToken::new(identifier_token(name.clone()), line, column),
+                    budget,
+                    source,
+                    line,
+                    column,
+                )?;
+            }
+            MacroReplacementToken::Other { kind, .. } => {
+                push_expanded_macro_token(
+                    &mut expanded,
+                    LocatedToken::new(kind.clone(), line, column),
+                    budget,
+                    source,
+                    line,
+                    column,
+                )?;
+            }
+        }
+    }
+    expansion_stack.pop();
+    Ok(expanded)
+}
+
+fn push_expanded_macro_token(
+    expanded: &mut Vec<LocatedToken>,
+    token: LocatedToken,
+    budget: &mut MacroExpansionBudget,
+    source: &str,
+    line: usize,
+    column: usize,
+) -> CustResult<()> {
+    if budget.emitted_tokens >= MAX_OBJECT_MACRO_EXPANSION_TOKENS {
+        return Err(lexer_error_with_context(
+            "object-like macro expansion token limit exceeded",
+            source,
+            line,
+            column,
+        ));
+    }
+    budget.emitted_tokens += 1;
+    expanded.push(token);
+    Ok(())
 }
 
 fn lexer_error_with_context(
