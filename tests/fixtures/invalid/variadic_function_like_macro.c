@@ -1,2 +1,2 @@
 #define SUM(first, ...) first
-int main(void) { return 0; }
+int main(void) { return SUM(1); }

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-28 bounded quoted-header closure after targeted RED/GREEN work, independent security/correctness review, Linux `openat2` containment-before-open and non-regular-file fixes, warning-free native C11 parity, 1,089 passing local tests, warning-free Clippy, and both canonical Docker gates. The next preprocessing slice is a roadmap choice, not an external blocker.
+None. Last reviewed during the 2026-07-28 bounded variadic-macro closure after targeted review-driven RED/GREEN work, lazy unused-argument prescan with reserved-token validation, bounded pre-rescan substitution, inactive nested-conditional operand suppression, exact empty-invocation arity, warning-free native C11 parity, 1,094 passing local tests, warning-free Clippy, and both canonical Docker gates. Stringification is an actionable next slice, not an external blocker.
 
 ## Blocker template
 

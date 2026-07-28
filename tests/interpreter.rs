@@ -227,6 +227,13 @@ fn supports_function_like_macros_with_nested_arguments_and_rescanning() {
 }
 
 #[test]
+fn supports_variadic_function_like_macros() {
+    let program = include_str!("fixtures/compat/valid/variadic_function_like_macros.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn macro_expansion_keeps_ordinary_integer_tokens_public() {
     let program = "#define X 1U\nint main(void) { return X; }\n";
 
@@ -647,14 +654,6 @@ fn rejects_malformed_conditional_directives_with_context() {
             "unexpected tokens after '#endif' at line 4, column 8\n#endif extra\n       ^",
         ),
         (
-            "#ifdef NEVER\n#ifdef\n#endif\n#else\nint main(void) { return 0; }\n#endif\n",
-            "expected macro name after '#ifdef' at line 2, column 7\n#ifdef\n      ^",
-        ),
-        (
-            "#ifdef NEVER\n#ifdef INNER\n#else extra\n#endif\n#else\nint main(void) { return 0; }\n#endif\n",
-            "unexpected tokens after '#else' at line 3, column 7\n#else extra\n      ^",
-        ),
-        (
             "#ifdef NEVER\n# /* first\n*/ ifdef INNER /* second\n#else\nint main(void) { return 0; }\n#endif\n",
             "unterminated block comment at line 3, column 16\n*/ ifdef INNER /* second\n               ^",
         ),
@@ -808,7 +807,24 @@ fn rejects_excessive_object_like_macro_expansion_tokens() {
 
     assert_eq!(
         err.to_string(),
-        "object-like macro expansion token limit exceeded at line 16, column 25\nint main(void) { return M14; }\n                        ^"
+        "macro expansion token limit exceeded at line 16, column 25\nint main(void) { return M14; }\n                        ^"
+    );
+}
+
+#[test]
+fn bounds_variadic_substitution_before_replacement_rescanning() {
+    let replacement = "__VA_ARGS__ ".repeat(129);
+    let argument = vec!["1"; 64].join(", ");
+    let invocation = format!("int main(void) {{ return MANY({argument}); }}");
+    let program = format!("#define MANY(...) MANY {replacement}\n{invocation}\n");
+
+    let err = interpret(&program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "macro expansion token limit exceeded at line 2, column 25\n{invocation}\n                        ^"
+        )
     );
 }
 
@@ -824,7 +840,7 @@ fn rejects_excessive_empty_object_like_macro_expansion_work() {
 
     assert_eq!(
         err.to_string(),
-        "object-like macro expansion work limit exceeded at line 19, column 25\nint main(void) { return M17 0; }\n                        ^"
+        "macro expansion work limit exceeded at line 19, column 25\nint main(void) { return M17 0; }\n                        ^"
     );
 }
 
@@ -838,7 +854,7 @@ fn object_like_macro_token_limit_is_shared_across_translation_unit() {
 
     assert_eq!(
         err.to_string(),
-        "object-like macro expansion token limit exceeded at line 2, column 6\nMANY MANY\n     ^"
+        "macro expansion token limit exceeded at line 2, column 6\nMANY MANY\n     ^"
     );
 }
 
@@ -926,6 +942,18 @@ fn rejects_recursive_and_conflicting_object_like_macros_with_context() {
 }
 
 #[test]
+fn macro_redefinitions_preserve_whitespace_separation() {
+    let program = "#define F(...) (__VA_ARGS__ + 1)\n#define F(...) (__VA_ARGS__+ 1)\nint main(void) { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "conflicting function-like macro redefinition for 'F' at line 2, column 9\n#define F(...) (__VA_ARGS__+ 1)\n        ^"
+    );
+}
+
+#[test]
 fn rejects_malformed_function_like_macros_with_context() {
     let cases = [
         (
@@ -942,7 +970,27 @@ fn rejects_malformed_function_like_macros_with_context() {
         ),
         (
             include_str!("fixtures/invalid/variadic_function_like_macro.c"),
-            "variadic macros are not supported at line 1, column 20\n#define SUM(first, ...) first\n                   ^",
+            "function-like macro 'SUM' expects at least 2 arguments but got 1 at line 2, column 25\nint main(void) { return SUM(1); }\n                        ^",
+        ),
+        (
+            "#define BAD(first, second, ...) 0\nint main(void) { return BAD(); }\n",
+            "function-like macro 'BAD' expects at least 3 arguments but got 1 at line 2, column 25\nint main(void) { return BAD(); }\n                        ^",
+        ),
+        (
+            "#define BAD __VA_ARGS__\nint main(void) { return 0; }\n",
+            "'__VA_ARGS__' is only permitted in variadic function-like macro replacements at line 1, column 13\n#define BAD __VA_ARGS__\n            ^",
+        ),
+        (
+            "#define BAD(value) __VA_ARGS__\nint main(void) { return 0; }\n",
+            "'__VA_ARGS__' is only permitted in variadic function-like macro replacements at line 1, column 20\n#define BAD(value) __VA_ARGS__\n                   ^",
+        ),
+        (
+            "#define BAD(__VA_ARGS__, ...) 0\nint main(void) { return 0; }\n",
+            "'__VA_ARGS__' cannot be used as a variadic macro parameter name at line 1, column 13\n#define BAD(__VA_ARGS__, ...) 0\n            ^",
+        ),
+        (
+            "#define BAD(first, ..., last) first\nint main(void) { return 0; }\n",
+            "variadic macro parameter must end the parameter list at line 1, column 23\n#define BAD(first, ..., last) first\n                      ^",
         ),
         (
             "#define ID(value) value\nint main(void) { return ID(1; }\n",
@@ -954,6 +1002,52 @@ fn rejects_malformed_function_like_macros_with_context() {
         let err = interpret(program).unwrap_err();
         assert_eq!(err.to_string(), expected, "program: {program}");
     }
+}
+
+#[test]
+fn rejects_reserved_variadic_identifier_outside_variadic_replacements() {
+    let cases = [
+        (
+            "int __VA_ARGS__;\nint main(void) { return 0; }\n",
+            "'__VA_ARGS__' is only permitted in variadic function-like macro replacements at line 1, column 5\nint __VA_ARGS__;\n    ^",
+        ),
+        (
+            "#define __VA_ARGS__ 1\nint main(void) { return 0; }\n",
+            "'__VA_ARGS__' cannot be used as a macro name at line 1, column 9\n#define __VA_ARGS__ 1\n        ^",
+        ),
+        (
+            "#define ID(value) value\nint main(void) { return ID(__VA_ARGS__); }\n",
+            "'__VA_ARGS__' is only permitted in variadic function-like macro replacements at line 2, column 28\nint main(void) { return ID(__VA_ARGS__); }\n                           ^",
+        ),
+        (
+            "#define IGNORE(value) 0\nint main(void) { return IGNORE(__VA_ARGS__); }\n",
+            "'__VA_ARGS__' is only permitted in variadic function-like macro replacements at line 2, column 32\nint main(void) { return IGNORE(__VA_ARGS__); }\n                               ^",
+        ),
+        (
+            "#ifdef __VA_ARGS__\n#endif\nint main(void) { return 0; }\n",
+            "'__VA_ARGS__' cannot be used as a macro name at line 1, column 8\n#ifdef __VA_ARGS__\n       ^",
+        ),
+        (
+            "#undef __VA_ARGS__\nint main(void) { return 0; }\n",
+            "'__VA_ARGS__' cannot be used as a macro name at line 1, column 8\n#undef __VA_ARGS__\n       ^",
+        ),
+        (
+            "#if defined(__VA_ARGS__)\n#endif\nint main(void) { return 0; }\n",
+            "'__VA_ARGS__' cannot be used as a macro name at line 1, column 13\n#if defined(__VA_ARGS__)\n            ^",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn inactive_nested_conditional_directives_ignore_operands() {
+    let program = "#if 0\n#ifdef\n#else ignored tokens\n#endif ignored tokens\n#ifndef __VA_ARGS__ trailing tokens are ignored\n#elif malformed tokens are ignored\n#else ignored tokens\n#endif ignored tokens\n#endif\nint main(void) { return 0; }\n";
+
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]

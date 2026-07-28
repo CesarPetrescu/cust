@@ -226,13 +226,21 @@ impl LocatedToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MacroDefinition {
     parameters: Option<Vec<String>>,
+    variadic: bool,
     replacement: Vec<MacroReplacementToken>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MacroReplacementToken {
-    Identifier(String),
-    Other { kind: Token, spelling: String },
+    Identifier {
+        name: String,
+        separated: bool,
+    },
+    Other {
+        kind: Token,
+        spelling: String,
+        separated: bool,
+    },
 }
 
 #[derive(Default)]
@@ -1739,6 +1747,14 @@ fn lex_spliced_with_state(
                     advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                 }
                 let text: String = chars[start..i].iter().collect();
+                if text == "__VA_ARGS__" && allow_preprocessor_directives {
+                    return Err(lexer_error_with_context(
+                        "'__VA_ARGS__' is only permitted in variadic function-like macro replacements",
+                        source,
+                        start_line,
+                        start_column,
+                    ));
+                }
                 if state.macros.contains_key(&text) {
                     let mut input = vec![LocatedToken::new(
                         identifier_token(text),
@@ -2167,6 +2183,7 @@ fn macro_replacement_token(
     token: LocatedToken,
     chars: &[char],
     start: usize,
+    separated: bool,
 ) -> MacroReplacementToken {
     if chars
         .get(start)
@@ -2176,7 +2193,10 @@ fn macro_replacement_token(
         while end < chars.len() && (chars[end].is_ascii_alphanumeric() || chars[end] == '_') {
             end += 1;
         }
-        MacroReplacementToken::Identifier(chars[start..end].iter().collect())
+        MacroReplacementToken::Identifier {
+            name: chars[start..end].iter().collect(),
+            separated,
+        }
     } else {
         let spelling = match chars.get(start) {
             Some(c) if c.is_ascii_digit() => {
@@ -2202,11 +2222,28 @@ fn macro_replacement_token(
                 }
                 chars[start..end].iter().collect()
             }
-            _ => String::new(),
+            _ => {
+                let remaining: String = chars[start..].iter().take(3).collect();
+                let len = if remaining.starts_with("<<=") || remaining.starts_with(">>=") {
+                    3
+                } else if [
+                    "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&", "||", "==",
+                    "!=", "<=", "<<", ">=", ">>", "->",
+                ]
+                .iter()
+                .any(|punctuator| remaining.starts_with(punctuator))
+                {
+                    2
+                } else {
+                    1
+                };
+                chars[start..start + len].iter().collect()
+            }
         };
         MacroReplacementToken::Other {
             kind: token.kind,
             spelling,
+            separated,
         }
     }
 }
@@ -2274,6 +2311,18 @@ fn process_preprocessor_directive(
                 ));
             }
             let parent_active = active;
+            if !parent_active {
+                conditional_stack.push(ConditionalFrame {
+                    parent_active: false,
+                    active: false,
+                    branch_taken: false,
+                    else_seen: false,
+                    directive_name,
+                    line,
+                    column: directive_column,
+                });
+                return Ok(false);
+            }
             let has_name_separator = skip_preprocessor_whitespace(
                 source,
                 chars,
@@ -2309,6 +2358,21 @@ fn process_preprocessor_directive(
                 cursor += 1;
             }
             let macro_name: String = chars[macro_name_start..cursor].iter().collect();
+            if macro_name == "__VA_ARGS__" {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    macro_name_start,
+                );
+                return Err(lexer_error_with_context(
+                    "'__VA_ARGS__' cannot be used as a macro name",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
             skip_preprocessor_whitespace(
                 source,
                 chars,
@@ -2358,6 +2422,20 @@ fn process_preprocessor_directive(
                     directive_column,
                 ));
             };
+            if frame.else_seen {
+                return Err(lexer_error_with_context(
+                    "duplicate '#else' conditional directive",
+                    source,
+                    line,
+                    directive_column,
+                ));
+            }
+            if !frame.parent_active {
+                frame.else_seen = true;
+                frame.active = false;
+                frame.branch_taken = true;
+                return Ok(false);
+            }
             skip_preprocessor_whitespace(
                 source,
                 chars,
@@ -2382,14 +2460,6 @@ fn process_preprocessor_directive(
                     error_column,
                 ));
             }
-            if frame.else_seen {
-                return Err(lexer_error_with_context(
-                    "duplicate '#else' conditional directive",
-                    source,
-                    line,
-                    directive_column,
-                ));
-            }
             frame.else_seen = true;
             frame.active = frame.parent_active && !frame.branch_taken;
             frame.branch_taken = true;
@@ -2402,6 +2472,13 @@ fn process_preprocessor_directive(
                     line,
                     directive_column,
                 ));
+            }
+            if conditional_stack
+                .last()
+                .is_some_and(|frame| !frame.parent_active)
+            {
+                conditional_stack.pop();
+                return Ok(false);
             }
             skip_preprocessor_whitespace(
                 source,
@@ -2439,22 +2516,30 @@ fn process_preprocessor_directive(
                 ));
             }
             let parent_active = active;
-            let condition = if parent_active {
-                evaluate_preprocessor_condition(
-                    source,
-                    chars,
-                    cursor,
-                    content_end,
+            if !parent_active {
+                conditional_stack.push(ConditionalFrame {
+                    parent_active: false,
+                    active: false,
+                    branch_taken: false,
+                    else_seen: false,
+                    directive_name,
                     line,
-                    directive_start,
-                    directive_column,
-                    &state.macros,
-                    &mut state.macro_expansion_budget,
-                    "if",
-                )? != 0
-            } else {
-                false
-            };
+                    column: directive_column,
+                });
+                return Ok(false);
+            }
+            let condition = evaluate_preprocessor_condition(
+                source,
+                chars,
+                cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+                &state.macros,
+                &mut state.macro_expansion_budget,
+                "if",
+            )? != 0;
             conditional_stack.push(ConditionalFrame {
                 parent_active,
                 active: parent_active && condition,
@@ -2482,7 +2567,11 @@ fn process_preprocessor_directive(
                     directive_column,
                 ));
             }
-            let should_evaluate = frame.parent_active && !frame.branch_taken;
+            if !frame.parent_active {
+                frame.active = false;
+                return Ok(false);
+            }
+            let should_evaluate = !frame.branch_taken;
             let condition = if should_evaluate {
                 evaluate_preprocessor_condition(
                     source,
@@ -2673,7 +2762,16 @@ fn process_preprocessor_directive(
                 directive_column,
                 macro_name_start,
             );
+            if macro_name == "__VA_ARGS__" {
+                return Err(lexer_error_with_context(
+                    "'__VA_ARGS__' cannot be used as a macro name",
+                    source,
+                    macro_line,
+                    macro_column,
+                ));
+            }
 
+            let mut variadic = false;
             let parameters = if cursor < content_end && chars[cursor] == '(' {
                 cursor += 1;
                 let mut parameters = Vec::new();
@@ -2691,6 +2789,51 @@ fn process_preprocessor_directive(
                 } else {
                     loop {
                         let parameter_start = cursor;
+                        if chars.get(cursor) == Some(&'.') {
+                            if chars.get(cursor..cursor + 3) != Some(&['.', '.', '.']) {
+                                let (error_line, error_column) = preprocessor_position_at(
+                                    chars,
+                                    directive_start,
+                                    line,
+                                    directive_column,
+                                    cursor,
+                                );
+                                return Err(lexer_error_with_context(
+                                    "expected '...' for variadic macro parameter",
+                                    source,
+                                    error_line,
+                                    error_column,
+                                ));
+                            }
+                            variadic = true;
+                            cursor += 3;
+                            skip_preprocessor_whitespace(
+                                source,
+                                chars,
+                                &mut cursor,
+                                content_end,
+                                line,
+                                directive_start,
+                                directive_column,
+                            )?;
+                            if cursor >= content_end || chars[cursor] != ')' {
+                                let (error_line, error_column) = preprocessor_position_at(
+                                    chars,
+                                    directive_start,
+                                    line,
+                                    directive_column,
+                                    cursor,
+                                );
+                                return Err(lexer_error_with_context(
+                                    "variadic macro parameter must end the parameter list",
+                                    source,
+                                    error_line,
+                                    error_column,
+                                ));
+                            }
+                            cursor += 1;
+                            break;
+                        }
                         if cursor >= content_end
                             || !(chars[cursor].is_ascii_alphabetic() || chars[cursor] == '_')
                         {
@@ -2701,13 +2844,8 @@ fn process_preprocessor_directive(
                                 directive_column,
                                 cursor,
                             );
-                            let message = if chars.get(cursor) == Some(&'.') {
-                                "variadic macros are not supported"
-                            } else {
-                                "expected parameter name in function-like macro definition"
-                            };
                             return Err(lexer_error_with_context(
-                                message,
+                                "expected parameter name in function-like macro definition",
                                 source,
                                 error_line,
                                 error_column,
@@ -2720,6 +2858,21 @@ fn process_preprocessor_directive(
                             cursor += 1;
                         }
                         let parameter: String = chars[parameter_start..cursor].iter().collect();
+                        if parameter == "__VA_ARGS__" {
+                            let (error_line, error_column) = preprocessor_position_at(
+                                chars,
+                                directive_start,
+                                line,
+                                directive_column,
+                                parameter_start,
+                            );
+                            return Err(lexer_error_with_context(
+                                "'__VA_ARGS__' cannot be used as a variadic macro parameter name",
+                                source,
+                                error_line,
+                                error_column,
+                            ));
+                        }
                         if parameters.contains(&parameter) {
                             let (error_line, error_column) = preprocessor_position_at(
                                 chars,
@@ -2834,9 +2987,22 @@ fn process_preprocessor_directive(
                     None,
                 )?;
                 replacement_tokens.pop();
+                if !variadic
+                    && let Some(token) = replacement_tokens.iter().find(|token| {
+                        preprocessor_identifier_name(&token.kind) == Some("__VA_ARGS__")
+                    })
+                {
+                    return Err(lexer_error_with_context(
+                        "'__VA_ARGS__' is only permitted in variadic function-like macro replacements",
+                        source,
+                        token.line,
+                        token.column,
+                    ));
+                }
                 let mut spelling_cursor = 0;
                 let mut spelling_line = replacement_line;
                 let mut spelling_column = replacement_column;
+                let mut previous_end = None;
                 replacement_tokens
                     .into_iter()
                     .map(|token| {
@@ -2856,12 +3022,27 @@ fn process_preprocessor_directive(
                             (token.line, token.column),
                             "macro replacement token location must belong to its source"
                         );
-                        macro_replacement_token(token, &replacement_chars, spelling_cursor)
+                        let separated = previous_end.is_some_and(|end| spelling_cursor > end);
+                        let replacement_token = macro_replacement_token(
+                            token,
+                            &replacement_chars,
+                            spelling_cursor,
+                            separated,
+                        );
+                        let spelling_len = match &replacement_token {
+                            MacroReplacementToken::Identifier { name, .. } => name.chars().count(),
+                            MacroReplacementToken::Other { spelling, .. } => {
+                                spelling.chars().count()
+                            }
+                        };
+                        previous_end = Some(spelling_cursor + spelling_len);
+                        replacement_token
                     })
                     .collect()
             };
             let definition = MacroDefinition {
                 parameters,
+                variadic,
                 replacement,
             };
 
@@ -2919,6 +3100,21 @@ fn process_preprocessor_directive(
                 cursor += 1;
             }
             let macro_name: String = chars[macro_name_start..cursor].iter().collect();
+            if macro_name == "__VA_ARGS__" {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    macro_name_start,
+                );
+                return Err(lexer_error_with_context(
+                    "'__VA_ARGS__' cannot be used as a macro name",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
             skip_preprocessor_whitespace(
                 source,
                 chars,
@@ -3408,6 +3604,14 @@ fn prepare_preprocessor_condition_tokens(
                     name_token.column,
                 ));
             };
+            if name == "__VA_ARGS__" {
+                return Err(lexer_error_with_context(
+                    "'__VA_ARGS__' cannot be used as a macro name",
+                    source,
+                    name_token.line,
+                    name_token.column,
+                ));
+            }
             cursor += 1;
             if parenthesized {
                 let Some(closing) = raw_tokens.get(cursor) else {
@@ -4131,6 +4335,14 @@ fn expand_macro_tokens(
             cursor += 1;
             continue;
         };
+        if name == "__VA_ARGS__" {
+            return Err(lexer_error_with_context(
+                "'__VA_ARGS__' is only permitted in variadic function-like macro replacements",
+                source,
+                token.line,
+                token.column,
+            ));
+        }
         let Some(definition) = macros.get(name) else {
             if count_plain_tokens {
                 push_expanded_macro_token(
@@ -4153,8 +4365,21 @@ fn expand_macro_tokens(
                 .get(cursor + 1)
                 .is_some_and(|next| next.kind == Token::LParen)
         {
-            let (arguments, next_cursor) =
-                parse_macro_arguments(tokens, cursor + 1, name, source, token.line, token.column)?;
+            let (arguments, next_cursor) = parse_macro_arguments(
+                tokens,
+                cursor + 1,
+                name,
+                definition.variadic.then_some(
+                    definition
+                        .parameters
+                        .as_ref()
+                        .expect("function-like macro requires parameters")
+                        .len(),
+                ),
+                source,
+                token.line,
+                token.column,
+            )?;
             (Some(arguments), next_cursor)
         } else if definition.parameters.is_some() {
             if count_plain_tokens {
@@ -4214,6 +4439,10 @@ fn expand_macro_tokens(
                 tokens,
                 cursor,
                 &nested_name,
+                macros
+                    .get(&nested_name)
+                    .filter(|definition| definition.variadic)
+                    .and_then(|definition| definition.parameters.as_ref().map(Vec::len)),
                 source,
                 nested_line,
                 nested_column,
@@ -4235,6 +4464,24 @@ fn expand_macro_tokens(
         result.extend(expanded);
     }
     Ok(result)
+}
+
+fn ensure_macro_replacement_token_capacity(
+    current_len: usize,
+    additional_len: usize,
+    source: &str,
+    line: usize,
+    column: usize,
+) -> CustResult<()> {
+    if additional_len > MAX_OBJECT_MACRO_EXPANSION_TOKENS.saturating_sub(current_len) {
+        return Err(lexer_error_with_context(
+            "macro expansion token limit exceeded",
+            source,
+            line,
+            column,
+        ));
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4281,7 +4528,7 @@ fn expand_macro(
     }
     if budget.work >= MAX_OBJECT_MACRO_EXPANSION_WORK {
         return Err(lexer_error_with_context(
-            "object-like macro expansion work limit exceeded",
+            "macro expansion work limit exceeded",
             source,
             line,
             column,
@@ -4292,14 +4539,19 @@ fn expand_macro(
     let mut expanded_arguments = Vec::new();
     if let Some(parameters) = &definition.parameters {
         let mut arguments = arguments.expect("function-like macro expansion requires arguments");
-        if parameters.len() == 1 && arguments.is_empty() {
+        if !parameters.is_empty() && arguments.is_empty() {
             arguments.push(Vec::new());
         }
-        if arguments.len() != parameters.len() {
+        let expected_arguments = parameters.len() + usize::from(definition.variadic);
+        if arguments.len() != expected_arguments {
+            let expectation = if definition.variadic {
+                format!("at least {}", parameters.len() + 1)
+            } else {
+                parameters.len().to_string()
+            };
             return Err(lexer_error_with_context(
                 format!(
-                    "function-like macro '{name}' expects {} arguments but got {}",
-                    parameters.len(),
+                    "function-like macro '{name}' expects {expectation} arguments but got {}",
                     arguments.len()
                 ),
                 source,
@@ -4307,16 +4559,44 @@ fn expand_macro(
                 column,
             ));
         }
-        for argument in arguments {
-            expanded_arguments.push(expand_macro_tokens(
-                &argument,
-                macros,
-                expansion_stack,
-                budget,
+        if let Some(token) = arguments
+            .iter()
+            .flatten()
+            .find(|token| preprocessor_identifier_name(&token.kind) == Some("__VA_ARGS__"))
+        {
+            return Err(lexer_error_with_context(
+                "'__VA_ARGS__' is only permitted in variadic function-like macro replacements",
                 source,
-                false,
-                depth + 1,
-            )?);
+                token.line,
+                token.column,
+            ));
+        }
+        for (index, argument) in arguments.into_iter().enumerate() {
+            let parameter_name = parameters.get(index).map(String::as_str).or_else(|| {
+                (definition.variadic && index == parameters.len()).then_some("__VA_ARGS__")
+            });
+            let is_substituted = parameter_name.is_some_and(|parameter_name| {
+                definition.replacement.iter().any(|token| {
+                    matches!(
+                        token,
+                        MacroReplacementToken::Identifier { name, .. }
+                            if name == parameter_name
+                    )
+                })
+            });
+            expanded_arguments.push(if is_substituted {
+                Some(expand_macro_tokens(
+                    &argument,
+                    macros,
+                    expansion_stack,
+                    budget,
+                    source,
+                    false,
+                    depth + 1,
+                )?)
+            } else {
+                None
+            });
         }
     }
 
@@ -4324,14 +4604,50 @@ fn expand_macro(
     let mut replacement = Vec::new();
     for replacement_token in &definition.replacement {
         match replacement_token {
-            MacroReplacementToken::Identifier(token_name) => {
+            MacroReplacementToken::Identifier {
+                name: token_name, ..
+            } => {
                 if let Some(index) = definition
                     .parameters
                     .as_ref()
                     .and_then(|parameters| parameters.iter().position(|name| name == token_name))
                 {
-                    replacement.extend(expanded_arguments[index].iter().cloned());
+                    let argument = expanded_arguments[index]
+                        .as_ref()
+                        .expect("substituted macro argument requires prescan");
+                    ensure_macro_replacement_token_capacity(
+                        replacement.len(),
+                        argument.len(),
+                        source,
+                        line,
+                        column,
+                    )?;
+                    replacement.extend(argument.iter().cloned());
+                } else if definition.variadic && token_name == "__VA_ARGS__" {
+                    let variadic_index = definition
+                        .parameters
+                        .as_ref()
+                        .expect("variadic macro requires a parameter list")
+                        .len();
+                    let argument = expanded_arguments[variadic_index]
+                        .as_ref()
+                        .expect("substituted variadic macro argument requires prescan");
+                    ensure_macro_replacement_token_capacity(
+                        replacement.len(),
+                        argument.len(),
+                        source,
+                        line,
+                        column,
+                    )?;
+                    replacement.extend(argument.iter().cloned());
                 } else {
+                    ensure_macro_replacement_token_capacity(
+                        replacement.len(),
+                        1,
+                        source,
+                        line,
+                        column,
+                    )?;
                     replacement.push(LocatedToken::new(
                         identifier_token(token_name.clone()),
                         line,
@@ -4340,6 +4656,13 @@ fn expand_macro(
                 }
             }
             MacroReplacementToken::Other { kind, .. } => {
+                ensure_macro_replacement_token_capacity(
+                    replacement.len(),
+                    1,
+                    source,
+                    line,
+                    column,
+                )?;
                 replacement.push(LocatedToken::new(kind.clone(), line, column));
             }
         }
@@ -4361,6 +4684,7 @@ fn parse_macro_arguments(
     tokens: &[LocatedToken],
     opening: usize,
     name: &str,
+    variadic_fixed_count: Option<usize>,
     source: &str,
     line: usize,
     column: usize,
@@ -4373,6 +4697,9 @@ fn parse_macro_arguments(
         .get(cursor)
         .is_some_and(|token| token.kind == Token::RParen)
     {
+        if variadic_fixed_count == Some(0) {
+            arguments.push(Vec::new());
+        }
         return Ok((arguments, cursor + 1));
     }
     while let Some(token) = tokens.get(cursor) {
@@ -4389,7 +4716,12 @@ fn parse_macro_arguments(
                 }
                 argument.push(token.clone());
             }
-            Token::Comma if depth == 1 => arguments.push(std::mem::take(&mut argument)),
+            Token::Comma
+                if depth == 1
+                    && variadic_fixed_count.is_none_or(|fixed| arguments.len() < fixed) =>
+            {
+                arguments.push(std::mem::take(&mut argument));
+            }
             _ => argument.push(token.clone()),
         }
         cursor += 1;
@@ -4412,7 +4744,7 @@ fn push_expanded_macro_token(
 ) -> CustResult<()> {
     if budget.emitted_tokens >= MAX_OBJECT_MACRO_EXPANSION_TOKENS {
         return Err(lexer_error_with_context(
-            "object-like macro expansion token limit exceeded",
+            "macro expansion token limit exceeded",
             source,
             line,
             column,

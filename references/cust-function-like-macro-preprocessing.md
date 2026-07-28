@@ -21,12 +21,12 @@ The implementation retains Cust's interpreter-owned preprocessing path. Native c
 
 The shared translation-unit expansion work and emitted-token quotas apply to both macro kinds. Expansion nesting is capped at 128 independently of macro-name recursion tracking, so deeply nested arguments fail deterministically before unbounded host recursion. Direct/indirect replacement recursion remains source-located.
 
-The first slice deliberately excludes variadic parameters, stringification (`#`), and token pasting (`##`). Header inclusion remains a separate future preprocessing package.
+The first slice deliberately excludes stringification (`#`) and token pasting (`##`). Variadic parameters are implemented by the follow-up slice in `references/cust-variadic-function-like-macro-preprocessing.md`; header inclusion is documented separately.
 
 ## Coverage
 
 - `tests/fixtures/compat/valid/function_like_macros.c` covers declarations, nested/empty arguments, argument prescan, object/function aliases, replacement rescanning across following calls, temporary self-disable behavior, and function macros in `#if`; the fixture returns 0 under Cust and the warning-free native C11 compiler oracle.
-- Invalid fixtures cover duplicate parameters, variadics, invocation arity, and recursive expansion with exact source context.
+- Invalid fixtures cover duplicate parameters, invocation arity, and recursive expansion with exact source context; follow-up variadic fixtures cover malformed ellipsis placement and omitted variable arguments.
 - Interpreter regressions cover the valid fixture and excessive nested invocation depth.
 - Existing object-macro depth/token/work and exact diagnostic regressions remain green.
 

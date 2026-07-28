@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-28 — Variadic macros and inactive conditional groups
+
+- ISO C11 draft N1570 §6.10.3 requires a variadic macro invocation to supply at least the named parameters plus one variable argument; an empty invocation contributes one empty argument when named parameters exist. `__VA_ARGS__` is reserved for variadic replacement lists, and commas after the fixed arguments belong to the single variable-argument preprocessing-token sequence.
+- Under N1570 §6.10.3.1, arguments are completely macro-replaced before substitution when neither `#` nor `##` applies. A parameter that never occurs in the replacement list is not substituted and therefore must not trigger prescan diagnostics or consume expansion budget. Cust caches replacement-driven prescans so repeated occurrences are expanded once, while still validating raw argument tokens for reserved `__VA_ARGS__` misuse before the lazy-prescan decision.
+- Repeated parameter occurrences can amplify a prescanned argument before replacement rescanning enforces the emitted-token quota. Cust checks each ordinary and variadic substitution against the 8,192-token replacement-vector bound before cloning, so resource diagnostics occur before unbounded intermediate allocation.
+- N1570 §6.10.1 specifies that preprocessing directives inside skipped groups are processed only through the directive name. GCC and Clang strict-C11 probes both accepted malformed/trailing operands on nested inactive `#ifdef`/`#else`/`#endif`; Cust now ignores those operands while retaining frame-depth/ordering and comment-termination checks. See `references/cust-variadic-function-like-macro-preprocessing.md`.
+
 ## 2026-07-28 — Bounded project-relative quoted headers
 
 - ISO C11 draft N1570 §6.10.2 searches a quoted header relative to the source file before implementation-defined locations. Cust models the bounded subset as the logical including-file directory followed by the primary file's project root; canonical identities remain separate for containment and cycle checks so symlink spelling does not change nested lookup semantics.
