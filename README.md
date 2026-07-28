@@ -91,7 +91,7 @@ int main() {
 
 Features:
 
-- one-line object-like `#define` macros with nested token expansion in declarations, integer constant expressions, and runtime expressions; bounded `#undef`; and bounded nested `#ifdef`/`#ifndef`/`#if`/`#elif`/`#else`/`#endif` branch selection with integer macro expressions and `defined`; comments and string/character literals are not macro-expanded
+- bounded object-like and function-like `#define` macros with named parameters, balanced argument collection, argument prescan/substitution/rescanning, and nested expansion in declarations, integer constant expressions, and runtime expressions; bounded `#undef`; and bounded nested `#ifdef`/`#ifndef`/`#if`/`#elif`/`#else`/`#endif` branch selection with integer macro expressions and `defined`; comments and string/character literals are not macro-expanded
 - `int main() { ... }` or `int main(void) { ... }` plus additional `int`, `char`, `void`, supported `struct`, supported `union`, or direct named-`enum` function definitions/prototypes; prototypes may use C-style unnamed parameter declarations such as `int add(int, int);` or `void use(int [], struct Point *);`
 - function calls with scalar/struct/union/pointer arguments, local function parameters, C-style empty `void` parameter lists, and by-value scalar/aggregate return types including top-level `const` spellings such as `const int f(void)` / `const struct Point make(void)`
 - integer, character, and string literals
@@ -198,16 +198,16 @@ docker compose run --rm cust
 
 ## Current limitations
 
-Cust is not a full C implementation. Fixed two-dimensional scalar arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported, but variable-length arrays, arrays with more than two dimensions, and aggregate-valued multidimensional elements remain unsupported. Preprocessing supports object-like `#define`/`#undef` plus bounded nested `#ifdef`/`#ifndef`/`#if`/`#elif`/`#else`/`#endif`; includes, function-like macros, and physical-line continuations remain unsupported. Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic calls, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
+Cust is not a full C implementation. Fixed two-dimensional scalar arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported, but variable-length arrays, arrays with more than two dimensions, and aggregate-valued multidimensional elements remain unsupported. Preprocessing supports bounded object-like and first-slice function-like `#define`, `#undef`, physical-line splicing, and nested `#ifdef`/`#ifndef`/`#if`/`#elif`/`#else`/`#endif`; includes, variadic macros, stringification (`#`), and token pasting (`##`) remain unsupported. Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic calls, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
 
 See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](docs/v0.1.md) for the historical v0.1 foundation notes.
 
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next language slice: add bounded physical-line continuation handling as a dedicated preprocessing phase while preserving LF/CRLF source locations and resource limits.
+- Next language slice: scope bounded quoted header inclusion without adding a native-compiler runtime path.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
-- Longer term: consider includes, function-like macros, standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures.
+- Longer term: consider macro stringification/token pasting/variadics, standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures.
 
 ## License
 

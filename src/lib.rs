@@ -169,7 +169,8 @@ impl LocatedToken {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ObjectMacro {
+struct MacroDefinition {
+    parameters: Option<Vec<String>>,
     replacement: Vec<MacroReplacementToken>,
 }
 
@@ -1233,7 +1234,7 @@ fn lex_spliced_with_context(
     token_limit: Option<(usize, &str)>,
 ) -> CustResult<Vec<LocatedToken>> {
     let mut tokens = Vec::new();
-    let mut macros = HashMap::<String, ObjectMacro>::new();
+    let mut macros = HashMap::<String, MacroDefinition>::new();
     let mut macro_expansion_budget = MacroExpansionBudget::default();
     let mut conditional_stack = Vec::<ConditionalFrame>::new();
     let mut i = 0;
@@ -1538,14 +1539,39 @@ fn lex_spliced_with_context(
                 }
                 let text: String = chars[start..i].iter().collect();
                 if macros.contains_key(&text) {
-                    let expanded = expand_object_macro(
-                        &text,
+                    let mut input = vec![LocatedToken::new(
+                        identifier_token(text),
+                        start_line,
+                        start_column,
+                    )];
+                    while let Some((invocation_start, invocation_end)) =
+                        macro_invocation_range(chars, i)
+                    {
+                        let invocation_chars = chars.slice(invocation_start, invocation_end);
+                        let (invocation_line, invocation_column) = chars.position(invocation_start);
+                        let mut invocation_tokens = lex_spliced_with_context(
+                            &invocation_chars,
+                            source,
+                            invocation_line,
+                            invocation_column,
+                            false,
+                            true,
+                            None,
+                        )?;
+                        invocation_tokens.pop();
+                        input.extend(invocation_tokens);
+                        while i < invocation_end {
+                            advance_position(chars, chars[i], &mut line, &mut column, &mut i);
+                        }
+                    }
+                    let expanded = expand_macro_tokens(
+                        &input,
                         &macros,
                         &mut Vec::new(),
                         &mut macro_expansion_budget,
                         source,
-                        start_line,
-                        start_column,
+                        false,
+                        0,
                     )?;
                     tokens.extend(normalize_expanded_integer_tokens(expanded, source)?);
                     continue;
@@ -1991,7 +2017,7 @@ fn process_preprocessor_directive(
     i: &mut usize,
     current_line: &mut usize,
     column: &mut usize,
-    macros: &mut HashMap<String, ObjectMacro>,
+    macros: &mut HashMap<String, MacroDefinition>,
     macro_expansion_budget: &mut MacroExpansionBudget,
     conditional_stack: &mut Vec<ConditionalFrame>,
 ) -> CustResult<bool> {
@@ -2342,45 +2368,145 @@ fn process_preprocessor_directive(
                 macro_name_start,
             );
 
-            if cursor < content_end && chars[cursor] == '(' {
-                let (error_line, error_column) = preprocessor_position_at(
-                    chars,
-                    directive_start,
-                    line,
-                    directive_column,
-                    cursor,
-                );
-                return Err(lexer_error_with_context(
-                    "function-like macros are not supported",
+            let parameters = if cursor < content_end && chars[cursor] == '(' {
+                cursor += 1;
+                let mut parameters = Vec::new();
+                skip_preprocessor_whitespace(
                     source,
-                    error_line,
-                    error_column,
-                ));
-            }
-            let has_replacement_separator = skip_preprocessor_whitespace(
-                source,
-                chars,
-                &mut cursor,
-                content_end,
-                line,
-                directive_start,
-                directive_column,
-            )?;
-            if cursor < content_end && !has_replacement_separator {
-                let (error_line, error_column) = preprocessor_position_at(
                     chars,
-                    directive_start,
+                    &mut cursor,
+                    content_end,
                     line,
+                    directive_start,
                     directive_column,
-                    cursor,
-                );
-                return Err(lexer_error_with_context(
-                    format!("malformed object-like macro definition for '{macro_name}'"),
+                )?;
+                if cursor < content_end && chars[cursor] == ')' {
+                    cursor += 1;
+                } else {
+                    loop {
+                        let parameter_start = cursor;
+                        if cursor >= content_end
+                            || !(chars[cursor].is_ascii_alphabetic() || chars[cursor] == '_')
+                        {
+                            let (error_line, error_column) = preprocessor_position_at(
+                                chars,
+                                directive_start,
+                                line,
+                                directive_column,
+                                cursor,
+                            );
+                            let message = if chars.get(cursor) == Some(&'.') {
+                                "variadic macros are not supported"
+                            } else {
+                                "expected parameter name in function-like macro definition"
+                            };
+                            return Err(lexer_error_with_context(
+                                message,
+                                source,
+                                error_line,
+                                error_column,
+                            ));
+                        }
+                        cursor += 1;
+                        while cursor < content_end
+                            && (chars[cursor].is_ascii_alphanumeric() || chars[cursor] == '_')
+                        {
+                            cursor += 1;
+                        }
+                        let parameter: String = chars[parameter_start..cursor].iter().collect();
+                        if parameters.contains(&parameter) {
+                            let (error_line, error_column) = preprocessor_position_at(
+                                chars,
+                                directive_start,
+                                line,
+                                directive_column,
+                                parameter_start,
+                            );
+                            return Err(lexer_error_with_context(
+                                format!("duplicate function-like macro parameter '{parameter}'"),
+                                source,
+                                error_line,
+                                error_column,
+                            ));
+                        }
+                        parameters.push(parameter);
+                        skip_preprocessor_whitespace(
+                            source,
+                            chars,
+                            &mut cursor,
+                            content_end,
+                            line,
+                            directive_start,
+                            directive_column,
+                        )?;
+                        if cursor < content_end && chars[cursor] == ')' {
+                            cursor += 1;
+                            break;
+                        }
+                        if cursor >= content_end || chars[cursor] != ',' {
+                            let (error_line, error_column) = preprocessor_position_at(
+                                chars,
+                                directive_start,
+                                line,
+                                directive_column,
+                                cursor,
+                            );
+                            return Err(lexer_error_with_context(
+                                "expected ',' or ')' after function-like macro parameter",
+                                source,
+                                error_line,
+                                error_column,
+                            ));
+                        }
+                        cursor += 1;
+                        skip_preprocessor_whitespace(
+                            source,
+                            chars,
+                            &mut cursor,
+                            content_end,
+                            line,
+                            directive_start,
+                            directive_column,
+                        )?;
+                    }
+                }
+                skip_preprocessor_whitespace(
                     source,
-                    error_line,
-                    error_column,
-                ));
-            }
+                    chars,
+                    &mut cursor,
+                    content_end,
+                    line,
+                    directive_start,
+                    directive_column,
+                )?;
+                Some(parameters)
+            } else {
+                let has_replacement_separator = skip_preprocessor_whitespace(
+                    source,
+                    chars,
+                    &mut cursor,
+                    content_end,
+                    line,
+                    directive_start,
+                    directive_column,
+                )?;
+                if cursor < content_end && !has_replacement_separator {
+                    let (error_line, error_column) = preprocessor_position_at(
+                        chars,
+                        directive_start,
+                        line,
+                        directive_column,
+                        cursor,
+                    );
+                    return Err(lexer_error_with_context(
+                        format!("malformed object-like macro definition for '{macro_name}'"),
+                        source,
+                        error_line,
+                        error_column,
+                    ));
+                }
+                None
+            };
 
             let mut replacement_end = content_end;
             while replacement_end > cursor && chars[replacement_end - 1].is_whitespace() {
@@ -2428,12 +2554,20 @@ fn process_preprocessor_directive(
                     })
                     .collect()
             };
-            let definition = ObjectMacro { replacement };
+            let definition = MacroDefinition {
+                parameters,
+                replacement,
+            };
 
             if let Some(existing) = macros.get(&macro_name) {
                 if existing != &definition {
+                    let kind = if definition.parameters.is_some() {
+                        "function-like"
+                    } else {
+                        "object-like"
+                    };
                     return Err(lexer_error_with_context(
-                        format!("conflicting object-like macro redefinition for '{macro_name}'"),
+                        format!("conflicting {kind} macro redefinition for '{macro_name}'"),
                         source,
                         macro_line,
                         macro_column,
@@ -2530,7 +2664,7 @@ fn evaluate_preprocessor_condition(
     line: usize,
     directive_start: usize,
     directive_column: usize,
-    macros: &HashMap<String, ObjectMacro>,
+    macros: &HashMap<String, MacroDefinition>,
     macro_expansion_budget: &mut MacroExpansionBudget,
     directive_name: &str,
 ) -> CustResult<i64> {
@@ -2579,11 +2713,11 @@ fn evaluate_preprocessor_condition(
 fn prepare_preprocessor_condition_tokens(
     source: &str,
     raw_tokens: Vec<LocatedToken>,
-    macros: &HashMap<String, ObjectMacro>,
+    macros: &HashMap<String, MacroDefinition>,
     macro_expansion_budget: &mut MacroExpansionBudget,
     directive_name: &str,
 ) -> CustResult<Vec<LocatedToken>> {
-    let mut prepared = Vec::new();
+    let mut unexpanded = Vec::new();
     let mut cursor = 0;
     while cursor < raw_tokens.len() && raw_tokens[cursor].kind != Token::Eof {
         let token = &raw_tokens[cursor];
@@ -2632,60 +2766,33 @@ fn prepare_preprocessor_condition_tokens(
                 }
                 cursor += 1;
             }
-            push_preprocessor_condition_token(
-                &mut prepared,
-                LocatedToken::new(
-                    Token::Number(i64::from(macros.contains_key(name))),
-                    defined_token.line,
-                    defined_token.column,
-                ),
-                source,
-                directive_name,
-            )?;
+            unexpanded.push(LocatedToken::new(
+                Token::Number(i64::from(macros.contains_key(name))),
+                defined_token.line,
+                defined_token.column,
+            ));
             continue;
         }
-
-        if let Some(name) = preprocessor_identifier_name(&token.kind) {
-            if macros.contains_key(name) {
-                let expanded = expand_object_macro(
-                    name,
-                    macros,
-                    &mut Vec::new(),
-                    macro_expansion_budget,
-                    source,
-                    token.line,
-                    token.column,
-                )?;
-                for mut expanded_token in expanded {
-                    if preprocessor_identifier_name(&expanded_token.kind).is_some() {
-                        expanded_token.kind = Token::Number(0);
-                    }
-                    push_preprocessor_condition_token(
-                        &mut prepared,
-                        expanded_token,
-                        source,
-                        directive_name,
-                    )?;
-                }
-            } else {
-                push_preprocessor_condition_token(
-                    &mut prepared,
-                    LocatedToken::new(Token::Number(0), token.line, token.column),
-                    source,
-                    directive_name,
-                )?;
-            }
-        } else {
-            push_preprocessor_condition_token(
-                &mut prepared,
-                token.clone(),
-                source,
-                directive_name,
-            )?;
-        }
+        unexpanded.push(token.clone());
         cursor += 1;
     }
 
+    let expanded = expand_macro_tokens(
+        &unexpanded,
+        macros,
+        &mut Vec::new(),
+        macro_expansion_budget,
+        source,
+        false,
+        0,
+    )?;
+    let mut prepared = Vec::new();
+    for mut token in expanded {
+        if preprocessor_identifier_name(&token.kind).is_some() {
+            token.kind = Token::Number(0);
+        }
+        push_preprocessor_condition_token(&mut prepared, token, source, directive_name)?;
+    }
     let eof = raw_tokens
         .last()
         .expect("condition lexer always appends an EOF token");
@@ -3108,6 +3215,84 @@ fn preprocessor_directive_line_end(chars: &[char], mut cursor: usize) -> usize {
     chars.len()
 }
 
+fn macro_invocation_range(chars: &[char], mut cursor: usize) -> Option<(usize, usize)> {
+    loop {
+        while cursor < chars.len() && chars[cursor].is_whitespace() {
+            cursor += 1;
+        }
+        if chars.get(cursor) == Some(&'/') && chars.get(cursor + 1) == Some(&'/') {
+            cursor += 2;
+            while cursor < chars.len() && chars[cursor] != '\n' {
+                cursor += 1;
+            }
+            continue;
+        }
+        if chars.get(cursor) != Some(&'/') || chars.get(cursor + 1) != Some(&'*') {
+            break;
+        }
+        cursor += 2;
+        while cursor + 1 < chars.len() && !(chars[cursor] == '*' && chars[cursor + 1] == '/') {
+            cursor += 1;
+        }
+        if cursor + 1 >= chars.len() {
+            return None;
+        }
+        cursor += 2;
+    }
+
+    if chars.get(cursor) != Some(&'(') {
+        return None;
+    }
+    let start = cursor;
+    let mut depth = 0;
+    while cursor < chars.len() {
+        match chars[cursor] {
+            quote @ ('\'' | '"') => {
+                cursor += 1;
+                while cursor < chars.len() {
+                    if chars[cursor] == '\\' {
+                        cursor = (cursor + 2).min(chars.len());
+                    } else {
+                        let closes_literal = chars[cursor] == quote;
+                        cursor += 1;
+                        if closes_literal {
+                            break;
+                        }
+                    }
+                }
+            }
+            '/' if chars.get(cursor + 1) == Some(&'/') => {
+                cursor += 2;
+                while cursor < chars.len() && chars[cursor] != '\n' {
+                    cursor += 1;
+                }
+            }
+            '/' if chars.get(cursor + 1) == Some(&'*') => {
+                cursor += 2;
+                while cursor + 1 < chars.len()
+                    && !(chars[cursor] == '*' && chars[cursor + 1] == '/')
+                {
+                    cursor += 1;
+                }
+                cursor = (cursor + 2).min(chars.len());
+            }
+            '(' => {
+                depth += 1;
+                cursor += 1;
+            }
+            ')' => {
+                depth -= 1;
+                cursor += 1;
+                if depth == 0 {
+                    return Some((start, cursor));
+                }
+            }
+            _ => cursor += 1,
+        }
+    }
+    Some((start, cursor))
+}
+
 fn preprocessor_position_at(
     chars: &SplicedSourceChars,
     mut cursor: usize,
@@ -3255,26 +3440,178 @@ fn skip_inactive_text_line(
     Ok(())
 }
 
-fn expand_object_macro(
+fn expand_macro_tokens(
+    tokens: &[LocatedToken],
+    macros: &HashMap<String, MacroDefinition>,
+    expansion_stack: &mut Vec<String>,
+    budget: &mut MacroExpansionBudget,
+    source: &str,
+    count_plain_tokens: bool,
+    depth: usize,
+) -> CustResult<Vec<LocatedToken>> {
+    let mut result = Vec::new();
+    let mut cursor = 0;
+    while cursor < tokens.len() {
+        let token = &tokens[cursor];
+        let Some(name) = preprocessor_identifier_name(&token.kind) else {
+            if count_plain_tokens {
+                push_expanded_macro_token(
+                    &mut result,
+                    token.clone(),
+                    budget,
+                    source,
+                    token.line,
+                    token.column,
+                )?;
+            } else {
+                result.push(token.clone());
+            }
+            cursor += 1;
+            continue;
+        };
+        let Some(definition) = macros.get(name) else {
+            if count_plain_tokens {
+                push_expanded_macro_token(
+                    &mut result,
+                    token.clone(),
+                    budget,
+                    source,
+                    token.line,
+                    token.column,
+                )?;
+            } else {
+                result.push(token.clone());
+            }
+            cursor += 1;
+            continue;
+        };
+
+        let (arguments, next_cursor) = if definition.parameters.is_some()
+            && tokens
+                .get(cursor + 1)
+                .is_some_and(|next| next.kind == Token::LParen)
+        {
+            let (arguments, next_cursor) =
+                parse_macro_arguments(tokens, cursor + 1, name, source, token.line, token.column)?;
+            (Some(arguments), next_cursor)
+        } else if definition.parameters.is_some() {
+            if count_plain_tokens {
+                push_expanded_macro_token(
+                    &mut result,
+                    token.clone(),
+                    budget,
+                    source,
+                    token.line,
+                    token.column,
+                )?;
+            } else {
+                result.push(token.clone());
+            }
+            cursor += 1;
+            continue;
+        } else {
+            (None, cursor + 1)
+        };
+
+        let mut expanded = expand_macro(
+            name,
+            arguments,
+            macros,
+            expansion_stack,
+            budget,
+            source,
+            token.line,
+            token.column,
+            depth,
+        )?;
+        cursor = next_cursor;
+
+        while tokens
+            .get(cursor)
+            .is_some_and(|next| next.kind == Token::LParen)
+        {
+            let Some(last) = expanded.last() else {
+                break;
+            };
+            let Some(nested_name) = preprocessor_identifier_name(&last.kind) else {
+                break;
+            };
+            if nested_name == name {
+                break;
+            }
+            if macros
+                .get(nested_name)
+                .is_none_or(|nested| nested.parameters.is_none())
+            {
+                break;
+            }
+            let nested_name = nested_name.to_string();
+            let nested_line = last.line;
+            let nested_column = last.column;
+            let (nested_arguments, next_cursor) = parse_macro_arguments(
+                tokens,
+                cursor,
+                &nested_name,
+                source,
+                nested_line,
+                nested_column,
+            )?;
+            expanded.pop();
+            expanded.extend(expand_macro(
+                &nested_name,
+                Some(nested_arguments),
+                macros,
+                expansion_stack,
+                budget,
+                source,
+                nested_line,
+                nested_column,
+                depth + 1,
+            )?);
+            cursor = next_cursor;
+        }
+        result.extend(expanded);
+    }
+    Ok(result)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn expand_macro(
     name: &str,
-    macros: &HashMap<String, ObjectMacro>,
+    arguments: Option<Vec<Vec<LocatedToken>>>,
+    macros: &HashMap<String, MacroDefinition>,
     expansion_stack: &mut Vec<String>,
     budget: &mut MacroExpansionBudget,
     source: &str,
     line: usize,
     column: usize,
+    depth: usize,
 ) -> CustResult<Vec<LocatedToken>> {
+    let definition = macros
+        .get(name)
+        .expect("macro expansion requires a registered definition")
+        .clone();
     if expansion_stack.iter().any(|expanded| expanded == name) {
+        let kind = if definition.parameters.is_some() {
+            "function-like"
+        } else {
+            "object-like"
+        };
         return Err(lexer_error_with_context(
-            format!("recursive object-like macro expansion for '{name}'"),
+            format!("recursive {kind} macro expansion for '{name}'"),
             source,
             line,
             column,
         ));
     }
-    if expansion_stack.len() >= MAX_OBJECT_MACRO_EXPANSION_DEPTH {
+    if depth >= MAX_OBJECT_MACRO_EXPANSION_DEPTH {
+        let kind = if definition.parameters.is_some() {
+            "function-like"
+        } else {
+            "object-like"
+        };
         return Err(lexer_error_with_context(
-            "object-like macro expansion depth limit exceeded",
+            format!("{kind} macro expansion depth limit exceeded"),
             source,
             line,
             column,
@@ -3290,48 +3627,117 @@ fn expand_object_macro(
     }
     budget.work += 1;
 
-    let definition = macros
-        .get(name)
-        .expect("macro expansion requires a registered definition");
+    let mut expanded_arguments = Vec::new();
+    if let Some(parameters) = &definition.parameters {
+        let mut arguments = arguments.expect("function-like macro expansion requires arguments");
+        if parameters.len() == 1 && arguments.is_empty() {
+            arguments.push(Vec::new());
+        }
+        if arguments.len() != parameters.len() {
+            return Err(lexer_error_with_context(
+                format!(
+                    "function-like macro '{name}' expects {} arguments but got {}",
+                    parameters.len(),
+                    arguments.len()
+                ),
+                source,
+                line,
+                column,
+            ));
+        }
+        for argument in arguments {
+            expanded_arguments.push(expand_macro_tokens(
+                &argument,
+                macros,
+                expansion_stack,
+                budget,
+                source,
+                false,
+                depth + 1,
+            )?);
+        }
+    }
+
     expansion_stack.push(name.to_string());
-    let mut expanded = Vec::new();
+    let mut replacement = Vec::new();
     for replacement_token in &definition.replacement {
         match replacement_token {
-            MacroReplacementToken::Identifier(nested_name) if macros.contains_key(nested_name) => {
-                expanded.extend(expand_object_macro(
-                    nested_name,
-                    macros,
-                    expansion_stack,
-                    budget,
-                    source,
-                    line,
-                    column,
-                )?);
-            }
-            MacroReplacementToken::Identifier(name) => {
-                push_expanded_macro_token(
-                    &mut expanded,
-                    LocatedToken::new(identifier_token(name.clone()), line, column),
-                    budget,
-                    source,
-                    line,
-                    column,
-                )?;
+            MacroReplacementToken::Identifier(token_name) => {
+                if let Some(index) = definition
+                    .parameters
+                    .as_ref()
+                    .and_then(|parameters| parameters.iter().position(|name| name == token_name))
+                {
+                    replacement.extend(expanded_arguments[index].iter().cloned());
+                } else {
+                    replacement.push(LocatedToken::new(
+                        identifier_token(token_name.clone()),
+                        line,
+                        column,
+                    ));
+                }
             }
             MacroReplacementToken::Other { kind, .. } => {
-                push_expanded_macro_token(
-                    &mut expanded,
-                    LocatedToken::new(kind.clone(), line, column),
-                    budget,
-                    source,
-                    line,
-                    column,
-                )?;
+                replacement.push(LocatedToken::new(kind.clone(), line, column));
             }
         }
     }
+    let expanded = expand_macro_tokens(
+        &replacement,
+        macros,
+        expansion_stack,
+        budget,
+        source,
+        true,
+        depth + 1,
+    )?;
     expansion_stack.pop();
     Ok(expanded)
+}
+
+fn parse_macro_arguments(
+    tokens: &[LocatedToken],
+    opening: usize,
+    name: &str,
+    source: &str,
+    line: usize,
+    column: usize,
+) -> CustResult<(Vec<Vec<LocatedToken>>, usize)> {
+    let mut arguments = Vec::new();
+    let mut argument = Vec::new();
+    let mut depth = 1;
+    let mut cursor = opening + 1;
+    if tokens
+        .get(cursor)
+        .is_some_and(|token| token.kind == Token::RParen)
+    {
+        return Ok((arguments, cursor + 1));
+    }
+    while let Some(token) = tokens.get(cursor) {
+        match token.kind {
+            Token::LParen => {
+                depth += 1;
+                argument.push(token.clone());
+            }
+            Token::RParen => {
+                depth -= 1;
+                if depth == 0 {
+                    arguments.push(argument);
+                    return Ok((arguments, cursor + 1));
+                }
+                argument.push(token.clone());
+            }
+            Token::Comma if depth == 1 => arguments.push(std::mem::take(&mut argument)),
+            _ => argument.push(token.clone()),
+        }
+        cursor += 1;
+    }
+    Err(lexer_error_with_context(
+        format!("unterminated invocation of function-like macro '{name}'"),
+        source,
+        line,
+        column,
+    ))
 }
 
 fn push_expanded_macro_token(

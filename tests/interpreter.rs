@@ -220,6 +220,13 @@ fn supports_nested_object_like_macros_across_c_contexts() {
 }
 
 #[test]
+fn supports_function_like_macros_with_nested_arguments_and_rescanning() {
+    let program = include_str!("fixtures/compat/valid/function_like_macros.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn macro_expansion_keeps_ordinary_integer_tokens_public() {
     let program = "#define X 1U\nint main(void) { return X; }\n";
 
@@ -872,10 +879,6 @@ fn rejects_unsupported_and_malformed_preprocessor_directives_with_context() {
             "include directives are not supported at line 1, column 1\n#include <stdio.h>\n^",
         ),
         (
-            include_str!("fixtures/invalid/function_like_macro.c"),
-            "function-like macros are not supported at line 1, column 15\n#define DOUBLE(value) ((value) * 2)\n              ^",
-        ),
-        (
             include_str!("fixtures/invalid/malformed_define_directive.c"),
             "expected macro name after '#define' at line 1, column 9\n#define 42\n        ^",
         ),
@@ -920,6 +923,55 @@ fn rejects_recursive_and_conflicting_object_like_macros_with_context() {
         let err = interpret(program).unwrap_err();
         assert_eq!(err.to_string(), expected, "program: {program}");
     }
+}
+
+#[test]
+fn rejects_malformed_function_like_macros_with_context() {
+    let cases = [
+        (
+            include_str!("fixtures/invalid/function_like_macro_arity.c"),
+            "function-like macro 'ADD' expects 2 arguments but got 1 at line 2, column 25\nint main(void) { return ADD(1); }\n                        ^",
+        ),
+        (
+            include_str!("fixtures/invalid/recursive_function_like_macro.c"),
+            "recursive function-like macro expansion for 'AGAIN' at line 2, column 25\nint main(void) { return AGAIN(1); }\n                        ^",
+        ),
+        (
+            include_str!("fixtures/invalid/duplicate_function_like_macro_parameter.c"),
+            "duplicate function-like macro parameter 'value' at line 1, column 21\n#define PICK(value, value) value\n                    ^",
+        ),
+        (
+            include_str!("fixtures/invalid/variadic_function_like_macro.c"),
+            "variadic macros are not supported at line 1, column 20\n#define SUM(first, ...) first\n                   ^",
+        ),
+        (
+            "#define ID(value) value\nint main(void) { return ID(1; }\n",
+            "unterminated invocation of function-like macro 'ID' at line 2, column 25\nint main(void) { return ID(1; }\n                        ^",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
+fn rejects_excessive_function_like_macro_argument_nesting() {
+    let nesting = 129;
+    let program = format!(
+        "#define ID(value) value\nint main(void) {{ return {}1{}; }}\n",
+        "ID(".repeat(nesting),
+        ")".repeat(nesting),
+    );
+
+    let err = interpret(&program).unwrap_err();
+    assert!(
+        err.to_string().starts_with(
+            "function-like macro expansion depth limit exceeded at line 2, column 409"
+        ),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]

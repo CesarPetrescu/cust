@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-28 — Bounded function-like macro preprocessing
+
+- ISO C11 draft N1570 §6.10.3 requires argument collection by balanced parentheses, complete argument macro replacement before substitution when `#`/`##` are absent, and rescanning of the substituted replacement together with following preprocessing tokens. Cust's shared token expander consequently handles object/function aliases, calls formed at replacement/source seams, and `#if` expressions.
+- During replacement rescanning, the macro currently being replaced is temporarily unavailable. A native `-std=c11 -Wall -Wextra -Werror` probe confirmed that `#define F(x) x` followed by `F(F)(1)` leaves the substituted `F` available as an ordinary function designator rather than re-invoking the same macro. Cust records this boundary while still diagnosing direct/indirect replacement recursion.
+- Independent review found that nested invocation arguments recurse before the old macro-name stack grows. Expansion now carries a separate 128-level nesting counter, while the translation-unit work/emitted-token quotas remain shared across object and function macros and `#if`. See `references/cust-function-like-macro-preprocessing.md`.
+
 ## 2026-07-28 — C11 physical source-line splicing
 
 - ISO C11 draft N1570 §5.1.1.2 translation phase 2 states that every backslash immediately followed by a new-line is deleted, splicing physical source lines into logical lines before preprocessing-token decomposition. Deletion cannot be modeled as whitespace: it must form identifiers, numbers, punctuators, comment delimiters, literals, and escapes across the boundary.
