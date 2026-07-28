@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-29 — Function-like macro stringification metadata
+
+- ISO C11 draft N1570 §6.10.3.2 requires `#` to consume the raw argument preprocessing-token sequence without macro expansion, collapse internal whitespace to one space, and escape quotes/backslashes in string/character-literal spellings. Cust consequently retains exact preprocessing spelling and separation alongside semantic token kinds, plus opaque preprocessing tokens that are decoded only if they survive into ordinary syntax.
+- Empty macro expansions need separator state even when they emit no token. `MacroExpansion { tokens, trailing_separation }` carries that state across argument, replacement, nested-call, and source seams. Before ordinary prescan, Cust clears only raw first-token separation to trim invocation-leading whitespace; substitution preserves separation created by expansion. Pending state must be consumed without boolean short-circuiting, or `mem::take` can be skipped and leak whitespace to later source tokens.
+- GCC and Clang diverge on indirect stringification when an object macro expands from a leading empty macro plus a separated token (`A -> EMPTY a`): GCC emits `"b+ a"`, Clang `"b+a"`. Cust preserves the explicit preprocessing separator following the empty replacement; this route remains an interpreter/GCC-focused regression, while compiler-neutral `c_compat` covers the shared raw-leading and empty-substitution cases. See `references/cust-macro-stringification-preprocessing-metadata.md`.
+
 ## 2026-07-28 — Variadic macros and inactive conditional groups
 
 - ISO C11 draft N1570 §6.10.3 requires a variadic macro invocation to supply at least the named parameters plus one variable argument; an empty invocation contributes one empty argument when named parameters exist. `__VA_ARGS__` is reserved for variadic replacement lists, and commas after the fixed arguments belong to the single variable-argument preprocessing-token sequence.

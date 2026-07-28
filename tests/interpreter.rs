@@ -234,6 +234,101 @@ fn supports_variadic_function_like_macros() {
 }
 
 #[test]
+fn supports_function_like_macro_stringification() {
+    let program = include_str!("fixtures/compat/valid/function_like_macro_stringification.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn macro_stringification_drops_leading_argument_whitespace_at_substitution_boundary() {
+    let program = r#"
+#define STR(value) #value
+#define XSTR(value) STR(value)
+#define ID(value) value
+int text_equal(char *left, char *right) {
+    int index = 0;
+    while (left[index] == right[index] && left[index] != '\0') {
+        index++;
+    }
+    return left[index] == right[index];
+}
+int main(void) {
+    return text_equal(XSTR(z+ID( a)), "z+a") ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn macro_stringification_keeps_empty_substitution_separation_inside_replacement() {
+    let program = r#"
+#define STR(value) #value
+#define XSTR(value) STR(value)
+#define EMPTY
+#define WRAP(value) pre value post
+int text_equal(char *left, char *right) {
+    int index = 0;
+    while (left[index] == right[index] && left[index] != '\0') {
+        index++;
+    }
+    return left[index] == right[index];
+}
+int main(void) {
+    return text_equal(XSTR(WRAP(EMPTY)+z), "pre post+z") ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn macro_stringification_trims_whitespace_before_an_empty_nested_argument() {
+    let program = r#"
+#define STR(value) #value
+#define XSTR(value) STR(value)
+#define EMPTY
+#define ID(value) value
+int text_equal(char *left, char *right) {
+    int index = 0;
+    while (left[index] == right[index] && left[index] != '\0') {
+        index++;
+    }
+    return left[index] == right[index];
+}
+int main(void) {
+    return text_equal(XSTR(z+ID( EMPTY)+a), "z++a") ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn macro_stringification_preserves_leading_separation_created_by_argument_expansion() {
+    let program = r#"
+#define STR(value) #value
+#define XSTR(value) STR(value)
+#define EMPTY
+#define A EMPTY a
+#define CAT(value) b+value
+int text_equal(char *left, char *right) {
+    int index = 0;
+    while (left[index] == right[index] && left[index] != '\0') {
+        index++;
+    }
+    return left[index] == right[index];
+}
+int main(void) {
+    return text_equal(XSTR(CAT(A)), "b+ a") ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn macro_expansion_keeps_ordinary_integer_tokens_public() {
     let program = "#define X 1U\nint main(void) { return X; }\n";
 
@@ -775,7 +870,7 @@ fn rejects_macro_replacement_hash_operators_with_context() {
 
     assert_eq!(
         err.to_string(),
-        "macro replacement '#' operators are not supported at line 1, column 11\n#define X #define Y 1\n          ^"
+        "macro stringification '#' is only supported in function-like macro replacements at line 1, column 11\n#define X #define Y 1\n          ^"
     );
 }
 
@@ -841,6 +936,23 @@ fn rejects_excessive_empty_object_like_macro_expansion_work() {
     assert_eq!(
         err.to_string(),
         "macro expansion work limit exceeded at line 19, column 25\nint main(void) { return M17 0; }\n                        ^"
+    );
+}
+
+#[test]
+fn macro_stringification_byte_limit_is_shared_across_translation_unit() {
+    let chunk = "a".repeat(8_192);
+    let calls = "    (void)XSTR(CHUNK);\n".repeat(128);
+    let program = format!(
+        "#define CHUNK {chunk}\n#define STR(value) #value\n#define XSTR(value) STR(value)\nint main(void) {{\n{calls}    return 0;\n}}\n"
+    );
+
+    let err = interpret(&program).unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("macro stringification byte limit exceeded"),
+        "unexpected error: {err}"
     );
 }
 
@@ -951,6 +1063,37 @@ fn macro_redefinitions_preserve_whitespace_separation() {
         err.to_string(),
         "conflicting function-like macro redefinition for 'F' at line 2, column 9\n#define F(...) (__VA_ARGS__+ 1)\n        ^"
     );
+}
+
+#[test]
+fn rejects_invalid_macro_stringification_operators_with_context() {
+    let cases = [
+        (
+            "#define BAD(value) # 1\nint main(void) { return 0; }\n",
+            "macro stringification '#' must be followed by a macro parameter at line 1, column 20\n#define BAD(value) # 1\n                   ^",
+        ),
+        (
+            "#define BAD(value) #\nint main(void) { return 0; }\n",
+            "macro stringification '#' must be followed by a macro parameter at line 1, column 20\n#define BAD(value) #\n                   ^",
+        ),
+        (
+            "#define BAD # value\nint main(void) { return 0; }\n",
+            "macro stringification '#' is only supported in function-like macro replacements at line 1, column 13\n#define BAD # value\n            ^",
+        ),
+        (
+            "#define BAD(value) ## value\nint main(void) { return 0; }\n",
+            "macro replacement '##' token pasting is not supported at line 1, column 20\n#define BAD(value) ## value\n                   ^",
+        ),
+        (
+            "#define BAD(value) value ##\nint main(void) { return 0; }\n",
+            "macro replacement '##' token pasting is not supported at line 1, column 26\n#define BAD(value) value ##\n                         ^",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
 }
 
 #[test]
