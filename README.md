@@ -198,14 +198,14 @@ docker compose run --rm cust
 
 ## Current limitations
 
-Cust is not a full C implementation. Fixed two-dimensional scalar arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported, but variable-length arrays, arrays with more than two dimensions, and aggregate-valued multidimensional elements remain unsupported. Preprocessing supports bounded object-like and first-slice function-like `#define`, `#undef`, physical-line splicing, and nested `#ifdef`/`#ifndef`/`#if`/`#elif`/`#else`/`#endif`; includes, variadic macros, stringification (`#`), and token pasting (`##`) remain unsupported. Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic calls, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
+Cust is not a full C implementation. Fixed two-dimensional scalar arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported, but variable-length arrays, arrays with more than two dimensions, and aggregate-valued multidimensional elements remain unsupported. Preprocessing supports bounded object-like and first-slice function-like `#define`, `#undef`, physical-line splicing, nested `#ifdef`/`#ifndef`/`#if`/`#elif`/`#else`/`#endif`, and project-relative quoted headers on Linux with depth/source-size/path-containment bounds. System headers, macro-expanded include operands, variadic macros, stringification (`#`), and token pasting (`##`) remain unsupported. Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic calls, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
 
 See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](docs/v0.1.md) for the historical v0.1 foundation notes.
 
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next language slice: scope bounded quoted header inclusion without adding a native-compiler runtime path.
+- Next language slice: scope bounded macro stringification/token-pasting or variadic preprocessing without adding a native-compiler runtime path.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: consider macro stringification/token pasting/variadics, standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures.
 

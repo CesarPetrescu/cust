@@ -1,21 +1,46 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+#[cfg(target_os = "linux")]
+use std::ffi::CString;
 use std::fmt;
+use std::fs;
+use std::io::{self, Read};
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsRawFd, FromRawFd};
+#[cfg(target_os = "linux")]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
 pub type CustResult<T> = Result<T, CustError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustError {
-    message: String,
+    message: Box<str>,
+    io_error: bool,
 }
 
 impl CustError {
     fn new(message: impl Into<String>) -> Self {
         Self {
-            message: message.into(),
+            message: message.into().into_boxed_str(),
+            io_error: false,
         }
+    }
+
+    fn io(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into().into_boxed_str(),
+            io_error: true,
+        }
+    }
+
+    /// Whether this error came from reading the primary source file.
+    pub fn is_io_error(&self) -> bool {
+        self.io_error
     }
 }
 
@@ -156,15 +181,45 @@ impl PreprocessorInteger {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct SourceOrigin {
+    name: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
 struct LocatedToken {
     kind: Token,
     line: usize,
     column: usize,
+    source_origin: Option<Rc<SourceOrigin>>,
+}
+
+impl fmt::Debug for LocatedToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocatedToken")
+            .field("kind", &self.kind)
+            .field("line", &self.line)
+            .field("column", &self.column)
+            .finish()
+    }
 }
 
 impl LocatedToken {
     fn new(kind: Token, line: usize, column: usize) -> Self {
-        Self { kind, line, column }
+        Self {
+            kind,
+            line,
+            column,
+            source_origin: None,
+        }
+    }
+
+    fn source_origin_suffix(&self) -> String {
+        self.source_origin
+            .as_ref()
+            .map_or_else(String::new, |origin| {
+                format!(" in included header '{}'", origin.name)
+            })
     }
 }
 
@@ -202,6 +257,28 @@ const MAX_OBJECT_MACRO_EXPANSION_WORK: usize = 65_536;
 const MAX_PREPROCESSOR_CONDITIONAL_DEPTH: usize = 128;
 const MAX_PREPROCESSOR_CONDITION_DEPTH: usize = 128;
 const MAX_PREPROCESSOR_CONDITION_TOKENS: usize = 8_192;
+const MAX_INCLUDE_DEPTH: usize = 32;
+const MAX_INCLUDED_SOURCE_BYTES: usize = 1_048_576;
+
+#[derive(Default)]
+struct PreprocessorState {
+    macros: HashMap<String, MacroDefinition>,
+    macro_expansion_budget: MacroExpansionBudget,
+    include_context: Option<IncludeContext>,
+}
+
+struct IncludeContext {
+    project_root: PathBuf,
+    #[cfg(target_os = "linux")]
+    project_root_file: fs::File,
+    stack: Vec<IncludedSourcePath>,
+    included_source_bytes: usize,
+}
+
+struct IncludedSourcePath {
+    logical: PathBuf,
+    canonical: PathBuf,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Expr {
@@ -1073,8 +1150,8 @@ enum Stmt {
     },
     Expr(Expr),
     Return(Option<Expr>),
-    Break(LocatedToken),
-    Continue(LocatedToken),
+    Break(Box<LocatedToken>),
+    Continue(Box<LocatedToken>),
     Block(Vec<Stmt>),
     If {
         cond: Expr,
@@ -1152,7 +1229,23 @@ pub struct InterpretOptions {
 
 /// Interpret a Cust source program with explicit execution options.
 pub fn interpret_with_options(source: &str, options: InterpretOptions) -> CustResult<i64> {
-    let tokens = lex(source)?;
+    interpret_tokens(lex(source)?, options)
+}
+
+/// Interpret a source file, allowing bounded quoted includes below its parent directory.
+pub fn interpret_file(path: impl AsRef<Path>) -> CustResult<i64> {
+    interpret_file_with_options(path, InterpretOptions::default())
+}
+
+/// Interpret a source file with explicit execution options and bounded quoted includes.
+pub fn interpret_file_with_options(
+    path: impl AsRef<Path>,
+    options: InterpretOptions,
+) -> CustResult<i64> {
+    interpret_tokens(lex_file(path.as_ref())?, options)
+}
+
+fn interpret_tokens(tokens: Vec<LocatedToken>, options: InterpretOptions) -> CustResult<i64> {
     let mut parser = Parser::new(tokens);
     let program = parser.parse_program()?;
     let mut interpreter = Interpreter::new(options);
@@ -1165,13 +1258,27 @@ pub fn interpret_with_options(source: &str, options: InterpretOptions) -> CustRe
 /// stops after lexing, so runtime errors such as division by zero are not
 /// evaluated while inspecting tokens.
 pub fn format_tokens(source: &str) -> CustResult<String> {
-    let tokens = lex(source)?;
-    Ok(tokens
+    Ok(format_token_stream(lex(source)?))
+}
+
+/// Format a source file's lexer tokens after resolving bounded quoted includes.
+pub fn format_file_tokens(path: impl AsRef<Path>) -> CustResult<String> {
+    Ok(format_token_stream(lex_file(path.as_ref())?))
+}
+
+fn format_token_stream(tokens: Vec<LocatedToken>) -> String {
+    tokens
         .into_iter()
-        .map(|token| format!("{}:{} {:?}", token.line, token.column, token.kind))
+        .map(|token| match token.source_origin {
+            Some(source_origin) => format!(
+                "{}:{}:{} {:?}",
+                source_origin.name, token.line, token.column, token.kind
+            ),
+            None => format!("{}:{} {:?}", token.line, token.column, token.kind),
+        })
         .collect::<Vec<_>>()
         .join("\n")
-        + "\n")
+        + "\n"
 }
 
 /// Format the parsed AST with deterministic function ordering.
@@ -1180,7 +1287,15 @@ pub fn format_tokens(source: &str) -> CustResult<String> {
 /// stops after parsing, so runtime errors such as division by zero are not
 /// evaluated while inspecting the syntax tree.
 pub fn format_ast(source: &str) -> CustResult<String> {
-    let tokens = lex(source)?;
+    format_ast_tokens(lex(source)?)
+}
+
+/// Format a source file's parsed AST after resolving bounded quoted includes.
+pub fn format_file_ast(path: impl AsRef<Path>) -> CustResult<String> {
+    format_ast_tokens(lex_file(path.as_ref())?)
+}
+
+fn format_ast_tokens(tokens: Vec<LocatedToken>) -> CustResult<String> {
     let mut parser = Parser::new(tokens);
     let program = parser.parse_program()?;
     let mut names = program.functions.keys().collect::<Vec<_>>();
@@ -1201,6 +1316,70 @@ pub fn format_ast(source: &str) -> CustResult<String> {
 
 fn lex(source: &str) -> CustResult<Vec<LocatedToken>> {
     lex_with_context(source, source, 1, 1, true, false, None)
+}
+
+fn lex_file(path: &Path) -> CustResult<Vec<LocatedToken>> {
+    let mut source_file = open_header_file(path)
+        .map_err(|err| CustError::io(format!("failed to read {}: {err}", path.display())))?;
+    let source_metadata = source_file
+        .metadata()
+        .map_err(|err| CustError::io(format!("failed to read {}: {err}", path.display())))?;
+    if !source_metadata.is_file() {
+        return Err(CustError::io(format!(
+            "failed to read {}: source is not a regular file",
+            path.display()
+        )));
+    }
+    #[cfg(unix)]
+    let canonical_path = opened_file_identity(&source_file, path)
+        .map_err(|err| CustError::io(format!("failed to read {}: {err}", path.display())))?;
+    #[cfg(not(unix))]
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|err| CustError::io(format!("failed to read {}: {err}", path.display())))?;
+    let logical_project_root = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    #[cfg(target_os = "linux")]
+    let (project_root, project_root_file) = {
+        let file = open_header_file(logical_project_root)
+            .map_err(|err| CustError::io(format!("failed to read {}: {err}", path.display())))?;
+        let canonical = opened_file_identity(&file, logical_project_root)
+            .map_err(|err| CustError::io(format!("failed to read {}: {err}", path.display())))?;
+        (canonical, file)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let project_root = logical_project_root
+        .canonicalize()
+        .map_err(|err| CustError::io(format!("failed to read {}: {err}", path.display())))?;
+
+    let file_name = path.file_name().ok_or_else(|| {
+        CustError::io(format!(
+            "failed to read {}: source is not a regular file",
+            path.display()
+        ))
+    })?;
+    let logical_path = project_root.join(file_name);
+    let mut source = String::new();
+    source_file
+        .read_to_string(&mut source)
+        .map_err(|err| CustError::io(format!("failed to read {}: {err}", path.display())))?;
+    let chars = SplicedSourceChars::new(&source, 1, 1);
+    let mut state = PreprocessorState {
+        include_context: Some(IncludeContext {
+            project_root,
+            #[cfg(target_os = "linux")]
+            project_root_file,
+            stack: vec![IncludedSourcePath {
+                logical: logical_path,
+                canonical: canonical_path,
+            }],
+            included_source_bytes: 0,
+        }),
+        ..PreprocessorState::default()
+    };
+    lex_spliced_with_state(&chars, &source, 1, 1, true, false, None, &mut state)
 }
 
 fn lex_with_context(
@@ -1233,9 +1412,31 @@ fn lex_spliced_with_context(
     preserve_preprocessor_integers: bool,
     token_limit: Option<(usize, &str)>,
 ) -> CustResult<Vec<LocatedToken>> {
+    let mut state = PreprocessorState::default();
+    lex_spliced_with_state(
+        chars,
+        source,
+        initial_line,
+        initial_column,
+        allow_preprocessor_directives,
+        preserve_preprocessor_integers,
+        token_limit,
+        &mut state,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lex_spliced_with_state(
+    chars: &SplicedSourceChars,
+    source: &str,
+    initial_line: usize,
+    initial_column: usize,
+    allow_preprocessor_directives: bool,
+    preserve_preprocessor_integers: bool,
+    token_limit: Option<(usize, &str)>,
+    state: &mut PreprocessorState,
+) -> CustResult<Vec<LocatedToken>> {
     let mut tokens = Vec::new();
-    let mut macros = HashMap::<String, MacroDefinition>::new();
-    let mut macro_expansion_budget = MacroExpansionBudget::default();
     let mut conditional_stack = Vec::<ConditionalFrame>::new();
     let mut i = 0;
     let mut line = initial_line;
@@ -1289,9 +1490,9 @@ fn lex_spliced_with_context(
                         &mut i,
                         &mut line,
                         &mut column,
-                        &mut macros,
-                        &mut macro_expansion_budget,
+                        state,
                         &mut conditional_stack,
+                        &mut tokens,
                     )?;
                     if !consumed {
                         skip_inactive_text_line(
@@ -1538,7 +1739,7 @@ fn lex_spliced_with_context(
                     advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                 }
                 let text: String = chars[start..i].iter().collect();
-                if macros.contains_key(&text) {
+                if state.macros.contains_key(&text) {
                     let mut input = vec![LocatedToken::new(
                         identifier_token(text),
                         start_line,
@@ -1566,9 +1767,9 @@ fn lex_spliced_with_context(
                     }
                     let expanded = expand_macro_tokens(
                         &input,
-                        &macros,
+                        &state.macros,
                         &mut Vec::new(),
-                        &mut macro_expansion_budget,
+                        &mut state.macro_expansion_budget,
                         source,
                         false,
                         0,
@@ -1805,9 +2006,9 @@ fn lex_spliced_with_context(
                     &mut i,
                     &mut line,
                     &mut column,
-                    &mut macros,
-                    &mut macro_expansion_budget,
+                    state,
                     &mut conditional_stack,
+                    &mut tokens,
                 )?;
             }
             other => {
@@ -2017,9 +2218,9 @@ fn process_preprocessor_directive(
     i: &mut usize,
     current_line: &mut usize,
     column: &mut usize,
-    macros: &mut HashMap<String, MacroDefinition>,
-    macro_expansion_budget: &mut MacroExpansionBudget,
+    state: &mut PreprocessorState,
     conditional_stack: &mut Vec<ConditionalFrame>,
+    output_tokens: &mut Vec<LocatedToken>,
 ) -> CustResult<bool> {
     let directive_start = *i;
     let line = *current_line;
@@ -2132,7 +2333,7 @@ fn process_preprocessor_directive(
                     error_column,
                 ));
             }
-            let is_defined = macros.contains_key(&macro_name);
+            let is_defined = state.macros.contains_key(&macro_name);
             let condition = if directive_name == "ifndef" {
                 !is_defined
             } else {
@@ -2247,8 +2448,8 @@ fn process_preprocessor_directive(
                     line,
                     directive_start,
                     directive_column,
-                    macros,
-                    macro_expansion_budget,
+                    &state.macros,
+                    &mut state.macro_expansion_budget,
                     "if",
                 )? != 0
             } else {
@@ -2291,8 +2492,8 @@ fn process_preprocessor_directive(
                     line,
                     directive_start,
                     directive_column,
-                    macros,
-                    macro_expansion_budget,
+                    &state.macros,
+                    &mut state.macro_expansion_budget,
                     "elif",
                 )? != 0
             } else {
@@ -2303,12 +2504,117 @@ fn process_preprocessor_directive(
         }
         _ if !active => return Ok(false),
         "include" => {
-            return Err(lexer_error_with_context(
-                "include directives are not supported",
+            if state.include_context.is_none() {
+                return Err(lexer_error_with_context(
+                    "include directives are not supported",
+                    source,
+                    line,
+                    directive_column,
+                ));
+            }
+            skip_preprocessor_whitespace(
                 source,
+                chars,
+                &mut cursor,
+                content_end,
                 line,
+                directive_start,
                 directive_column,
-            ));
+            )?;
+            if cursor >= content_end {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    "expected quoted header name after '#include'",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            if chars[cursor] == '<' {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    "system header includes are not supported",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            if chars[cursor] != '"' {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    "macro-expanded include operands are not supported",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            cursor += 1;
+            let header_start = cursor;
+            while cursor < content_end && chars[cursor] != '"' {
+                cursor += 1;
+            }
+            if cursor >= content_end || header_start == cursor {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    header_start,
+                );
+                return Err(lexer_error_with_context(
+                    "expected closing quote after '#include' header name",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            let header_name: String = chars[header_start..cursor].iter().collect();
+            cursor += 1;
+            skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if cursor < content_end {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    "unexpected tokens after '#include' header name",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            let included_tokens =
+                lex_quoted_header(&header_name, source, line, directive_column, state)?;
+            output_tokens.extend(included_tokens);
         }
         "define" => {
             let has_name_separator = skip_preprocessor_whitespace(
@@ -2559,7 +2865,7 @@ fn process_preprocessor_directive(
                 replacement,
             };
 
-            if let Some(existing) = macros.get(&macro_name) {
+            if let Some(existing) = state.macros.get(&macro_name) {
                 if existing != &definition {
                     let kind = if definition.parameters.is_some() {
                         "function-like"
@@ -2574,7 +2880,7 @@ fn process_preprocessor_directive(
                     ));
                 }
             } else {
-                macros.insert(macro_name, definition);
+                state.macros.insert(macro_name, definition);
             }
         }
         "undef" => {
@@ -2637,7 +2943,7 @@ fn process_preprocessor_directive(
                     error_column,
                 ));
             }
-            macros.remove(&macro_name);
+            state.macros.remove(&macro_name);
         }
         _ => {
             return Err(lexer_error_with_context(
@@ -2653,6 +2959,362 @@ fn process_preprocessor_directive(
         advance_position(chars, chars[*i], current_line, column, i);
     }
     Ok(true)
+}
+
+fn open_header_file(path: &Path) -> io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NONBLOCK);
+    options.open(path)
+}
+
+#[cfg(target_os = "linux")]
+fn open_header_file_beneath(
+    project_root_file: Option<&fs::File>,
+    project_root: &Path,
+    logical_path: &Path,
+) -> io::Result<fs::File> {
+    let project_root_file = project_root_file.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            "secure quoted header inclusion is not supported on this platform",
+        )
+    })?;
+    let canonical_path = logical_path.canonicalize()?;
+    let relative_path = canonical_path
+        .strip_prefix(project_root)
+        .map_err(|_| io::Error::from_raw_os_error(libc::EXDEV))?;
+    let relative_path = CString::new(relative_path.as_os_str().as_bytes()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "quoted header path contains a NUL byte",
+        )
+    })?;
+
+    // `open_how` is an integer-only kernel ABI structure, so all-zero is a
+    // valid baseline before assigning every field used by openat2.
+    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
+    how.flags = (libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NONBLOCK) as u64;
+    how.resolve = libc::RESOLVE_BENEATH | libc::RESOLVE_NO_MAGICLINKS;
+    // SAFETY: the directory fd, NUL-terminated path, initialized `open_how`,
+    // and structure size remain valid for the duration of the syscall.
+    let fd = unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            project_root_file.as_raw_fd(),
+            relative_path.as_ptr(),
+            &how,
+            std::mem::size_of::<libc::open_how>(),
+        )
+    };
+    if fd == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a successful openat2 call returns a new owned file descriptor.
+    Ok(unsafe { fs::File::from_raw_fd(fd as i32) })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_header_file_beneath(
+    _project_root_file: Option<&fs::File>,
+    _project_root: &Path,
+    _logical_path: &Path,
+) -> io::Result<fs::File> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "secure quoted header inclusion is not supported on this platform",
+    ))
+}
+
+#[cfg(unix)]
+fn opened_file_identity(file: &fs::File, logical_path: &Path) -> io::Result<PathBuf> {
+    let canonical_path = logical_path.canonicalize()?;
+    let opened_metadata = file.metadata()?;
+    let current_metadata = fs::metadata(&canonical_path)?;
+    if opened_metadata.dev() != current_metadata.dev()
+        || opened_metadata.ino() != current_metadata.ino()
+    {
+        return Err(io::Error::other(
+            "quoted header path changed while it was being opened",
+        ));
+    }
+    Ok(canonical_path)
+}
+
+#[cfg(not(unix))]
+fn opened_file_identity(_file: &fs::File, _logical_path: &Path) -> io::Result<PathBuf> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "secure quoted header inclusion is not supported on this platform",
+    ))
+}
+
+fn normalize_logical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(Path::new(std::path::MAIN_SEPARATOR_STR)),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
+fn logical_source_name(project_root: &Path, logical_path: &Path) -> String {
+    logical_path
+        .strip_prefix(project_root)
+        .unwrap_or(logical_path)
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => Some(part.to_string_lossy()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn lex_quoted_header(
+    header_name: &str,
+    including_source: &str,
+    include_line: usize,
+    include_column: usize,
+    state: &mut PreprocessorState,
+) -> CustResult<Vec<LocatedToken>> {
+    let header_path = Path::new(header_name);
+    if header_path.is_absolute()
+        || header_path.components().any(|component| {
+            !matches!(
+                component,
+                Component::Normal(_) | Component::CurDir | Component::ParentDir
+            )
+        })
+    {
+        return Err(lexer_error_with_context(
+            format!("quoted header path '{header_name}' must stay below the project include root"),
+            including_source,
+            include_line,
+            include_column,
+        ));
+    }
+
+    let (project_root, current_directory) = {
+        let context = state
+            .include_context
+            .as_ref()
+            .expect("file lexing installs an include context");
+        (
+            context.project_root.clone(),
+            context
+                .stack
+                .last()
+                .and_then(|path| path.logical.parent())
+                .expect("an included source file has a parent directory")
+                .to_path_buf(),
+        )
+    };
+    let mut search_roots = vec![current_directory];
+    if search_roots[0] != project_root {
+        search_roots.push(project_root.clone());
+    }
+    let mut selected_header = None;
+    for root in search_roots {
+        let logical_path = normalize_logical_path(&root.join(header_path));
+        if !logical_path.starts_with(&project_root) {
+            return Err(lexer_error_with_context(
+                format!("quoted header path '{header_name}' escapes the project include root"),
+                including_source,
+                include_line,
+                include_column,
+            ));
+        }
+        #[cfg(target_os = "linux")]
+        let project_root_file = state
+            .include_context
+            .as_ref()
+            .map(|context| &context.project_root_file);
+        #[cfg(not(target_os = "linux"))]
+        let project_root_file = None;
+        let file = match open_header_file_beneath(project_root_file, &project_root, &logical_path) {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            #[cfg(target_os = "linux")]
+            Err(err) if err.raw_os_error() == Some(libc::EXDEV) => {
+                return Err(lexer_error_with_context(
+                    format!("quoted header path '{header_name}' escapes the project include root"),
+                    including_source,
+                    include_line,
+                    include_column,
+                ));
+            }
+            Err(err) => {
+                return Err(lexer_error_with_context(
+                    format!("failed to open quoted header '{header_name}': {err}"),
+                    including_source,
+                    include_line,
+                    include_column,
+                ));
+            }
+        };
+        let metadata = file.metadata().map_err(|err| {
+            lexer_error_with_context(
+                format!("failed to inspect quoted header '{header_name}': {err}"),
+                including_source,
+                include_line,
+                include_column,
+            )
+        })?;
+        if !metadata.is_file() {
+            return Err(lexer_error_with_context(
+                format!("quoted header '{header_name}' is not a regular file"),
+                including_source,
+                include_line,
+                include_column,
+            ));
+        }
+        let canonical_path = opened_file_identity(&file, &logical_path).map_err(|err| {
+            lexer_error_with_context(
+                format!("failed to resolve quoted header '{header_name}': {err}"),
+                including_source,
+                include_line,
+                include_column,
+            )
+        })?;
+        if !canonical_path.starts_with(&project_root) {
+            return Err(lexer_error_with_context(
+                format!("quoted header path '{header_name}' escapes the project include root"),
+                including_source,
+                include_line,
+                include_column,
+            ));
+        }
+        selected_header = Some((logical_path, canonical_path, file));
+        break;
+    }
+    let Some((logical_path, canonical_path, header_file)) = selected_header else {
+        return Err(lexer_error_with_context(
+            format!("quoted header '{header_name}' was not found below the project include root"),
+            including_source,
+            include_line,
+            include_column,
+        ));
+    };
+
+    {
+        let context = state
+            .include_context
+            .as_ref()
+            .expect("file lexing installs an include context");
+        // Allow one recursive entry so conventional include guards can make the
+        // repeated header inactive before rejecting an actually unguarded cycle.
+        if context
+            .stack
+            .iter()
+            .filter(|path| path.canonical == canonical_path)
+            .count()
+            >= 2
+        {
+            return Err(lexer_error_with_context(
+                format!("quoted header include cycle detected for '{header_name}'"),
+                including_source,
+                include_line,
+                include_column,
+            ));
+        }
+        if context.stack.len().saturating_sub(1) >= MAX_INCLUDE_DEPTH {
+            return Err(lexer_error_with_context(
+                format!("quoted header include depth limit of {MAX_INCLUDE_DEPTH} exceeded"),
+                including_source,
+                include_line,
+                include_column,
+            ));
+        }
+    }
+
+    let included_source_bytes = state
+        .include_context
+        .as_ref()
+        .expect("file lexing installs an include context")
+        .included_source_bytes;
+    let remaining_source_bytes = MAX_INCLUDED_SOURCE_BYTES - included_source_bytes;
+    let mut header_bytes = Vec::new();
+    header_file
+        .take(remaining_source_bytes as u64 + 1)
+        .read_to_end(&mut header_bytes)
+        .map_err(|err| {
+            lexer_error_with_context(
+                format!("failed to read quoted header '{header_name}': {err}"),
+                including_source,
+                include_line,
+                include_column,
+            )
+        })?;
+    if header_bytes.len() > remaining_source_bytes {
+        return Err(lexer_error_with_context(
+            format!("included source size limit of {MAX_INCLUDED_SOURCE_BYTES} bytes exceeded"),
+            including_source,
+            include_line,
+            include_column,
+        ));
+    }
+    let next_source_bytes = included_source_bytes + header_bytes.len();
+    let source_name = logical_source_name(&project_root, &logical_path);
+    let header_source = String::from_utf8(header_bytes).map_err(|_| {
+        lexer_error_with_context(
+            format!("quoted header '{header_name}' is not valid UTF-8"),
+            including_source,
+            include_line,
+            include_column,
+        )
+    })?;
+
+    {
+        let context = state
+            .include_context
+            .as_mut()
+            .expect("file lexing installs an include context");
+        context.included_source_bytes = next_source_bytes;
+        context.stack.push(IncludedSourcePath {
+            logical: logical_path,
+            canonical: canonical_path,
+        });
+    }
+    let header_chars = SplicedSourceChars::new(&header_source, 1, 1);
+    let result = lex_spliced_with_state(
+        &header_chars,
+        &header_source,
+        1,
+        1,
+        true,
+        false,
+        None,
+        state,
+    );
+    state
+        .include_context
+        .as_mut()
+        .expect("file lexing installs an include context")
+        .stack
+        .pop();
+
+    let mut tokens = result
+        .map_err(|err| CustError::new(format!("in included header '{source_name}': {err}")))?;
+    let eof = tokens
+        .pop()
+        .expect("included header lexer always appends an EOF token");
+    debug_assert_eq!(eof.kind, Token::Eof);
+    let source_origin = Rc::new(SourceOrigin { name: source_name });
+    for token in &mut tokens {
+        if token.source_origin.is_none() {
+            token.source_origin = Some(Rc::clone(&source_origin));
+        }
+    }
+    Ok(tokens)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -10602,13 +11264,13 @@ impl Parser {
     fn parse_break(&mut self) -> CustResult<Stmt> {
         let token = self.advance();
         self.expect_semicolon_after("break statement")?;
-        Ok(Stmt::Break(token))
+        Ok(Stmt::Break(Box::new(token)))
     }
 
     fn parse_continue(&mut self) -> CustResult<Stmt> {
         let token = self.advance();
         self.expect_semicolon_after("continue statement")?;
-        Ok(Stmt::Continue(token))
+        Ok(Stmt::Continue(Box::new(token)))
     }
 
     fn parse_if(&mut self) -> CustResult<Stmt> {
@@ -13508,8 +14170,14 @@ impl Parser {
     }
 
     fn error_at(message: String, token: &LocatedToken) -> CustError {
+        let origin = token
+            .source_origin
+            .as_ref()
+            .map_or_else(String::new, |origin| {
+                format!(" in included header '{}'", origin.name)
+            });
         CustError::new(format!(
-            "{message} at line {}, column {}",
+            "{message} at line {}, column {}{origin}",
             token.line, token.column
         ))
     }
@@ -13836,15 +14504,19 @@ impl Interpreter {
 
     fn break_outside_loop_or_switch_error(token: &LocatedToken) -> CustError {
         CustError::new(format!(
-            "break outside loop or switch at line {}, column {}",
-            token.line, token.column
+            "break outside loop or switch at line {}, column {}{}",
+            token.line,
+            token.column,
+            token.source_origin_suffix()
         ))
     }
 
     fn continue_outside_loop_error(token: &LocatedToken) -> CustError {
         CustError::new(format!(
-            "continue outside loop at line {}, column {}",
-            token.line, token.column
+            "continue outside loop at line {}, column {}{}",
+            token.line,
+            token.column,
+            token.source_origin_suffix()
         ))
     }
 
@@ -23751,8 +24423,8 @@ impl Interpreter {
                 Ok(ExecFlow::None)
             }
             Stmt::Return(expr) => Ok(ExecFlow::Return(self.eval_return_value(expr.as_ref())?)),
-            Stmt::Break(token) => Ok(ExecFlow::Break(token.clone())),
-            Stmt::Continue(token) => Ok(ExecFlow::Continue(token.clone())),
+            Stmt::Break(token) => Ok(ExecFlow::Break((**token).clone())),
+            Stmt::Continue(token) => Ok(ExecFlow::Continue((**token).clone())),
             Stmt::Block(statements) => self.exec_block(statements),
             Stmt::If {
                 cond,

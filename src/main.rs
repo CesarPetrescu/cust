@@ -1,5 +1,4 @@
 use std::env;
-use std::fs;
 use std::process;
 
 fn main() {
@@ -63,21 +62,13 @@ fn main() {
         process::exit(64);
     }
 
-    let source = match fs::read_to_string(&path) {
-        Ok(source) => source,
-        Err(err) => {
-            eprintln!("cust: failed to read {path}: {err}");
-            process::exit(66);
-        }
-    };
-
-    match mode.execute(&source) {
+    match mode.execute(&path) {
         Ok(output) => {
             print!("{output}");
         }
         Err(err) => {
             eprintln!("cust: {err}");
-            process::exit(1);
+            process::exit(if err.is_io_error() { 66 } else { 1 });
         }
     }
 }
@@ -89,19 +80,19 @@ enum Mode {
 }
 
 impl Mode {
-    fn execute(&self, source: &str) -> cust::CustResult<String> {
+    fn execute(&self, path: &str) -> cust::CustResult<String> {
         match self {
             Self::Run {
                 max_loop_iterations,
-            } => cust::interpret_with_options(
-                source,
+            } => cust::interpret_file_with_options(
+                path,
                 cust::InterpretOptions {
                     max_loop_iterations: *max_loop_iterations,
                 },
             )
             .map(|value| format!("{value}\n")),
-            Self::Tokens => cust::format_tokens(source),
-            Self::Ast => cust::format_ast(source),
+            Self::Tokens => cust::format_file_tokens(path),
+            Self::Ast => cust::format_file_ast(path),
         }
     }
 }

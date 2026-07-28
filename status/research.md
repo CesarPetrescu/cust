@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-28 — Bounded project-relative quoted headers
+
+- ISO C11 draft N1570 §6.10.2 searches a quoted header relative to the source file before implementation-defined locations. Cust models the bounded subset as the logical including-file directory followed by the primary file's project root; canonical identities remain separate for containment and cycle checks so symlink spelling does not change nested lookup semantics.
+- Resource bounds must apply before unbounded allocation or blocking I/O. On Linux, included sources are opened relative to the project-root directory descriptor with `openat2(RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS)` plus `O_NONBLOCK`, rejected unless regular files, and read through a 1 MiB cumulative limiter; recursion is capped at 32 included headers.
+- Canonicalize/check/reopen alone is TOCTOU-prone and can open an escaping target before checking containment. Cust canonicalizes only to select an in-root relative target, then performs the actual open beneath the root with `openat2`; Unix dev/inode comparison still binds the opened handle to the selected logical path. Platforms without this secure resolver fail closed for quoted inclusion, and their success fixtures are gated while a fail-closed test remains. See `references/cust-bounded-quoted-header-inclusion.md`.
+
 ## 2026-07-28 — Bounded function-like macro preprocessing
 
 - ISO C11 draft N1570 §6.10.3 requires argument collection by balanced parentheses, complete argument macro replacement before substitution when `#`/`##` are absent, and rescanning of the substituted replacement together with following preprocessing tokens. Cust's shared token expander consequently handles object/function aliases, calls formed at replacement/source seams, and `#if` expressions.

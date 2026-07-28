@@ -218,6 +218,8 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/object_like_macro_line_continuations.c",
     "tests/fixtures/compat/valid/object_like_macro_undef.c",
     "tests/fixtures/compat/valid/object_like_macros.c",
+    #[cfg(target_os = "linux")]
+    "tests/fixtures/compat/valid/quoted_header_includes.c",
     "tests/fixtures/compat/valid/pointer_array_elements.c",
     "tests/fixtures/compat/valid/pointer_arithmetic.c",
     "tests/fixtures/compat/valid/pointer_difference_scalar_expressions.c",
@@ -326,9 +328,8 @@ fn supported_programs_match_c_compiler_exit_codes() {
         c_compiler().expect("expected gcc, clang, or cc to be available for C compatibility tests");
 
     for fixture in COMPAT_FIXTURES {
-        let source = fs::read_to_string(fixture).expect("compatibility fixture should be readable");
         let cust_result =
-            cust::interpret(&source).expect("compatibility fixture should run under Cust");
+            cust::interpret_file(fixture).expect("compatibility fixture should run under Cust");
         let c_result = compile_and_run(&compiler, Path::new(fixture));
 
         assert_eq!(

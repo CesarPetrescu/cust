@@ -14236,6 +14236,24 @@ fn rejects_multi_character_char_literals() {
 }
 
 #[test]
+fn supports_recursive_calls_within_documented_depth_limit() {
+    let program = r#"
+int recurse(int remaining) {
+    if (remaining == 0) {
+        return 0;
+    }
+    return recurse(remaining - 1);
+}
+
+int main(void) {
+    return recurse(30);
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn reports_function_name_when_recursive_calls_exceed_depth_limit() {
     let program = include_str!("fixtures/invalid/recursive_call_depth_limit.c");
 
