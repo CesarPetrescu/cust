@@ -314,6 +314,37 @@ fn supports_macro_token_pasting_across_supported_preprocessing_tokens() {
 }
 
 #[test]
+fn supports_direct_source_digraph_punctuators() {
+    let program = include_str!("fixtures/compat/valid/direct_source_digraph_punctuators.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_source_digraph_directives_preserve_placement_diagnostics() {
+    let program = "int value = 0;\nvalue %:define VALUE 7\nint main(void) { return value; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "preprocessor directives must begin on a new line at line 2, column 7\nvalue %:define VALUE 7\n      ^"
+    );
+}
+
+#[test]
+fn direct_source_digraph_macro_redefinitions_preserve_replacement_spelling() {
+    let program = "%:define OPEN <:\n#define OPEN [\nint main(void) { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "conflicting object-like macro redefinition for 'OPEN' at line 2, column 9\n#define OPEN [\n        ^"
+    );
+}
+
+#[test]
 fn macro_stringification_drops_leading_argument_whitespace_at_substitution_boundary() {
     let program = r#"
 #define STR(value) #value

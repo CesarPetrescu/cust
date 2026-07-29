@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added direct-source C11 digraph punctuators: `<:`, `:>`, `<%`, `%>`, `%:`, and `%:%:` now behave as bracket, brace, directive/stringification, and token-pasting spellings while retaining exact preprocessing spelling metadata.
+
+### Diagnostics and verification
+
+- Preserved exact directive-placement and spelling-sensitive macro-redefinition diagnostics for digraph routes, added focused interpreter regressions plus a warning-free compiler-oracle fixture, and verified 1,113 local/Docker tests.
+
 ## v0.4.0 — 2026-07-29
 
 ### Language subset

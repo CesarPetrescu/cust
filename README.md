@@ -91,7 +91,7 @@ int main() {
 
 Features:
 
-- bounded object-like, named-parameter, and variadic function-like `#define` macros with balanced argument collection, raw/prescanned substitution, stringification (`#` / `%:`), token pasting (`##` / `%:%:`), rescanning, and nested expansion; bounded `#undef`; bounded nested `#ifdef`/`#ifndef`/`#if`/`#elif`/`#else`/`#endif`; global LF/CRLF physical-line splicing; and project-relative quoted headers on Linux with shared macro state plus depth/source-size/path-containment bounds; comments and string/character literal contents are not macro-expanded
+- bounded object-like, named-parameter, and variadic function-like `#define` macros with balanced argument collection, raw/prescanned substitution, stringification (`#` / `%:`), token pasting (`##` / `%:%:`), rescanning, and nested expansion; bounded `#undef`; bounded nested `#ifdef`/`#ifndef`/`#if`/`#elif`/`#else`/`#endif`; direct-source C11 digraph punctuators (`<:`, `:>`, `<%`, `%>`, `%:`, `%:%:`) with spelling preservation; global LF/CRLF physical-line splicing; and project-relative quoted headers on Linux with shared macro state plus depth/source-size/path-containment bounds; comments and string/character literal contents are not macro-expanded
 - `int main() { ... }` or `int main(void) { ... }` plus additional `int`, `char`, `void`, supported `struct`, supported `union`, or direct named-`enum` function definitions/prototypes; prototypes may use C-style unnamed parameter declarations such as `int add(int, int);` or `void use(int [], struct Point *);`
 - function calls with scalar/struct/union/pointer arguments, local function parameters, C-style empty `void` parameter lists, and by-value scalar/aggregate return types including top-level `const` spellings such as `const int f(void)` / `const struct Point make(void)`
 - integer, character, and string literals
@@ -198,16 +198,16 @@ docker compose run --rm cust
 
 ## Current limitations
 
-Cust is not a full C implementation. Fixed two-dimensional scalar arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported, but variable-length arrays, arrays with more than two dimensions, and aggregate-valued multidimensional elements remain unsupported. Preprocessing supports bounded object-like, named-parameter, and variadic function-like `#define`, function-like macro stringification and token pasting, `#undef`, physical-line splicing, nested conditionals, and project-relative quoted headers on Linux with depth/source-size/path-containment bounds. System headers, macro-expanded include operands, ordinary-source bracket/brace digraph spellings, and `%:` directive introducers remain unsupported; `%:` / `%:%:` macro operators are supported, and quoted inclusion fails closed on non-Linux platforms. Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
+Cust is not a full C implementation. Fixed two-dimensional scalar arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported, but variable-length arrays, arrays with more than two dimensions, and aggregate-valued multidimensional elements remain unsupported. Preprocessing supports bounded object-like, named-parameter, and variadic function-like `#define`, function-like macro stringification and token pasting, `#undef`, physical-line splicing, nested conditionals, direct-source C11 digraph punctuators, and project-relative quoted headers on Linux with depth/source-size/path-containment bounds. System headers and macro-expanded include operands remain unsupported; quoted inclusion fails closed on non-Linux platforms. Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
 
 See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](docs/v0.1.md) for the historical v0.1 foundation notes.
 
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next language slice: add direct-source C digraph punctuator spelling parity while preserving macro spelling metadata and directive-placement safety.
+- Next language slice: add bounded macro-expanded quoted-header operands while reusing the existing secure file-aware include path and preprocessing budgets.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
-- Longer term: consider standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures after direct-source digraph closure.
+- Longer term: consider standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures after macro-expanded quoted-header closure.
 
 ## License
 

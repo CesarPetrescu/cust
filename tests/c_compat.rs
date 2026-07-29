@@ -216,6 +216,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/variadic_function_like_macros.c",
     "tests/fixtures/compat/valid/function_like_macro_stringification.c",
     "tests/fixtures/compat/valid/macro_token_pasting.c",
+    "tests/fixtures/compat/valid/direct_source_digraph_punctuators.c",
     "tests/fixtures/compat/valid/object_like_macro_conditionals.c",
     "tests/fixtures/compat/valid/object_like_macro_if_elif.c",
     "tests/fixtures/compat/valid/object_like_macro_line_continuations.c",

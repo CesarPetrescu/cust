@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-29 — Direct-source C11 digraph punctuators
+
+- ISO C11 draft N1570 §6.4.6 lists `<:`, `:>`, `<%`, `%>`, `%:`, and `%:%:` as punctuators that behave as `[`, `]`, `{`, `}`, `#`, and `##` respectively in every aspect except spelling: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf. Cust therefore lowers semantic token kinds while retaining `LocatedToken.preprocessing_spelling` for stringification and macro-definition equality.
+- `%:` directive eligibility must use the same logical-line state and inactive-conditional structural routing as `#`; physical splicing occurs first, and mid-line `%:define` retains the existing exact directive-placement diagnostic.
+- The `<::` fourth-character tokenization exception is C++-specific, not C11. A strict `clang -std=c11 -Xclang -dump-tokens` probe tokenized `0 <::> 0` as `0`, `<:`, `:>`, `0`, agreeing with N1570 and rejecting an initial review false positive.
+
 ## 2026-07-29 — v0.4.0 release closure
 
 - Release consistency requires package and lock versions, exact CLI assertions, both Compose image tags and assertions, README claims, changelog notes, and all status files to move together.

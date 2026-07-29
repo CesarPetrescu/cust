@@ -1577,6 +1577,28 @@ fn lex_spliced_with_state(
                         )?;
                     }
                 }
+                '%' if chars.get(i + 1) == Some(&':') && !line_has_preprocessing_token => {
+                    let consumed = process_preprocessor_directive(
+                        source,
+                        chars,
+                        &mut i,
+                        &mut line,
+                        &mut column,
+                        state,
+                        &mut conditional_stack,
+                        &mut tokens,
+                    )?;
+                    if !consumed {
+                        skip_inactive_text_line(
+                            source,
+                            chars,
+                            &mut i,
+                            &mut line,
+                            &mut column,
+                            &mut line_has_preprocessing_token,
+                        )?;
+                    }
+                }
                 _ => {
                     skip_inactive_text_line(
                         source,
@@ -1592,9 +1614,10 @@ fn lex_spliced_with_state(
         }
         if c == '\n' {
             line_has_preprocessing_token = false;
-        } else if !c.is_whitespace()
-            && c != '#'
-            && !(c == '/' && matches!(chars.get(i + 1), Some('/') | Some('*')))
+        } else if !(c.is_whitespace()
+            || c == '#'
+            || (c == '%' && chars.get(i + 1) == Some(&':'))
+            || (c == '/' && matches!(chars.get(i + 1), Some('/') | Some('*'))))
         {
             line_has_preprocessing_token = true;
         }
@@ -2003,6 +2026,39 @@ fn lex_spliced_with_state(
                 advance_position(chars, '%', &mut line, &mut column, &mut i);
                 advance_position(chars, ':', &mut line, &mut column, &mut i);
             }
+            '%' if chars.get(i + 1) == Some(&':') => {
+                if !allow_preprocessor_directives {
+                    return Err(lexer_error_with_context(
+                        "macro replacement '#' operators are not supported",
+                        source,
+                        line,
+                        column,
+                    ));
+                }
+                if line_has_preprocessing_token {
+                    return Err(lexer_error_with_context(
+                        "preprocessor directives must begin on a new line",
+                        source,
+                        line,
+                        column,
+                    ));
+                }
+                process_preprocessor_directive(
+                    source,
+                    chars,
+                    &mut i,
+                    &mut line,
+                    &mut column,
+                    state,
+                    &mut conditional_stack,
+                    &mut tokens,
+                )?;
+            }
+            '%' if chars.get(i + 1) == Some(&'>') => {
+                push_token(&mut tokens, Token::RBrace, line, column);
+                advance_position(chars, '%', &mut line, &mut column, &mut i);
+                advance_position(chars, '>', &mut line, &mut column, &mut i);
+            }
             '%' if chars.get(i + 1) == Some(&'=') => {
                 push_token(&mut tokens, Token::PercentAssign, line, column);
                 advance_position(chars, '%', &mut line, &mut column, &mut i);
@@ -2093,6 +2149,11 @@ fn lex_spliced_with_state(
                 push_token(&mut tokens, Token::Question, line, column);
                 advance_position(chars, c, &mut line, &mut column, &mut i);
             }
+            ':' if chars.get(i + 1) == Some(&'>') => {
+                push_token(&mut tokens, Token::RBracket, line, column);
+                advance_position(chars, ':', &mut line, &mut column, &mut i);
+                advance_position(chars, '>', &mut line, &mut column, &mut i);
+            }
             ':' => {
                 push_token(&mut tokens, Token::Colon, line, column);
                 advance_position(chars, c, &mut line, &mut column, &mut i);
@@ -2110,6 +2171,16 @@ fn lex_spliced_with_state(
             '!' => {
                 push_token(&mut tokens, Token::Bang, line, column);
                 advance_position(chars, c, &mut line, &mut column, &mut i);
+            }
+            '<' if chars.get(i + 1) == Some(&':') => {
+                push_token(&mut tokens, Token::LBracket, line, column);
+                advance_position(chars, '<', &mut line, &mut column, &mut i);
+                advance_position(chars, ':', &mut line, &mut column, &mut i);
+            }
+            '<' if chars.get(i + 1) == Some(&'%') => {
+                push_token(&mut tokens, Token::LBrace, line, column);
+                advance_position(chars, '<', &mut line, &mut column, &mut i);
+                advance_position(chars, '%', &mut line, &mut column, &mut i);
             }
             '<' if chars.get(i + 1) == Some(&'<') && chars.get(i + 2) == Some(&'=') => {
                 push_token(&mut tokens, Token::ShiftLeftAssign, line, column);
@@ -2513,6 +2584,12 @@ fn process_preprocessor_directive(
     output_tokens: &mut Vec<LocatedToken>,
 ) -> CustResult<bool> {
     let directive_start = *i;
+    let directive_marker_len =
+        if chars.get(directive_start..directive_start + 2) == Some(&['%', ':']) {
+            2
+        } else {
+            1
+        };
     let line = *current_line;
     let directive_column = *column;
     let line_end = preprocessor_directive_line_end(chars, *i);
@@ -2522,11 +2599,17 @@ fn process_preprocessor_directive(
         line_end
     };
     let active = conditional_stack.last().is_none_or(|frame| frame.active);
-    if !active && !inactive_directive_has_name_on_line(chars, directive_start + 1, content_end) {
+    if !active
+        && !inactive_directive_has_name_on_line(
+            chars,
+            directive_start + directive_marker_len,
+            content_end,
+        )
+    {
         return Ok(false);
     }
 
-    let mut cursor = directive_start + 1;
+    let mut cursor = directive_start + directive_marker_len;
     skip_preprocessor_whitespace(
         source,
         chars,
