@@ -2976,43 +2976,48 @@ fn process_preprocessor_directive(
                     error_column,
                 ));
             }
-            if chars[cursor] != '"' {
-                let (error_line, error_column) = preprocessor_position_at(
+            let header_name = if chars[cursor] == '"' {
+                cursor += 1;
+                let header_start = cursor;
+                while cursor < content_end && chars[cursor] != '"' {
+                    cursor += 1;
+                }
+                if cursor >= content_end || header_start == cursor {
+                    let (error_line, error_column) = preprocessor_position_at(
+                        chars,
+                        directive_start,
+                        line,
+                        directive_column,
+                        header_start,
+                    );
+                    return Err(lexer_error_with_context(
+                        "expected closing quote after '#include' header name",
+                        source,
+                        error_line,
+                        error_column,
+                    ));
+                }
+                let header_name: String = chars[header_start..cursor].iter().collect();
+                cursor += 1;
+                header_name
+            } else {
+                let (operand_line, operand_column) = preprocessor_position_at(
                     chars,
                     directive_start,
                     line,
                     directive_column,
                     cursor,
                 );
-                return Err(lexer_error_with_context(
-                    "macro-expanded include operands are not supported",
+                let header_name = expand_quoted_header_operand(
+                    &chars.slice(cursor, content_end),
                     source,
-                    error_line,
-                    error_column,
-                ));
-            }
-            cursor += 1;
-            let header_start = cursor;
-            while cursor < content_end && chars[cursor] != '"' {
-                cursor += 1;
-            }
-            if cursor >= content_end || header_start == cursor {
-                let (error_line, error_column) = preprocessor_position_at(
-                    chars,
-                    directive_start,
-                    line,
-                    directive_column,
-                    header_start,
-                );
-                return Err(lexer_error_with_context(
-                    "expected closing quote after '#include' header name",
-                    source,
-                    error_line,
-                    error_column,
-                ));
-            }
-            let header_name: String = chars[header_start..cursor].iter().collect();
-            cursor += 1;
+                    operand_line,
+                    operand_column,
+                    state,
+                )?;
+                cursor = content_end;
+                header_name
+            };
             skip_preprocessor_whitespace(
                 source,
                 chars,
@@ -3681,6 +3686,83 @@ fn logical_source_name(project_root: &Path, logical_path: &Path) -> String {
         })
         .collect::<Vec<_>>()
         .join("/")
+}
+
+fn expand_quoted_header_operand(
+    operand_chars: &SplicedSourceChars,
+    source: &str,
+    operand_line: usize,
+    operand_column: usize,
+    state: &mut PreprocessorState,
+) -> CustResult<String> {
+    let mut raw_tokens = lex_spliced_with_context(
+        operand_chars,
+        source,
+        operand_line,
+        operand_column,
+        false,
+        true,
+        true,
+        None,
+    )?;
+    let eof = raw_tokens
+        .pop()
+        .expect("include operand lexer always appends an EOF token");
+    debug_assert_eq!(eof.kind, Token::Eof);
+
+    let expanded = expand_macro_tokens(
+        &raw_tokens,
+        &state.macros,
+        &mut Vec::new(),
+        &mut state.macro_expansion_budget,
+        source,
+        false,
+        0,
+    )?
+    .tokens;
+    if expanded
+        .first()
+        .is_some_and(|token| token.kind == Token::Lt)
+        && expanded.last().is_some_and(|token| token.kind == Token::Gt)
+    {
+        return Err(lexer_error_with_context(
+            "system header includes are not supported",
+            source,
+            operand_line,
+            operand_column,
+        ));
+    }
+    if expanded.len() != 1 {
+        return Err(lexer_error_with_context(
+            "macro-expanded include operand must expand to exactly one ordinary string literal",
+            source,
+            operand_line,
+            operand_column,
+        ));
+    }
+
+    let token = &expanded[0];
+    let ordinary_string = matches!(token.kind, Token::StringLiteral(_))
+        || matches!(&token.kind, Token::RawPreprocessor(spelling) if spelling.starts_with('"'));
+    let spelling = &token.preprocessing_spelling;
+    if !ordinary_string || !spelling.starts_with('"') || !spelling.ends_with('"') {
+        return Err(lexer_error_with_context(
+            "macro-expanded include operand must expand to exactly one ordinary string literal",
+            source,
+            operand_line,
+            operand_column,
+        ));
+    }
+    let header_name = &spelling[1..spelling.len() - 1];
+    if header_name.is_empty() {
+        return Err(lexer_error_with_context(
+            "macro-expanded include operand must name a non-empty quoted header",
+            source,
+            operand_line,
+            operand_column,
+        ));
+    }
+    Ok(header_name.to_string())
 }
 
 fn lex_quoted_header(

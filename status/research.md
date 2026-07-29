@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-29 — Macro-expanded quoted-header operands
+
+- ISO C11 draft N1570 §6.10.2p4 requires the preprocessing-token sequence after `#include` to be macro-replaced, then to match a quoted or angle header form: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf. Cust supports only the quoted result and reuses its existing secure project-relative file path.
+- The operand must use the translation unit's existing macro table and depth/token/work/generated-byte budgets. Inactive directives remain structural names only, so malformed or recursive operands under an inactive parent are not tokenized or expanded.
+- GCC and Clang strict-C11 probes treat escapes inside a macro-produced quoted operand as raw header-name spelling (`"foo\\x2eh"` searches for that spelling rather than `foo.h`). `expand_quoted_header_operand()` therefore retains `LocatedToken.preprocessing_spelling`, strips only the outer quotes, rejects prefixed/wide strings and multi-token output, and delegates containment to `lex_quoted_header()`. See `references/cust-macro-expanded-quoted-header-includes.md`.
+
 ## 2026-07-29 — Direct-source C11 digraph punctuators
 
 - ISO C11 draft N1570 §6.4.6 lists `<:`, `:>`, `<%`, `%>`, `%:`, and `%:%:` as punctuators that behave as `[`, `]`, `{`, `}`, `#`, and `##` respectively in every aspect except spelling: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf. Cust therefore lowers semantic token kinds while retaining `LocatedToken.preprocessing_spelling` for stringification and macro-definition equality.

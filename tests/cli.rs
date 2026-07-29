@@ -301,6 +301,95 @@ fn run_mode_supports_project_relative_quoted_headers() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn run_mode_expands_macros_in_quoted_header_operands() {
+    let directory = temp_source_directory("macro-expanded-quoted-header");
+    fs::create_dir(directory.join("nested")).expect("nested header directory should be creatable");
+    fs::write(
+        directory.join("router.h"),
+        concat!(
+            "#define NEXT_HEADER \"nested/value.h\"\n",
+            "#define SELECT_HEADER(value) value\n",
+            "#include SELECT_HEADER(NEXT_HEADER)\n",
+        ),
+    )
+    .expect("router header should be writable");
+    fs::write(
+        directory.join("nested/value.h"),
+        "#define INCLUDED_VALUE 42\n",
+    )
+    .expect("nested value header should be writable");
+    fs::write(directory.join("bonus.h"), "#define BONUS_VALUE 1\n")
+        .expect("stringified-name header should be writable");
+    let source = directory.join("main.c");
+    fs::write(
+        &source,
+        concat!(
+            "#define ROUTER_HEADER \"router.h\"\n",
+            "#define FORWARD_HEADER ROUTER_HEADER\n",
+            "#define RECURSIVE_HEADER RECURSIVE_HEADER\n",
+            "#if 0\n",
+            "#include RECURSIVE_HEADER\n",
+            "#include MALFORMED(\n",
+            "#endif\n",
+            "%:include FORWARD_HEADER\n",
+            "#define STRINGIFY_HEADER_RAW(value) #value\n",
+            "#include STRINGIFY_HEADER_RAW(bonus.h)\n",
+            "int main(void) { return INCLUDED_VALUE + BONUS_VALUE; }\n",
+        ),
+    )
+    .expect("temporary source should be writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    fs::remove_dir_all(&directory).expect("temporary source directory should be removable");
+
+    assert!(
+        output.status.success(),
+        "macro-expanded quoted headers should run: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "43\n");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn run_mode_shares_macro_token_budget_with_include_operands() {
+    let directory = temp_source_directory("macro-expanded-header-budget");
+    fs::write(directory.join("config.h"), "#define VALUE 1\n")
+        .expect("temporary header should be writable");
+    let source = directory.join("main.c");
+    let replacement = "1 ".repeat(8_192);
+    fs::write(
+        &source,
+        format!(
+            "#define MANY {replacement}\n#define HEADER \"config.h\"\nMANY\n#include HEADER\nint main(void) {{ return VALUE; }}\n"
+        ),
+    )
+    .expect("temporary source should be writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    fs::remove_dir_all(&directory).expect("temporary source directory should be removable");
+
+    assert!(!output.status.success(), "shared token budget should fail");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        concat!(
+            "cust: macro expansion token limit exceeded at line 4, column 10\n",
+            "#include HEADER\n",
+            "         ^\n",
+        )
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn token_mode_distinguishes_project_relative_header_origins() {
     let directory = temp_source_directory("header-origins");
     fs::create_dir(directory.join("left")).expect("left header directory should be creatable");
@@ -419,8 +508,32 @@ fn run_mode_rejects_unsupported_missing_and_unsafe_headers() {
             "quoted header path '../outside.h' escapes the project include root at line 1, column 1\n#include \"../outside.h\"\n^",
         ),
         (
-            "#define HEADER \"config.h\"\n#include HEADER\nint main(void) { return 0; }\n",
-            "macro-expanded include operands are not supported at line 2, column 10\n#include HEADER\n         ^",
+            "#define HEADER config.h\n#include HEADER\nint main(void) { return 0; }\n",
+            "macro-expanded include operand must expand to exactly one ordinary string literal at line 2, column 10\n#include HEADER\n         ^",
+        ),
+        (
+            "#define HEADER \"one.h\" \"two.h\"\n#include HEADER\nint main(void) { return 0; }\n",
+            "macro-expanded include operand must expand to exactly one ordinary string literal at line 2, column 10\n#include HEADER\n         ^",
+        ),
+        (
+            "#define HEADER \"\"\n#include HEADER\nint main(void) { return 0; }\n",
+            "macro-expanded include operand must name a non-empty quoted header at line 2, column 10\n#include HEADER\n         ^",
+        ),
+        (
+            "#define HEADER \"../outside.h\"\n#include HEADER\nint main(void) { return 0; }\n",
+            "quoted header path '../outside.h' escapes the project include root at line 2, column 1\n#include HEADER\n^",
+        ),
+        (
+            "#define HEADER <stdio.h>\n#include HEADER\nint main(void) { return 0; }\n",
+            "system header includes are not supported at line 2, column 10\n#include HEADER\n         ^",
+        ),
+        (
+            "#define HEADER L\"wide.h\"\n#include HEADER\nint main(void) { return 0; }\n",
+            "macro-expanded include operand must expand to exactly one ordinary string literal at line 2, column 10\n#include HEADER\n         ^",
+        ),
+        (
+            "#define PASS(value) value\n#include PASS(\nint main(void) { return 0; }\n",
+            "unterminated invocation of function-like macro 'PASS' at line 2, column 10\n#include PASS(\n         ^",
         ),
     ];
 
@@ -568,6 +681,34 @@ fn run_mode_reports_included_header_locations_and_cycles() {
             "unexpected character '@' at line 1, column 15\n",
             "#define VALUE @\n",
             "              ^\n",
+        )
+    );
+
+    fs::write(
+        directory.join("router.h"),
+        "#define HEADER L\"wide.h\"\n#include HEADER\n",
+    )
+    .expect("temporary macro-router header should be writable");
+    fs::write(
+        &source,
+        "#include \"router.h\"\nint main(void) { return 0; }\n",
+    )
+    .expect("temporary source should be writable");
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    assert!(
+        !output.status.success(),
+        "invalid nested macro include should fail"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        concat!(
+            "cust: in included header 'router.h': macro-expanded include operand must expand ",
+            "to exactly one ordinary string literal at line 2, column 10\n",
+            "#include HEADER\n",
+            "         ^\n",
         )
     );
 
