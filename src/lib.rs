@@ -307,6 +307,7 @@ const MAX_PREPROCESSOR_CONDITIONAL_DEPTH: usize = 128;
 const MAX_PREPROCESSOR_CONDITION_DEPTH: usize = 128;
 const MAX_PREPROCESSOR_CONDITION_TOKENS: usize = 8_192;
 const MAX_PREPROCESSOR_ERROR_MESSAGE_BYTES: usize = 1_048_576;
+const MAX_LINE_DIRECTIVE_SOURCE_NAME_BYTES: usize = 4_096;
 const MAX_MACRO_STRINGIFICATION_BYTES: usize = 1_048_576;
 const MAX_MACRO_TOKEN_PASTING_BYTES: usize = 1_048_576;
 const MAX_INCLUDE_DEPTH: usize = 32;
@@ -317,6 +318,8 @@ struct PreprocessorState {
     macros: HashMap<String, MacroDefinition>,
     macro_expansion_budget: MacroExpansionBudget,
     include_context: Option<IncludeContext>,
+    predefined_source_override: Option<String>,
+    predefined_line_offset: i64,
 }
 
 struct IncludeContext {
@@ -1960,6 +1963,7 @@ fn lex_spliced_with_state(
                         &mut state.macro_expansion_budget,
                         source,
                         &predefined_source_name,
+                        state.predefined_line_offset,
                         false,
                         0,
                     )?;
@@ -2881,6 +2885,7 @@ fn process_preprocessor_directive(
                 &state.macros,
                 &mut state.macro_expansion_budget,
                 &predefined_source_name,
+                state.predefined_line_offset,
                 "if",
             )? != 0;
             conditional_stack.push(ConditionalFrame {
@@ -2928,6 +2933,7 @@ fn process_preprocessor_directive(
                     &state.macros,
                     &mut state.macro_expansion_budget,
                     &predefined_source_name,
+                    state.predefined_line_offset,
                     "elif",
                 )? != 0
             } else {
@@ -2967,6 +2973,184 @@ fn process_preprocessor_directive(
                 line,
                 directive_column,
             ));
+        }
+        "line" => {
+            skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if cursor >= content_end {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    "expected decimal line number after '#line'",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            let (operand_line, operand_column) =
+                preprocessor_position_at(chars, directive_start, line, directive_column, cursor);
+            let mut raw_tokens = lex_spliced_with_context(
+                &chars.slice(cursor, content_end),
+                source,
+                operand_line,
+                operand_column,
+                false,
+                true,
+                true,
+                Some((MAX_PREPROCESSOR_CONDITION_TOKENS, "line")),
+            )?;
+            raw_tokens.pop();
+            let predefined_source_name = current_predefined_source_name(state);
+            let expanded = expand_macro_tokens(
+                &raw_tokens,
+                &state.macros,
+                &mut Vec::new(),
+                &mut state.macro_expansion_budget,
+                source,
+                &predefined_source_name,
+                state.predefined_line_offset,
+                false,
+                0,
+            )?;
+            let tokens = expanded.tokens;
+            let Some(line_token) = tokens.first() else {
+                return Err(lexer_error_with_context(
+                    "expected decimal line number after '#line'",
+                    source,
+                    operand_line,
+                    operand_column,
+                ));
+            };
+            if !line_token
+                .preprocessing_spelling
+                .chars()
+                .all(|character| character.is_ascii_digit())
+            {
+                return Err(lexer_error_with_context(
+                    "expected decimal line number after '#line'",
+                    source,
+                    line_token.line,
+                    line_token.column,
+                ));
+            }
+            let presumed_line = line_token
+                .preprocessing_spelling
+                .parse::<u64>()
+                .ok()
+                .filter(|value| (1..=2_147_483_647).contains(value))
+                .ok_or_else(|| {
+                    lexer_error_with_context(
+                        "'#line' line number must be between 1 and 2147483647",
+                        source,
+                        line_token.line,
+                        line_token.column,
+                    )
+                })? as i64;
+            let source_override = match tokens.get(1) {
+                None => None,
+                Some(token) if token.preprocessing_spelling.starts_with('"') => {
+                    let values = match &token.kind {
+                        Token::StringLiteral(values) => values.clone(),
+                        Token::RawPreprocessor(spelling) => {
+                            let mut decoded = lex_with_context(
+                                spelling,
+                                source,
+                                token.line,
+                                token.column,
+                                false,
+                                false,
+                                None,
+                            )?;
+                            decoded.pop();
+                            match decoded.as_slice() {
+                                [
+                                    LocatedToken {
+                                        kind: Token::StringLiteral(values),
+                                        ..
+                                    },
+                                ] => values.clone(),
+                                _ => {
+                                    return Err(lexer_error_with_context(
+                                        "expected ordinary string literal after '#line' line number",
+                                        source,
+                                        token.line,
+                                        token.column,
+                                    ));
+                                }
+                            }
+                        }
+                        _ => {
+                            return Err(lexer_error_with_context(
+                                "expected ordinary string literal after '#line' line number",
+                                source,
+                                token.line,
+                                token.column,
+                            ));
+                        }
+                    };
+                    let characters: String = values
+                        .iter()
+                        .copied()
+                        .take(values.len().saturating_sub(1))
+                        .map(|value| char::from_u32(value as u32).unwrap_or('\u{fffd}'))
+                        .collect();
+                    if characters.len() > MAX_LINE_DIRECTIVE_SOURCE_NAME_BYTES {
+                        return Err(lexer_error_with_bounded_context(
+                            format!(
+                                "'#line' source name exceeds {MAX_LINE_DIRECTIVE_SOURCE_NAME_BYTES} bytes"
+                            ),
+                            source,
+                            token.line,
+                            token.column,
+                        ));
+                    }
+                    Some(characters)
+                }
+                Some(token) => {
+                    return Err(lexer_error_with_context(
+                        "expected ordinary string literal after '#line' line number",
+                        source,
+                        token.line,
+                        token.column,
+                    ));
+                }
+            };
+            if let Some(token) = tokens.get(2) {
+                return Err(lexer_error_with_context(
+                    "unexpected tokens after '#line' source name",
+                    source,
+                    token.line,
+                    token.column,
+                ));
+            }
+            let directive_end_line = chars.position(line_end).0;
+            let next_physical_line = i64::try_from(directive_end_line)
+                .ok()
+                .and_then(|line| line.checked_add(1))
+                .ok_or_else(|| {
+                    lexer_error_with_context(
+                        "physical line number is out of range",
+                        source,
+                        line,
+                        directive_column,
+                    )
+                })?;
+            state.predefined_line_offset = presumed_line - next_physical_line;
+            if let Some(source_override) = source_override {
+                state.predefined_source_override = Some(source_override);
+            }
         }
         "include" => {
             if state.include_context.is_none() {
@@ -3752,6 +3936,9 @@ fn logical_source_name(project_root: &Path, logical_path: &Path) -> String {
 }
 
 fn current_predefined_source_name(state: &PreprocessorState) -> String {
+    if let Some(name) = &state.predefined_source_override {
+        return name.clone();
+    }
     state
         .include_context
         .as_ref()
@@ -3794,6 +3981,7 @@ fn expand_quoted_header_operand(
         &mut state.macro_expansion_budget,
         source,
         &predefined_source_name,
+        state.predefined_line_offset,
         false,
         0,
     )?
@@ -4048,6 +4236,8 @@ fn lex_quoted_header(
             canonical: canonical_path,
         });
     }
+    let saved_source_override = state.predefined_source_override.take();
+    let saved_line_offset = std::mem::replace(&mut state.predefined_line_offset, 0);
     let header_chars = SplicedSourceChars::new(&header_source, 1, 1);
     let result = lex_spliced_with_state(
         &header_chars,
@@ -4060,6 +4250,8 @@ fn lex_quoted_header(
         None,
         state,
     );
+    state.predefined_source_override = saved_source_override;
+    state.predefined_line_offset = saved_line_offset;
     state
         .include_context
         .as_mut()
@@ -4094,6 +4286,7 @@ fn evaluate_preprocessor_condition(
     macros: &HashMap<String, MacroDefinition>,
     macro_expansion_budget: &mut MacroExpansionBudget,
     predefined_source_name: &str,
+    predefined_line_offset: i64,
     directive_name: &str,
 ) -> CustResult<i64> {
     skip_preprocessor_whitespace(
@@ -4135,6 +4328,7 @@ fn evaluate_preprocessor_condition(
         macros,
         macro_expansion_budget,
         predefined_source_name,
+        predefined_line_offset,
         directive_name,
     )?;
     PreprocessorConditionParser::new(tokens, source, directive_name).parse()
@@ -4146,6 +4340,7 @@ fn prepare_preprocessor_condition_tokens(
     macros: &HashMap<String, MacroDefinition>,
     macro_expansion_budget: &mut MacroExpansionBudget,
     predefined_source_name: &str,
+    predefined_line_offset: i64,
     directive_name: &str,
 ) -> CustResult<Vec<LocatedToken>> {
     let mut unexpanded = Vec::new();
@@ -4223,6 +4418,7 @@ fn prepare_preprocessor_condition_tokens(
         macro_expansion_budget,
         source,
         predefined_source_name,
+        predefined_line_offset,
         false,
         0,
     )?;
@@ -4972,6 +5168,7 @@ fn expand_macro_tokens(
     budget: &mut MacroExpansionBudget,
     source: &str,
     predefined_source_name: &str,
+    predefined_line_offset: i64,
     count_plain_tokens: bool,
     depth: usize,
 ) -> CustResult<MacroExpansion> {
@@ -5016,6 +5213,7 @@ fn expand_macro_tokens(
                 budget,
                 source,
                 predefined_source_name,
+                predefined_line_offset,
                 depth,
             )?;
             expanded.separated |= token.separated || pending_separation;
@@ -5099,6 +5297,7 @@ fn expand_macro_tokens(
             budget,
             source,
             predefined_source_name,
+            predefined_line_offset,
             token.line,
             token.column,
             depth,
@@ -5155,6 +5354,7 @@ fn expand_macro_tokens(
                 budget,
                 source,
                 predefined_source_name,
+                predefined_line_offset,
                 nested_line,
                 nested_column,
                 depth + 1,
@@ -5409,6 +5609,7 @@ fn expand_macro(
     budget: &mut MacroExpansionBudget,
     source: &str,
     predefined_source_name: &str,
+    predefined_line_offset: i64,
     line: usize,
     column: usize,
     depth: usize,
@@ -5531,6 +5732,7 @@ fn expand_macro(
                     budget,
                     source,
                     predefined_source_name,
+                    predefined_line_offset,
                     false,
                     depth + 1,
                 )?)
@@ -5711,6 +5913,7 @@ fn expand_macro(
         budget,
         source,
         predefined_source_name,
+        predefined_line_offset,
         true,
         depth + 1,
     )?;
@@ -5831,6 +6034,7 @@ fn expand_predefined_macro(
     budget: &mut MacroExpansionBudget,
     source: &str,
     predefined_source_name: &str,
+    predefined_line_offset: i64,
     depth: usize,
 ) -> CustResult<LocatedToken> {
     if depth >= MAX_OBJECT_MACRO_EXPANSION_DEPTH {
@@ -5862,7 +6066,7 @@ fn expand_predefined_macro(
 
     let (kind, spelling) = match name {
         "__LINE__" => {
-            let line = i64::try_from(invocation.line).map_err(|_| {
+            let physical_line = i64::try_from(invocation.line).map_err(|_| {
                 lexer_error_with_context(
                     "predefined line number is out of range",
                     source,
@@ -5870,6 +6074,16 @@ fn expand_predefined_macro(
                     invocation.column,
                 )
             })?;
+            let line = physical_line
+                .checked_add(predefined_line_offset)
+                .ok_or_else(|| {
+                    lexer_error_with_context(
+                        "predefined line number is out of range",
+                        source,
+                        invocation.line,
+                        invocation.column,
+                    )
+                })?;
             (Token::Number(line), line.to_string())
         }
         "__FILE__" => {

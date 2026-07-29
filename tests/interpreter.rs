@@ -235,6 +235,108 @@ fn predefined_file_and_line_macros_expand_at_the_use_site() {
 }
 
 #[test]
+fn line_directives_remap_predefined_file_and_line_macros() {
+    let program = r#"#line 100 "virtual.c"
+int text_equal(char *left, char *right) {
+    while (*left == *right && *left != '\0') { left++; right++; }
+    return *left == *right;
+}
+#line 200
+int main(void) {
+    return text_equal(__FILE__, "virtual.c") && __LINE__ == 201 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn line_directives_expand_macro_operands_in_conditions_and_forwarding() {
+    let program = r#"#define TARGET 300
+#define SOURCE "macro.c"
+#define LINE_ARGS(number, source) number source
+#line LINE_ARGS(TARGET, SOURCE)
+#if __LINE__ != 300
+@
+#endif
+#define FORWARDED __LINE__
+int main(void) {
+    char *source = __FILE__;
+    return source[0] == 'm' && source[6] == 'c' && source[7] == '\0'
+            && FORWARDED == 307
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn line_directives_apply_after_physically_spliced_directives() {
+    let program = "#line 40 \\\n\"spliced.c\"\nint main(void) { return __LINE__ == 40 ? 0 : 1; }\n";
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn line_directives_restore_parent_state_after_included_headers() {
+    assert_eq!(
+        cust::interpret_file("tests/fixtures/compat/valid/line_directives.c").unwrap(),
+        0
+    );
+}
+
+#[test]
+fn line_directives_preserve_physical_error_locations() {
+    let program = "#line 900 \"virtual.c\"\nint main(void) { return @; }\n";
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "unexpected character '@' at line 2, column 25\nint main(void) { return @; }\n                        ^"
+    );
+}
+
+#[test]
+fn line_directives_reject_invalid_operands_with_exact_diagnostics() {
+    for (program, expected) in [
+        (
+            "#line 0\nint main(void) { return 0; }\n",
+            "'#line' line number must be between 1 and 2147483647 at line 1, column 7\n#line 0\n      ^",
+        ),
+        (
+            "#line 2147483648\nint main(void) { return 0; }\n",
+            "'#line' line number must be between 1 and 2147483647 at line 1, column 7\n#line 2147483648\n      ^",
+        ),
+        (
+            "#line value\nint main(void) { return 0; }\n",
+            "expected decimal line number after '#line' at line 1, column 7\n#line value\n      ^",
+        ),
+        (
+            "#line 7 L\"wide.c\"\nint main(void) { return 0; }\n",
+            "expected ordinary string literal after '#line' line number at line 1, column 9\n#line 7 L\"wide.c\"\n        ^",
+        ),
+        (
+            "#line 7 \"ok.c\" extra\nint main(void) { return 0; }\n",
+            "unexpected tokens after '#line' source name at line 1, column 16\n#line 7 \"ok.c\" extra\n               ^",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn line_directives_bound_remapped_source_names_and_diagnostics() {
+    let source_name = "x".repeat(4_097);
+    let program = format!("#line 7 \"{source_name}\"\nint main(void) {{ return 0; }}\n");
+
+    let error = interpret(&program).unwrap_err().to_string();
+    assert!(error.contains("'#line' source name exceeds 4096 bytes at line 1, column 9"));
+    assert!(error.len() < 2_048, "diagnostic was {} bytes", error.len());
+}
+
+#[test]
 fn predefined_macros_expand_through_conditions_forwarding_and_stringification() {
     let program = r#"#define ID(value) value
 #define FORWARDED_LINE __LINE__

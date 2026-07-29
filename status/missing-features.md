@@ -2,7 +2,9 @@
 
 Prioritized backlog for autonomous implementation.
 
-Latest update (2026-07-29): bounded active C11 `#error` / `%:error` diagnostics are complete. Raw messages remain unexpanded, comments/whitespace normalize outside literals, empty/digraph/spliced/inactive/header-origin routes retain exact diagnostics, and a 1 MiB UTF-8 message cap uses bounded context on overflow so output cannot scale with an attacker-controlled source line. Independent review, 1,125 local tests, and both Docker gates pass. Implementation-ready `#line` remapping fixtures are next.
+Latest update (2026-07-29): bounded C11 `#line` / `%:line` presumed source locations are complete. Direct and macro-expanded operands, optional ordinary names, subsequent predefined-macro uses, conditions/forwarding, physical splicing, nested-header-local state, parent restoration, physical diagnostics, exact malformed/range/trailing errors, an 8,192-token operand limit, and a 4 KiB remapped-name limit pass with warning-free native parity, independent review, 1,132 local tests, and both Docker gates. See `references/cust-line-directives.md`.
+
+Latest update (2026-07-29): bounded active C11 `#error` / `%:error` diagnostics are complete. Raw messages remain unexpanded, comments/whitespace normalize outside literals, empty/digraph/spliced/inactive/header-origin routes retain exact diagnostics, and a 1 MiB UTF-8 message cap uses bounded context on overflow so output cannot scale with an attacker-controlled source line. Independent review, 1,125 local tests, and both Docker gates pass. The subsequent `#line` remapping slice is recorded above.
 
 Previous update (2026-07-29): bounded predefined `__FILE__`/`__LINE__` semantics are complete. Dynamic use-site expansion covers direct, forwarded, stringified, conditional, primary, and nested-header routes; file-aware names are normalized project-relative logical paths, physical lines retain splicing metadata, control-character spellings remain valid C tokens, reserved redefinition/undefinition is exact, shared budgets remain bounded, the native fixture returns 0, all 1,121 local tests pass, and both Docker gates pass.
 
