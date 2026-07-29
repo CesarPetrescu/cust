@@ -4,9 +4,13 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
+Latest prepared release slice (2026-07-30): v0.5.0 Cargo/lock metadata, Docker runtime/test image tags, exact local/container CLI assertions, README support/limitations/roadmap text, changelog notes, and all status files agree. Focused version tests went RED on `0.4.0` and GREEN on `0.5.0`; the clean baseline has 1,132 tests. The non-conflicting annotated tag is reserved for the verified release commit and remains pending until `origin/main` accepts it.
+
+1. [ ] Add C11 null preprocessing directives (`#` and `%:` alone on a logical line). Acceptance: direct/digraph forms, preprocessing whitespace and comments, active/inactive conditional groups, physical-line splicing, included headers, exact placement/malformed diagnostics, warning-free native parity, focused TDD, independent review, and both Docker gates.
+
 Latest completed language slice (2026-07-29): bounded C11 `#line` / `%:line` directives now remap presumed source names/lines through direct and macro-expanded operands while retaining physical diagnostics, include-local state and parent restoration, shared macro budgets, an 8,192-token operand cap, and a 4 KiB remapped-name cap. Exact diagnostics, warning-free native parity, focused TDD, independent review, all 1,132 tests, and both Docker gates pass.
 
-1. [ ] Prepare and publish v0.5.0 for the completed post-v0.4 preprocessing package. Acceptance: synchronize Cargo/lock, exact CLI output/tests, Docker runtime/test image tags, README and changelog release notes; run the canonical gate; push the release commit; then create/push a non-conflicting annotated `v0.5.0` tag and verify its peeled target on `origin`.
+- [x] Prepare v0.5.0 for atomic publication from one verified release commit. Cargo/lock, exact CLI output/tests, Docker runtime/test image tags, README/changelog, and all status files are synchronized; focused RED/GREEN and canonical verification pass; tag publication is reserved for after the release commit reaches `origin/main`.
 
 Latest completed language slice (2026-07-29): bounded predefined `__FILE__`/`__LINE__` macros now expand dynamically through direct, forwarded, stringified, and conditional contexts with normalized primary/header logical names, physical use-site lines, valid escaped preprocessing spelling, shared budgets, and exact reserved-name diagnostics. The warning-free native fixture, independent review, all 1,121 tests, and both Docker gates pass.
 

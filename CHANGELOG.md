@@ -4,6 +4,8 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.5.0 — 2026-07-30
+
 ### Language subset
 
 - Added direct-source C11 digraph punctuators: `<:`, `:>`, `<%`, `%>`, `%:`, and `%:%:` now behave as bracket, brace, directive/stringification, and token-pasting spellings while retaining exact preprocessing spelling metadata.
@@ -19,6 +21,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 - Added direct/forwarded/stringified/conditional and primary/nested-header predefined-macro coverage; warning-free native parity and 1,121 local/Docker tests pass.
 - Added exact empty/message/source-context diagnostics for error directives plus a 1 MiB UTF-8 message bound whose overflow diagnostic uses bounded source context; 1,125 local/Docker tests pass.
 - Added exact malformed/range/trailing-token diagnostics for line directives, an 8,192-token operand bound, a 4 KiB remapped-source-name bound with bounded overflow context, physical-splicing coverage, warning-free compiler-oracle parity, and 1,132 passing local/Docker tests.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.5.0`.
+- Verified 1,132 tests at release time: 1,008 interpreter tests, 98 deterministic fuzz-safety tests, and 26 CLI, Docker, compiler-oracle, and repository tests.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, and host ABI layout/promotion rules remain unsupported.
 
 ## v0.4.0 — 2026-07-29
 

@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ## Latest autonomous verification
+
+The Cust v0.5.0 package is prepared for atomic publication. Cargo package/lock metadata, exact CLI output, Docker Compose runtime/test image tags, README support/limitations/roadmap text, changelog release notes, and all five status files are synchronized at `0.5.0`. The release packages direct-source C11 digraphs, macro-expanded quoted includes, dynamic `__FILE__`/`__LINE__`, bounded `#error`, and bounded `#line`. Focused version assertions went RED on `0.4.0` and GREEN on `0.5.0`; the clean baseline has 1,132 tests (1,008 interpreter, 98 fuzz-safety, 22 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test). The non-conflicting annotated `v0.5.0` tag is reserved for this verified release commit and remains publishable only after `origin/main` accepts it.
+
+Verified commands before publication: clean-baseline `cargo test`; focused CLI and Compose metadata RED/GREEN; `cargo check`; `cargo run --quiet -- --version`; `cargo metadata --no-deps --format-version 1`; local/remote tag preflight; independent pre-commit review; `cargo fmt --check`; `cargo clippy -- -D warnings`; `cargo test`; `docker compose run --rm test`; `docker compose run --rm cust`; `docker compose run --rm cust --version`; and `git diff --check`.
 
 Bounded C11 `#line` and `%:line` presumed source locations are complete. Direct decimal and optional ordinary string operands, object/function macro-expanded operands, subsequent `__LINE__`/`__FILE__` uses, conditional and forwarding expansion, physical-line splicing, nested-header-local remaps, and parent restoration all pass. Physical token coordinates remain unchanged for exact source snippets. Operands are capped at 8,192 preprocessing tokens; remapped names are capped at 4,096 UTF-8 bytes and use bounded overflow context. Exact range, malformed, wide-string, and trailing-token diagnostics pass, as does the warning-free native fixture. The canonical local/Docker gates pass with 1,132 tests (1,008 interpreter, 98 fuzz-safety, 22 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test). See `references/cust-line-directives.md`.
 

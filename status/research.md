@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-30 — v0.5.0 release closure
+
+- No new language-semantics research was needed. Release consistency remains executable: `env!("CARGO_PKG_VERSION")` drives the binary, `tests/cli.rs` pins the exact package/output value, and `tests/docker_compose.rs` pins both Compose image tags.
+- The release commit must reach `origin/main` before the annotated `v0.5.0` tag is created. Local and remote tag preflight must both be empty; after publication, the remote peeled `refs/tags/v0.5.0^{}` target must equal the release commit.
+- Independent release review rejected a proposed `__STDC__`/`__STDC_VERSION__` roadmap item: N1570 §§4 and 6.10.8.1 make those values a conformance claim, and `__STDC_HOSTED__ == 0` does not make Cust's intentionally partial subset a conforming freestanding implementation. Do not define those macros unless the conformance boundary changes.
+- The next bounded C11 slice is the null directive from N1570 §6.10: a `#` preprocessing token followed only by whitespace/comments has no effect. Cust should support both `#` and the equivalent `%:` digraph while preserving existing logical-line, inactive-group, splicing, include-origin, and malformed-directive diagnostics.
+
 ## 2026-07-29 — Bounded C11 `#line` presumed source locations
 
 - Official WG14 N1570 §6.10.4: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `#line` accepts a decimal digit sequence in `1..=2147483647`, optionally followed by one ordinary character string literal, and causes the following source line plus subsequent `__FILE__`/`__LINE__` uses to adopt those presumed locations; a nonmatching initial form is macro-replaced and reprocessed.
