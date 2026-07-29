@@ -265,6 +265,16 @@ enum MacroReplacementToken {
         spelling: String,
         separated: bool,
     },
+    Paste {
+        spelling: String,
+        separated: bool,
+    },
+}
+
+enum MacroSubstitutionItem {
+    Token(LocatedToken),
+    Paste,
+    Placemark { separated: bool },
 }
 
 #[derive(Default)]
@@ -272,6 +282,7 @@ struct MacroExpansionBudget {
     emitted_tokens: usize,
     work: usize,
     stringified_bytes: usize,
+    pasted_bytes: usize,
 }
 
 struct MacroExpansion {
@@ -296,6 +307,7 @@ const MAX_PREPROCESSOR_CONDITIONAL_DEPTH: usize = 128;
 const MAX_PREPROCESSOR_CONDITION_DEPTH: usize = 128;
 const MAX_PREPROCESSOR_CONDITION_TOKENS: usize = 8_192;
 const MAX_MACRO_STRINGIFICATION_BYTES: usize = 1_048_576;
+const MAX_MACRO_TOKEN_PASTING_BYTES: usize = 1_048_576;
 const MAX_INCLUDE_DEPTH: usize = 32;
 const MAX_INCLUDED_SOURCE_BYTES: usize = 1_048_576;
 
@@ -2470,6 +2482,25 @@ fn macro_replacement_token(token: LocatedToken, separated: bool) -> MacroReplace
     }
 }
 
+fn macro_hash_pair_is_paste(tokens: &[LocatedToken], index: usize) -> bool {
+    let Some(left) = tokens.get(index) else {
+        return false;
+    };
+    let Some(right) = tokens.get(index + 1) else {
+        return false;
+    };
+    left.kind == Token::Hash
+        && right.kind == Token::Hash
+        && !right.separated
+        && matches!(
+            (
+                left.preprocessing_spelling.as_str(),
+                right.preprocessing_spelling.as_str()
+            ),
+            ("#", "#") | ("%:", "%:")
+        )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_preprocessor_directive(
     source: &str,
@@ -3210,44 +3241,58 @@ fn process_preprocessor_directive(
                     None,
                 )?;
                 replacement_tokens.pop();
-                for (index, token) in replacement_tokens.iter().enumerate() {
-                    if token.kind != Token::Hash {
+                let mut replacement_index = 0;
+                while replacement_index < replacement_tokens.len() {
+                    if macro_hash_pair_is_paste(&replacement_tokens, replacement_index) {
+                        let operator = &replacement_tokens[replacement_index];
+                        if replacement_index == 0
+                            || replacement_index + 2 == replacement_tokens.len()
+                        {
+                            return Err(lexer_error_with_context(
+                                "macro token-pasting operator cannot appear at the edge of a replacement list",
+                                source,
+                                operator.line,
+                                operator.column,
+                            ));
+                        }
+                        if macro_hash_pair_is_paste(&replacement_tokens, replacement_index + 2) {
+                            return Err(lexer_error_with_context(
+                                "macro token-pasting operator requires an operand on each side",
+                                source,
+                                operator.line,
+                                operator.column,
+                            ));
+                        }
+                        replacement_index += 2;
                         continue;
                     }
-                    if replacement_tokens
-                        .get(index + 1)
-                        .is_some_and(|next| next.kind == Token::Hash && !next.separated)
-                    {
-                        return Err(lexer_error_with_context(
-                            "macro replacement '##' token pasting is not supported",
-                            source,
-                            token.line,
-                            token.column,
-                        ));
+                    let token = &replacement_tokens[replacement_index];
+                    if token.kind == Token::Hash {
+                        let Some(parameters) = parameters.as_ref() else {
+                            return Err(lexer_error_with_context(
+                                "macro stringification '#' is only supported in function-like macro replacements",
+                                source,
+                                token.line,
+                                token.column,
+                            ));
+                        };
+                        let target = replacement_tokens
+                            .get(replacement_index + 1)
+                            .and_then(|next| preprocessor_identifier_name(&next.kind));
+                        let valid_target = target.is_some_and(|target| {
+                            parameters.iter().any(|parameter| parameter == target)
+                                || (variadic && target == "__VA_ARGS__")
+                        });
+                        if !valid_target {
+                            return Err(lexer_error_with_context(
+                                "macro stringification '#' must be followed by a macro parameter",
+                                source,
+                                token.line,
+                                token.column,
+                            ));
+                        }
                     }
-                    let Some(parameters) = parameters.as_ref() else {
-                        return Err(lexer_error_with_context(
-                            "macro stringification '#' is only supported in function-like macro replacements",
-                            source,
-                            token.line,
-                            token.column,
-                        ));
-                    };
-                    let target = replacement_tokens
-                        .get(index + 1)
-                        .and_then(|next| preprocessor_identifier_name(&next.kind));
-                    let valid_target = target.is_some_and(|target| {
-                        parameters.iter().any(|parameter| parameter == target)
-                            || (variadic && target == "__VA_ARGS__")
-                    });
-                    if !valid_target {
-                        return Err(lexer_error_with_context(
-                            "macro stringification '#' must be followed by a macro parameter",
-                            source,
-                            token.line,
-                            token.column,
-                        ));
-                    }
+                    replacement_index += 1;
                 }
                 if !variadic
                     && let Some(token) = replacement_tokens.iter().find(|token| {
@@ -3265,37 +3310,60 @@ fn process_preprocessor_directive(
                 let mut spelling_line = replacement_line;
                 let mut spelling_column = replacement_column;
                 let mut previous_end = None;
-                replacement_tokens
-                    .into_iter()
-                    .map(|token| {
-                        while spelling_cursor < replacement_chars.len()
-                            && (spelling_line, spelling_column) != (token.line, token.column)
-                        {
-                            advance_position(
-                                &replacement_chars,
-                                replacement_chars[spelling_cursor],
-                                &mut spelling_line,
-                                &mut spelling_column,
-                                &mut spelling_cursor,
-                            );
-                        }
-                        assert_eq!(
-                            (spelling_line, spelling_column),
-                            (token.line, token.column),
-                            "macro replacement token location must belong to its source"
+                let mut replacement = Vec::new();
+                let mut token_index = 0;
+                while token_index < replacement_tokens.len() {
+                    let token = &replacement_tokens[token_index];
+                    while spelling_cursor < replacement_chars.len()
+                        && (spelling_line, spelling_column) != (token.line, token.column)
+                    {
+                        advance_position(
+                            &replacement_chars,
+                            replacement_chars[spelling_cursor],
+                            &mut spelling_line,
+                            &mut spelling_column,
+                            &mut spelling_cursor,
                         );
-                        let separated = previous_end.is_some_and(|end| spelling_cursor > end);
-                        let replacement_token = macro_replacement_token(token, separated);
-                        let spelling_len = match &replacement_token {
-                            MacroReplacementToken::Identifier { name, .. } => name.chars().count(),
-                            MacroReplacementToken::Other { spelling, .. } => {
-                                spelling.chars().count()
-                            }
-                        };
+                    }
+                    assert_eq!(
+                        (spelling_line, spelling_column),
+                        (token.line, token.column),
+                        "macro replacement token location must belong to its source"
+                    );
+                    let separated = previous_end.is_some_and(|end| spelling_cursor > end);
+                    if macro_hash_pair_is_paste(&replacement_tokens, token_index) {
+                        let spelling = format!(
+                            "{}{}",
+                            replacement_tokens[token_index].preprocessing_spelling,
+                            replacement_tokens[token_index + 1].preprocessing_spelling
+                        );
+                        replacement.push(MacroReplacementToken::Paste {
+                            spelling,
+                            separated,
+                        });
+                        let spelling_len = replacement_tokens[token_index]
+                            .preprocessing_spelling
+                            .chars()
+                            .count()
+                            + replacement_tokens[token_index + 1]
+                                .preprocessing_spelling
+                                .chars()
+                                .count();
                         previous_end = Some(spelling_cursor + spelling_len);
-                        replacement_token
-                    })
-                    .collect()
+                        token_index += 2;
+                        continue;
+                    }
+                    let replacement_token = macro_replacement_token(token.clone(), separated);
+                    let spelling_len = match &replacement_token {
+                        MacroReplacementToken::Identifier { name, .. } => name.chars().count(),
+                        MacroReplacementToken::Other { spelling, .. } => spelling.chars().count(),
+                        MacroReplacementToken::Paste { .. } => unreachable!(),
+                    };
+                    previous_end = Some(spelling_cursor + spelling_len);
+                    replacement.push(replacement_token);
+                    token_index += 1;
+                }
+                replacement
             };
             let definition = MacroDefinition {
                 parameters,
@@ -4839,6 +4907,150 @@ fn stringify_macro_argument(
     )
 }
 
+fn pasted_punctuator_token(spelling: &str) -> Option<Token> {
+    match spelling {
+        "<:" => Some(Token::LBracket),
+        ":>" => Some(Token::RBracket),
+        "<%" => Some(Token::LBrace),
+        "%>" => Some(Token::RBrace),
+        "%:" => Some(Token::Hash),
+        "##" | "%:%:" => Some(Token::RawPreprocessor(spelling.to_string())),
+        _ => None,
+    }
+}
+
+fn paste_macro_tokens(
+    left: LocatedToken,
+    right: LocatedToken,
+    budget: &mut MacroExpansionBudget,
+    source: &str,
+    line: usize,
+    column: usize,
+) -> CustResult<LocatedToken> {
+    let required_bytes = left
+        .preprocessing_spelling
+        .len()
+        .saturating_add(right.preprocessing_spelling.len());
+    if required_bytes > MAX_MACRO_TOKEN_PASTING_BYTES.saturating_sub(budget.pasted_bytes) {
+        return Err(lexer_error_with_context(
+            "macro token-pasting byte limit exceeded",
+            source,
+            line,
+            column,
+        ));
+    }
+    budget.pasted_bytes += required_bytes;
+    let spelling = format!(
+        "{}{}",
+        left.preprocessing_spelling, right.preprocessing_spelling
+    );
+    if let Some(kind) = pasted_punctuator_token(&spelling) {
+        return Ok(LocatedToken::new(kind, line, column)
+            .with_preprocessing_spelling(spelling, left.separated));
+    }
+    let pasted_source = SplicedSourceChars::new(&spelling, line, column);
+    let pasted = lex_spliced_with_context(
+        &pasted_source,
+        source,
+        line,
+        column,
+        false,
+        true,
+        true,
+        None,
+    );
+    let Ok(mut pasted) = pasted else {
+        return Err(lexer_error_with_context(
+            format!("token pasting produced invalid preprocessing token '{spelling}'"),
+            source,
+            line,
+            column,
+        ));
+    };
+    pasted.pop();
+    if pasted.len() != 1 {
+        return Err(lexer_error_with_context(
+            format!("token pasting produced invalid preprocessing token '{spelling}'"),
+            source,
+            line,
+            column,
+        ));
+    }
+    let mut pasted = pasted.pop().expect("one pasted token must be present");
+    pasted.preprocessing_spelling = spelling;
+    pasted.separated = left.separated;
+    Ok(pasted)
+}
+
+fn apply_macro_token_pastes(
+    items: Vec<MacroSubstitutionItem>,
+    budget: &mut MacroExpansionBudget,
+    source: &str,
+    line: usize,
+    column: usize,
+) -> CustResult<(Vec<LocatedToken>, bool)> {
+    let mut combined = Vec::new();
+    let mut items = items.into_iter();
+    while let Some(item) = items.next() {
+        if !matches!(item, MacroSubstitutionItem::Paste) {
+            combined.push(item);
+            continue;
+        }
+        let left = combined
+            .pop()
+            .expect("validated token-pasting operator requires a left operand");
+        let right = items
+            .next()
+            .expect("validated token-pasting operator requires a right operand");
+        let pasted = match (left, right) {
+            (MacroSubstitutionItem::Token(left), MacroSubstitutionItem::Token(right)) => {
+                MacroSubstitutionItem::Token(paste_macro_tokens(
+                    left, right, budget, source, line, column,
+                )?)
+            }
+            (MacroSubstitutionItem::Token(token), MacroSubstitutionItem::Placemark { .. }) => {
+                MacroSubstitutionItem::Token(token)
+            }
+            (
+                MacroSubstitutionItem::Placemark { separated },
+                MacroSubstitutionItem::Token(mut token),
+            ) => {
+                token.separated = separated;
+                MacroSubstitutionItem::Token(token)
+            }
+            (
+                MacroSubstitutionItem::Placemark { separated },
+                MacroSubstitutionItem::Placemark { .. },
+            ) => MacroSubstitutionItem::Placemark { separated },
+            (MacroSubstitutionItem::Paste, _) | (_, MacroSubstitutionItem::Paste) => {
+                return Err(lexer_error_with_context(
+                    "macro token-pasting operator requires an operand on each side",
+                    source,
+                    line,
+                    column,
+                ));
+            }
+        };
+        combined.push(pasted);
+    }
+
+    let mut tokens = Vec::new();
+    let mut pending_separation = false;
+    for item in combined {
+        match item {
+            MacroSubstitutionItem::Token(mut token) => {
+                token.separated |= std::mem::take(&mut pending_separation);
+                tokens.push(token);
+            }
+            MacroSubstitutionItem::Placemark { separated } => {
+                pending_separation |= separated;
+            }
+            MacroSubstitutionItem::Paste => unreachable!(),
+        }
+    }
+    Ok((tokens, pending_separation))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn expand_macro(
     name: &str,
@@ -4944,12 +5156,17 @@ fn expand_macro(
                         ) && !index.checked_sub(1).is_some_and(|previous_index| {
                             matches!(
                                 definition.replacement.get(previous_index),
-                                Some(MacroReplacementToken::Other {
-                                    kind: Token::Hash,
-                                    ..
-                                })
+                                Some(
+                                    MacroReplacementToken::Other {
+                                        kind: Token::Hash,
+                                        ..
+                                    } | MacroReplacementToken::Paste { .. }
+                                )
                             )
-                        })
+                        }) && !matches!(
+                            definition.replacement.get(index + 1),
+                            Some(MacroReplacementToken::Paste { .. })
+                        )
                     })
             });
             let expanded = if is_substituted {
@@ -4975,7 +5192,7 @@ fn expand_macro(
     }
 
     expansion_stack.push(name.to_string());
-    let mut replacement = Vec::new();
+    let mut replacement_items = Vec::new();
     let mut pending_separation = false;
     let mut replacement_index = 0;
     while replacement_index < definition.replacement.len() {
@@ -4985,68 +5202,82 @@ fn expand_macro(
                 name: token_name,
                 separated,
             } => {
-                if let Some(index) = definition
+                let argument_index = definition
                     .parameters
                     .as_ref()
                     .and_then(|parameters| parameters.iter().position(|name| name == token_name))
-                {
-                    let argument = expanded_arguments[index]
-                        .as_ref()
-                        .expect("substituted macro argument requires prescan");
-                    ensure_macro_replacement_token_capacity(
-                        replacement.len(),
-                        argument.tokens.len(),
-                        source,
-                        line,
-                        column,
-                    )?;
-                    let mut tokens = argument.tokens.clone();
-                    if let Some(first) = tokens.first_mut() {
-                        first.separated |= *separated || pending_separation;
-                        pending_separation = argument.trailing_separation;
+                    .or_else(|| {
+                        (definition.variadic && token_name == "__VA_ARGS__").then(|| {
+                            definition
+                                .parameters
+                                .as_ref()
+                                .expect("variadic macro requires a parameter list")
+                                .len()
+                        })
+                    });
+                if let Some(argument_index) = argument_index {
+                    let adjacent_to_paste = matches!(
+                        replacement_index
+                            .checked_sub(1)
+                            .and_then(|index| definition.replacement.get(index)),
+                        Some(MacroReplacementToken::Paste { .. })
+                    ) || matches!(
+                        definition.replacement.get(replacement_index + 1),
+                        Some(MacroReplacementToken::Paste { .. })
+                    );
+                    if adjacent_to_paste {
+                        let mut tokens = raw_arguments[argument_index].clone();
+                        ensure_macro_replacement_token_capacity(
+                            replacement_items.len(),
+                            tokens.len().max(1),
+                            source,
+                            line,
+                            column,
+                        )?;
+                        let separated = *separated | std::mem::take(&mut pending_separation);
+                        if let Some(first) = tokens.first_mut() {
+                            first.separated = separated;
+                            replacement_items
+                                .extend(tokens.into_iter().map(MacroSubstitutionItem::Token));
+                        } else {
+                            replacement_items.push(MacroSubstitutionItem::Placemark { separated });
+                        }
                     } else {
-                        pending_separation |= *separated || argument.trailing_separation;
+                        let argument = expanded_arguments[argument_index]
+                            .as_ref()
+                            .expect("ordinary substituted macro argument requires prescan");
+                        ensure_macro_replacement_token_capacity(
+                            replacement_items.len(),
+                            argument.tokens.len(),
+                            source,
+                            line,
+                            column,
+                        )?;
+                        let mut tokens = argument.tokens.clone();
+                        if let Some(first) = tokens.first_mut() {
+                            first.separated |= *separated || pending_separation;
+                            pending_separation = argument.trailing_separation;
+                        } else {
+                            pending_separation |= *separated || argument.trailing_separation;
+                        }
+                        replacement_items
+                            .extend(tokens.into_iter().map(MacroSubstitutionItem::Token));
                     }
-                    replacement.extend(tokens);
-                } else if definition.variadic && token_name == "__VA_ARGS__" {
-                    let variadic_index = definition
-                        .parameters
-                        .as_ref()
-                        .expect("variadic macro requires a parameter list")
-                        .len();
-                    let argument = expanded_arguments[variadic_index]
-                        .as_ref()
-                        .expect("substituted variadic macro argument requires prescan");
-                    ensure_macro_replacement_token_capacity(
-                        replacement.len(),
-                        argument.tokens.len(),
-                        source,
-                        line,
-                        column,
-                    )?;
-                    let mut tokens = argument.tokens.clone();
-                    if let Some(first) = tokens.first_mut() {
-                        first.separated |= *separated || pending_separation;
-                        pending_separation = argument.trailing_separation;
-                    } else {
-                        pending_separation |= *separated || argument.trailing_separation;
-                    }
-                    replacement.extend(tokens);
                 } else {
                     ensure_macro_replacement_token_capacity(
-                        replacement.len(),
+                        replacement_items.len(),
                         1,
                         source,
                         line,
                         column,
                     )?;
-                    replacement.push(
+                    replacement_items.push(MacroSubstitutionItem::Token(
                         LocatedToken::new(identifier_token(token_name.clone()), line, column)
                             .with_preprocessing_spelling(
                                 token_name.clone(),
                                 *separated | std::mem::take(&mut pending_separation),
                             ),
-                    );
+                    ));
                 }
             }
             MacroReplacementToken::Other {
@@ -5059,7 +5290,8 @@ fn expand_macro(
                     .get(replacement_index + 1)
                     .and_then(|token| match token {
                         MacroReplacementToken::Identifier { name, .. } => Some(name.as_str()),
-                        MacroReplacementToken::Other { .. } => None,
+                        MacroReplacementToken::Other { .. }
+                        | MacroReplacementToken::Paste { .. } => None,
                     })
                     .expect("validated macro stringification requires a following parameter");
                 let argument_index = definition
@@ -5077,20 +5309,20 @@ fn expand_macro(
                     })
                     .expect("validated stringification target must be a macro parameter");
                 ensure_macro_replacement_token_capacity(
-                    replacement.len(),
+                    replacement_items.len(),
                     1,
                     source,
                     line,
                     column,
                 )?;
-                replacement.push(stringify_macro_argument(
+                replacement_items.push(MacroSubstitutionItem::Token(stringify_macro_argument(
                     &raw_arguments[argument_index],
                     budget,
                     source,
                     line,
                     column,
                     *separated | std::mem::take(&mut pending_separation),
-                )?);
+                )?));
                 replacement_index += 1;
             }
             MacroReplacementToken::Other {
@@ -5099,22 +5331,28 @@ fn expand_macro(
                 separated,
             } => {
                 ensure_macro_replacement_token_capacity(
-                    replacement.len(),
+                    replacement_items.len(),
                     1,
                     source,
                     line,
                     column,
                 )?;
-                replacement.push(
+                replacement_items.push(MacroSubstitutionItem::Token(
                     LocatedToken::new(kind.clone(), line, column).with_preprocessing_spelling(
                         spelling.clone(),
                         *separated | std::mem::take(&mut pending_separation),
                     ),
-                );
+                ));
+            }
+            MacroReplacementToken::Paste { .. } => {
+                replacement_items.push(MacroSubstitutionItem::Paste);
             }
         }
         replacement_index += 1;
     }
+    let (replacement, paste_trailing_separation) =
+        apply_macro_token_pastes(replacement_items, budget, source, line, column)?;
+    pending_separation |= paste_trailing_separation;
     let mut expanded = expand_macro_tokens(
         &replacement,
         macros,

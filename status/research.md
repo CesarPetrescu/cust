@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-29 — Bounded macro token pasting
+
+- ISO C11 draft N1570 §6.10.3.3 specifies that parameters adjacent to `##` use raw, unprescanned preprocessing tokens; empty arguments produce placemarkers; nonempty operands must concatenate into one preprocessing token; placemarkers disappear; and the result is rescanned. Cust models these phases explicitly instead of delegating to a host preprocessor.
+- Exact operator spelling and whitespace separation remain macro-definition equality metadata. Strict `cc`, GCC, and Clang C11 probes all diagnosed redefinitions that changed `left## right` to `left ## right` or `##` to `%:%:`, even though invocation results matched.
+- Concatenation must re-lex retained preprocessing spellings and require exactly one token: successful lexing alone accepts invalid pairs such as `+*` as two tokens. Raw multi-token arguments paste only their nearest boundary tokens; empty operands use placemarkers; every generated/intermediate spelling is charged against a translation-unit-wide 1 MiB byte bound before allocation. See `references/cust-macro-token-pasting.md` and N1570 at https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf.
+- N1570 §6.4.6 includes `<:`, `:>`, `<%`, `%>`, `%:`, and `%:%:` as punctuator spellings. GCC and Clang probes confirmed that pasted forms remain one preprocessing token and preserve their original spelling through later stringification (`%:`, `%:%:`, and `##` respectively). Cust therefore maps pasted digraph delimiters to semantic bracket/brace tokens and retains generated hash/paste operators as one spelling-aware token instead of rejecting the lexer's internal multi-token decomposition.
+
 ## 2026-07-29 — Function-like macro stringification metadata
 
 - ISO C11 draft N1570 §6.10.3.2 requires `#` to consume the raw argument preprocessing-token sequence without macro expansion, collapse internal whitespace to one space, and escape quotes/backslashes in string/character-literal spellings. Cust consequently retains exact preprocessing spelling and separation alongside semantic token kinds, plus opaque preprocessing tokens that are decoded only if they survive into ordinary syntax.

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-29 bounded macro-stringification closure after four review-driven separator RED/GREEN regressions, exact invalid/operator/resource diagnostics, warning-free native C11 parity, 1,101 passing local tests, warning-free Clippy, and both canonical Docker gates. Token pasting is an actionable next slice, not an external blocker.
+None. Last reviewed during the 2026-07-29 bounded macro-token-pasting closure after strict TDD, native-oracle redefinition/generated-punctuator probes, review-driven metadata/resource/punctuator fixes, exact operator/result/byte-limit diagnostics, warning-free native C11 parity, 1,110 passing local tests, warning-free Clippy, and both canonical Docker gates. The v0.4.0 release package is actionable next work, not an external blocker.
 
 ## Blocker template
 

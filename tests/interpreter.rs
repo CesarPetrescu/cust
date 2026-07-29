@@ -241,6 +241,79 @@ fn supports_function_like_macro_stringification() {
 }
 
 #[test]
+fn token_pasting_uses_raw_arguments_then_rescans_the_result() {
+    let program = r#"
+#define NAME VALUE
+#define DIRECT_NAME 7
+#define DIRECT_VALUE 9
+#define CAT(left, right) left ## right
+#define XCAT(left, right) CAT(left, right)
+int main(void) {
+    return CAT(DIRECT_, NAME) + XCAT(DIRECT_, NAME);
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 16);
+}
+
+#[test]
+fn token_pasting_accepts_bracket_digraph_results() {
+    let program = r#"
+#define CAT(left, right) left ## right
+int main(void) {
+    int values[2] = {3, 4};
+    return values CAT(<, :) 1 CAT(:, >) - 4;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn token_pasting_accepts_brace_digraph_results() {
+    let program = r#"
+#define CAT(left, right) left ## right
+int main(void) {
+    int total = 0;
+    CAT(<, %) total += 5; CAT(%, >)
+    return total - 5;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn token_pasting_accepts_hash_and_paste_punctuator_results() {
+    let program = r#"
+#define CAT(left, right) left ## right
+#define STR(value) #value
+#define XSTR(value) STR(value)
+int main(void) {
+    char *hash = XSTR(CAT(%, :));
+    char *digraph_paste = XSTR(CAT(%:, %:));
+    char *paste = XSTR(CAT(#, #));
+    return hash[0] == '%' && hash[1] == ':' && hash[2] == '\0'
+            && digraph_paste[0] == '%' && digraph_paste[1] == ':'
+            && digraph_paste[2] == '%' && digraph_paste[3] == ':'
+            && digraph_paste[4] == '\0'
+            && paste[0] == '#' && paste[1] == '#' && paste[2] == '\0'
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn supports_macro_token_pasting_across_supported_preprocessing_tokens() {
+    let program = include_str!("fixtures/compat/valid/macro_token_pasting.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn macro_stringification_drops_leading_argument_whitespace_at_substitution_boundary() {
     let program = r#"
 #define STR(value) #value
@@ -1066,7 +1139,31 @@ fn macro_redefinitions_preserve_whitespace_separation() {
 }
 
 #[test]
-fn rejects_invalid_macro_stringification_operators_with_context() {
+fn macro_token_paste_redefinitions_preserve_operator_whitespace_separation() {
+    let program = "#define CAT(left, right) left## right\n#define CAT(left, right) left ## right\nint main(void) { return CAT(1, 2) - 12; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "conflicting function-like macro redefinition for 'CAT' at line 2, column 9\n#define CAT(left, right) left ## right\n        ^"
+    );
+}
+
+#[test]
+fn macro_token_paste_redefinitions_preserve_digraph_spelling() {
+    let program = "#define CAT(left, right) left ## right\n#define CAT(left, right) left %:%: right\nint main(void) { return CAT(1, 2) - 12; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "conflicting function-like macro redefinition for 'CAT' at line 2, column 9\n#define CAT(left, right) left %:%: right\n        ^"
+    );
+}
+
+#[test]
+fn rejects_invalid_macro_stringification_and_token_pasting_operators_with_context() {
     let cases = [
         (
             "#define BAD(value) # 1\nint main(void) { return 0; }\n",
@@ -1082,11 +1179,15 @@ fn rejects_invalid_macro_stringification_operators_with_context() {
         ),
         (
             "#define BAD(value) ## value\nint main(void) { return 0; }\n",
-            "macro replacement '##' token pasting is not supported at line 1, column 20\n#define BAD(value) ## value\n                   ^",
+            "macro token-pasting operator cannot appear at the edge of a replacement list at line 1, column 20\n#define BAD(value) ## value\n                   ^",
         ),
         (
             "#define BAD(value) value ##\nint main(void) { return 0; }\n",
-            "macro replacement '##' token pasting is not supported at line 1, column 26\n#define BAD(value) value ##\n                         ^",
+            "macro token-pasting operator cannot appear at the edge of a replacement list at line 1, column 26\n#define BAD(value) value ##\n                         ^",
+        ),
+        (
+            "#define BAD(value) value ## ## tail\nint main(void) { return 0; }\n",
+            "macro token-pasting operator requires an operand on each side at line 1, column 26\n#define BAD(value) value ## ## tail\n                         ^",
         ),
     ];
 
@@ -1094,6 +1195,34 @@ fn rejects_invalid_macro_stringification_operators_with_context() {
         let err = interpret(program).unwrap_err();
         assert_eq!(err.to_string(), expected, "program: {program}");
     }
+}
+
+#[test]
+fn rejects_token_pasting_results_that_are_not_one_preprocessing_token() {
+    let program = include_str!("fixtures/invalid/macro_token_pasting_invalid_result.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "token pasting produced invalid preprocessing token '+*' at line 2, column 25\nint main(void) { return BAD(+, *); }\n                        ^"
+    );
+}
+
+#[test]
+fn bounds_macro_token_pasting_generated_bytes() {
+    let half = "a".repeat(524_289);
+    let program = format!(
+        "#define CAT(left, right) left ## right\nint main(void) {{ return CAT({half}, {half}); }}\n"
+    );
+
+    let err = interpret(&program).unwrap_err();
+
+    assert!(
+        err.to_string()
+            .starts_with("macro token-pasting byte limit exceeded at line 2, column 25"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
