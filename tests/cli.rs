@@ -301,6 +301,84 @@ fn run_mode_supports_project_relative_quoted_headers() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn run_mode_uses_normalized_logical_names_for_predefined_file_macros() {
+    let directory = temp_source_directory("predefined-file-logical-names");
+    fs::create_dir(directory.join("nested")).expect("nested header directory should be creatable");
+    fs::write(
+        directory.join("nested/probe.h"),
+        concat!(
+            "int header_predefined_ok(void) {\n",
+            "    char *source = __FILE__;\n",
+            "    return text_equal(source, \"nested/probe.h\") && __LINE__ == 3;\n",
+            "}\n",
+        ),
+    )
+    .expect("predefined header should be writable");
+    let source = directory.join("main.c");
+    fs::write(
+        &source,
+        concat!(
+            "int text_equal(char *left, char *right) { while (*left == *right && *left != '\\0') { left++; right++; } return *left == *right; }\n",
+            "#include \"nested/probe.h\"\n",
+            "int main(void) {\n",
+            "    char *source = __FILE__;\n",
+            "    return text_equal(source, \"main.c\") && __LINE__ == 5 && header_predefined_ok() ? 0 : 1;\n",
+            "}\n",
+        ),
+    )
+    .expect("predefined primary source should be writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    fs::remove_dir_all(&directory).expect("temporary source directory should be removable");
+
+    assert!(
+        output.status.success(),
+        "predefined logical names should run: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "0\n");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn run_mode_escapes_predefined_file_spelling_for_unusual_logical_names() {
+    let directory = temp_source_directory("predefined-file-spelling");
+    let source = directory.join("odd\nname.c");
+    fs::write(
+        &source,
+        r#"#define RAW(value) #value
+#define STR(value) RAW(value)
+int text_equal(char *left, char *right) { while (*left == *right && *left != '\0') { left++; right++; } return *left == *right; }
+int main(void) {
+    char *source = __FILE__;
+    char *spelling = STR(__FILE__);
+    return text_equal(source, "odd\nname.c") && text_equal(spelling, "\"odd\\nname.c\"") ? 0 : 1;
+}
+"#,
+    )
+    .expect("unusual logical source should be writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    fs::remove_dir_all(&directory).expect("temporary source directory should be removable");
+
+    assert!(
+        output.status.success(),
+        "unusual predefined file spelling should run: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "0\n");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn run_mode_expands_macros_in_quoted_header_operands() {
     let directory = temp_source_directory("macro-expanded-quoted-header");
     fs::create_dir(directory.join("nested")).expect("nested header directory should be creatable");

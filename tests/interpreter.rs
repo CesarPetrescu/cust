@@ -220,6 +220,79 @@ fn supports_nested_object_like_macros_across_c_contexts() {
 }
 
 #[test]
+fn predefined_file_and_line_macros_expand_at_the_use_site() {
+    let program = r#"int main(void) {
+    char *source = __FILE__;
+    int first = __LINE__;
+    return source[0] == '<' && source[1] == 'i' && source[6] == '>'
+            && source[7] == '\0' && first == 3 && __LINE__ == 5
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn predefined_macros_expand_through_conditions_forwarding_and_stringification() {
+    let program = r#"#define ID(value) value
+#define FORWARDED_LINE __LINE__
+#define STR_RAW(value) #value
+#define STR(value) STR_RAW(value)
+#if !defined(__FILE__) || !defined __LINE__
+@
+#endif
+#ifndef __FILE__
+@
+#endif
+#if __LINE__ != 11
+@
+#endif
+int text_equal(char *left, char *right) {
+    while (*left == *right && *left != '\0') { left++; right++; }
+    return *left == *right;
+}
+int main(void) {
+    char *direct = STR_RAW(__LINE__);
+    char *expanded = STR(__LINE__);
+    int forwarded = ID(FORWARDED_LINE);
+    return text_equal(direct, "__LINE__") && text_equal(expanded, "20")
+            && forwarded == 21
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_redefinition_and_undefinition_of_predefined_macros() {
+    for (program, expected) in [
+        (
+            "#define __LINE__ 7\nint main(void) { return 0; }\n",
+            "predefined macro '__LINE__' cannot be redefined at line 1, column 9\n#define __LINE__ 7\n        ^",
+        ),
+        (
+            "#undef __FILE__\nint main(void) { return 0; }\n",
+            "predefined macro '__FILE__' cannot be undefined at line 1, column 8\n#undef __FILE__\n       ^",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn predefined_macros_track_primary_and_included_logical_sources() {
+    assert_eq!(
+        cust::interpret_file("tests/fixtures/compat/valid/predefined_file_line.c").unwrap(),
+        0
+    );
+}
+
+#[test]
 fn supports_function_like_macros_with_nested_arguments_and_rescanning() {
     let program = include_str!("fixtures/compat/valid/function_like_macros.c");
 

@@ -1923,7 +1923,9 @@ fn lex_spliced_with_state(
                         start_column,
                     ));
                 }
-                if state.macros.contains_key(&text) {
+                if state.macros.contains_key(&text)
+                    || (allow_preprocessor_directives && is_predefined_macro_name(&text))
+                {
                     let mut input = vec![
                         LocatedToken::new(identifier_token(text.clone()), start_line, start_column)
                             .with_preprocessing_spelling(text, next_token_separated),
@@ -1949,12 +1951,14 @@ fn lex_spliced_with_state(
                             advance_position(chars, chars[i], &mut line, &mut column, &mut i);
                         }
                     }
+                    let predefined_source_name = current_predefined_source_name(state);
                     let expanded = expand_macro_tokens(
                         &input,
                         &state.macros,
                         &mut Vec::new(),
                         &mut state.macro_expansion_budget,
                         source,
+                        &predefined_source_name,
                         false,
                         0,
                     )?;
@@ -2733,7 +2737,7 @@ fn process_preprocessor_directive(
                     error_column,
                 ));
             }
-            let is_defined = state.macros.contains_key(&macro_name);
+            let is_defined = is_macro_defined(&state.macros, &macro_name);
             let condition = if directive_name == "ifndef" {
                 !is_defined
             } else {
@@ -2864,6 +2868,7 @@ fn process_preprocessor_directive(
                 });
                 return Ok(false);
             }
+            let predefined_source_name = current_predefined_source_name(state);
             let condition = evaluate_preprocessor_condition(
                 source,
                 chars,
@@ -2874,6 +2879,7 @@ fn process_preprocessor_directive(
                 directive_column,
                 &state.macros,
                 &mut state.macro_expansion_budget,
+                &predefined_source_name,
                 "if",
             )? != 0;
             conditional_stack.push(ConditionalFrame {
@@ -2909,6 +2915,7 @@ fn process_preprocessor_directive(
             }
             let should_evaluate = !frame.branch_taken;
             let condition = if should_evaluate {
+                let predefined_source_name = current_predefined_source_name(state);
                 evaluate_preprocessor_condition(
                     source,
                     chars,
@@ -2919,6 +2926,7 @@ fn process_preprocessor_directive(
                     directive_column,
                     &state.macros,
                     &mut state.macro_expansion_budget,
+                    &predefined_source_name,
                     "elif",
                 )? != 0
             } else {
@@ -3106,6 +3114,14 @@ fn process_preprocessor_directive(
             if macro_name == "__VA_ARGS__" {
                 return Err(lexer_error_with_context(
                     "'__VA_ARGS__' cannot be used as a macro name",
+                    source,
+                    macro_line,
+                    macro_column,
+                ));
+            }
+            if is_predefined_macro_name(&macro_name) {
+                return Err(lexer_error_with_context(
+                    format!("predefined macro '{macro_name}' cannot be redefined"),
                     source,
                     macro_line,
                     macro_column,
@@ -3528,6 +3544,21 @@ fn process_preprocessor_directive(
                     error_column,
                 ));
             }
+            if is_predefined_macro_name(&macro_name) {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    macro_name_start,
+                );
+                return Err(lexer_error_with_context(
+                    format!("predefined macro '{macro_name}' cannot be undefined"),
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
             skip_preprocessor_whitespace(
                 source,
                 chars,
@@ -3688,6 +3719,19 @@ fn logical_source_name(project_root: &Path, logical_path: &Path) -> String {
         .join("/")
 }
 
+fn current_predefined_source_name(state: &PreprocessorState) -> String {
+    state
+        .include_context
+        .as_ref()
+        .and_then(|context| {
+            context
+                .stack
+                .last()
+                .map(|path| logical_source_name(&context.project_root, &path.logical))
+        })
+        .unwrap_or_else(|| "<input>".to_string())
+}
+
 fn expand_quoted_header_operand(
     operand_chars: &SplicedSourceChars,
     source: &str,
@@ -3710,12 +3754,14 @@ fn expand_quoted_header_operand(
         .expect("include operand lexer always appends an EOF token");
     debug_assert_eq!(eof.kind, Token::Eof);
 
+    let predefined_source_name = current_predefined_source_name(state);
     let expanded = expand_macro_tokens(
         &raw_tokens,
         &state.macros,
         &mut Vec::new(),
         &mut state.macro_expansion_budget,
         source,
+        &predefined_source_name,
         false,
         0,
     )?
@@ -4015,6 +4061,7 @@ fn evaluate_preprocessor_condition(
     directive_column: usize,
     macros: &HashMap<String, MacroDefinition>,
     macro_expansion_budget: &mut MacroExpansionBudget,
+    predefined_source_name: &str,
     directive_name: &str,
 ) -> CustResult<i64> {
     skip_preprocessor_whitespace(
@@ -4055,6 +4102,7 @@ fn evaluate_preprocessor_condition(
         raw_tokens,
         macros,
         macro_expansion_budget,
+        predefined_source_name,
         directive_name,
     )?;
     PreprocessorConditionParser::new(tokens, source, directive_name).parse()
@@ -4065,6 +4113,7 @@ fn prepare_preprocessor_condition_tokens(
     raw_tokens: Vec<LocatedToken>,
     macros: &HashMap<String, MacroDefinition>,
     macro_expansion_budget: &mut MacroExpansionBudget,
+    predefined_source_name: &str,
     directive_name: &str,
 ) -> CustResult<Vec<LocatedToken>> {
     let mut unexpanded = Vec::new();
@@ -4125,7 +4174,7 @@ fn prepare_preprocessor_condition_tokens(
                 cursor += 1;
             }
             unexpanded.push(LocatedToken::new(
-                Token::Number(i64::from(macros.contains_key(name))),
+                Token::Number(i64::from(is_macro_defined(macros, name))),
                 defined_token.line,
                 defined_token.column,
             ));
@@ -4141,6 +4190,7 @@ fn prepare_preprocessor_condition_tokens(
         &mut Vec::new(),
         macro_expansion_budget,
         source,
+        predefined_source_name,
         false,
         0,
     )?;
@@ -4799,12 +4849,14 @@ fn skip_inactive_text_line(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn expand_macro_tokens(
     tokens: &[LocatedToken],
     macros: &HashMap<String, MacroDefinition>,
     expansion_stack: &mut Vec<String>,
     budget: &mut MacroExpansionBudget,
     source: &str,
+    predefined_source_name: &str,
     count_plain_tokens: bool,
     depth: usize,
 ) -> CustResult<MacroExpansion> {
@@ -4841,6 +4893,21 @@ fn expand_macro_tokens(
                 token.line,
                 token.column,
             ));
+        }
+        if is_predefined_macro_name(name) {
+            let mut expanded = expand_predefined_macro(
+                name,
+                token,
+                budget,
+                source,
+                predefined_source_name,
+                depth,
+            )?;
+            expanded.separated |= token.separated || pending_separation;
+            pending_separation = false;
+            result.push(expanded);
+            cursor += 1;
+            continue;
         }
         let Some(definition) = macros.get(name) else {
             let mut token = token.clone();
@@ -4916,6 +4983,7 @@ fn expand_macro_tokens(
             expansion_stack,
             budget,
             source,
+            predefined_source_name,
             token.line,
             token.column,
             depth,
@@ -4971,6 +5039,7 @@ fn expand_macro_tokens(
                 expansion_stack,
                 budget,
                 source,
+                predefined_source_name,
                 nested_line,
                 nested_column,
                 depth + 1,
@@ -5224,6 +5293,7 @@ fn expand_macro(
     expansion_stack: &mut Vec<String>,
     budget: &mut MacroExpansionBudget,
     source: &str,
+    predefined_source_name: &str,
     line: usize,
     column: usize,
     depth: usize,
@@ -5345,6 +5415,7 @@ fn expand_macro(
                     expansion_stack,
                     budget,
                     source,
+                    predefined_source_name,
                     false,
                     depth + 1,
                 )?)
@@ -5524,6 +5595,7 @@ fn expand_macro(
         expansion_stack,
         budget,
         source,
+        predefined_source_name,
         true,
         depth + 1,
     )?;
@@ -5605,6 +5677,101 @@ fn push_expanded_macro_token(
     budget.emitted_tokens += 1;
     expanded.push(token);
     Ok(())
+}
+
+fn is_predefined_macro_name(name: &str) -> bool {
+    matches!(name, "__FILE__" | "__LINE__")
+}
+
+fn is_macro_defined(macros: &HashMap<String, MacroDefinition>, name: &str) -> bool {
+    is_predefined_macro_name(name) || macros.contains_key(name)
+}
+
+fn preprocessing_string_literal_spelling(value: &str) -> String {
+    let mut spelling = String::from("\"");
+    for character in value.chars() {
+        match character {
+            '\\' => spelling.push_str("\\\\"),
+            '"' => spelling.push_str("\\\""),
+            '\u{7}' => spelling.push_str("\\a"),
+            '\u{8}' => spelling.push_str("\\b"),
+            '\t' => spelling.push_str("\\t"),
+            '\n' => spelling.push_str("\\n"),
+            '\u{b}' => spelling.push_str("\\v"),
+            '\u{c}' => spelling.push_str("\\f"),
+            '\r' => spelling.push_str("\\r"),
+            control if control.is_control() && (control as u32) <= 0o777 => {
+                spelling.push_str(&format!("\\{:03o}", control as u32));
+            }
+            ordinary => spelling.push(ordinary),
+        }
+    }
+    spelling.push('"');
+    spelling
+}
+
+fn expand_predefined_macro(
+    name: &str,
+    invocation: &LocatedToken,
+    budget: &mut MacroExpansionBudget,
+    source: &str,
+    predefined_source_name: &str,
+    depth: usize,
+) -> CustResult<LocatedToken> {
+    if depth >= MAX_OBJECT_MACRO_EXPANSION_DEPTH {
+        return Err(lexer_error_with_context(
+            "predefined macro expansion depth limit exceeded",
+            source,
+            invocation.line,
+            invocation.column,
+        ));
+    }
+    if budget.work >= MAX_OBJECT_MACRO_EXPANSION_WORK {
+        return Err(lexer_error_with_context(
+            "macro expansion work limit exceeded",
+            source,
+            invocation.line,
+            invocation.column,
+        ));
+    }
+    if budget.emitted_tokens >= MAX_OBJECT_MACRO_EXPANSION_TOKENS {
+        return Err(lexer_error_with_context(
+            "macro expansion token limit exceeded",
+            source,
+            invocation.line,
+            invocation.column,
+        ));
+    }
+    budget.work += 1;
+    budget.emitted_tokens += 1;
+
+    let (kind, spelling) = match name {
+        "__LINE__" => {
+            let line = i64::try_from(invocation.line).map_err(|_| {
+                lexer_error_with_context(
+                    "predefined line number is out of range",
+                    source,
+                    invocation.line,
+                    invocation.column,
+                )
+            })?;
+            (Token::Number(line), line.to_string())
+        }
+        "__FILE__" => {
+            let spelling = preprocessing_string_literal_spelling(predefined_source_name);
+            let mut value = predefined_source_name
+                .chars()
+                .map(|character| character as i64)
+                .collect::<Vec<_>>();
+            value.push(0);
+            (Token::StringLiteral(value), spelling)
+        }
+        _ => unreachable!("predefined macro expansion requires a predefined name"),
+    };
+    let mut token = LocatedToken::new(kind, invocation.line, invocation.column)
+        .with_preprocessing_spelling(spelling, invocation.separated);
+    token.source_origin = invocation.source_origin.clone();
+    Ok(token)
 }
 
 fn normalize_expanded_integer_tokens(

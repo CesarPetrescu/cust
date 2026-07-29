@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-29 macro-expanded quoted-header closure after focused RED/GREEN, exact malformed/resource/nested-origin diagnostics, warning-free native parity, independent review, 1,115 passing local tests, warning-free Clippy, and both canonical Docker gates. Predefined `__FILE__`/`__LINE__` semantics are actionable next work, not an external blocker.
+None. Last reviewed during the 2026-07-29 predefined `__FILE__`/`__LINE__` closure after focused RED/GREEN, exact direct/forwarded/stringified/conditional and primary/header logical-source coverage, exact reserved-name diagnostics, warning-free native parity, independent review, 1,121 passing local tests, warning-free Clippy, and both canonical Docker gates. Bounded active `#error` diagnostics are actionable next work, not an external blocker.
 
 ## Blocker template
 

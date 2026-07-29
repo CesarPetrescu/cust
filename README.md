@@ -198,16 +198,16 @@ docker compose run --rm cust
 
 ## Current limitations
 
-Cust is not a full C implementation. Fixed two-dimensional scalar arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported, but variable-length arrays, arrays with more than two dimensions, and aggregate-valued multidimensional elements remain unsupported. Preprocessing supports bounded object-like, named-parameter, and variadic function-like `#define`, function-like macro stringification and token pasting, `#undef`, physical-line splicing, nested conditionals, direct-source C11 digraph punctuators, and project-relative quoted headers on Linux with direct or exactly-one-string-literal macro-expanded operands plus shared expansion/depth/source-size/path-containment bounds. System headers remain unsupported, direct string-only library entry points still reject includes, and quoted inclusion fails closed on non-Linux platforms. Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
+Cust is not a full C implementation. Fixed two-dimensional scalar arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported, but variable-length arrays, arrays with more than two dimensions, and aggregate-valued multidimensional elements remain unsupported. Preprocessing supports bounded object-like, named-parameter, and variadic function-like `#define`, function-like macro stringification and token pasting, `#undef`, dynamic predefined `__FILE__`/`__LINE__`, physical-line splicing, nested conditionals, direct-source C11 digraph punctuators, and project-relative quoted headers on Linux with direct or exactly-one-string-literal macro-expanded operands plus shared expansion/depth/source-size/path-containment bounds. System headers remain unsupported, direct string-only library entry points still reject includes, and quoted inclusion fails closed on non-Linux platforms. Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, flexible array members and bit-fields, `goto`, general aggregate casts, and native ABI layout/promotion compatibility. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures, never as Cust's runtime path or an implementation shortcut.
 
 See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](docs/v0.1.md) for the historical v0.1 foundation notes.
 
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next language slice: add bounded C predefined `__FILE__` and `__LINE__` macro semantics with exact primary/header origins and physical locations.
+- Next language slice: add bounded active `#error` diagnostics with exact message text and source locations.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
-- Longer term: consider `#error`/`#line`, standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures.
+- Longer term: consider `#line`, standard-library calls, floating-point values, multiple pointer levels, and broader C conformance fixtures.
 
 ## License
 

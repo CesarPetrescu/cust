@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-29 — C11 predefined `__FILE__` and `__LINE__`
+
+- Official WG14 N1570 §6.10.8p1-p2 and §6.10.8.1: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `__FILE__` and `__LINE__` are the mandatory predefined macros whose values vary through a translation unit; they produce the presumed current source-file name as a character string literal and presumed source line as an integer constant, and neither name may be the subject of `#define` or `#undef`.
+- Until Cust implements `#line`, the physical positions preserved by `SplicedSourceChars` are the presumed line numbers. File-aware APIs deliberately expose normalized project-relative logical names (`main.c`, `nested/header.h`), while string-only APIs use deterministic `<input>`.
+- Predefined expansion must happen in the shared rescanner rather than only the top-level lexer so forwarding, argument prescan, two-level stringification, and preprocessing conditions agree. Raw replacement/condition/invocation lexers must preserve the names until rescanning.
+- `__FILE__` needs separate decoded value and valid preprocessing spelling. Escape backslashes, quotes, and control characters; otherwise a legal Linux filename containing a newline becomes an invalid string token and two-level stringification diverges from native compilers. See `references/cust-predefined-file-line-macros.md`.
+
 ## 2026-07-29 — Macro-expanded quoted-header operands
 
 - ISO C11 draft N1570 §6.10.2p4 requires the preprocessing-token sequence after `#include` to be macro-replaced, then to match a quoted or angle header form: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf. Cust supports only the quoted result and reuses its existing secure project-relative file path.
