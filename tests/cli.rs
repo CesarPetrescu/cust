@@ -763,6 +763,31 @@ fn run_mode_reports_included_header_locations_and_cycles() {
     );
 
     fs::write(
+        directory.join("error.h"),
+        "#error unsupported configuration\n",
+    )
+    .expect("temporary error header should be writable");
+    fs::write(
+        &source,
+        "#include \"error.h\"\nint main(void) { return 0; }\n",
+    )
+    .expect("temporary source should be writable");
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    assert!(!output.status.success(), "header #error should fail");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        concat!(
+            "cust: in included header 'error.h': #error: unsupported configuration ",
+            "at line 1, column 1\n",
+            "#error unsupported configuration\n",
+            "^\n",
+        )
+    );
+
+    fs::write(
         directory.join("router.h"),
         "#define HEADER L\"wide.h\"\n#include HEADER\n",
     )

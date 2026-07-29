@@ -25,6 +25,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Predefined expansion must happen in the shared rescanner rather than only the top-level lexer so forwarding, argument prescan, two-level stringification, and preprocessing conditions agree. Raw replacement/condition/invocation lexers must preserve the names until rescanning.
 - `__FILE__` needs separate decoded value and valid preprocessing spelling. Escape backslashes, quotes, and control characters; otherwise a legal Linux filename containing a newline becomes an invalid string token and two-level stringification diverges from native compilers. See `references/cust-predefined-file-line-macros.md`.
 
+## 2026-07-29 — Bounded C11 `#error` diagnostics
+
+- Official WG14 N1570 §6.10.5: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `# error pp-tokensopt` must produce a diagnostic that includes the specified preprocessing-token sequence. The grammar does not macro-replace that sequence; strict GCC probes likewise retain a macro name literally and replace comments with token separation.
+- Cust preserves raw message spelling, collapses whitespace/comments only outside quoted preprocessing literals, accepts the `%:error` digraph, and ignores operands in inactive groups through existing directive-name-only routing. Physical splicing still happens before this processing.
+- A message-only allocation cap is insufficient if the overflow error copies an attacker-controlled multi-megabyte source line. The 1 MiB message overflow path therefore uses a fixed 256-character source window centered near the directive location and a bounded caret offset; the regression asserts the complete diagnostic stays below 2 KiB. See `references/cust-bounded-error-directives.md`.
+- N1570 §6.10.4 requires `#line` decimal values in 1..=2147483647, an optional ordinary character string that changes the presumed source name, and macro replacement for forms that do not initially match. Future fixtures must keep presumed `__LINE__`/`__FILE__` metadata separate from physical positions used to extract exact source snippets.
+
 ## 2026-07-29 — Macro-expanded quoted-header operands
 
 - ISO C11 draft N1570 §6.10.2p4 requires the preprocessing-token sequence after `#include` to be macro-replaced, then to match a quoted or angle header form: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf. Cust supports only the quoted result and reuses its existing secure project-relative file path.

@@ -679,6 +679,90 @@ int main(void) { return RESULT + NESTED; }
 }
 
 #[test]
+fn active_error_directives_report_the_exact_message_with_context() {
+    let program = include_str!("fixtures/invalid/error_directive.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "#error: REASON + details at line 2, column 1\n#error REASON + details\n^"
+    );
+}
+
+#[test]
+fn error_directives_normalize_comments_and_whitespace_in_messages() {
+    let program = "#error  alpha/**/ beta   + \"two words\" // ignored\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "#error: alpha beta + \"two words\" at line 1, column 1\n#error  alpha/**/ beta   + \"two words\" // ignored\n^"
+    );
+
+    let program = "#error \"escaped \\\" // /* still literal */ quote\" + '\\''\n";
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "#error: \"escaped \\\" // /* still literal */ quote\" + '\\'' at line 1, column 1\n#error \"escaped \\\" // /* still literal */ quote\" + '\\''\n^"
+    );
+}
+
+#[test]
+fn bounds_error_directive_message_bytes_before_formatting_the_diagnostic() {
+    let program = format!("#error {}\n", "é".repeat(524_289));
+
+    let err = interpret(&program).unwrap_err();
+    let diagnostic = err.to_string();
+
+    assert!(
+        diagnostic
+            .starts_with("preprocessor #error message byte limit exceeded at line 1, column 1"),
+        "unexpected error kind"
+    );
+    assert!(
+        diagnostic.len() < 2_048,
+        "bounded message diagnostic was {} bytes",
+        diagnostic.len()
+    );
+}
+
+#[test]
+fn error_directives_support_empty_digraph_spliced_and_conditional_routes() {
+    let inactive = "#if 0\n#error ignored @ tokens\n%:error also ignored\n#endif\nint main(void) { return 0; }\n";
+    assert_eq!(interpret(inactive).unwrap(), 0);
+
+    let cases = [
+        (
+            "#error\n",
+            "#error directive triggered at line 1, column 1\n#error\n^",
+        ),
+        (
+            "%:error digraph route\n",
+            "#error: digraph route at line 1, column 1\n%:error digraph route\n^",
+        ),
+        (
+            "#error phy\\\nsical message\n",
+            "#error: physical message at line 1, column 1\n#error phy\\\n^",
+        ),
+        (
+            "#error alpha /* across\nlines */ beta\n",
+            "#error: alpha beta at line 1, column 1\n#error alpha /* across\n^",
+        ),
+        (
+            "#error message /*\n",
+            "unterminated block comment at line 1, column 16\n#error message /*\n               ^",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+}
+
+#[test]
 fn rejects_malformed_if_elif_expressions_and_ordering_with_context() {
     let cases = [
         (

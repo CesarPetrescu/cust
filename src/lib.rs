@@ -306,6 +306,7 @@ const MAX_OBJECT_MACRO_EXPANSION_WORK: usize = 65_536;
 const MAX_PREPROCESSOR_CONDITIONAL_DEPTH: usize = 128;
 const MAX_PREPROCESSOR_CONDITION_DEPTH: usize = 128;
 const MAX_PREPROCESSOR_CONDITION_TOKENS: usize = 8_192;
+const MAX_PREPROCESSOR_ERROR_MESSAGE_BYTES: usize = 1_048_576;
 const MAX_MACRO_STRINGIFICATION_BYTES: usize = 1_048_576;
 const MAX_MACRO_TOKEN_PASTING_BYTES: usize = 1_048_576;
 const MAX_INCLUDE_DEPTH: usize = 32;
@@ -2936,6 +2937,37 @@ fn process_preprocessor_directive(
             frame.branch_taken |= frame.active;
         }
         _ if !active => return Ok(false),
+        "error" => {
+            skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            let message = normalize_preprocessor_error_message(
+                source,
+                chars,
+                cursor,
+                content_end,
+                directive_start,
+                line,
+                directive_column,
+            )?;
+            let message = if message.is_empty() {
+                "#error directive triggered".to_string()
+            } else {
+                format!("#error: {message}")
+            };
+            return Err(lexer_error_with_context(
+                message,
+                source,
+                line,
+                directive_column,
+            ));
+        }
         "include" => {
             if state.include_context.is_none() {
                 return Err(lexer_error_with_context(
@@ -4715,6 +4747,89 @@ fn preprocessor_position_at(
     (line, column)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn normalize_preprocessor_error_message(
+    source: &str,
+    chars: &SplicedSourceChars,
+    mut cursor: usize,
+    end: usize,
+    directive_start: usize,
+    line: usize,
+    directive_column: usize,
+) -> CustResult<String> {
+    let mut message = String::new();
+    let mut separated = false;
+    let push_message_char = |message: &mut String, character: char| -> CustResult<()> {
+        if character.len_utf8() > MAX_PREPROCESSOR_ERROR_MESSAGE_BYTES.saturating_sub(message.len())
+        {
+            return Err(lexer_error_with_bounded_context(
+                "preprocessor #error message byte limit exceeded",
+                source,
+                line,
+                directive_column,
+            ));
+        }
+        message.push(character);
+        Ok(())
+    };
+    while cursor < end {
+        if chars[cursor].is_whitespace() {
+            separated = !message.is_empty();
+            cursor += 1;
+            continue;
+        }
+        if chars[cursor] == '/' && chars.get(cursor + 1) == Some(&'/') {
+            break;
+        }
+        if chars[cursor] == '/' && chars.get(cursor + 1) == Some(&'*') {
+            let comment_start = cursor;
+            cursor += 2;
+            while cursor + 1 < end && !(chars[cursor] == '*' && chars[cursor + 1] == '/') {
+                cursor += 1;
+            }
+            if cursor + 1 >= end {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    comment_start,
+                );
+                return Err(lexer_error_with_context(
+                    "unterminated block comment",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            cursor += 2;
+            separated = !message.is_empty();
+            continue;
+        }
+        if separated {
+            push_message_char(&mut message, ' ')?;
+            separated = false;
+        }
+        let current = chars[cursor];
+        push_message_char(&mut message, current)?;
+        cursor += 1;
+        if matches!(current, '\'' | '"') {
+            while cursor < end {
+                let literal_char = chars[cursor];
+                push_message_char(&mut message, literal_char)?;
+                cursor += 1;
+                if literal_char == '\\' && cursor < end {
+                    push_message_char(&mut message, chars[cursor])?;
+                    cursor += 1;
+                } else if literal_char == current {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(message)
+}
+
 fn inactive_directive_has_name_on_line(chars: &[char], mut cursor: usize, end: usize) -> bool {
     loop {
         while cursor < end && matches!(chars[cursor], ' ' | '\t' | '\u{b}' | '\u{c}' | '\r') {
@@ -5835,6 +5950,36 @@ fn lexer_error_with_context(
     let caret_padding = " ".repeat(column.saturating_sub(1));
     CustError::new(format!(
         "{} at line {line}, column {column}\n{source_line}\n{caret_padding}^",
+        message.into()
+    ))
+}
+
+fn lexer_error_with_bounded_context(
+    message: impl Into<String>,
+    source: &str,
+    line: usize,
+    column: usize,
+) -> CustError {
+    const MAX_CONTEXT_CHARS: usize = 256;
+    const CONTEXT_BEFORE_TARGET: usize = 64;
+
+    let source_line = source.lines().nth(line.saturating_sub(1)).unwrap_or("");
+    let target = column.saturating_sub(1);
+    let context_start = target.saturating_sub(CONTEXT_BEFORE_TARGET);
+    let mut source_chars = source_line.chars().skip(context_start);
+    let mut context: String = source_chars.by_ref().take(MAX_CONTEXT_CHARS).collect();
+    let truncated_after = source_chars.next().is_some();
+    let truncated_before = context_start > 0;
+    if truncated_before {
+        context.insert_str(0, "...");
+    }
+    if truncated_after {
+        context.push_str("...");
+    }
+    let caret_column = usize::from(truncated_before) * 3 + target.saturating_sub(context_start);
+    let caret_padding = " ".repeat(caret_column);
+    CustError::new(format!(
+        "{} at line {line}, column {column}\n{context}\n{caret_padding}^",
         message.into()
     ))
 }

@@ -8,11 +8,15 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 - Added direct-source C11 digraph punctuators: `<:`, `:>`, `<%`, `%>`, `%:`, and `%:%:` now behave as bracket, brace, directive/stringification, and token-pasting spellings while retaining exact preprocessing spelling metadata.
 - Added bounded macro-expanded quoted-header operands for Linux file entry points: active `#include` / `%:include` directives may expand object-like, function-like, nested, and stringifying macros to exactly one ordinary string-literal header name before reusing the secure project-relative include path.
+- Added bounded predefined `__FILE__` / `__LINE__` expansion with dynamic use-site lines, normalized primary/nested-header logical names, valid escaped token spelling, forwarding/stringification/conditional parity, and exact reserved-name diagnostics.
+- Added bounded active C11 `#error` / `%:error` directives with unexpanded preprocessing-token messages, comment/whitespace normalization, physical splicing, conditional suppression, and included-header origin propagation.
 
 ### Diagnostics and verification
 
 - Preserved exact directive-placement and spelling-sensitive macro-redefinition diagnostics for digraph routes, added focused interpreter regressions plus a warning-free compiler-oracle fixture, and verified 1,113 local/Docker tests.
 - Added exact non-string, multi-token, empty, wide-string, system-header, malformed-invocation, unsafe-path, nested-origin, and shared-expansion-budget diagnostics for macro-expanded includes; warning-free native project parity and 1,115 local/Docker tests pass.
+- Added direct/forwarded/stringified/conditional and primary/nested-header predefined-macro coverage; warning-free native parity and 1,121 local/Docker tests pass.
+- Added exact empty/message/source-context diagnostics for error directives plus a 1 MiB UTF-8 message bound whose overflow diagnostic uses bounded source context; 1,125 local/Docker tests pass.
 
 ## v0.4.0 — 2026-07-29
 

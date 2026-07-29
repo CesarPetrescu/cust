@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-29 predefined `__FILE__`/`__LINE__` closure after focused RED/GREEN, exact direct/forwarded/stringified/conditional and primary/header logical-source coverage, exact reserved-name diagnostics, warning-free native parity, independent review, 1,121 passing local tests, warning-free Clippy, and both canonical Docker gates. Bounded active `#error` diagnostics are actionable next work, not an external blocker.
+None. Last reviewed during the 2026-07-29 bounded active `#error` closure after focused RED/GREEN, review-driven bounded-output hardening, exact direct/digraph/spliced/inactive/literal/header-origin diagnostics, official/native semantics probes, independent review, 1,125 passing local tests, warning-free Clippy, and both canonical Docker gates. C11 `#line` remapping fixtures and metadata design are actionable next work, not an external blocker.
 
 ## Blocker template
 
