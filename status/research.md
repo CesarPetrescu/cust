@@ -18,6 +18,11 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-29 — v0.4.0 release closure
+
+- Release consistency requires package and lock versions, exact CLI assertions, both Compose image tags and assertions, README claims, changelog notes, and all status files to move together.
+- Annotated-tag publication is deliberately ordered after the verified release commit reaches `origin/main`; both local and remote tag namespaces must be empty beforehand, and the remote peeled `refs/tags/v0.4.0^{}` target must equal the release commit.
+
 ## 2026-07-29 — Bounded macro token pasting
 
 - ISO C11 draft N1570 §6.10.3.3 specifies that parameters adjacent to `##` use raw, unprescanned preprocessing tokens; empty arguments produce placemarkers; nonempty operands must concatenate into one preprocessing token; placemarkers disappear; and the result is rescanned. Cust models these phases explicitly instead of delegating to a host preprocessor.

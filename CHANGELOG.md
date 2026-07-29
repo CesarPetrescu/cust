@@ -4,23 +4,37 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.4.0 — 2026-07-29
+
 ### Language subset
 
 - Added one-line object-like `#define` macros with deterministic nested expansion across declarations, enum/array integer constant expressions, and runtime expressions. Macro names inside comments and string/character literals remain untouched.
 - Added bounded `#undef` directives: known definitions expire before subsequent tokens, unknown names are harmless, and removed names may be redefined with different replacement lists.
 - Added bounded nested `#ifdef` / `#ifndef` conditional preprocessing with one `#else`, inactive-token/directive skipping, current macro-table definedness, and a 128-group nesting limit.
 - Added bounded expression-form `#if` / `#elif` preprocessing with object-macro expansion, both `defined` spellings, ordered branch selection, C-style `intmax_t`/`uintmax_t` condition arithmetic, short-circuiting, and separate expression token/depth limits.
-- Added bounded function-like macros with named parameters, zero/empty/nested arguments, balanced argument collection, argument prescan and substitution, replacement rescanning across object/function aliases and following calls, ordinary-code and `#if` expansion, and C-compatible temporary self-disable behavior.
-- Added bounded C11 variadic function-like macros with final `...` parameters, `__VA_ARGS__` substitution, merged comma-preserving variable arguments, empty arguments, nested forwarding, ordinary-code and conditional expansion, reserved-identifier diagnostics, and whitespace-sensitive compatible-redefinition checks.
-- Added bounded function-like macro stringification with raw unprescanned arguments, whitespace/comment normalization, quote/backslash escaping, `#` and `%:` spellings, variadic support, opaque preprocessing-token spelling, and expansion-separator preservation across empty substitutions.
+- Added global C11 physical-line splicing for LF and CRLF continuations before tokenization while retaining exact physical source positions.
+- Added bounded function-like and variadic macros with balanced arguments, raw/prescanned substitution, replacement rescanning, temporary self-disable behavior, and reserved-identifier and compatible-redefinition checks.
+- Added bounded project-relative quoted header inclusion on Linux with logical including-path search, shared macro state, guarded recursion, exact origins, secure beneath-root opening, and explicit depth/source-size limits.
+- Added function-like macro stringification with raw arguments, whitespace normalization, escaping, `#` / `%:` spellings, variadic support, opaque preprocessing-token spelling, and expansion-separator preservation.
+- Added function-like and object-like macro token pasting with raw adjacent arguments, placemarkers, chained reduction, exact one-token validation, rescanning, variadic support, and `##` / `%:%:` spelling metadata.
 
-### Diagnostics and verification
+### Diagnostics and safety
 
-- Added exact source-context diagnostics for recursive expansion, conflicting object/function-like redefinitions, malformed and duplicate function parameters, fixed/variadic invocation arity, reserved `__VA_ARGS__` misuse, invalid stringification operators, unsupported token-pasting forms, unsupported `#include`, and bounded expansion depth/token/work/stringification-byte exhaustion.
-- Added exact source-context diagnostics for missing/invalid `#undef` names and trailing tokens after the identifier.
-- Added exact source-context diagnostics for malformed, unmatched, duplicate, unterminated, and unsupported conditional directives, including multiline-comment and inactive-branch locations.
-- Added exact condition diagnostics for malformed `defined`, invalid integer suffixes, division by zero, invalid shift counts, unexpected tokens, and excessive token/depth expansion; internal preprocessing integer metadata is normalized before public ordinary token output.
-- Added focused interpreter tests and warning-free native compiler-oracle fixtures; the full local and Docker verification gates cover 1,101 tests.
+- Added exact source-context diagnostics for recursive expansion, conflicting definitions, malformed parameters and invocations, reserved `__VA_ARGS__` misuse, invalid stringification/pasting operators and results, and bounded expansion depth/token/work/generated-byte exhaustion.
+- Added exact diagnostics for malformed `#undef` and conditional directives, malformed `defined` expressions, invalid preprocessing integers and arithmetic, and inactive-branch structural errors.
+- Added exact missing/system/macro-expanded/unsafe/non-regular header diagnostics, include-cycle/depth/source-size failures, and fail-closed quoted-inclusion behavior on unsupported platforms.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.4.0`.
+- Added focused interpreter/CLI regressions and warning-free native compiler-oracle fixtures for every bounded preprocessing slice.
+- Verified 1,110 tests at release time: 990 interpreter tests, 98 deterministic fuzz-safety tests, and 22 CLI, Docker, compiler-oracle, and repository tests.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Preprocessing still excludes system headers, macro-expanded include operands, ordinary-source bracket/brace digraph spellings, and `%:` directive introducers; `%:` / `%:%:` macro operators are supported, while secure quoted inclusion is Linux-only and fails closed elsewhere.
+- Other unsupported areas include standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, and host ABI layout/promotion rules.
 
 ## v0.3.0 — 2026-07-27
 
