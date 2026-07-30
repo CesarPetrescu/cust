@@ -7,10 +7,12 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Language subset
 
 - Added the first bounded standard-library runtime slice: explicitly prototyped C11 `abs`, `labs`, and `llabs` calls execute inside Cust over its deterministic integer model, evaluate arguments once, and retain scalar `sizeof` metadata without evaluating calls.
+- Added explicitly prototyped C11 `atoi`, `atol`, and `atoll` calls over interpreter-owned NUL-terminated character storage, with C whitespace/sign/decimal parsing, one-time pointer evaluation, a 4,096-byte scan bound, non-evaluating `sizeof`, and deterministic overflow handling.
 
 ### Diagnostics and verification
 
 - Added exact incompatible-prototype, missing-prototype, arity, scalar-shape, and minimum-integer absolute-value overflow boundaries plus a warning-free native compiler-oracle fixture.
+- Added exact null, wrong-pointee, escaped-owner, unterminated-input, scan-limit, arity, incompatible-prototype, and integer-string-overflow boundaries plus warning-free native compiler-oracle parity.
 
 ## v0.6.0 — 2026-07-30
 

@@ -15041,6 +15041,176 @@ fn preserves_integer_absolute_value_call_argument_boundaries() {
 }
 
 #[test]
+fn rejects_incompatible_integer_string_conversion_function_declarations() {
+    for (name, declaration, argument) in [
+        ("atoi", "int atoi(char *text);", "\"7\""),
+        ("atol", "char atol(const char *text);", "\"7\""),
+        ("atoll", "long long int atoll(const int *text);", "0"),
+    ] {
+        let program = format!("{declaration}\nint main(void) {{ return {name}({argument}); }}\n");
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type"
+            )
+        );
+    }
+}
+
+#[test]
+fn rejects_null_integer_string_conversion_inputs() {
+    let err = interpret(
+        "int atoi(const char *text);\nint main(void) { return atoi((const char *)0); }\n",
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "null character pointer passed to function 'atoi'"
+    );
+}
+
+#[test]
+fn rejects_unterminated_integer_string_conversion_inputs() {
+    let program = r#"
+int atoi(const char *text);
+int main(void) {
+    const char text[2] = {'1', '2'};
+    return atoi(text);
+}
+"#;
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "unterminated character sequence passed to function 'atoi'"
+    );
+}
+
+#[test]
+fn bounds_integer_string_conversion_input_scans() {
+    let input = "x".repeat(4097);
+    let program =
+        format!("int atoi(const char *text);\nint main(void) {{ return atoi(\"{input}\"); }}\n");
+    let err = interpret(&program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function 'atoi' exceeded maximum input length of 4096 bytes"
+    );
+}
+
+#[test]
+fn checks_integer_string_conversion_overflow_at_cust_integer_boundaries() {
+    for (name, declaration, input) in [
+        ("atoi", "int atoi(const char *text);", "9223372036854775808"),
+        (
+            "atol",
+            "long int atol(const char *text);",
+            "-9223372036854775809",
+        ),
+        (
+            "atoll",
+            "long long int atoll(const char *text);",
+            "999999999999999999999999999999999999",
+        ),
+    ] {
+        let program = format!("{declaration}\nint main(void) {{ return {name}(\"{input}\"); }}\n");
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("integer string conversion overflow in function '{name}'")
+        );
+    }
+
+    let program = r#"
+long long int atoll(const char *text);
+int main(void) {
+    long long int maximum = atoll("9223372036854775807");
+    long long int minimum = atoll("-9223372036854775808");
+    return maximum == 9223372036854775807LL
+        && minimum == (-9223372036854775807LL - 1LL) ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_integer_string_conversion_call_and_pointer_boundaries() {
+    let cases = [
+        (
+            "int main(void) { return atoi(\"7\"); }\n",
+            "undefined function 'atoi'",
+        ),
+        (
+            "int atoi(const char *text);\nint main(void) { return atoi(); }\n",
+            "function 'atoi' expected 1 arguments, got 0",
+        ),
+        (
+            "int atoi(const char *text);\nint main(void) { int value = 7; return atoi(&value); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int atoi(const char *text);\nchar *expired(void) { char text[2] = {'7', 0}; return text; }\nint main(void) { return atoi(expired()); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "int atoi(const char *text);\nint main(void) { char *saved = 0; { char text[2] = {'7', 0}; saved = text; } return atoi(saved); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "struct Holder { const char *text; };\nint atoi(const char *text);\nint main(void) { struct Holder holder = {0}; { char text[2] = {'7', 0}; holder.text = text; } return atoi(holder.text); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "struct Holder { const char *text; };\nint atoi(const char *text);\nstruct Holder make(void) { char text[2] = {'7', 0}; struct Holder holder = {text}; return holder; }\nint main(void) { struct Holder holder = make(); return atoi(holder.text); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn sizeof_integer_string_conversion_calls_validate_unevaluated_arguments() {
+    let cases = [
+        (
+            "int atoi(const char *text);\nint main(void) { return sizeof(atoi()); }\n",
+            "function 'atoi' expected 1 arguments, got 0",
+        ),
+        (
+            "int atoi(const char *text);\nint main(void) { int value = 7; return sizeof(atoi(&value)); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+
+    let program = r#"
+int atoi(const char *text);
+int main(void) {
+    int size = sizeof(atoi(0));
+    return size == sizeof(int) ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn supports_integer_string_conversion_standard_library_functions() {
+    let program = include_str!("fixtures/compat/valid/integer_string_conversion_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn supports_recursive_calls_within_documented_depth_limit() {
     let program = r#"
 int recurse(int remaining) {

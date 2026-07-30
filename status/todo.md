@@ -4,6 +4,8 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
+Latest completed language slice (2026-07-30): bounded explicitly prototyped C11 `atoi`/`atol`/`atoll` calls now parse interpreter-owned NUL-terminated character storage with C whitespace/sign/decimal-prefix semantics, one-time pointer evaluation, a 4,096-byte scan, deterministic overflow, non-evaluating constraint-aware `sizeof`, exact declaration/type/null/lifetime/termination diagnostics, and pointer-owner preservation through scalar/aggregate slots. Warning-free native parity, independent approval, all 1,158 tests, and both Docker gates pass.
+
 Latest completed language slice (2026-07-30): bounded C11 `_Pragma("once")` now executes direct and macro-produced operators after replacement/rescanning, including split macro-token sequences; destringizes prefixed literals; remains inert in inactive groups; reuses opened-file once identity; retains exact diagnostics; and bounds cumulative payload bytes, tokens before allocation, and pending processing. Warning-free native parity, independent approval, Windows cross-target checking, all 1,144 tests, and both Docker gates pass.
 
 1. [x] Scope and implement bounded C99/C11 `_Pragma("once")` preprocessing for file-aware headers. Direct/object/function/split-token routes, standard destringization, inactive behavior, opened-file identity, exact diagnostics, resource and linearity hardening, focused TDD, native parity, independent approval, cross-target checking, and both Docker gates pass.
@@ -12,7 +14,9 @@ Latest completed language slice (2026-07-30): bounded C11 `_Pragma("once")` now 
 
 3. [x] Scope and implement the first bounded v0.7 language milestone. Selected explicitly prototyped C11 `abs`/`labs`/`llabs` over floating-point values and deeper pointers; retained prototype metadata, user-definition precedence, one-time scalar evaluation, non-evaluating `sizeof`, checked deterministic overflow, exact unsupported boundaries, a warning-free compiler oracle, focused TDD, independent approval, all 1,150 local tests, and both Docker gates pass.
 
-4. [ ] Scope and implement bounded `atoi`/`atol`/`atoll` calls. Require exact explicit prototypes; scan interpreter-owned NUL-terminated `char` pointers once and within a fixed bound; support C whitespace, sign, and decimal digits; preserve pointer type/owner/lifetime diagnostics; define null/unterminated/no-digit/overflow boundaries; and add warning-free native parity plus focused valid/invalid fixtures.
+4. [x] Scope and implement bounded `atoi`/`atol`/`atoll` calls. Exact explicit prototypes, one-time bounded interpreter-owned character scans, C whitespace/sign/decimal-prefix parsing, pointer type/owner/lifetime preservation, deterministic null/termination/no-digit/overflow boundaries, non-evaluating `sizeof`, focused regressions, warning-free native parity, independent approval, all 1,158 tests, and both Docker gates pass.
+
+5. [ ] Scope and implement bounded explicitly prototyped `strcmp`. Evaluate both `const char *` arguments once and left-to-right; compare interpreter-owned NUL-terminated storage lexically as unsigned bytes under independent 4,096-byte bounds; preserve type/owner/lifetime diagnostics; define exact null/unterminated boundaries; keep `sizeof` non-evaluating and constraint-aware; and add focused/native-oracle fixtures without a host runtime path.
 
 Latest completed language slice (2026-07-30): bounded `#pragma once` now suppresses repeated project-relative quoted headers by opened `(device, inode)` identity across direct/digraph directives, symlink/hard-link aliases, and recursive includes. Inactive directives remain inert; exact malformed/unsupported diagnostics, secure-resolution ordering, native parity, review-driven hard-link RED/GREEN, Windows cross-target checking, all 1,139 tests, and both Docker gates pass.
 

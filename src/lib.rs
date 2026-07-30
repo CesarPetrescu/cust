@@ -892,6 +892,7 @@ struct FunctionSignature {
 struct ParamSignature {
     ty: ParamType,
     kind: ParamKind,
+    points_to_const: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1086,6 +1087,7 @@ impl FunctionSignature {
                 .map(|param| ParamSignature {
                     ty: param.ty.clone(),
                     kind: param.kind,
+                    points_to_const: param.points_to_const,
                 })
                 .collect(),
         }
@@ -16370,6 +16372,7 @@ impl Parser {
 }
 
 const MAX_CALL_DEPTH: usize = 32;
+const MAX_INTEGER_STRING_BYTES: usize = 4096;
 
 struct Interpreter {
     scopes: Vec<Scope>,
@@ -16745,9 +16748,17 @@ impl Interpreter {
             if self.has_integer_absolute_value_prototype(name) {
                 return self.call_integer_absolute_value_function(name, arg_exprs);
             }
+            if self.has_integer_string_conversion_prototype(name) {
+                return self.call_integer_string_conversion_function(name, arg_exprs);
+            }
             if matches!(name, "abs" | "labs" | "llabs") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
+                )));
+            }
+            if matches!(name, "atoi" | "atol" | "atoll") && self.prototypes.contains_key(name) {
+                return Err(CustError::new(format!(
+                    "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type"
                 )));
             }
             return Err(CustError::new(format!("undefined function '{name}'")));
@@ -16940,6 +16951,7 @@ impl Interpreter {
             params: vec![ParamSignature {
                 ty: ParamType::Scalar(CType::Int),
                 kind: ParamKind::Scalar,
+                points_to_const: false,
             }],
         };
         self.prototypes.get(name) == Some(&expected)
@@ -16963,6 +16975,153 @@ impl Interpreter {
             ))
         })?;
         Ok(Some(ReturnValue::Scalar(value)))
+    }
+
+    fn has_integer_string_conversion_prototype(&self, name: &str) -> bool {
+        if !matches!(name, "atoi" | "atol" | "atoll") {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Scalar(CType::Int),
+            params: vec![ParamSignature {
+                ty: ParamType::Scalar(CType::Char),
+                kind: ParamKind::Pointer,
+                points_to_const: true,
+            }],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_integer_string_conversion_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 1 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 1 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+        let pointer = self.eval_pointer(&arg_exprs[0])?;
+        if matches!(pointer, PointerValue::Null) {
+            return Err(CustError::new(format!(
+                "null character pointer passed to function '{name}'"
+            )));
+        }
+        self.ensure_pointer_type_matches(&PointeeType::Scalar(CType::Char), &pointer)?;
+        let value = match &pointer {
+            PointerValue::ArrayBase { array, .. } => {
+                let array = array.borrow();
+                Self::parse_bounded_integer_string(name, &array.elements)?
+            }
+            PointerValue::ArrayElement { array, index, .. } => {
+                let array = array.borrow();
+                Self::parse_bounded_integer_string(name, &array.elements[*index..])?
+            }
+            PointerValue::Scalar { .. }
+            | PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. } => {
+                Self::parse_bounded_integer_string(name, &[self.deref_pointer(&pointer)?])?
+            }
+            PointerValue::Null
+            | PointerValue::Struct { .. }
+            | PointerValue::StructElement { .. }
+            | PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. }
+            | PointerValue::Array2DRow { .. } => {
+                return Err(CustError::new(format!(
+                    "function '{name}' requires a pointer to character storage"
+                )));
+            }
+        };
+        Ok(Some(ReturnValue::Scalar(value)))
+    }
+
+    fn parse_bounded_integer_string(name: &str, bytes: &[i64]) -> CustResult<i64> {
+        let mut sign = 1_i64;
+        let mut value = 0_i64;
+        let mut saw_sign = false;
+        let mut saw_digit = false;
+        let mut conversion_finished = false;
+        let mut overflowed = false;
+
+        for (offset, byte) in bytes.iter().copied().enumerate() {
+            if byte == 0 {
+                if overflowed {
+                    return Err(CustError::new(format!(
+                        "integer string conversion overflow in function '{name}'"
+                    )));
+                }
+                return Ok(if saw_digit { value } else { 0 });
+            }
+            if offset >= MAX_INTEGER_STRING_BYTES {
+                return Err(CustError::new(format!(
+                    "function '{name}' exceeded maximum input length of {MAX_INTEGER_STRING_BYTES} bytes"
+                )));
+            }
+            if conversion_finished {
+                continue;
+            }
+            if !saw_sign && !saw_digit && matches!(byte, 9..=13 | 32) {
+                continue;
+            }
+            if !saw_sign && !saw_digit && matches!(byte, 43 | 45) {
+                saw_sign = true;
+                if byte == 45 {
+                    sign = -1;
+                }
+                continue;
+            }
+            if (48..=57).contains(&byte) {
+                saw_digit = true;
+                if overflowed {
+                    continue;
+                }
+                let digit = byte - 48;
+                let next = if sign < 0 {
+                    value
+                        .checked_mul(10)
+                        .and_then(|value| value.checked_sub(digit))
+                } else {
+                    value
+                        .checked_mul(10)
+                        .and_then(|value| value.checked_add(digit))
+                };
+                match next {
+                    Some(next) => value = next,
+                    None => overflowed = true,
+                }
+            } else {
+                conversion_finished = true;
+            }
+        }
+
+        Err(CustError::new(format!(
+            "unterminated character sequence passed to function '{name}'"
+        )))
+    }
+
+    fn sizeof_integer_string_conversion_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 1 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 1 arguments, got {}",
+                args.len()
+            )));
+        }
+        if matches!(args[0], Expr::Number(0)) {
+            return Ok(INT_SIZE);
+        }
+        match self.pointer_expr_pointee_type(&args[0])? {
+            Some(PointeeType::Scalar(CType::Char)) => Ok(INT_SIZE),
+            Some(actual) => Err(CustError::new(format!(
+                "cannot convert pointer to {} to pointer to char",
+                self.pointee_label(&actual)
+            ))),
+            None => Err(CustError::new(format!(
+                "function '{name}' requires a pointer to character storage"
+            ))),
+        }
     }
 
     fn validate_return_value(
@@ -19319,6 +19478,7 @@ impl Interpreter {
             ) => {
                 self.ensure_pointer_conversion_preserves_const(field.points_to_const, expr)?;
                 let assigned = self.eval_pointer(expr)?;
+                let assigned = self.attach_array_pointer_owner(assigned);
                 if let StructFieldType::Pointer(expected_ty) = &field.ty {
                     self.ensure_pointer_type_matches(expected_ty, &assigned)?;
                 }
@@ -19824,6 +19984,7 @@ impl Interpreter {
         value: PointerValue,
     ) -> CustResult<()> {
         self.ensure_variable_mutable(name)?;
+        let value = self.attach_array_pointer_owner(value);
         if let Some(expected) = self.direct_struct_pointer_field_type(name, path)? {
             self.ensure_pointer_type_matches(&expected, &value)?;
         }
@@ -21698,6 +21859,7 @@ impl Interpreter {
         value: PointerValue,
     ) -> CustResult<()> {
         self.ensure_struct_pointer_target_mutable(pointer)?;
+        let value = self.attach_array_pointer_owner(value);
         if let Some(expected) = self.struct_pointer_pointer_field_type(pointer, path)? {
             self.ensure_pointer_type_matches(&expected, &value)?;
         }
@@ -22475,6 +22637,7 @@ impl Interpreter {
                     self.ensure_variable_mutable(name)?;
                     self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
                     let pointer = self.eval_pointer(value)?;
+                    let pointer = self.attach_array_pointer_owner(pointer);
                     self.ensure_pointer_slot_type_matches(&current_pointer, &ty, &pointer)?;
                     if let Some(Value::Pointer { pointer: slot, .. }) = self.find_variable_mut(name)
                     {
@@ -25048,7 +25211,7 @@ impl Interpreter {
                 let type_name = self.aggregate_expr_type_name(aggregate)?;
                 self.sizeof_aggregate_field_type(&type_name, fields)
             }
-            Expr::Call { name, .. } => match self.functions.get(name) {
+            Expr::Call { name, args } => match self.functions.get(name) {
                 Some(function) => function
                     .return_type
                     .size(&self.struct_types)
@@ -25056,6 +25219,9 @@ impl Interpreter {
                         CustError::new(format!("void function '{name}' used as scalar expression"))
                     }),
                 None if self.has_integer_absolute_value_prototype(name) => Ok(INT_SIZE),
+                None if self.has_integer_string_conversion_prototype(name) => {
+                    self.sizeof_integer_string_conversion_call(name, args)
+                }
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },
             Expr::UnaryPlus(_)
@@ -26509,6 +26675,7 @@ impl Interpreter {
                         self.ensure_variable_mutable(name)?;
                         self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
                         let pointer = self.eval_pointer(expr)?;
+                        let pointer = self.attach_array_pointer_owner(pointer);
                         if let PointerValue::Array2DRow { array, .. } = &current_pointer {
                             let array = array.borrow();
                             let Some((_, columns)) = array.dimensions else {

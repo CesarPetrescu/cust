@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-30 — Bounded integer-string conversion functions
+
+- Official WG14 N1570 §7.22.1.2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — the declarations are `int atoi(const char *nptr)`, `long int atol(const char *nptr)`, and `long long int atoll(const char *nptr)`. Each is equivalent to its base-10 `strtol`/`strtoll` counterpart except that error behavior is unspecified.
+- Cust lowers all supported integer spellings to deterministic `i64`, so all three names share one runtime result representation while exact source prototype metadata (including pointer pointee `const`) gates intrinsic dispatch. C whitespace bytes 9–13 and 32, one optional sign, and the initial decimal digit sequence are recognized; no digits return zero.
+- Cust deliberately defines unspecified/error cases: null, wrong-pointee, escaped owner, missing NUL, a scan beyond 4,096 bytes, and unrepresentable `i64` input produce exact diagnostics. Scanning continues to the NUL after conversion ends so the interpreter never treats an unterminated object as a valid C string. Native compilers remain fixture oracles only.
+- Review showed that array owner metadata must be captured whenever a pointer enters a longer-lived scalar or aggregate slot, not only at function returns. Shared scalar assignment helpers, aggregate pointer-field assignment helpers, and aggregate initializers now attach lexical owners before storage. `sizeof(atoi(...))` validates arity/pointer shape without evaluating the call and accepts the literal integer null-pointer constant `0`.
+- Next candidate: C11 §7.24.4.2 `strcmp` can reuse bounded character-storage traversal while adding ordered two-argument evaluation and independent pointer/lifetime/termination checks; unlike `strtol`, it does not require unsupported `char **`.
+
 ## 2026-07-30 — First bounded v0.7 standard-library slice
 
 - Official WG14 N1570 §7.22.6.1: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `int abs(int)`, `long int labs(long int)`, and `long long int llabs(long long int)` return an integer's absolute value; behavior is undefined when the result is not representable. Cust maps all supported integer spellings to its deterministic `i64` scalar model and reports its minimum value explicitly with `checked_abs()` instead of inheriting a Rust debug-build panic.
