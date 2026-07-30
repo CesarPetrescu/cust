@@ -690,6 +690,7 @@ enum Array2DFieldTarget {
 struct Program {
     globals: Vec<Stmt>,
     functions: HashMap<String, Function>,
+    prototypes: HashMap<String, FunctionSignature>,
     struct_types: HashMap<String, StructTypeDef>,
 }
 
@@ -7118,6 +7119,7 @@ impl Parser {
         Ok(Program {
             globals,
             functions,
+            prototypes,
             struct_types: self.struct_types.clone(),
         })
     }
@@ -16375,6 +16377,7 @@ struct Interpreter {
     live_scope_ids: HashSet<usize>,
     next_scope_id: usize,
     functions: HashMap<String, Function>,
+    prototypes: HashMap<String, FunctionSignature>,
     struct_types: HashMap<String, StructTypeDef>,
     call_depth: usize,
     return_type_stack: Vec<ReturnType>,
@@ -16662,6 +16665,7 @@ impl Interpreter {
             live_scope_ids: HashSet::new(),
             next_scope_id: 0,
             functions: HashMap::new(),
+            prototypes: HashMap::new(),
             struct_types: HashMap::new(),
             call_depth: 0,
             return_type_stack: Vec::new(),
@@ -16706,6 +16710,7 @@ impl Interpreter {
 
     fn run(&mut self, program: &Program) -> CustResult<i64> {
         self.functions = program.functions.clone();
+        self.prototypes = program.prototypes.clone();
         self.struct_types = program.struct_types.clone();
         self.push_scope();
         for global in &program.globals {
@@ -16736,11 +16741,17 @@ impl Interpreter {
     }
 
     fn call_function(&mut self, name: &str, arg_exprs: &[Expr]) -> CustResult<Option<ReturnValue>> {
-        let function = self
-            .functions
-            .get(name)
-            .cloned()
-            .ok_or_else(|| CustError::new(format!("undefined function '{name}'")))?;
+        let Some(function) = self.functions.get(name).cloned() else {
+            if self.has_integer_absolute_value_prototype(name) {
+                return self.call_integer_absolute_value_function(name, arg_exprs);
+            }
+            if matches!(name, "abs" | "labs" | "llabs") && self.prototypes.contains_key(name) {
+                return Err(CustError::new(format!(
+                    "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
+                )));
+            }
+            return Err(CustError::new(format!("undefined function '{name}'")));
+        };
 
         if function.params.len() != arg_exprs.len() {
             return Err(CustError::new(format!(
@@ -16918,6 +16929,40 @@ impl Interpreter {
         self.return_type_stack.pop();
         self.call_depth -= 1;
         result
+    }
+
+    fn has_integer_absolute_value_prototype(&self, name: &str) -> bool {
+        if !matches!(name, "abs" | "labs" | "llabs") {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Scalar(CType::Int),
+            params: vec![ParamSignature {
+                ty: ParamType::Scalar(CType::Int),
+                kind: ParamKind::Scalar,
+            }],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_integer_absolute_value_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 1 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 1 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+        let value = self.eval_scalar_conversion(CType::Int, &arg_exprs[0])?;
+        let value = value.checked_abs().ok_or_else(|| {
+            CustError::new(format!(
+                "integer absolute value overflow in function '{name}'"
+            ))
+        })?;
+        Ok(Some(ReturnValue::Scalar(value)))
     }
 
     fn validate_return_value(
@@ -25010,6 +25055,7 @@ impl Interpreter {
                     .ok_or_else(|| {
                         CustError::new(format!("void function '{name}' used as scalar expression"))
                     }),
+                None if self.has_integer_absolute_value_prototype(name) => Ok(INT_SIZE),
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },
             Expr::UnaryPlus(_)

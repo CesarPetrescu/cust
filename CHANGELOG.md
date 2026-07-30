@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added the first bounded standard-library runtime slice: explicitly prototyped C11 `abs`, `labs`, and `llabs` calls execute inside Cust over its deterministic integer model, evaluate arguments once, and retain scalar `sizeof` metadata without evaluating calls.
+
+### Diagnostics and verification
+
+- Added exact incompatible-prototype, missing-prototype, arity, scalar-shape, and minimum-integer absolute-value overflow boundaries plus a warning-free native compiler-oracle fixture.
+
 ## v0.6.0 — 2026-07-30
 
 ### Language subset

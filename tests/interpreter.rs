@@ -14954,6 +14954,93 @@ fn rejects_multi_character_char_literals() {
 }
 
 #[test]
+fn supports_integer_absolute_value_standard_library_functions() {
+    let program = include_str!("fixtures/compat/valid/integer_absolute_value_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn reports_integer_absolute_value_overflow_for_the_minimum_cust_integer() {
+    for (name, declaration) in [
+        ("abs", "int abs(int value);"),
+        ("labs", "long int labs(long int value);"),
+        ("llabs", "long long int llabs(long long int value);"),
+    ] {
+        let program = format!(
+            "{declaration}\nint main(void) {{ return {name}(-9223372036854775807LL - 1LL); }}\n"
+        );
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("integer absolute value overflow in function '{name}'")
+        );
+    }
+}
+
+#[test]
+fn rejects_incompatible_integer_absolute_value_function_declarations() {
+    for (name, declaration, argument) in [
+        ("abs", "char abs(int value);", "-2"),
+        ("labs", "long int labs(char value);", "-2"),
+        ("llabs", "long long int llabs(long long int *value);", "0"),
+    ] {
+        let program = format!("{declaration}\nint main(void) {{ return {name}({argument}); }}\n");
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
+            )
+        );
+    }
+}
+
+#[test]
+fn sizeof_integer_absolute_value_calls_is_non_evaluating() {
+    let program = r#"
+int abs(int value);
+int mark(int *counter, int value) {
+    *counter += 1;
+    return value;
+}
+int main(void) {
+    int counter = 0;
+    int size = sizeof(abs(mark(&counter, -7)));
+    return size == sizeof(int) && counter == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn requires_prototypes_for_integer_absolute_value_standard_library_functions() {
+    let err = interpret("int main(void) { return abs(-7); }\n").unwrap_err();
+
+    assert_eq!(err.to_string(), "undefined function 'abs'");
+}
+
+#[test]
+fn preserves_integer_absolute_value_call_argument_boundaries() {
+    let cases = [
+        (
+            "int abs(int value);\nint main(void) { return abs(); }\n",
+            "function 'abs' expected 1 arguments, got 0",
+        ),
+        (
+            "int abs(int value);\nint main(void) { int value = 1; return abs(&value); }\n",
+            "pointer value used as scalar",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn supports_recursive_calls_within_documented_depth_limit() {
     let program = r#"
 int recurse(int remaining) {

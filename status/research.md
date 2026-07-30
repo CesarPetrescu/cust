@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-30 — First bounded v0.7 standard-library slice
+
+- Official WG14 N1570 §7.22.6.1: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `int abs(int)`, `long int labs(long int)`, and `long long int llabs(long long int)` return an integer's absolute value; behavior is undefined when the result is not representable. Cust maps all supported integer spellings to its deterministic `i64` scalar model and reports its minimum value explicitly with `checked_abs()` instead of inheriting a Rust debug-build panic.
+- Candidate comparison selected this family over floating-point values and deeper pointers. Floating point would fan out through `CType`, values, literals, arithmetic/comparison/conversion, arrays/aggregates, calls, and NaN/width policy; deeper pointers would fan out through every pointer target, const/type/lifetime classifier, declaration/cast/query route, and mutation path. The pure integer absolute-value family reuses scalar calls, has one exact signature per name, is deterministic, has a warning-free native oracle, and requires no host C runtime implementation shortcut.
+- Cust does not preprocess system headers, so the bounded interface requires an exact top-level manual prototype. Parser prototypes are now retained in `Program`/`Interpreter`; a compatible unresolved `abs`/`labs`/`llabs` call invokes Cust's intrinsic, while a user function definition wins and missing/incompatible prototypes remain exact boundaries. `sizeof(call)` consults the retained supported prototype without evaluating its argument.
+- Follow-up candidate: `atoi`/`atol`/`atoll` can reuse the same explicit-prototype model and interpreter-owned `char` pointer storage, but must first define bounded NUL scanning, C whitespace/sign/digit handling, and exact null/type/lifetime/unterminated/no-digit/overflow behavior.
+
 ## 2026-07-30 — v0.6.0 release closure
 
 - No new language-semantics research was needed. Release consistency remains executable: `env!("CARGO_PKG_VERSION")` drives CLI output, `tests/cli.rs` pins the exact package/output value, and `tests/docker_compose.rs` pins both Compose image tags.

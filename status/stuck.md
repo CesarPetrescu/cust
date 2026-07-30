@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-30 v0.6.0 release-preparation run after a clean 1,144-test baseline, exact CLI/Compose version RED/GREEN, synchronized Cargo/lock/Docker/docs/status surfaces, and empty local/remote `v0.6.0` tag preflight. Independent review, the canonical gate, release-commit push, annotated-tag publication, and remote peeled-target verification remain mandatory closure steps rather than blockers.
+None. Last reviewed during the 2026-07-30 first bounded v0.7 standard-library run after a clean 1,144-test baseline, focused `abs`/`labs`/`llabs` RED/GREEN, compiler-oracle GREEN, independent approval, all 1,150 local tests, and both Docker gates passed. The previously reserved annotated `v0.6.0` tag is published and its remote peeled target matches release commit `40f721ad0a88a545443eb991002369d89732912e`. Commit and push remain closure steps rather than blockers.
 
 ## Blocker template
 
