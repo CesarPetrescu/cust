@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-30 — Bounded `#pragma once`
+
+- Official GCC CPP documentation: https://gcc.gnu.org/onlinedocs/cpp/Pragmas.html — when `#pragma once` is seen while scanning a header, that file is not read again; GCC documents it as a less-portable alternative to wrapper `#ifndef` guards.
+- Cust recognizes only the exact active `once` pragma (including `%:pragma once`) in file-aware sources. Other pragma names and malformed/trailing operands retain exact source diagnostics; inactive pragmas remain unprocessed through the existing conditional-directive state machine.
+- Secure path containment and opened-handle/path consistency checks still run before the once lookup. The cache and include-cycle stack use opened `(device, inode)` identity rather than canonical path strings so symlink and hard-link aliases collapse while a replacement inode at the same pathname is not skipped. Independent review found the path-key weakness; a focused hard-link RED reproduced it before the identity fix.
+- Once suppression happens before include depth and cumulative source-byte accounting, and a header marks itself before a recursive include is resolved. The existing conventional-guard recursion path remains unchanged for headers without the pragma.
+
 ## 2026-07-30 — C11 null preprocessing directives
 
 - Official WG14 N1570 §6.10.7: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — a preprocessing directive of the form `# new-line` has no effect. C11 §6.4.6 makes `%:` an alternative spelling for `#`, so Cust accepts both after preprocessing whitespace/comments are removed.

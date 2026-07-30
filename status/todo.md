@@ -4,9 +4,13 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
+Latest completed language slice (2026-07-30): bounded `#pragma once` now suppresses repeated project-relative quoted headers by opened `(device, inode)` identity across direct/digraph directives, symlink/hard-link aliases, and recursive includes. Inactive directives remain inert; exact malformed/unsupported diagnostics, secure-resolution ordering, native parity, review-driven hard-link RED/GREEN, Windows cross-target checking, all 1,139 tests, and both Docker gates pass.
+
+1. [ ] Scope and implement bounded C99/C11 `_Pragma("once")` preprocessing for file-aware headers. Acceptance: direct and macro-produced operators, standard string destringization, active/inactive behavior, opened-file identity/resource-order reuse, exact malformed/non-string/unsupported diagnostics, warning-free native project parity, focused TDD, independent review, cross-target checking, and both Docker gates.
+
 Latest completed language slice (2026-07-30): C11 null `#` / `%:` preprocessing directives now consume active logical lines containing only preprocessing whitespace/comments with no effect. Direct/digraph, comments, LF splicing, active/inactive conditionals, included headers, exact malformed/placement diagnostics, warning-free native parity, independent review, all 1,135 tests, and both Docker gates pass. The previously prepared annotated `v0.5.0` tag is confirmed published and peels to release commit `4a7ec79486b4c86ecdfea2524aa3e5c854ceba70` on `origin`.
 
-1. [ ] Scope and implement bounded `#pragma once` for project-relative quoted headers. Acceptance: direct and `%:pragma once` spellings, active/inactive conditional behavior, repeated and aliased include identities, cycle/guard interaction, exact malformed and unsupported-pragma diagnostics, warning-free native project parity, focused TDD, independent review, and both Docker gates.
+2. [x] Scope and implement bounded `#pragma once` for project-relative quoted headers. Direct/digraph spellings, active/inactive behavior, repeated/symlink/hard-link opened-file identities, recursion/guard interaction, exact malformed/unsupported diagnostics, warning-free native parity, focused TDD, review-driven hardening, cross-target checking, and both Docker gates pass.
 
 Latest completed language slice (2026-07-29): bounded C11 `#line` / `%:line` directives now remap presumed source names/lines through direct and macro-expanded operands while retaining physical diagnostics, include-local state and parent restoration, shared macro budgets, an 8,192-token operand cap, and a 4 KiB remapped-name cap. Exact diagnostics, warning-free native parity, focused TDD, independent review, all 1,132 tests, and both Docker gates pass.
 

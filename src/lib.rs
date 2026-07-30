@@ -327,11 +327,22 @@ struct IncludeContext {
     #[cfg(target_os = "linux")]
     project_root_file: fs::File,
     stack: Vec<IncludedSourcePath>,
+    pragma_once_headers: HashSet<OpenedSourceIdentity>,
     included_source_bytes: usize,
 }
 
 struct IncludedSourcePath {
     logical: PathBuf,
+    identity: OpenedSourceIdentity,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct OpenedSourceIdentity {
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(not(unix))]
     canonical: PathBuf,
 }
 
@@ -1392,6 +1403,8 @@ fn lex_file(path: &Path) -> CustResult<Vec<LocatedToken>> {
     let canonical_path = path
         .canonicalize()
         .map_err(|err| CustError::io(format!("failed to read {}: {err}", path.display())))?;
+    let source_identity = opened_source_identity(&source_file, &canonical_path)
+        .map_err(|err| CustError::io(format!("failed to read {}: {err}", path.display())))?;
     let logical_project_root = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -1428,8 +1441,9 @@ fn lex_file(path: &Path) -> CustResult<Vec<LocatedToken>> {
             project_root_file,
             stack: vec![IncludedSourcePath {
                 logical: logical_path,
-                canonical: canonical_path,
+                identity: source_identity,
             }],
+            pragma_once_headers: HashSet::new(),
             included_source_bytes: 0,
         }),
         ..PreprocessorState::default()
@@ -3158,6 +3172,95 @@ fn process_preprocessor_directive(
                 state.predefined_source_override = Some(source_override);
             }
         }
+        "pragma" => {
+            skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if cursor >= content_end
+                || !(chars[cursor].is_ascii_alphabetic() || chars[cursor] == '_')
+            {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    "expected pragma name after '#pragma'",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            let pragma_name_start = cursor;
+            while cursor < content_end
+                && (chars[cursor].is_ascii_alphanumeric() || chars[cursor] == '_')
+            {
+                cursor += 1;
+            }
+            let pragma_name: String = chars[pragma_name_start..cursor].iter().collect();
+            if pragma_name != "once" {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    pragma_name_start,
+                );
+                return Err(lexer_error_with_context(
+                    format!("preprocessor pragma '#pragma {pragma_name}' is not supported"),
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            skip_preprocessor_whitespace(
+                source,
+                chars,
+                &mut cursor,
+                content_end,
+                line,
+                directive_start,
+                directive_column,
+            )?;
+            if cursor < content_end {
+                let (error_line, error_column) = preprocessor_position_at(
+                    chars,
+                    directive_start,
+                    line,
+                    directive_column,
+                    cursor,
+                );
+                return Err(lexer_error_with_context(
+                    "unexpected tokens after '#pragma once'",
+                    source,
+                    error_line,
+                    error_column,
+                ));
+            }
+            let context = state.include_context.as_mut().ok_or_else(|| {
+                lexer_error_with_context(
+                    "preprocessor directive '#pragma' is not supported",
+                    source,
+                    line,
+                    directive_column,
+                )
+            })?;
+            let source_identity = context
+                .stack
+                .last()
+                .expect("file lexing keeps the current source on the include stack")
+                .identity
+                .clone();
+            context.pragma_once_headers.insert(source_identity);
+        }
         "include" => {
             if state.include_context.is_none() {
                 return Err(lexer_error_with_context(
@@ -3912,6 +4015,27 @@ fn opened_file_identity(_file: &fs::File, _logical_path: &Path) -> io::Result<Pa
     ))
 }
 
+fn opened_source_identity(
+    file: &fs::File,
+    _canonical_path: &Path,
+) -> io::Result<OpenedSourceIdentity> {
+    #[cfg(unix)]
+    {
+        let metadata = file.metadata()?;
+        Ok(OpenedSourceIdentity {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = file;
+        Ok(OpenedSourceIdentity {
+            canonical: _canonical_path.to_path_buf(),
+        })
+    }
+}
+
 fn normalize_logical_path(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {
@@ -4151,10 +4275,18 @@ fn lex_quoted_header(
                 include_column,
             ));
         }
-        selected_header = Some((logical_path, canonical_path, file));
+        let source_identity = opened_source_identity(&file, &canonical_path).map_err(|err| {
+            lexer_error_with_context(
+                format!("failed to identify quoted header '{header_name}': {err}"),
+                including_source,
+                include_line,
+                include_column,
+            )
+        })?;
+        selected_header = Some((logical_path, source_identity, file));
         break;
     }
-    let Some((logical_path, canonical_path, header_file)) = selected_header else {
+    let Some((logical_path, source_identity, header_file)) = selected_header else {
         return Err(lexer_error_with_context(
             format!("quoted header '{header_name}' was not found below the project include root"),
             including_source,
@@ -4168,12 +4300,15 @@ fn lex_quoted_header(
             .include_context
             .as_ref()
             .expect("file lexing installs an include context");
+        if context.pragma_once_headers.contains(&source_identity) {
+            return Ok(Vec::new());
+        }
         // Allow one recursive entry so conventional include guards can make the
         // repeated header inactive before rejecting an actually unguarded cycle.
         if context
             .stack
             .iter()
-            .filter(|path| path.canonical == canonical_path)
+            .filter(|path| path.identity == source_identity)
             .count()
             >= 2
         {
@@ -4239,7 +4374,7 @@ fn lex_quoted_header(
         context.included_source_bytes = next_source_bytes;
         context.stack.push(IncludedSourcePath {
             logical: logical_path,
-            canonical: canonical_path,
+            identity: source_identity,
         });
     }
     let saved_source_override = state.predefined_source_override.take();

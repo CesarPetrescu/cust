@@ -301,6 +301,192 @@ fn run_mode_supports_project_relative_quoted_headers() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn run_mode_applies_pragma_once_by_opened_header_identity() {
+    let directory = temp_source_directory("pragma-once-identity");
+    let header = directory.join("config.h");
+    let symlink_alias = directory.join("config-symlink.h");
+    let hard_link_alias = directory.join("config-hard-link.h");
+    let source = directory.join("main.c");
+    fs::write(
+        &header,
+        "#pragma once\n#define CONFIG_VALUE 42\nint from_config(void) { return CONFIG_VALUE; }\n",
+    )
+    .expect("pragma-once header should be writable");
+    std::os::unix::fs::symlink(&header, &symlink_alias)
+        .expect("header symlink alias should be creatable");
+    fs::hard_link(&header, &hard_link_alias).expect("header hard-link alias should be creatable");
+    fs::write(
+        &source,
+        concat!(
+            "#include \"config.h\"\n",
+            "#include \"config.h\"\n",
+            "#include \"config-symlink.h\"\n",
+            "#include \"config-hard-link.h\"\n",
+            "int main(void) { return from_config(); }\n",
+        ),
+    )
+    .expect("temporary source should be writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    fs::remove_dir_all(&directory).expect("temporary source directory should be removable");
+
+    assert!(
+        output.status.success(),
+        "pragma-once header should run once by canonical identity: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn run_mode_supports_digraph_pragma_once_in_recursive_headers() {
+    let directory = temp_source_directory("digraph-pragma-once-recursion");
+    let header = directory.join("recursive.h");
+    let source = directory.join("main.c");
+    fs::write(
+        &header,
+        concat!(
+            "%:pragma once\n",
+            "#define RECURSIVE_VALUE 17\n",
+            "#include \"recursive.h\"\n",
+            "int from_recursive(void) { return RECURSIVE_VALUE; }\n",
+        ),
+    )
+    .expect("recursive pragma-once header should be writable");
+    fs::write(
+        &source,
+        "#include \"recursive.h\"\nint main(void) { return from_recursive(); }\n",
+    )
+    .expect("temporary source should be writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    fs::remove_dir_all(&directory).expect("temporary source directory should be removable");
+
+    assert!(
+        output.status.success(),
+        "digraph pragma-once recursion should terminate: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "17\n");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn inactive_pragma_once_does_not_mark_the_header() {
+    let directory = temp_source_directory("inactive-pragma-once");
+    let header = directory.join("counter.h");
+    let source = directory.join("main.c");
+    fs::write(
+        &header,
+        concat!(
+            "#if 0\n",
+            "#pragma once\n",
+            "#endif\n",
+            "#ifndef COUNTER_SEEN\n",
+            "#define COUNTER_SEEN\n",
+            "#define COUNTER_VALUE 1\n",
+            "#else\n",
+            "#undef COUNTER_VALUE\n",
+            "#define COUNTER_VALUE 2\n",
+            "#endif\n",
+        ),
+    )
+    .expect("inactive pragma-once header should be writable");
+    fs::write(
+        &source,
+        concat!(
+            "#include \"counter.h\"\n",
+            "#include \"counter.h\"\n",
+            "int main(void) { return COUNTER_VALUE; }\n",
+        ),
+    )
+    .expect("temporary source should be writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    fs::remove_dir_all(&directory).expect("temporary source directory should be removable");
+
+    assert!(
+        output.status.success(),
+        "inactive pragma once should have no effect: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "2\n");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn run_mode_reports_exact_pragma_diagnostics() {
+    let cases = [
+        (
+            "#pragma\nint main(void) { return 0; }\n",
+            concat!(
+                "cust: expected pragma name after '#pragma' at line 1, column 8\n",
+                "#pragma\n",
+                "       ^\n",
+            ),
+        ),
+        (
+            "#pragma 123\nint main(void) { return 0; }\n",
+            concat!(
+                "cust: expected pragma name after '#pragma' at line 1, column 9\n",
+                "#pragma 123\n",
+                "        ^\n",
+            ),
+        ),
+        (
+            "#pragma pack\nint main(void) { return 0; }\n",
+            concat!(
+                "cust: preprocessor pragma '#pragma pack' is not supported at line 1, column 9\n",
+                "#pragma pack\n",
+                "        ^\n",
+            ),
+        ),
+        (
+            "%:pragma once extra\nint main(void) { return 0; }\n",
+            concat!(
+                "cust: unexpected tokens after '#pragma once' at line 1, column 15\n",
+                "%:pragma once extra\n",
+                "              ^\n",
+            ),
+        ),
+    ];
+
+    for (source_text, expected_stderr) in cases {
+        let source = write_temp_source(source_text);
+        let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+            .arg(&source)
+            .output()
+            .expect("cust binary should run");
+        fs::remove_file(&source).expect("temporary source should be removable");
+
+        assert!(
+            !output.status.success(),
+            "source should fail: {source_text}"
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            expected_stderr,
+            "source: {source_text}"
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn run_mode_uses_normalized_logical_names_for_predefined_file_macros() {
     let directory = temp_source_directory("predefined-file-logical-names");
     fs::create_dir(directory.join("nested")).expect("nested header directory should be creatable");

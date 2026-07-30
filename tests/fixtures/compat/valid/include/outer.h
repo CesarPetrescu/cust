@@ -1,3 +1,4 @@
+#pragma once
 #ifndef CUST_OUTER_H
 #define CUST_OUTER_H
 #define NESTED_HEADER "nested.h"
