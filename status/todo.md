@@ -4,6 +4,8 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
+Latest release preparation (2026-07-31): Cargo/lock, exact CLI output/tests, both Docker Compose image tags, README/changelog/status claims, and the 1,170-test inventory are synchronized for bounded v0.7.0. Focused CLI/Compose expectations went RED against `0.6.0` and GREEN at `0.7.0`; local/remote tag preflight is empty. The annotated tag is reserved for the independently reviewed, canonically verified release commit and may be published only after `origin/main` accepts it.
+
 Latest completed language slice (2026-07-30): bounded explicitly prototyped C11 `strlen` evaluates one character pointer once, validates interpreter-owned storage and lexical owners, normalizes unsigned bytes before NUL detection, returns the preceding-character count, caps scans at 4,096 bytes, preserves exact diagnostics, and keeps `sizeof` non-evaluating but declaration/shape-aware. Focused review-driven RED/GREEN, registered warning-free native parity, independent approval, all 1,170 local tests, and both Docker gates pass.
 
 Latest completed language slice (2026-07-30): bounded explicitly prototyped C11 `strcmp` now evaluates two character pointers once and left-to-right, validates interpreter-owned storage and lexical owners, normalizes unsigned bytes before NUL detection, compares lexically, caps each scan independently at 4,096 bytes, preserves exact argument-specific diagnostics, and keeps `sizeof` non-evaluating but constraint-aware. Focused review-driven RED/GREEN regressions, warning-free native parity, all 1,166 tests, and both Docker gates pass.
@@ -24,7 +26,9 @@ Latest completed language slice (2026-07-30): bounded C11 `_Pragma("once")` now 
 
 6. [x] Scope and implement bounded explicitly prototyped `strlen`. One interpreter-owned NUL-terminated `const char *` evaluates once; unsigned-byte NUL detection returns its length under a 4,096-byte bound; exact prototype/type/owner/lifetime/null/unterminated diagnostics remain; `sizeof(call)` is non-evaluating but constraint-aware; and the registered warning-free native fixture passes without a host runtime shortcut.
 
-7. [ ] Prepare and publish bounded v0.7.0 release metadata. Synchronize Cargo/lock/CLI/Docker versions, README/changelog/status claims, exact version and Compose tests, and the verified suite count; obtain independent approval, pass the canonical gate, push one release commit, publish an annotated `v0.7.0` tag, and verify its remote peeled target.
+7. [x] Prepare bounded v0.7.0 release metadata. Cargo/lock/CLI/Docker versions, README/changelog/status claims, exact version and Compose tests, the 1,170-test inventory, focused RED/GREEN, and local/remote tag preflight are synchronized. The tag remains reserved for the reviewed and canonically verified release commit after `origin/main` acceptance.
+
+8. [ ] Scope and implement bounded explicitly prototyped `strncmp`. Evaluate two character pointers plus the deterministic count once and in source order, compare only the requested unsigned-byte prefix, preserve bounded storage/owner/lifetime/null diagnostics and non-evaluating `sizeof`, and add focused plus warning-free native-oracle coverage without a host runtime shortcut.
 
 Latest completed language slice (2026-07-30): bounded `#pragma once` now suppresses repeated project-relative quoted headers by opened `(device, inode)` identity across direct/digraph directives, symlink/hard-link aliases, and recursive includes. Inactive directives remain inert; exact malformed/unsupported diagnostics, secure-resolution ordering, native parity, review-driven hard-link RED/GREEN, Windows cross-target checking, all 1,139 tests, and both Docker gates pass.
 

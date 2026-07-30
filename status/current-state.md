@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-07-30
+Last updated: 2026-07-31
 
 ## Latest autonomous verification
+
+The Cust v0.7.0 package is prepared for atomic publication. Cargo package/lock metadata, exact CLI output, both Docker Compose image tags, README support/limitations/roadmap text, changelog release notes, and all five status files are synchronized for `0.7.0`. The release packages explicitly prototyped bounded `abs`/`labs`/`llabs`, `atoi`/`atol`/`atoll`, `strcmp`, and `strlen` intrinsics without a host runtime path. The 1,170-test release inventory is 1,037 interpreter tests, 98 deterministic fuzz-safety tests, 31 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+Release TDD evidence: exact CLI and Compose expectations first failed against package/image version `0.6.0`, then passed after Cargo/lock and both Compose images moved to `0.7.0`. `cargo check`, `cargo run --quiet -- --version`, Cargo metadata, and empty local/remote `v0.7.0` tag preflight agree. The annotated `v0.7.0` tag is reserved for this verified release commit and may be published only after independent review, the canonical local/Docker gate, and acceptance of the release commit by `origin/main`.
 
 The bounded C11 string-length slice is complete: an exact manually declared integer-returning `strlen(const char *)` prototype activates a Cust-owned intrinsic while user definitions win and missing/incompatible declarations remain explicit boundaries. Cust evaluates the pointer expression once, validates interpreter-owned character storage and lexical owners/lifetimes, normalizes each character to an unsigned byte before NUL detection, returns the number of preceding characters, and caps the scan at 4,096 non-NUL bytes. Null, wrong-pointee, expired-owner, unterminated, and over-bound inputs retain exact diagnostics. `sizeof(strlen(...))` remains non-evaluating while checking the declaration, arity, and pointer shape. No host C runtime is used.
 

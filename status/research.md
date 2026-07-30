@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-31 — v0.7.0 release closure
+
+- No new language-semantics research was needed. Release consistency remains executable: `env!("CARGO_PKG_VERSION")` drives CLI output, exact CLI and Compose tests pin `0.7.0`, and Cargo metadata confirms the package version.
+- The reconciled release inventory is 1,170 tests: 1,037 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
+- Local and remote `v0.7.0` preflight are empty. The release commit must reach `origin/main` before creating the annotated tag; the remote peeled `refs/tags/v0.7.0^{}` target must then equal the release commit, and an existing tag must never be moved.
+- Next candidate: bounded explicitly prototyped `strncmp` can reuse reviewed character traversal while adding source-ordered count evaluation and at-most-count unsigned-byte prefix comparison.
+
 ## 2026-07-30 — Bounded string length
 
 - Official WG14 N1570 §7.24.6.3: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `size_t strlen(const char *s)` returns the number of characters preceding the terminating null character.

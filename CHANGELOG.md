@@ -4,15 +4,29 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.7.0 — 2026-07-31
+
 ### Language subset
 
 - Added the first bounded standard-library runtime slice: explicitly prototyped C11 `abs`, `labs`, and `llabs` calls execute inside Cust over its deterministic integer model, evaluate arguments once, and retain scalar `sizeof` metadata without evaluating calls.
 - Added explicitly prototyped C11 `atoi`, `atol`, and `atoll` calls over interpreter-owned NUL-terminated character storage, with C whitespace/sign/decimal parsing, one-time pointer evaluation, a 4,096-byte scan bound, non-evaluating `sizeof`, and deterministic overflow handling.
+- Added explicitly prototyped C11 `strcmp` and `strlen` calls over interpreter-owned character storage, with ordered one-time argument evaluation, unsigned-byte semantics, independent 4,096-byte traversal bounds, lexical sign results or exact lengths, and non-evaluating constraint-aware `sizeof`.
 
 ### Diagnostics and verification
 
 - Added exact incompatible-prototype, missing-prototype, arity, scalar-shape, and minimum-integer absolute-value overflow boundaries plus a warning-free native compiler-oracle fixture.
 - Added exact null, wrong-pointee, escaped-owner, unterminated-input, scan-limit, arity, incompatible-prototype, and integer-string-overflow boundaries plus warning-free native compiler-oracle parity.
+- Added exact argument-specific pointer, owner, lifetime, termination, and traversal-limit diagnostics for string comparison and length calls, with review-driven unsigned-byte NUL handling and compiler-oracle registration coverage.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.7.0`.
+- Verified 1,170 tests at release preparation time: 1,037 interpreter tests, 98 deterministic fuzz-safety tests, and 35 CLI, Docker, compiler-oracle, and repository tests.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls beyond the explicitly prototyped bounded integer/string families, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported.
 
 ## v0.6.0 — 2026-07-30
 

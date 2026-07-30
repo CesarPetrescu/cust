@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.6.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.7.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -67,7 +67,7 @@ Both Compose services use `pull_policy: build`, so `docker compose run --rm test
 
 The `test` service keeps a writable container overlay so Cargo can update `target/`, but it has no host source mount, no network, dropped capabilities, and no privilege escalation.
 
-## Supported v0.6 language
+## Supported v0.7.0 language
 
 Cust currently supports this C subset:
 
@@ -206,7 +206,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: prepare and publish v0.7.0 from one verified release commit, synchronizing Cargo/lock, CLI/Docker versions, README/changelog/status claims, exact version tests, and an annotated tag after the bounded integer/string intrinsic roadmap is complete.
+- Next milestone: scope bounded explicitly prototyped `strncmp` as the next standard-library slice, reusing interpreter-owned character traversal while adding a deterministic count argument and prefix-length semantics.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider floating-point values, multiple pointer levels, and broader C conformance fixtures.
 
