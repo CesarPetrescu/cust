@@ -278,6 +278,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/integer_absolute_value_functions.c",
     "tests/fixtures/compat/valid/integer_string_conversion_functions.c",
     "tests/fixtures/compat/valid/string_comparison_function.c",
+    "tests/fixtures/compat/valid/string_length_function.c",
     "tests/fixtures/compat/valid/line_comments.c",
     "tests/fixtures/compat/valid/bool_type_spellings.c",
     "tests/fixtures/compat/valid/bool_conversion_semantics.c",

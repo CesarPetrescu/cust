@@ -15250,6 +15250,121 @@ int main(void) {
 }
 
 #[test]
+fn supports_bounded_strlen_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/string_length_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strlen_declaration_call_and_pointer_boundaries() {
+    for (program, expected) in [
+        (
+            "int main(void) { return strlen(\"text\"); }\n",
+            "undefined function 'strlen'",
+        ),
+        (
+            "int strlen(char *text);\nint main(void) { return strlen(\"text\"); }\n",
+            "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
+        ),
+        (
+            "char strlen(const char *text);\nint main(void) { return strlen(\"text\"); }\n",
+            "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
+        ),
+        (
+            "int strlen(const int *text);\nint main(void) { return strlen(0); }\n",
+            "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
+        ),
+        (
+            "int strlen(const char *text);\nint main(void) { return strlen(); }\n",
+            "function 'strlen' expected 1 arguments, got 0",
+        ),
+        (
+            "int strlen(const char *text);\nint main(void) { int value = 0; return strlen(&value); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int strlen(const char *text);\nchar *expired(void) { char text[2] = {'x', 0}; return text; }\nint main(void) { return strlen(expired()); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "int strlen(const char *text);\nint main(void) { return strlen((const char *)0); }\n",
+            "null character pointer passed as argument 1 to function 'strlen'",
+        ),
+        (
+            "int strlen(const char *text);\nint main(void) { const char text[1] = {'x'}; return strlen(text); }\n",
+            "unterminated character sequence passed as argument 1 to function 'strlen'",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn sizeof_strlen_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+unsigned long int strlen(const char *text);
+char *mark(int *calls, char *text) {
+    *calls += 1;
+    return text;
+}
+int main(void) {
+    int calls = 0;
+    int size = sizeof(strlen(mark(&calls, "text")));
+    int null_size = sizeof(strlen(0));
+    return size == sizeof(unsigned long int) && null_size == sizeof(unsigned long int)
+        && calls == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "int strlen(char *text);\nint main(void) { return sizeof(strlen(\"text\")); }\n",
+            "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
+        ),
+        (
+            "int strlen(const char *text);\nint main(void) { return sizeof(strlen()); }\n",
+            "function 'strlen' expected 1 arguments, got 0",
+        ),
+        (
+            "int strlen(const char *text);\nint main(void) { int value = 0; return sizeof(strlen(&value)); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int strlen(const char *text);\nint main(void) { return sizeof(strlen(1)); }\n",
+            "function 'strlen' requires a pointer to character storage",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn normalizes_and_bounds_strlen_character_scans() {
+    let normalized_nul = r#"
+int strlen(const char *text);
+int main(void) {
+    char text[3] = {256, 'x', 0};
+    return strlen(text) == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(normalized_nul).unwrap(), 0);
+
+    let oversized = "x".repeat(4097);
+    let program = format!(
+        "int strlen(const char *text);\nint main(void) {{ return strlen(\"{oversized}\"); }}\n"
+    );
+    let err = interpret(&program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "argument 1 to function 'strlen' exceeded maximum input length of 4096 bytes"
+    );
+}
+
+#[test]
 fn rejects_incompatible_strcmp_function_declarations() {
     for declaration in [
         "int strcmp(char *left, const char *right);",

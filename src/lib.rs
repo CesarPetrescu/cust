@@ -16754,6 +16754,9 @@ impl Interpreter {
             if self.has_string_comparison_prototype(name) {
                 return self.call_string_comparison_function(name, arg_exprs);
             }
+            if self.has_string_length_prototype(name) {
+                return self.call_string_length_function(name, arg_exprs);
+            }
             if matches!(name, "abs" | "labs" | "llabs") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
@@ -16767,6 +16770,11 @@ impl Interpreter {
             if name == "strcmp" && self.prototypes.contains_key(name) {
                 return Err(CustError::new(
                     "standard library function 'strcmp' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type",
+                ));
+            }
+            if name == "strlen" && self.prototypes.contains_key(name) {
+                return Err(CustError::new(
+                    "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
                 ));
             }
             return Err(CustError::new(format!("undefined function '{name}'")));
@@ -17279,6 +17287,45 @@ impl Interpreter {
             }
         }
         Ok(INT_SIZE)
+    }
+
+    fn has_string_length_prototype(&self, name: &str) -> bool {
+        if name != "strlen" {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Scalar(CType::Int),
+            params: vec![ParamSignature {
+                ty: ParamType::Scalar(CType::Char),
+                kind: ParamKind::Pointer,
+                points_to_const: true,
+            }],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_string_length_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 1 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 1 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let pointer = self.eval_pointer(&arg_exprs[0])?;
+        self.validate_character_pointer_argument(name, 1, &pointer)?;
+        let length = self
+            .read_bounded_character_sequence(name, 1, &pointer)?
+            .len() as i64;
+        Ok(Some(ReturnValue::Scalar(length)))
+    }
+
+    fn sizeof_string_length_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        self.sizeof_integer_string_conversion_call(name, args)
     }
 
     fn validate_return_value(
@@ -25381,6 +25428,14 @@ impl Interpreter {
                 }
                 None if self.has_string_comparison_prototype(name) => {
                     self.sizeof_string_comparison_call(name, args)
+                }
+                None if self.has_string_length_prototype(name) => {
+                    self.sizeof_string_length_call(name, args)
+                }
+                None if name == "strlen" && self.prototypes.contains_key(name) => {
+                    Err(CustError::new(
+                        "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
+                    ))
                 }
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },

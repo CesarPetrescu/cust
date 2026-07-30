@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-30 — Bounded string length
+
+- Official WG14 N1570 §7.24.6.3: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `size_t strlen(const char *s)` returns the number of characters preceding the terminating null character.
+- Cust maps the integer return into its deterministic scalar model and gates execution on the retained one-pointer-to-const-character signature. The pointer evaluates once; shared reviewed traversal normalizes unsigned bytes before NUL detection and caps the scan at 4,096 non-NUL bytes. `sizeof` checks declaration, arity, and pointer shape without evaluating the operand.
+- A warning-free native fixture uses `unsigned long int` for the host `size_t` spelling while Cust intentionally normalizes supported integer spellings. Independent review required explicit compiler-oracle fixture registration and exact unsupported-declaration handling inside `sizeof` before approval.
+- Next candidate: package the bounded v0.7 integer/string intrinsic roadmap in a synchronized v0.7.0 release commit and annotated tag.
+
 ## 2026-07-30 — Bounded string comparison
 
 - Official WG14 N1570 §7.24.4.2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `int strcmp(const char *s1, const char *s2)` returns an integer greater than, equal to, or less than zero according to the lexical relation of the strings; the sign is required, not a particular magnitude.

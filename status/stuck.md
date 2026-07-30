@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-30 bounded `strcmp` run after focused RED/GREEN, review-driven unsigned-byte NUL and failure-path argument-order fixes, compiler-oracle GREEN, final independent approval, all 1,166 local tests, and both Docker gates passed. Commit and push remain closure steps rather than blockers.
+None. Last reviewed during the 2026-07-30 bounded `strlen` run after focused RED/GREEN, compiler-oracle fixture registration, a review-driven incompatible-declaration `sizeof` regression/fix, final independent approval, all 1,170 local tests, and both Docker gates passed. Commit and push remain closure steps rather than blockers.
 
 ## Blocker template
 
