@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-30 — Bounded string comparison
+
+- Official WG14 N1570 §7.24.4.2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `int strcmp(const char *s1, const char *s2)` returns an integer greater than, equal to, or less than zero according to the lexical relation of the strings; the sign is required, not a particular magnitude.
+- Cust gates the intrinsic on the exact retained deterministic signature and executes it only when no user definition exists. Both arguments evaluate once and left-to-right before pointer validation. Each interpreter-owned sequence is independently bounded to 4,096 non-NUL bytes, and comparison uses normalized unsigned-byte values; NUL detection must happen after that normalization because Cust stores scalar values as `i64`.
+- Independent review exposed two failure-path details: validating argument 1 before evaluating argument 2 violated the selected ordered-evaluation contract, and checking raw `i64 == 0` before byte normalization mishandled values congruent to zero modulo 256. Focused RED/GREEN regressions now lock both behaviors. Native compilers remain fixture oracles only.
+- Next candidate: bounded `strlen` can reuse the reviewed character traversal with one pointer, while returning the consumed length and retaining the same prototype, owner/lifetime, null, termination, resource, and unevaluated-`sizeof` boundaries.
+
 ## 2026-07-30 — Bounded integer-string conversion functions
 
 - Official WG14 N1570 §7.22.1.2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — the declarations are `int atoi(const char *nptr)`, `long int atol(const char *nptr)`, and `long long int atoll(const char *nptr)`. Each is equivalent to its base-10 `strtol`/`strtoll` counterpart except that error behavior is unspecified.

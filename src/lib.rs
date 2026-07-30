@@ -16751,6 +16751,9 @@ impl Interpreter {
             if self.has_integer_string_conversion_prototype(name) {
                 return self.call_integer_string_conversion_function(name, arg_exprs);
             }
+            if self.has_string_comparison_prototype(name) {
+                return self.call_string_comparison_function(name, arg_exprs);
+            }
             if matches!(name, "abs" | "labs" | "llabs") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
@@ -16760,6 +16763,11 @@ impl Interpreter {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type"
                 )));
+            }
+            if name == "strcmp" && self.prototypes.contains_key(name) {
+                return Err(CustError::new(
+                    "standard library function 'strcmp' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type",
+                ));
             }
             return Err(CustError::new(format!("undefined function '{name}'")));
         };
@@ -17122,6 +17130,155 @@ impl Interpreter {
                 "function '{name}' requires a pointer to character storage"
             ))),
         }
+    }
+
+    fn has_string_comparison_prototype(&self, name: &str) -> bool {
+        if name != "strcmp" {
+            return false;
+        }
+        let character_pointer = ParamSignature {
+            ty: ParamType::Scalar(CType::Char),
+            kind: ParamKind::Pointer,
+            points_to_const: true,
+        };
+        let expected = FunctionSignature {
+            return_type: ReturnType::Scalar(CType::Int),
+            params: vec![character_pointer.clone(), character_pointer],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_string_comparison_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 2 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 2 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let left = self.eval_pointer(&arg_exprs[0])?;
+        let right = self.eval_pointer(&arg_exprs[1])?;
+        self.validate_character_pointer_argument(name, 1, &left)?;
+        self.validate_character_pointer_argument(name, 2, &right)?;
+
+        let left = self.read_bounded_character_sequence(name, 1, &left)?;
+        let right = self.read_bounded_character_sequence(name, 2, &right)?;
+        let result = match left.cmp(&right) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        };
+        Ok(Some(ReturnValue::Scalar(result)))
+    }
+
+    fn validate_character_pointer_argument(
+        &self,
+        name: &str,
+        argument: usize,
+        pointer: &PointerValue,
+    ) -> CustResult<()> {
+        if matches!(pointer, PointerValue::Null) {
+            return Err(CustError::new(format!(
+                "null character pointer passed as argument {argument} to function '{name}'"
+            )));
+        }
+        self.ensure_pointer_type_matches(&PointeeType::Scalar(CType::Char), pointer)
+    }
+
+    fn read_bounded_character_sequence(
+        &self,
+        name: &str,
+        argument: usize,
+        pointer: &PointerValue,
+    ) -> CustResult<Vec<u8>> {
+        let scalar;
+        let bytes = match pointer {
+            PointerValue::ArrayBase { array, .. } => {
+                let array = array.borrow();
+                return Self::copy_bounded_character_sequence(name, argument, &array.elements);
+            }
+            PointerValue::ArrayElement { array, index, .. } => {
+                let array = array.borrow();
+                return Self::copy_bounded_character_sequence(
+                    name,
+                    argument,
+                    &array.elements[*index..],
+                );
+            }
+            PointerValue::Scalar { .. }
+            | PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. } => {
+                scalar = [self.deref_pointer(pointer)?];
+                &scalar
+            }
+            PointerValue::Null
+            | PointerValue::Struct { .. }
+            | PointerValue::StructElement { .. }
+            | PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. }
+            | PointerValue::Array2DRow { .. } => {
+                return Err(CustError::new(format!(
+                    "function '{name}' requires character storage for argument {argument}"
+                )));
+            }
+        };
+        Self::copy_bounded_character_sequence(name, argument, bytes)
+    }
+
+    fn copy_bounded_character_sequence(
+        name: &str,
+        argument: usize,
+        bytes: &[i64],
+    ) -> CustResult<Vec<u8>> {
+        let mut result = Vec::with_capacity(bytes.len().min(MAX_INTEGER_STRING_BYTES));
+        for (offset, byte) in bytes.iter().copied().enumerate() {
+            let byte = byte.rem_euclid(256) as u8;
+            if byte == 0 {
+                return Ok(result);
+            }
+            if offset >= MAX_INTEGER_STRING_BYTES {
+                return Err(CustError::new(format!(
+                    "argument {argument} to function '{name}' exceeded maximum input length of {MAX_INTEGER_STRING_BYTES} bytes"
+                )));
+            }
+            result.push(byte);
+        }
+        Err(CustError::new(format!(
+            "unterminated character sequence passed as argument {argument} to function '{name}'"
+        )))
+    }
+
+    fn sizeof_string_comparison_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 2 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 2 arguments, got {}",
+                args.len()
+            )));
+        }
+        for argument in args {
+            if matches!(argument, Expr::Number(0)) {
+                continue;
+            }
+            match self.pointer_expr_pointee_type(argument)? {
+                Some(PointeeType::Scalar(CType::Char)) => {}
+                Some(actual) => {
+                    return Err(CustError::new(format!(
+                        "cannot convert pointer to {} to pointer to char",
+                        self.pointee_label(&actual)
+                    )));
+                }
+                None => {
+                    return Err(CustError::new(format!(
+                        "function '{name}' requires pointers to character storage"
+                    )));
+                }
+            }
+        }
+        Ok(INT_SIZE)
     }
 
     fn validate_return_value(
@@ -25221,6 +25378,9 @@ impl Interpreter {
                 None if self.has_integer_absolute_value_prototype(name) => Ok(INT_SIZE),
                 None if self.has_integer_string_conversion_prototype(name) => {
                     self.sizeof_integer_string_conversion_call(name, args)
+                }
+                None if self.has_string_comparison_prototype(name) => {
+                    self.sizeof_string_comparison_call(name, args)
                 }
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },

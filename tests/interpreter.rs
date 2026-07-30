@@ -15211,6 +15211,229 @@ fn supports_integer_string_conversion_standard_library_functions() {
 }
 
 #[test]
+fn supports_bounded_strcmp_standard_library_function() {
+    let program = r#"
+int strcmp(const char *left, const char *right);
+int order = 0;
+
+char *left_arg(void) {
+    order = order * 10 + 1;
+    return "alpha";
+}
+
+char *right_arg(void) {
+    order = order * 10 + 2;
+    return "alpha";
+}
+
+int main(void) {
+    if (strcmp("same", "same") != 0) {
+        return 1;
+    }
+    if (strcmp("alpha", "alpine") >= 0 || strcmp("zeta", "beta") <= 0) {
+        return 2;
+    }
+    if (strcmp("xxalpha" + 2, "alpha") != 0) {
+        return 3;
+    }
+    if (strcmp("\x80", "\x7f") <= 0) {
+        return 4;
+    }
+    if (strcmp(left_arg(), right_arg()) != 0 || order != 12) {
+        return 5;
+    }
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_incompatible_strcmp_function_declarations() {
+    for declaration in [
+        "int strcmp(char *left, const char *right);",
+        "char strcmp(const char *left, const char *right);",
+        "int strcmp(const char *left, const int *right);",
+    ] {
+        let program =
+            format!("{declaration}\nint main(void) {{ return strcmp(\"left\", \"right\"); }}\n");
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "standard library function 'strcmp' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type"
+        );
+    }
+}
+
+#[test]
+fn sizeof_strcmp_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+int strcmp(const char *left, const char *right);
+char *mark(int *counter, char *text) {
+    *counter += 1;
+    return text;
+}
+int main(void) {
+    int left_calls = 0;
+    int right_calls = 0;
+    int size = sizeof(strcmp(mark(&left_calls, "left"), mark(&right_calls, "right")));
+    int null_size = sizeof(strcmp(0, 0));
+    return size == sizeof(int) && null_size == sizeof(int)
+        && left_calls == 0 && right_calls == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { return sizeof(strcmp(\"left\")); }\n",
+            "function 'strcmp' expected 2 arguments, got 1",
+        ),
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { int value = 0; return sizeof(strcmp(&value, \"right\")); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { int value = 0; return sizeof(strcmp(\"left\", &value)); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn preserves_strcmp_call_and_pointer_boundaries() {
+    let cases = [
+        (
+            "int main(void) { return strcmp(\"left\", \"right\"); }\n",
+            "undefined function 'strcmp'",
+        ),
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { return strcmp(\"left\"); }\n",
+            "function 'strcmp' expected 2 arguments, got 1",
+        ),
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { int value = 0; return strcmp(&value, \"right\"); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { int value = 0; return strcmp(\"left\", &value); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int strcmp(const char *left, const char *right);\nchar *expired(void) { char text[2] = {'x', 0}; return text; }\nint main(void) { return strcmp(expired(), \"x\"); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { char *saved = 0; { char text[2] = {'x', 0}; saved = text; } return strcmp(\"x\", saved); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+
+    let user_definition = r#"
+int strcmp(int left, int right) {
+    return left - right;
+}
+int main(void) {
+    return strcmp(7, 4) == 3 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+}
+
+#[test]
+fn strcmp_normalizes_character_values_before_nul_detection() {
+    let program = r#"
+int strcmp(const char *left, const char *right);
+int main(void) {
+    char left[3] = {256, 'x', 0};
+    char empty[1] = {0};
+    return strcmp(left, empty) == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn strcmp_evaluates_both_arguments_left_to_right_before_validation() {
+    let program = r#"
+int strcmp(const char *left, const char *right);
+int order = 0;
+
+char *left(void) {
+    order = 1;
+    return 0;
+}
+
+char *right(void) {
+    char text[1] = {0};
+    return text + (order == 1 ? 2 : -1);
+}
+
+int main(void) {
+    return strcmp(left(), right());
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "array pointer index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn reports_null_and_unterminated_strcmp_arguments() {
+    for (program, expected) in [
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { return strcmp((const char *)0, \"right\"); }\n",
+            "null character pointer passed as argument 1 to function 'strcmp'",
+        ),
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { return strcmp(\"left\", (const char *)0); }\n",
+            "null character pointer passed as argument 2 to function 'strcmp'",
+        ),
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { const char left[1] = {'x'}; return strcmp(left, \"x\"); }\n",
+            "unterminated character sequence passed as argument 1 to function 'strcmp'",
+        ),
+        (
+            "int strcmp(const char *left, const char *right);\nint main(void) { const char right[1] = {'x'}; return strcmp(\"x\", right); }\n",
+            "unterminated character sequence passed as argument 2 to function 'strcmp'",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn bounds_each_strcmp_input_scan_independently() {
+    let oversized = "x".repeat(4097);
+    for (left, right, argument) in [(oversized.as_str(), "x", 1), ("x", oversized.as_str(), 2)] {
+        let program = format!(
+            "int strcmp(const char *left, const char *right);\nint main(void) {{ return strcmp(\"{left}\", \"{right}\"); }}\n"
+        );
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "argument {argument} to function 'strcmp' exceeded maximum input length of 4096 bytes"
+            )
+        );
+    }
+}
+
+#[test]
 fn supports_recursive_calls_within_documented_depth_limit() {
     let program = r#"
 int recurse(int remaining) {
