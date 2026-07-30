@@ -2628,6 +2628,12 @@ fn process_preprocessor_directive(
         directive_start,
         directive_column,
     )?;
+    if cursor == content_end {
+        while *i < line_end {
+            advance_position(chars, chars[*i], current_line, column, i);
+        }
+        return Ok(true);
+    }
     let directive_name_start = cursor;
     while cursor < content_end && (chars[cursor].is_ascii_alphanumeric() || chars[cursor] == '_') {
         cursor += 1;

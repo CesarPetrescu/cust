@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-30 — C11 null preprocessing directives
+
+- Official WG14 N1570 §6.10.7: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — a preprocessing directive of the form `# new-line` has no effect. C11 §6.4.6 makes `%:` an alternative spelling for `#`, so Cust accepts both after preprocessing whitespace/comments are removed.
+- `process_preprocessor_directive()` now checks for an exhausted logical-line operand immediately after shared preprocessing-whitespace/comment scanning, consumes through `line_end`, and returns without changing macro/conditional state. Nonempty malformed operands still enter the existing source-located directive-name diagnostic path.
+- A strict `cc -std=c11 -Wall -Wextra -Werror` project fixture confirms direct, digraph, comment, spliced, conditional, and included-header parity. The next candidate is bounded `#pragma once` keyed by the secure include path's already-opened canonical identity; all other pragmas should remain exact unsupported diagnostics.
+- Release-state audit confirmed remote `refs/tags/v0.5.0^{}` equals `4a7ec79486b4c86ecdfea2524aa3e5c854ceba70`.
+
 ## 2026-07-30 — v0.5.0 release closure
 
 - No new language-semantics research was needed. Release consistency remains executable: `env!("CARGO_PKG_VERSION")` drives the binary, `tests/cli.rs` pins the exact package/output value, and `tests/docker_compose.rs` pins both Compose image tags.

@@ -51,6 +51,8 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/predefined_file_line.c",
     #[cfg(target_os = "linux")]
     "tests/fixtures/compat/valid/line_directives.c",
+    #[cfg(target_os = "linux")]
+    "tests/fixtures/compat/valid/null_preprocessing_directives.c",
     "tests/fixtures/compat/valid/extern_global_declarations.c",
     "tests/fixtures/compat/valid/volatile_type_qualifiers.c",
     "tests/fixtures/compat/valid/atomic_type_qualifiers.c",

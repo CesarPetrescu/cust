@@ -220,6 +220,68 @@ fn supports_nested_object_like_macros_across_c_contexts() {
 }
 
 #[test]
+fn supports_null_preprocessing_directives() {
+    let program = r#"#
+%:
+# /**/
+%: // comment
+#\
+ /* physically spliced */
+#if 1
+#
+#else
+#error selected the wrong branch
+#endif
+#if 0
+# inactive tokens are ignored
+%:
+#error inactive error
+#endif
+int main(void) { return 0; }
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn null_preprocessing_directives_work_in_included_headers() {
+    assert_eq!(
+        cust::interpret_file("tests/fixtures/compat/valid/null_preprocessing_directives.c")
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn null_preprocessing_directives_preserve_malformed_and_placement_diagnostics() {
+    for (program, expected) in [
+        (
+            "# 123\nint main(void) { return 0; }\n",
+            "expected preprocessor directive name after '#' at line 1, column 1\n# 123\n^",
+        ),
+        (
+            "# /**/ 123\nint main(void) { return 0; }\n",
+            "expected preprocessor directive name after '#' at line 1, column 1\n# /**/ 123\n^",
+        ),
+        (
+            "%: +\nint main(void) { return 0; }\n",
+            "expected preprocessor directive name after '#' at line 1, column 1\n%: +\n^",
+        ),
+        (
+            "int value; #\nint main(void) { return 0; }\n",
+            "preprocessor directives must begin on a new line at line 1, column 12\nint value; #\n           ^",
+        ),
+        (
+            "int value; %:\nint main(void) { return 0; }\n",
+            "preprocessor directives must begin on a new line at line 1, column 12\nint value; %:\n           ^",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
 fn predefined_file_and_line_macros_expand_at_the_use_site() {
     let program = r#"int main(void) {
     char *source = __FILE__;

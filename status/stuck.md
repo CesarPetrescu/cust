@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-30 v0.5.0 release preparation after clean-baseline verification, focused exact-version RED/GREEN, non-conflicting local/remote tag preflight, synchronized Cargo/lock/CLI/Docker/docs/status metadata, independent review, 1,132 passing local tests, warning-free Clippy, and both canonical Docker gates. Annotated-tag publication remains an ordered post-`origin/main` step, not an external blocker.
+None. Last reviewed during the 2026-07-30 C11 null-directive run after focused RED/GREEN, strict native parity, independent review, 1,135 passing local tests, warning-free Clippy, and both canonical Docker gates. The annotated `v0.5.0` tag is published and its remote peeled target matches release commit `4a7ec79486b4c86ecdfea2524aa3e5c854ceba70`.
 
 ## Blocker template
 
