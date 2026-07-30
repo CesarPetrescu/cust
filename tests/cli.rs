@@ -309,7 +309,7 @@ fn run_mode_applies_pragma_once_by_opened_header_identity() {
     let source = directory.join("main.c");
     fs::write(
         &header,
-        "#pragma once\n#define CONFIG_VALUE 42\nint from_config(void) { return CONFIG_VALUE; }\n",
+        "_Pragma(L\"once\")\n#define CONFIG_VALUE 42\nint from_config(void) { return CONFIG_VALUE; }\n",
     )
     .expect("pragma-once header should be writable");
     std::os::unix::fs::symlink(&header, &symlink_alias)
@@ -344,14 +344,18 @@ fn run_mode_applies_pragma_once_by_opened_header_identity() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn run_mode_supports_digraph_pragma_once_in_recursive_headers() {
+fn run_mode_expands_complete_pragma_operator_token_sequence() {
     let directory = temp_source_directory("digraph-pragma-once-recursion");
     let header = directory.join("recursive.h");
     let source = directory.join("main.c");
     fs::write(
         &header,
         concat!(
-            "%:pragma once\n",
+            "#define PRAGMA_OPERATOR _Pragma\n",
+            "#define LEFT_PAREN (\n",
+            "#define PRAGMA_PAYLOAD \"once\"\n",
+            "#define RIGHT_PAREN )\n",
+            "PRAGMA_OPERATOR LEFT_PAREN PRAGMA_PAYLOAD RIGHT_PAREN\n",
             "#define RECURSIVE_VALUE 17\n",
             "#include \"recursive.h\"\n",
             "int from_recursive(void) { return RECURSIVE_VALUE; }\n",
@@ -372,7 +376,7 @@ fn run_mode_supports_digraph_pragma_once_in_recursive_headers() {
 
     assert!(
         output.status.success(),
-        "digraph pragma-once recursion should terminate: {}",
+        "macro-produced pragma-once token sequence should terminate recursion: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "17\n");
@@ -389,7 +393,8 @@ fn inactive_pragma_once_does_not_mark_the_header() {
         &header,
         concat!(
             "#if 0\n",
-            "#pragma once\n",
+            "#define INACTIVE_PRAGMA(value) _Pragma(#value)\n",
+            "INACTIVE_PRAGMA(once)\n",
             "#endif\n",
             "#ifndef COUNTER_SEEN\n",
             "#define COUNTER_SEEN\n",
@@ -462,6 +467,38 @@ fn run_mode_reports_exact_pragma_diagnostics() {
                 "              ^\n",
             ),
         ),
+        (
+            "_Pragma 123\nint main(void) { return 0; }\n",
+            concat!(
+                "cust: expected '(' after '_Pragma' at line 1, column 1\n",
+                "_Pragma 123\n",
+                "^\n",
+            ),
+        ),
+        (
+            "_Pragma(123)\nint main(void) { return 0; }\n",
+            concat!(
+                "cust: expected string literal in '_Pragma' at line 1, column 9\n",
+                "_Pragma(123)\n",
+                "        ^\n",
+            ),
+        ),
+        (
+            "_Pragma(\"once\" extra)\nint main(void) { return 0; }\n",
+            concat!(
+                "cust: expected ')' after '_Pragma' string literal at line 1, column 16\n",
+                "_Pragma(\"once\" extra)\n",
+                "               ^\n",
+            ),
+        ),
+        (
+            "_Pragma(\"pack\")\nint main(void) { return 0; }\n",
+            concat!(
+                "cust: preprocessor pragma '_Pragma(\"pack\")' is not supported at line 1, column 1\n",
+                "_Pragma(\"pack\")\n",
+                "^\n",
+            ),
+        ),
     ];
 
     for (source_text, expected_stderr) in cases {
@@ -483,6 +520,117 @@ fn run_mode_reports_exact_pragma_diagnostics() {
             "source: {source_text}"
         );
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn bounds_pragma_operator_payload_bytes_across_translation_unit() {
+    let padding = "x".repeat(600_000);
+    let source_text = format!(
+        "#define LARGE_ONCE _Pragma(\"once /*{padding}*/\")\nLARGE_ONCE\nLARGE_ONCE\nint main(void) {{ return 0; }}\n"
+    );
+    let source = write_temp_source(&source_text);
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    fs::remove_file(&source).expect("temporary source should be removable");
+
+    assert!(!output.status.success(), "reused payload should be bounded");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        concat!(
+            "cust: '_Pragma' payload byte limit exceeded at line 3, column 1\n",
+            "LARGE_ONCE\n",
+            "^\n",
+        )
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn bounds_pragma_operator_payload_tokens_with_bounded_diagnostics() {
+    let operators = "+ ".repeat(8_193);
+    let source_text = format!("_Pragma(\"once {operators}\")\nint main(void) {{ return 0; }}\n");
+    let source = write_temp_source(&source_text);
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&source)
+        .output()
+        .expect("cust binary should run");
+    fs::remove_file(&source).expect("temporary source should be removable");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "oversized payload should fail");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(
+        stderr.starts_with("cust: '_Pragma' payload token limit exceeded at line 1, column 1\n"),
+        "unexpected payload-token diagnostic: {stderr}"
+    );
+    assert!(
+        stderr.len() < 2_048,
+        "payload-token diagnostic should stay bounded"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn processes_whitespace_after_large_pragma_literals_in_linear_time() {
+    let padding = "x".repeat(300_000);
+    let whitespace = " ".repeat(10_000);
+    let source_text =
+        format!("_Pragma(\"once /*{padding}*/\"{whitespace})\nint main(void) {{ return 0; }}\n");
+    let source = write_temp_source(&source_text);
+    let output = run_cust_with_deadline(std::path::Path::new(&source));
+    fs::remove_file(&source).expect("temporary source should be removable");
+
+    assert!(
+        output.status.success(),
+        "large pragma should complete: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "0\n");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[cfg(unix)]
+#[test]
+fn processes_empty_macros_after_large_pragma_literals_in_linear_time() {
+    let padding = "x".repeat(300_000);
+    let empty_expansions = " EMPTY".repeat(5_000);
+    let source_text = format!(
+        "#define EMPTY\n_Pragma(\"once /*{padding}*/\"{empty_expansions})\nint main(void) {{ return 0; }}\n"
+    );
+    let source = write_temp_source(&source_text);
+    let output = run_cust_with_deadline(std::path::Path::new(&source));
+    fs::remove_file(&source).expect("temporary source should be removable");
+
+    assert!(
+        output.status.success(),
+        "large pragma with empty expansions should complete: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "0\n");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[cfg(unix)]
+#[test]
+fn processes_many_pragma_operators_from_one_macro_in_linear_time() {
+    let operators = "_Pragma(\"once\") ".repeat(2_000);
+    let source_text =
+        format!("#define MANY_PRAGMAS {operators}\nMANY_PRAGMAS\nint main(void) {{ return 0; }}\n");
+    let source = write_temp_source(&source_text);
+    let output = run_cust_with_deadline(std::path::Path::new(&source));
+    fs::remove_file(&source).expect("temporary source should be removable");
+
+    assert!(
+        output.status.success(),
+        "many pragma operators should complete: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "0\n");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
 }
 
 #[cfg(target_os = "linux")]

@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 #[cfg(target_os = "linux")]
 use std::ffi::CString;
@@ -283,6 +283,7 @@ struct MacroExpansionBudget {
     work: usize,
     stringified_bytes: usize,
     pasted_bytes: usize,
+    pragma_bytes: usize,
 }
 
 struct MacroExpansion {
@@ -308,6 +309,7 @@ const MAX_PREPROCESSOR_CONDITION_DEPTH: usize = 128;
 const MAX_PREPROCESSOR_CONDITION_TOKENS: usize = 8_192;
 const MAX_PREPROCESSOR_ERROR_MESSAGE_BYTES: usize = 1_048_576;
 const MAX_LINE_DIRECTIVE_SOURCE_NAME_BYTES: usize = 4_096;
+const MAX_PRAGMA_OPERATOR_BYTES: usize = 1_048_576;
 const MAX_MACRO_STRINGIFICATION_BYTES: usize = 1_048_576;
 const MAX_MACRO_TOKEN_PASTING_BYTES: usize = 1_048_576;
 const MAX_INCLUDE_DEPTH: usize = 32;
@@ -1532,6 +1534,7 @@ fn lex_spliced_with_state(
     let mut column = initial_column;
     let mut line_has_preprocessing_token = false;
     let mut next_token_separated = false;
+    let mut pending_pragma_start = None;
 
     while i < chars.len() {
         let c = chars[i];
@@ -1682,7 +1685,7 @@ fn lex_spliced_with_state(
                     ));
                 }
             }
-            _ if allow_macro_hash_operator
+            _ if (allow_macro_hash_operator || pending_pragma_start.is_some())
                 && preprocessing_literal_quote_offset(chars, i).is_some() =>
             {
                 let start = i;
@@ -1982,11 +1985,13 @@ fn lex_spliced_with_state(
                         0,
                     )?;
                     let trailing_separation = expanded.trailing_separation;
-                    tokens.extend(normalize_expanded_integer_tokens(
+                    append_expanded_tokens_with_pragmas(
                         expanded.tokens,
+                        &mut tokens,
+                        &mut pending_pragma_start,
+                        state,
                         source,
-                        false,
-                    )?);
+                    )?;
                     next_token_separated = trailing_separation;
                     continue;
                 }
@@ -2301,11 +2306,31 @@ fn lex_spliced_with_state(
                 next_token_separated = false;
             }
         }
+        if allow_preprocessor_directives && tokens.len() > token_count_before {
+            if pending_pragma_start.is_none() {
+                pending_pragma_start = tokens[token_count_before.min(tokens.len())..]
+                    .iter()
+                    .position(|token| preprocessor_identifier_name(&token.kind) == Some("_Pragma"))
+                    .map(|offset| token_count_before + offset);
+            }
+            execute_pending_pragma_operators(
+                &mut tokens,
+                &mut pending_pragma_start,
+                state,
+                source,
+                false,
+            )?;
+        }
         if let Some((directive_name, token)) = token_limit.and_then(|(limit, directive_name)| {
             tokens.get(limit).map(|token| (directive_name, token))
         }) {
+            let message = if directive_name == "_Pragma" {
+                "'_Pragma' payload token limit exceeded".to_string()
+            } else {
+                format!("'#{directive_name}' expression token limit exceeded")
+            };
             return Err(lexer_error_with_context(
-                format!("'#{directive_name}' expression token limit exceeded"),
+                message,
                 source,
                 token.line,
                 token.column,
@@ -2324,6 +2349,8 @@ fn lex_spliced_with_state(
             frame.column,
         ));
     }
+
+    execute_pending_pragma_operators(&mut tokens, &mut pending_pragma_start, state, source, true)?;
 
     tokens.push(LocatedToken::new(Token::Eof, line, column));
     Ok(tokens)
@@ -2593,6 +2620,281 @@ fn macro_hash_pair_is_paste(tokens: &[LocatedToken], index: usize) -> bool {
             ),
             ("#", "#") | ("%:", "%:")
         )
+}
+
+fn destringize_pragma_operator_literal(token: &LocatedToken, source: &str) -> CustResult<String> {
+    if !matches!(
+        token.kind,
+        Token::StringLiteral(_) | Token::RawPreprocessor(_)
+    ) {
+        return Err(lexer_error_with_context(
+            "expected string literal in '_Pragma'",
+            source,
+            token.line,
+            token.column,
+        ));
+    }
+    let spelling = token.preprocessing_spelling.as_str();
+    let Some(quote_index) = spelling.find('"') else {
+        return Err(lexer_error_with_context(
+            "expected string literal in '_Pragma'",
+            source,
+            token.line,
+            token.column,
+        ));
+    };
+    if !matches!(&spelling[..quote_index], "" | "L" | "u" | "U" | "u8")
+        || !spelling.ends_with('"')
+        || spelling.len() <= quote_index + 1
+    {
+        return Err(lexer_error_with_context(
+            "expected string literal in '_Pragma'",
+            source,
+            token.line,
+            token.column,
+        ));
+    }
+    let inner = &spelling[quote_index + 1..spelling.len() - 1];
+    if inner.len() > MAX_PRAGMA_OPERATOR_BYTES {
+        return Err(lexer_error_with_bounded_context(
+            format!("'_Pragma' string literal exceeds {MAX_PRAGMA_OPERATOR_BYTES} bytes"),
+            source,
+            token.line,
+            token.column,
+        ));
+    }
+    let mut payload = String::with_capacity(inner.len());
+    let mut characters = inner.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\\' && matches!(characters.peek(), Some('"' | '\\')) {
+            payload.push(
+                characters
+                    .next()
+                    .expect("peeked pragma string escape must be present"),
+            );
+        } else {
+            payload.push(character);
+        }
+    }
+    Ok(payload)
+}
+
+fn execute_pragma_operator_payload(
+    payload: &str,
+    operator: &LocatedToken,
+    state: &mut PreprocessorState,
+    source: &str,
+) -> CustResult<()> {
+    if payload.len()
+        > MAX_PRAGMA_OPERATOR_BYTES.saturating_sub(state.macro_expansion_budget.pragma_bytes)
+    {
+        return Err(lexer_error_with_bounded_context(
+            "'_Pragma' payload byte limit exceeded",
+            source,
+            operator.line,
+            operator.column,
+        ));
+    }
+    state.macro_expansion_budget.pragma_bytes += payload.len();
+    let payload_chars = SplicedSourceChars::new(payload, operator.line, operator.column);
+    let mut payload_tokens = lex_spliced_with_context(
+        &payload_chars,
+        source,
+        operator.line,
+        operator.column,
+        false,
+        true,
+        true,
+        Some((MAX_PREPROCESSOR_CONDITION_TOKENS, "_Pragma")),
+    )
+    .map_err(|error| {
+        if error
+            .message
+            .starts_with("'_Pragma' payload token limit exceeded")
+        {
+            lexer_error_with_bounded_context(
+                "'_Pragma' payload token limit exceeded",
+                source,
+                operator.line,
+                operator.column,
+            )
+        } else {
+            lexer_error_with_context(
+                "malformed pragma payload in '_Pragma'",
+                source,
+                operator.line,
+                operator.column,
+            )
+        }
+    })?;
+    payload_tokens.pop();
+    let Some(pragma_name) = payload_tokens
+        .first()
+        .and_then(|token| preprocessor_identifier_name(&token.kind))
+    else {
+        return Err(lexer_error_with_context(
+            "expected pragma name in '_Pragma' string literal",
+            source,
+            operator.line,
+            operator.column,
+        ));
+    };
+    if pragma_name != "once" {
+        return Err(lexer_error_with_context(
+            format!("preprocessor pragma '_Pragma({payload:?})' is not supported"),
+            source,
+            operator.line,
+            operator.column,
+        ));
+    }
+    if payload_tokens.len() != 1 {
+        return Err(lexer_error_with_context(
+            "unexpected tokens after '_Pragma(\"once\")'",
+            source,
+            operator.line,
+            operator.column,
+        ));
+    }
+    let context = state.include_context.as_mut().ok_or_else(|| {
+        lexer_error_with_context(
+            "preprocessor operator '_Pragma' is not supported",
+            source,
+            operator.line,
+            operator.column,
+        )
+    })?;
+    let source_identity = context
+        .stack
+        .last()
+        .expect("file lexing keeps the current source on the include stack")
+        .identity
+        .clone();
+    context.pragma_once_headers.insert(source_identity);
+    Ok(())
+}
+
+fn append_expanded_tokens_with_pragmas(
+    mut expanded: Vec<LocatedToken>,
+    output: &mut Vec<LocatedToken>,
+    pending_start: &mut Option<usize>,
+    state: &mut PreprocessorState,
+    source: &str,
+) -> CustResult<()> {
+    if expanded.is_empty() {
+        return Ok(());
+    }
+    if pending_start.is_some() {
+        output.append(&mut expanded);
+    } else if let Some(operator_offset) = expanded
+        .iter()
+        .position(|token| preprocessor_identifier_name(&token.kind) == Some("_Pragma"))
+    {
+        let pending = expanded.split_off(operator_offset);
+        output.extend(normalize_expanded_integer_tokens(expanded, source, false)?);
+        *pending_start = Some(output.len());
+        output.extend(pending);
+    } else {
+        output.extend(normalize_expanded_integer_tokens(expanded, source, false)?);
+    }
+    execute_pending_pragma_operators(output, pending_start, state, source, false)
+}
+
+fn execute_pending_pragma_operators(
+    tokens: &mut Vec<LocatedToken>,
+    pending_start: &mut Option<usize>,
+    state: &mut PreprocessorState,
+    source: &str,
+    final_input: bool,
+) -> CustResult<()> {
+    let Some(mut start) = *pending_start else {
+        return Ok(());
+    };
+    let mut pending = VecDeque::from(tokens.split_off(start));
+    loop {
+        let operator = pending
+            .front()
+            .expect("pending pragma sequence starts with an operator");
+        let Some(opening) = pending.get(1) else {
+            if final_input {
+                return Err(lexer_error_with_context(
+                    "expected '(' after '_Pragma'",
+                    source,
+                    operator.line,
+                    operator.column,
+                ));
+            }
+            tokens.extend(pending);
+            *pending_start = Some(start);
+            return Ok(());
+        };
+        if opening.kind != Token::LParen {
+            return Err(lexer_error_with_context(
+                "expected '(' after '_Pragma'",
+                source,
+                operator.line,
+                operator.column,
+            ));
+        }
+        let Some(literal) = pending.get(2) else {
+            if final_input {
+                return Err(lexer_error_with_context(
+                    "expected string literal in '_Pragma'",
+                    source,
+                    operator.line,
+                    operator.column,
+                ));
+            }
+            tokens.extend(pending);
+            *pending_start = Some(start);
+            return Ok(());
+        };
+        let Some(closing) = pending.get(3) else {
+            if final_input {
+                return Err(lexer_error_with_context(
+                    "expected ')' after '_Pragma' string literal",
+                    source,
+                    operator.line,
+                    operator.column,
+                ));
+            }
+            tokens.extend(pending);
+            *pending_start = Some(start);
+            return Ok(());
+        };
+        if closing.kind != Token::RParen {
+            return Err(lexer_error_with_context(
+                "expected ')' after '_Pragma' string literal",
+                source,
+                closing.line,
+                closing.column,
+            ));
+        }
+        let payload = destringize_pragma_operator_literal(literal, source)?;
+        let operator = operator.clone();
+        execute_pragma_operator_payload(&payload, &operator, state, source)?;
+        for _ in 0..4 {
+            pending.pop_front();
+        }
+
+        let mut ordinary = Vec::new();
+        while pending
+            .front()
+            .is_some_and(|token| preprocessor_identifier_name(&token.kind) != Some("_Pragma"))
+        {
+            ordinary.push(
+                pending
+                    .pop_front()
+                    .expect("guard requires one ordinary token"),
+            );
+        }
+        tokens.extend(normalize_expanded_integer_tokens(ordinary, source, false)?);
+        if pending.is_empty() {
+            *pending_start = None;
+            return Ok(());
+        }
+        start = tokens.len();
+        *pending_start = Some(start);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

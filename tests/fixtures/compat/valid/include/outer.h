@@ -1,4 +1,6 @@
-#pragma once
+#define CUST_DO_PRAGMA_(value) _Pragma(#value)
+#define CUST_DO_PRAGMA(value) CUST_DO_PRAGMA_(value)
+CUST_DO_PRAGMA(once)
 #ifndef CUST_OUTER_H
 #define CUST_OUTER_H
 #define NESTED_HEADER "nested.h"

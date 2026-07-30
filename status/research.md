@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-30 — Bounded C11 `_Pragma("once")`
+
+- Official WG14 N1570 §6.10.9: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `_Pragma` is processed after macro replacement; its parenthesized string-literal operand is destringized by deleting any encoding prefix, deleting `\\` before `\\` or `"`, and then behaving as if the resulting preprocessing tokens appeared in a `#pragma` directive.
+- Cust recognizes only the resulting exact `once` pragma and routes it through the existing opened-source identity set. Direct, function-stringified, object-like, nested, and separately macro-produced `_Pragma`, `(`, string, and `)` tokens therefore agree with `#pragma once`; inactive groups do not expand or execute the operator.
+- GCC/Clang probes confirmed macro-produced `_Pragma("once")`; Clang C11 also accepts `L`, `u`, `U`, and `u8` prefixes, matching N1570's “any encoding prefix” wording. Malformed/non-string/concatenated operands and unsupported pragma names remain source-located diagnostics.
+- Resource closure charges destringized payload bytes cumulatively per translation unit, caps each payload's tokenization before token-vector growth, defers destringization until `)` exists, ignores whitespace/empty-expansion retries, and consumes batches through one `VecDeque` pass. Independent review exposed the split-token and superlinear-work risks before final approval.
+
 ## 2026-07-30 — Bounded `#pragma once`
 
 - Official GCC CPP documentation: https://gcc.gnu.org/onlinedocs/cpp/Pragmas.html — when `#pragma once` is seen while scanning a header, that file is not read again; GCC documents it as a less-portable alternative to wrapper `#ifndef` guards.

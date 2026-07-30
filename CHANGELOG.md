@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added bounded C11 `_Pragma("once")` for file-aware sources, including direct and object/function-macro-produced operators, split expanded-token sequences, standard encoding-prefix/quote/backslash destringization, inactive-group suppression, and reuse of opened-file `#pragma once` identity.
+
+### Diagnostics and verification
+
+- Added exact malformed/non-string/unsupported-pragma diagnostics, cumulative 1 MiB payload accounting, pre-allocation 8,192-token limits, and linear pending-operator processing regressions. Warning-free native parity, Windows GNU cross-target checking, 1,144 local tests, and both Docker gates pass.
+
 ## v0.5.0 — 2026-07-30
 
 ### Language subset
