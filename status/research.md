@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-30 — v0.6.0 release closure
+
+- No new language-semantics research was needed. Release consistency remains executable: `env!("CARGO_PKG_VERSION")` drives CLI output, `tests/cli.rs` pins the exact package/output value, and `tests/docker_compose.rs` pins both Compose image tags.
+- The release commit must reach `origin/main` before the annotated `v0.6.0` tag is created. Empty local/remote tag preflight, exact local tag-target equality, and remote peeled `refs/tags/v0.6.0^{}` equality are mandatory; an existing tag is a blocker and must never be moved autonomously.
+- The release packages the completed C11 null-directive, opened-identity `#pragma once`, and macro-expanded `_Pragma("once")` slices. The next bounded planning task is to compare standard-library calls, floating-point values, and deeper pointers before selecting a deterministic v0.7 vertical slice with executable acceptance fixtures.
+
 ## 2026-07-30 — Bounded C11 `_Pragma("once")`
 
 - Official WG14 N1570 §6.10.9: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `_Pragma` is processed after macro replacement; its parenthesized string-literal operand is destringized by deleting any encoding prefix, deleting `\\` before `\\` or `"`, and then behaving as if the resulting preprocessing tokens appeared in a `#pragma` directive.

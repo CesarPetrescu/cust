@@ -4,13 +4,28 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.6.0 — 2026-07-30
+
 ### Language subset
 
+- Added C11 null preprocessing directives: active `#` and `%:` logical lines containing only preprocessing whitespace/comments have no effect across direct, spliced, conditional, and included-header routes.
+- Added bounded `#pragma once` / `%:pragma once` for Linux file-aware sources, keyed by opened `(device, inode)` identity so repeated, symlinked, hard-linked, and recursive header paths share suppression without bypassing secure path resolution.
 - Added bounded C11 `_Pragma("once")` for file-aware sources, including direct and object/function-macro-produced operators, split expanded-token sequences, standard encoding-prefix/quote/backslash destringization, inactive-group suppression, and reuse of opened-file `#pragma once` identity.
 
 ### Diagnostics and verification
 
 - Added exact malformed/non-string/unsupported-pragma diagnostics, cumulative 1 MiB payload accounting, pre-allocation 8,192-token limits, and linear pending-operator processing regressions. Warning-free native parity, Windows GNU cross-target checking, 1,144 local tests, and both Docker gates pass.
+- Added exact null-directive placement and pragma-name/trailing-token diagnostics; preserved secure include ordering and opened-file identity checks; and verified warning-free native fixtures plus independent review for each slice.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.6.0`.
+- Verified 1,144 tests at release preparation time: 1,011 interpreter tests, 98 deterministic fuzz-safety tests, and 35 CLI, Docker, compiler-oracle, and repository tests.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported.
 
 ## v0.5.0 — 2026-07-30
 

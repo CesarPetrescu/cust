@@ -8,7 +8,9 @@ Latest completed language slice (2026-07-30): bounded C11 `_Pragma("once")` now 
 
 1. [x] Scope and implement bounded C99/C11 `_Pragma("once")` preprocessing for file-aware headers. Direct/object/function/split-token routes, standard destringization, inactive behavior, opened-file identity, exact diagnostics, resource and linearity hardening, focused TDD, native parity, independent approval, cross-target checking, and both Docker gates pass.
 
-2. [ ] Prepare and publish bounded v0.6.0 release metadata. Acceptance: synchronize Cargo/lock/CLI/Docker versions, README/changelog/status claims, focused version RED/GREEN assertions, independent review, canonical verification, release-commit push, non-conflicting annotated-tag publication, and remote peeled-target verification.
+2. [x] Prepare bounded v0.6.0 release metadata. Cargo/lock/CLI/Docker versions, README/changelog/status claims, the 1,144-test release count, focused version RED/GREEN assertions, and tag preflight are synchronized. The tag is reserved for the verified release commit and publication remains ordered after review, the canonical gate, and `origin/main` acceptance.
+
+3. [ ] Scope the first bounded v0.7 language milestone. Compare standard-library calls, floating-point values, and deeper pointer forms for deterministic semantics, safety, parser/runtime fan-out, and warning-free native-oracle suitability; select one vertical slice and add executable valid/invalid acceptance fixtures with explicit adjacent unsupported boundaries before implementation.
 
 Latest completed language slice (2026-07-30): bounded `#pragma once` now suppresses repeated project-relative quoted headers by opened `(device, inode)` identity across direct/digraph directives, symlink/hard-link aliases, and recursive includes. Inactive directives remain inert; exact malformed/unsupported diagnostics, secure-resolution ordering, native parity, review-driven hard-link RED/GREEN, Windows cross-target checking, all 1,139 tests, and both Docker gates pass.
 
