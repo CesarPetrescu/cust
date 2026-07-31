@@ -15292,6 +15292,319 @@ fn supports_bounded_strstr_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strcpy_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/string_copy_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strcpy_declaration_call_and_user_definition_boundaries() {
+    let expected = "standard library function 'strcpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type";
+    for program in [
+        "const char *strcpy(char *destination, const char *source);\nint main(void) { char out[2]; return strcpy(out, \"x\") != out; }\n",
+        "char *strcpy(const char *destination, const char *source);\nint main(void) { char out[2]; return strcpy(out, \"x\") != out; }\n",
+        "char *strcpy(char *destination, char *source);\nint main(void) { char out[2]; return sizeof(strcpy(out, out)); }\n",
+        "char *strcpy(char *destination, const int *source);\nint main(void) { char out[2]; return strcpy(out, 0) != out; }\n",
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    for (program, expected) in [
+        (
+            "int main(void) { char out[2]; return strcpy(out, \"x\") != out; }\n",
+            "undefined function 'strcpy'",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char out[2]; return strcpy(out) != out; }\n",
+            "function 'strcpy' expected 2 arguments, got 1",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let user_definition = r#"
+int strcpy(int destination, int source) {
+    return destination + source;
+}
+int main(void) {
+    return strcpy(3, -3);
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+
+    let matching_user_definition = r#"
+char *strcpy(char *destination, const char *source);
+char *strcpy(char *destination, const char *source) {
+    return destination;
+}
+int main(void) {
+    char rows[2][4] = {{0}};
+    return sizeof(*strcpy((char *)rows, "x")) == sizeof(char) ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(matching_user_definition).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strcpy_pointer_storage_lifetime_and_capacity_boundaries() {
+    for (program, expected) in [
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { int value = 0; return strcpy(&value, \"x\") != 0; }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char out[2]; int value = 0; return strcpy(out, &value) != 0; }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nchar *expired(void) { char out[2] = {0}; return out; }\nint main(void) { return strcpy(expired(), \"x\") != 0; }\n",
+            "pointer to out-of-scope variable 'out'",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nchar *expired(void) { char source[2] = {'x', 0}; return source; }\nint main(void) { char out[2]; return strcpy(out, expired()) != out; }\n",
+            "pointer to out-of-scope variable 'source'",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { return strcpy((char *)0, \"x\") != 0; }\n",
+            "null character pointer passed as argument 1 to function 'strcpy'",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char out[2]; return strcpy(out, (const char *)0) != out; }\n",
+            "null character pointer passed as argument 2 to function 'strcpy'",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { const char source[1] = {'x'}; char out[2]; return strcpy(out, source) != out; }\n",
+            "unterminated character sequence passed as argument 2 to function 'strcpy'",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { return strcpy(\"x\", \"y\") != 0; }\n",
+            "cannot modify read-only array through pointer",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { const char out[2] = {0}; return strcpy(out, \"x\") != 0; }\n",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char out[4] = {0}; return strcpy(out, \"four\") != out; }\n",
+            "destination argument 1 to function 'strcpy' requires 5 bytes, but only 4 bytes are available",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char out[5] = {0}; return strcpy(out + 2, \"cat\") != out + 2; }\n",
+            "destination argument 1 to function 'strcpy' requires 4 bytes, but only 3 bytes are available",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn rejects_overlapping_strcpy_ranges() {
+    let expected = "overlapping source and destination ranges passed to function 'strcpy'";
+    for program in [
+        "char *strcpy(char *destination, const char *source);\nint main(void) { char text[5] = \"abc\"; return strcpy(text, text) != text; }\n",
+        "char *strcpy(char *destination, const char *source);\nint main(void) { char text[5] = \"abc\"; return strcpy(text + 1, text) != text + 1; }\n",
+        "char *strcpy(char *destination, const char *source);\nint main(void) { char text[5] = \"abc\"; return strcpy(text, text + 1) != text; }\n",
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn strcpy_preserves_two_dimensional_row_boundaries() {
+    for (program, expected) in [
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char out[2][4] = {{0}, {'z', 0}}; char (*row)[4] = out; return strcpy(*row, \"1234\") != *row; }\n",
+            "destination argument 1 to function 'strcpy' requires 5 bytes, but only 4 bytes are available",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}, {'z', 0}}; return strcpy(*rows + 4, \"x\") != *rows + 4; }\n",
+            "two-dimensional array row pointer index 4 out of bounds for row 0 with length 4",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}, {'z', 0}}; char out[2] = {0}; return strcpy(out, *(rows + 1) - 1) != out; }\n",
+            "two-dimensional array row pointer index 3 out of bounds for row 1 with length 4",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char source[2][4] = {{'a', 'b', 'c', 'd'}, {0}}; char (*row)[4] = source; char out[8] = {0}; return strcpy(out, *row) != out; }\n",
+            "unterminated character sequence passed as argument 2 to function 'strcpy'",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nstruct Frame { char rows[2][4]; };\nint main(void) { struct Frame frame = {{{0}, {'z', 0}}}; return strcpy(&frame.rows, \"1234\") != 0; }\n",
+            "function 'strcpy' requires character storage for argument 1",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nstruct Frame { char rows[2][4]; };\nint main(void) { struct Frame frame = {{{'a', 'b', 'c', 'd'}, {0}}}; char out[8] = {0}; return strcpy(out, &frame.rows) != out; }\n",
+            "function 'strcpy' requires character storage for argument 2",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}}; return sizeof(strcpy(rows, \"x\")); }\n",
+            "function 'strcpy' requires pointers to character storage",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nstruct Frame { char rows[2][4]; };\nint main(void) { struct Frame frame = {{{0}}}; return sizeof(strcpy(&frame.rows, \"x\")); }\n",
+            "function 'strcpy' requires pointers to character storage",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}}; return sizeof(strcpy((char *)rows, \"x\")); }\n",
+            "function 'strcpy' requires pointers to character storage",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}}; char *slot = 0; return sizeof(strcpy(slot = rows, \"x\")); }\n",
+            "function 'strcpy' requires pointers to character storage",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char (*row)[4] = 0; return sizeof(strcpy(row, \"x\")); }\n",
+            "function 'strcpy' requires pointers to character storage",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}}; char (*row)[4] = rows; return sizeof(strcpy(row = 0, \"x\")); }\n",
+            "function 'strcpy' requires pointers to character storage",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}}; char (*row)[4] = rows; return sizeof(strcpy(row += 0, \"x\")); }\n",
+            "function 'strcpy' requires pointers to character storage",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}}; char (*row)[4] = rows; return sizeof(strcpy(row -= 0, \"x\")); }\n",
+            "function 'strcpy' requires pointers to character storage",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}}; return sizeof(strcpy(&rows[0], \"x\")); }\n",
+            "function 'strcpy' requires pointers to character storage",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nstruct Frame { char rows[2][4]; };\nint main(void) { struct Frame frame = {{{0}}}; return strcpy(&frame.rows[0], \"1234\") != 0; }\n",
+            "function 'strcpy' requires character storage for argument 1",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn strcpy_row_pointer_metadata_respects_enum_shadowing() {
+    let program = r#"
+char *strcpy(char *destination, const char *source);
+int main(void) {
+    char rows[2][4] = {{0}};
+    char (*slot)[4] = rows;
+    int used = slot == rows;
+    {
+        enum { slot = 0 };
+        return used && sizeof(strcpy((char *)slot, "x")) == sizeof(char *) ? 0 : 1;
+    }
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn strcpy_evaluates_both_pointers_in_source_order_before_validation() {
+    let program = r#"
+char *strcpy(char *destination, const char *source);
+int order = 0;
+int *destination(void) {
+    static int value = 0;
+    order = 1;
+    return &value;
+}
+char *source(void) {
+    static char values[1] = {0};
+    return &values[order == 1 ? 2 : -1];
+}
+int main(void) {
+    return strcpy(destination(), source()) != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array 'values' index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn normalizes_and_bounds_strcpy_character_sequences() {
+    let normalized = r#"
+char *strcpy(char *destination, const char *source);
+int main(void) {
+    char source[3] = {354, 355, 0};
+    char destination[3] = {0};
+    strcpy(destination, source);
+    return destination[0] == 98 && destination[1] == 99 && destination[2] == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(normalized).unwrap(), 0);
+
+    let boundary = "x".repeat(4096);
+    let program = format!(
+        "char *strcpy(char *destination, const char *source);\nint main(void) {{ char out[4097] = {{0}}; return strcpy(out, \"{boundary}\") == out && out[4095] == 'x' && out[4096] == 0 ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&program).unwrap(), 0);
+
+    let oversized = "x".repeat(4097);
+    let program = format!(
+        "char *strcpy(char *destination, const char *source);\nint main(void) {{ char out[4098] = {{0}}; return strcpy(out, \"{oversized}\") != out; }}\n"
+    );
+    assert_eq!(
+        interpret(&program).unwrap_err().to_string(),
+        "argument 2 to function 'strcpy' exceeded maximum input length of 4096 bytes"
+    );
+}
+
+#[test]
+fn sizeof_strcpy_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+char *strcpy(char *destination, const char *source);
+char *mark_destination(int *calls, char *destination) {
+    *calls += 1;
+    return destination;
+}
+const char *mark_source(int *calls, const char *source) {
+    *calls += 1;
+    return source;
+}
+int main(void) {
+    int calls = 0;
+    char out[5] = {0};
+    int pointer_size = sizeof(strcpy(mark_destination(&calls, out), mark_source(&calls, "x")));
+    int character_size = sizeof(*strcpy(mark_destination(&calls, out), mark_source(&calls, "x")));
+    int nested = sizeof(strcpy(out, "x") != 0);
+    return pointer_size == sizeof(char *) && character_size == sizeof(char)
+        && nested == sizeof(int) && calls == 0 && out[0] == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char out[2]; return sizeof(strcpy(out)); }\n",
+            "function 'strcpy' expected 2 arguments, got 1",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}}; return sizeof(strcpy(rows)); }\n",
+            "function 'strcpy' expected 2 arguments, got 1",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { int value = 0; return sizeof(*strcpy(&value, \"x\")); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strcpy(char *destination, const char *source);\nint main(void) { const char out[2] = {0}; return sizeof(strcpy(out, \"x\")); }\n",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "int main(void) { char out[2]; return sizeof(strcpy(out, \"x\") != 0); }\n",
+            "undefined function 'strcpy'",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
 fn strstr_returns_the_original_haystack_pointer_for_an_empty_needle() {
     let program = r#"
 char *strstr(const char *haystack, const char *needle);

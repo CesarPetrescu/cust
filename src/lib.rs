@@ -16399,6 +16399,7 @@ struct Scope {
     static_local_ids: HashMap<String, usize>,
     enum_constants: HashMap<String, i64>,
     const_variables: HashSet<String>,
+    array2d_pointer_types: HashMap<String, (CType, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16768,6 +16769,9 @@ impl Interpreter {
             if self.has_character_set_search_prototype(name) {
                 return self.call_character_set_search_function(name, arg_exprs);
             }
+            if self.has_string_copy_prototype(name) {
+                return self.call_string_copy_function(name, arg_exprs);
+            }
             if self.has_string_span_prototype(name) {
                 return self.call_string_span_function(name, arg_exprs);
             }
@@ -16805,6 +16809,11 @@ impl Interpreter {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                 )));
+            }
+            if name == "strcpy" && self.prototypes.contains_key(name) {
+                return Err(CustError::new(
+                    "standard library function 'strcpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type",
+                ));
             }
             if matches!(name, "strspn" | "strcspn") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
@@ -16966,6 +16975,13 @@ impl Interpreter {
         self.call_depth += 1;
         self.return_type_stack.push(function.return_type.clone());
         self.push_scope_with_values_and_consts(param_scope, const_params);
+        for param in &function.params {
+            if let (ParamKind::Array2D, ParamType::Array2D(elem_type, columns)) =
+                (&param.kind, &param.ty)
+            {
+                self.mark_current_array2d_pointer_type(&param.name, *elem_type, *columns);
+            }
+        }
         let result = match self.exec_block(&function.body) {
             Ok(ExecFlow::Return(value)) => {
                 self.validate_return_value(name, &function.return_type, value)
@@ -17228,6 +17244,12 @@ impl Interpreter {
                 "null character pointer passed as argument {argument} to function '{name}'"
             )));
         }
+        if matches!(pointer, PointerValue::ArrayBase { array, .. } if array.borrow().dimensions.is_some())
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires character storage for argument {argument}"
+            )));
+        }
         self.ensure_pointer_type_matches(&PointeeType::Scalar(CType::Char), pointer)
     }
 
@@ -17245,10 +17267,11 @@ impl Interpreter {
             }
             PointerValue::ArrayElement { array, index, .. } => {
                 let array = array.borrow();
+                let end = Self::character_sequence_array_end(&array, *index);
                 return Self::copy_bounded_character_sequence(
                     name,
                     argument,
-                    &array.elements[*index..],
+                    &array.elements[*index..end],
                 );
             }
             PointerValue::Scalar { .. }
@@ -17269,6 +17292,18 @@ impl Interpreter {
             }
         };
         Self::copy_bounded_character_sequence(name, argument, bytes)
+    }
+
+    fn character_sequence_array_end(array: &ArrayValue, index: usize) -> usize {
+        match array.dimensions {
+            Some((_, columns)) => index
+                .checked_div(columns)
+                .and_then(|row| row.checked_add(1))
+                .and_then(|row| row.checked_mul(columns))
+                .unwrap_or(array.elements.len())
+                .min(array.elements.len()),
+            None => array.elements.len(),
+        }
     }
 
     fn copy_bounded_character_sequence(
@@ -17702,6 +17737,172 @@ impl Interpreter {
         Ok(POINTER_SIZE)
     }
 
+    fn has_string_copy_prototype(&self, name: &str) -> bool {
+        if name != "strcpy" {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Pointer {
+                ty: PointeeType::Scalar(CType::Char),
+                points_to_const: false,
+            },
+            params: vec![
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Char),
+                    kind: ParamKind::Pointer,
+                    points_to_const: false,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Char),
+                    kind: ParamKind::Pointer,
+                    points_to_const: true,
+                },
+            ],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_string_copy_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 2 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 2 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let destination = self.eval_pointer(&arg_exprs[0])?;
+        let source = self.eval_pointer(&arg_exprs[1])?;
+        for (index, argument) in arg_exprs.iter().enumerate() {
+            if self.array2d_row_pointer_element_type(argument).is_some() {
+                return Err(CustError::new(format!(
+                    "function '{name}' requires character storage for argument {}",
+                    index + 1
+                )));
+            }
+        }
+        self.ensure_pointer_conversion_preserves_const(false, &arg_exprs[0])?;
+        self.validate_character_pointer_argument(name, 1, &destination)?;
+        self.validate_character_pointer_argument(name, 2, &source)?;
+
+        let mut bytes = self.read_bounded_character_sequence(name, 2, &source)?;
+        bytes.push(0);
+        let current = self.deref_pointer(&destination)?;
+        self.assign_deref_pointer(&destination, current)?;
+        self.ensure_string_copy_destination_capacity(name, &destination, bytes.len())?;
+        self.ensure_string_copy_ranges_do_not_overlap(name, &destination, &source, bytes.len())?;
+        for (offset, byte) in bytes.into_iter().enumerate() {
+            if offset == 0 {
+                self.assign_deref_pointer(&destination, i64::from(byte))?;
+            } else {
+                self.assign_pointer_index(&destination, offset as i64, i64::from(byte))?;
+            }
+        }
+
+        Ok(Some(ReturnValue::Pointer {
+            pointer: destination,
+            ty: PointeeType::Scalar(CType::Char),
+            points_to_const: false,
+        }))
+    }
+
+    fn ensure_string_copy_destination_capacity(
+        &self,
+        name: &str,
+        destination: &PointerValue,
+        required: usize,
+    ) -> CustResult<()> {
+        let available = match destination {
+            PointerValue::ArrayBase { array, .. } => array.borrow().elements.len(),
+            PointerValue::ArrayElement { array, index, .. } => {
+                let array = array.borrow();
+                Self::character_sequence_array_end(&array, *index).saturating_sub(*index)
+            }
+            PointerValue::Scalar { .. }
+            | PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. } => 1,
+            PointerValue::Null
+            | PointerValue::Struct { .. }
+            | PointerValue::StructElement { .. }
+            | PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. }
+            | PointerValue::Array2DRow { .. } => {
+                return Err(CustError::new(format!(
+                    "function '{name}' requires character storage for argument 1"
+                )));
+            }
+        };
+        if required > available {
+            return Err(CustError::new(format!(
+                "destination argument 1 to function '{name}' requires {required} bytes, but only {available} bytes are available"
+            )));
+        }
+        Ok(())
+    }
+
+    fn ensure_string_copy_ranges_do_not_overlap(
+        &self,
+        name: &str,
+        destination: &PointerValue,
+        source: &PointerValue,
+        len: usize,
+    ) -> CustResult<()> {
+        let overlaps = match (
+            Self::character_array_pointer_position(destination),
+            Self::character_array_pointer_position(source),
+        ) {
+            (Some((destination_array, destination_start)), Some((source_array, source_start))) => {
+                Rc::ptr_eq(destination_array, source_array)
+                    && destination_start < source_start.saturating_add(len)
+                    && source_start < destination_start.saturating_add(len)
+            }
+            _ => Self::pointer_eq(destination, source),
+        };
+        if overlaps {
+            return Err(CustError::new(format!(
+                "overlapping source and destination ranges passed to function '{name}'"
+            )));
+        }
+        Ok(())
+    }
+
+    fn character_array_pointer_position(
+        pointer: &PointerValue,
+    ) -> Option<(&Rc<RefCell<ArrayValue>>, usize)> {
+        match pointer {
+            PointerValue::ArrayBase { array, .. } => Some((array, 0)),
+            PointerValue::ArrayElement { array, index, .. } => Some((array, *index)),
+            _ => None,
+        }
+    }
+
+    fn sizeof_string_copy_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 2 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 2 arguments, got {}",
+                args.len()
+            )));
+        }
+        if args
+            .iter()
+            .any(|argument| self.array2d_row_pointer_element_type(argument).is_some())
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires pointers to character storage"
+            )));
+        }
+        self.sizeof_string_comparison_call(name, args)?;
+        if !matches!(args[0], Expr::Number(0)) && self.pointer_expr_points_to_const(&args[0]) {
+            return Err(CustError::new(
+                "cannot discard const qualifier from pointer target",
+            ));
+        }
+        Ok(POINTER_SIZE)
+    }
+
     fn has_string_span_prototype(&self, name: &str) -> bool {
         if !matches!(name, "strspn" | "strcspn") {
             return false;
@@ -17762,6 +17963,17 @@ impl Interpreter {
                         )));
                     } else {
                         return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                }
+                if name == "strcpy" && !self.functions.contains_key(name) {
+                    if self.has_string_copy_prototype(name) {
+                        self.sizeof_string_copy_call(name, args)?;
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(CustError::new(
+                            "standard library function 'strcpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type",
+                        ));
+                    } else {
+                        return Err(CustError::new("undefined function 'strcpy'"));
                     }
                 }
                 if matches!(name.as_str(), "strspn" | "strcspn")
@@ -18284,6 +18496,7 @@ impl Interpreter {
             static_local_ids: HashMap::new(),
             enum_constants: HashMap::new(),
             const_variables,
+            array2d_pointer_types: HashMap::new(),
         });
     }
 
@@ -18601,6 +18814,12 @@ impl Interpreter {
                 self.sizeof_character_set_search_call(name, args)?;
                 Ok(Some(PointeeType::Scalar(CType::Char)))
             }
+            Expr::Call { name, args }
+                if self.has_string_copy_prototype(name) && !self.functions.contains_key(name) =>
+            {
+                self.sizeof_string_copy_call(name, args)?;
+                Ok(Some(PointeeType::Scalar(CType::Char)))
+            }
             Expr::Call { name, .. }
                 if matches!(name.as_str(), "strpbrk" | "strstr")
                     && !self.functions.contains_key(name) =>
@@ -18611,6 +18830,15 @@ impl Interpreter {
                     )))
                 } else {
                     Err(CustError::new(format!("undefined function '{name}'")))
+                }
+            }
+            Expr::Call { name, .. } if name == "strcpy" && !self.functions.contains_key(name) => {
+                if self.prototypes.contains_key(name) {
+                    Err(CustError::new(
+                        "standard library function 'strcpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type",
+                    ))
+                } else {
+                    Err(CustError::new("undefined function 'strcpy'"))
                 }
             }
             Expr::Call { name, .. } => match self
@@ -18658,33 +18886,56 @@ impl Interpreter {
 
     fn array2d_row_pointer_element_type(&self, expr: &Expr) -> Option<CType> {
         match expr {
-            Expr::Var(name) => match self.find_variable(name) {
-                Some(Value::Array(array)) if array.borrow().dimensions.is_some() => {
-                    Some(array.borrow().elem_type)
+            Expr::Var(name) => {
+                if self.enum_constant_shadows_variable(name) {
+                    None
+                } else {
+                    self.array2d_pointer_variable_type(name)
+                        .map(|(elem_type, _)| elem_type)
+                        .or_else(|| match self.find_variable(name) {
+                            Some(Value::Array(array)) if array.borrow().dimensions.is_some() => {
+                                Some(array.borrow().elem_type)
+                            }
+                            Some(Value::Pointer {
+                                pointer: PointerValue::Array2DRow { array, .. },
+                                ..
+                            }) => Some(array.borrow().elem_type),
+                            _ => None,
+                        })
                 }
-                Some(Value::Pointer {
-                    pointer: PointerValue::Array2DRow { array, .. },
-                    ..
-                }) => Some(array.borrow().elem_type),
-                _ => None,
-            },
-            Expr::StructGet { name, fields } => match self.find_variable(name) {
-                Some(Value::Struct {
-                    type_name,
-                    fields: field_map,
-                }) => Self::nested_field_value(type_name, field_map, fields)
-                    .ok()
-                    .and_then(|(_, field)| match field {
-                        StructFieldValue::Array { value, .. }
-                            if value.borrow().dimensions.is_some() =>
-                        {
-                            Some(value.borrow().elem_type)
-                        }
-                        _ => None,
-                    }),
-                _ => None,
-            },
-            Expr::StructElementGet { name, fields, .. } => self
+            }
+            Expr::AddressOfArray { name, .. } => self
+                .array2d_pointer_variable_type(name)
+                .map(|(elem_type, _)| elem_type)
+                .or_else(|| match self.find_variable(name) {
+                    Some(Value::Array(array)) if array.borrow().dimensions.is_some() => {
+                        Some(array.borrow().elem_type)
+                    }
+                    _ => None,
+                }),
+            Expr::StructGet { name, fields }
+            | Expr::AddressOfStructField { name, fields }
+            | Expr::AddressOfStructArrayField { name, fields, .. } => {
+                match self.find_variable(name) {
+                    Some(Value::Struct {
+                        type_name,
+                        fields: field_map,
+                    }) => Self::nested_field_value(type_name, field_map, fields)
+                        .ok()
+                        .and_then(|(_, field)| match field {
+                            StructFieldValue::Array { value, .. }
+                                if value.borrow().dimensions.is_some() =>
+                            {
+                                Some(value.borrow().elem_type)
+                            }
+                            _ => None,
+                        }),
+                    _ => None,
+                }
+            }
+            Expr::StructElementGet { name, fields, .. }
+            | Expr::AddressOfStructElementField { name, fields, .. }
+            | Expr::AddressOfStructElementArrayField { name, fields, .. } => self
                 .struct_element_field_metadata(name, fields)
                 .ok()
                 .flatten()
@@ -18692,7 +18943,11 @@ impl Interpreter {
                     StructFieldType::Array2D(elem_type, _, _) => Some(elem_type),
                     _ => None,
                 }),
-            Expr::StructPtrGet { pointer, fields } => self
+            Expr::StructPtrGet { pointer, fields }
+            | Expr::AddressOfStructPtrField { pointer, fields }
+            | Expr::AddressOfStructPtrArrayField {
+                pointer, fields, ..
+            } => self
                 .struct_pointer_expr_field_metadata(pointer, fields)
                 .ok()
                 .flatten()
@@ -18700,7 +18955,8 @@ impl Interpreter {
                     StructFieldType::Array2D(elem_type, _, _) => Some(elem_type),
                     _ => None,
                 }),
-            Expr::AggregateFieldGet { aggregate, fields } => self
+            Expr::AggregateFieldGet { aggregate, fields }
+            | Expr::AddressOfAggregateField { aggregate, fields } => self
                 .aggregate_literal_field_metadata(aggregate, fields)
                 .ok()
                 .flatten()
@@ -18721,6 +18977,20 @@ impl Interpreter {
                     StructFieldType::Array2D(elem_type, _, _) => Some(elem_type),
                     _ => None,
                 }),
+            Expr::Assign { name, value } => self
+                .array2d_pointer_variable_type(name)
+                .map(|(elem_type, _)| elem_type)
+                .or_else(|| self.array2d_row_pointer_element_type(value)),
+            Expr::CompoundAssign { name, .. } => self
+                .array2d_pointer_variable_type(name)
+                .map(|(elem_type, _)| elem_type),
+            Expr::StructSet { value, .. }
+            | Expr::StructPtrSet { value, .. }
+            | Expr::StructElementSet { value, .. }
+            | Expr::StructFieldArrayElementSet { value, .. }
+            | Expr::AggregateFieldSet { value, .. }
+            | Expr::PointerCast { expr: value, .. } => self.array2d_row_pointer_element_type(value),
+            Expr::Increment { target, .. } => self.array2d_row_pointer_element_type(target),
             Expr::Call { name, .. } => self.functions.get(name).and_then(|function| {
                 if let ReturnType::Array2DPointer { elem_type, .. } = function.return_type {
                     Some(elem_type)
@@ -19642,6 +19912,38 @@ impl Interpreter {
             .last_mut()
             .expect("exec_block always creates a current scope")
             .values
+    }
+
+    fn mark_current_array2d_pointer_type(&mut self, name: &str, elem_type: CType, columns: usize) {
+        self.scopes
+            .last_mut()
+            .expect("exec_block always creates a current scope")
+            .array2d_pointer_types
+            .insert(name.to_string(), (elem_type, columns));
+    }
+
+    fn array2d_pointer_variable_type(&self, name: &str) -> Option<(CType, usize)> {
+        for scope in self.scopes.iter().rev() {
+            if scope.values.contains_key(name)
+                || scope.static_local_ids.contains_key(name)
+                || scope.enum_constants.contains_key(name)
+            {
+                return scope.array2d_pointer_types.get(name).copied();
+            }
+        }
+        None
+    }
+
+    fn enum_constant_shadows_variable(&self, name: &str) -> bool {
+        for scope in self.scopes.iter().rev() {
+            if scope.enum_constants.contains_key(name) {
+                return true;
+            }
+            if scope.values.contains_key(name) || scope.static_local_ids.contains_key(name) {
+                return false;
+            }
+        }
+        false
     }
 
     fn current_scope_has_identifier(&self, name: &str) -> bool {
@@ -24108,12 +24410,22 @@ impl Interpreter {
                 source_name,
                 index,
                 owner,
-            } => self.array_pointer_at(
-                array,
-                source_name.clone(),
-                owner.clone(),
-                *index as i64 + offset,
-            ),
+            } => {
+                let next_index = (*index as i64).checked_add(offset).ok_or_else(|| {
+                    CustError::new("array pointer index overflow during pointer arithmetic")
+                })?;
+                if let Some((_, columns)) = array.borrow().dimensions {
+                    let row = *index / columns;
+                    let row_start = row * columns;
+                    let row_end = row_start + columns;
+                    if next_index < row_start as i64 || next_index >= row_end as i64 {
+                        return Err(CustError::new(format!(
+                            "two-dimensional array row pointer index {next_index} out of bounds for row {row} with length {columns}"
+                        )));
+                    }
+                }
+                self.array_pointer_at(array, source_name.clone(), owner.clone(), next_index)
+            }
             PointerValue::Array2DRow {
                 array,
                 source_name,
@@ -24934,6 +25246,7 @@ impl Interpreter {
             Expr::Call { name, .. } => {
                 self.has_character_search_prototype(name)
                     || self.has_character_set_search_prototype(name)
+                    || self.has_string_copy_prototype(name)
                     || matches!(
                         self.functions
                             .get(name)
@@ -26168,6 +26481,9 @@ impl Interpreter {
                 None if self.has_character_set_search_prototype(name) => {
                     self.sizeof_character_set_search_call(name, args)
                 }
+                None if self.has_string_copy_prototype(name) => {
+                    self.sizeof_string_copy_call(name, args)
+                }
                 None if self.has_string_span_prototype(name) => {
                     self.sizeof_string_span_call(name, args)
                 }
@@ -26194,6 +26510,11 @@ impl Interpreter {
                     Err(CustError::new(format!(
                         "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                     )))
+                }
+                None if name == "strcpy" && self.prototypes.contains_key(name) => {
+                    Err(CustError::new(
+                        "standard library function 'strcpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type",
+                    ))
                 }
                 None if matches!(name.as_str(), "strspn" | "strcspn")
                     && self.prototypes.contains_key(name) =>
@@ -27446,6 +27767,12 @@ impl Interpreter {
             .expect("exec_block always creates a current scope")
             .static_local_ids
             .insert(name.to_string(), id);
+        if let Stmt::Array2DPointerDecl {
+            elem_type, columns, ..
+        } = decl
+        {
+            self.mark_current_array2d_pointer_type(name, *elem_type, *columns);
+        }
         Ok(ExecFlow::None)
     }
 
@@ -27536,6 +27863,7 @@ impl Interpreter {
                         points_to_const: *points_to_const,
                     },
                 );
+                self.mark_current_array2d_pointer_type(name, *elem_type, *columns);
                 if *is_const {
                     self.mark_current_variable_const(name);
                 }

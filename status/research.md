@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-31 — Bounded string copy and next concatenation package
+
+- Linux man-pages 6.18 `strcpy(3)` documents `char *strcpy(char *restrict dst, const char *restrict src)`, copying `strlen(src) + 1` bytes including NUL and returning `dst`; it places destination sizing on the caller and states that source/destination may not overlap. Cust turns those native undefined-behavior boundaries into deterministic capacity and overlap diagnostics over interpreter-owned storage.
+- Cust snapshots and bounds the normalized source before mutation, preflights destination writability/capacity/overlap, then copies through interpreter pointer writes and returns the original `PointerValue`. No host address or libc path is used. Two-dimensional character rows are scan/capacity subobjects, and shared pointer arithmetic now rejects crossing from one row into another before a string call can reinterpret the neighboring row as valid storage.
+- Independent review exposed six closure gaps: arity needed to precede row-shape checks in unevaluated calls; enum constants had to stop row-pointer metadata lookup; row-pointer compound-assignment wrappers needed classification; native-overlap UB needed deterministic rejection; flattened two-dimensional pointer arithmetic needed row-local bounds; and matching user definitions had to outrank intrinsic inference beneath `sizeof(*call)`. Each received a focused RED/GREEN regression before final approval.
+- The same man page specifies `strcat` as overwriting destination's terminating NUL with source and requiring `strlen(dst) + strlen(src) + 1` bytes. The next package can reuse `strcpy` activation, pointer identity, overlap, capacity, row, and non-evaluating machinery while adding a bounded pre-scan of the existing destination string.
+
 ## 2026-07-31 — Bounded substring search
 
 - Local `man 3 strstr` (Linux man-pages 6.18): `char *strstr(const char *haystack, const char *needle)` returns the beginning of the first occurrence of `needle`, null when absent, and exactly `haystack` when `needle` is empty; terminating NUL bytes are not compared.

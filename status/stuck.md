@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-31 bounded `strstr` run: eight focused interpreter tests, adjacent `strpbrk`/string-span regressions, the registered strict native/compiler-oracle fixture, formatting, strict Clippy, all 1,211 local tests, and both Docker Compose gates pass. Independent review found nested `strstr` calls under scalar `sizeof` wrappers bypassed declaration/arity/type validation; focused RED/GREEN generalized the recursive intrinsic validator, and final re-review approved with no blocking/high/medium issue. The runtime image prints `10`.
+None. Last reviewed during the 2026-07-31 bounded `strcpy` run: nine focused interpreter tests, the registered strict native/compiler-oracle fixture, formatting, strict Clippy, all 1,220 local tests, and both Docker Compose gates pass. Independent review drove focused RED/GREEN fixes for unevaluated arity ordering, enum-shadowed row metadata, row compound wrappers, overlap, cross-row two-dimensional arithmetic, and matching user-definition precedence; final re-review returned `APPROVED`. The runtime image prints `10`.
 
 ## Blocker template
 
