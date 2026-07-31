@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-31 — Bounded character-set search
+
+- Local `man 3 strpbrk` (Linux man-pages 6.18): `char *strpbrk(const char *s, const char *accept)` returns the first byte in `s` that occurs in `accept`, or null when no byte matches. Cust maps this to two independently bounded interpreter-owned NUL-terminated character sequences and returns an owner/lifetime/read-only-preserving pointer into the first sequence.
+- Both pointer expressions evaluate once left-to-right before validation. Shared character-sequence copying normalizes values modulo 256, excludes each terminating NUL from membership, accepts a terminator at offset 4,096, and reports exact argument-specific null/type/lifetime/unterminated/over-bound diagnostics.
+- Review showed that direct `sizeof(strpbrk(...))` coverage is insufficient: `pointer_expr_pointee_type()` must validate recognized intrinsic calls used beneath `sizeof(*call)`, and must preserve missing/incompatible declaration diagnostics instead of falling through to Cust `int` sizing. Focused RED/GREEN regressions cover all three nested routes.
+- Local `man 3 strspn` identifies the next compact package: `strspn` returns the initial segment length consisting only of accepted bytes, while `strcspn` returns the initial segment length consisting only of bytes absent from the reject set. Both can reuse the reviewed two-sequence bounded-validation model with deterministic integer results.
+
 ## 2026-07-31 — Bounded reverse character search
 
 - Official WG14 N1570 §7.24.5.5: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `char *strrchr(const char *s, int c)` locates the last occurrence of `c` converted to `char`; the terminating NUL is part of the searched string; the result is the located pointer or null when absent.

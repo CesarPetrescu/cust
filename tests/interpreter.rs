@@ -15278,6 +15278,220 @@ fn supports_bounded_strrchr_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strpbrk_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/character_set_search_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strpbrk_declaration_and_call_boundaries() {
+    let expected = "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type";
+    for program in [
+        "const char *strpbrk(const char *text, const char *accept);\nint main(void) { return strpbrk(\"text\", \"x\") != 0; }\n",
+        "char *strpbrk(char *text, const char *accept);\nint main(void) { return sizeof(strpbrk(\"text\", \"x\")); }\n",
+        "char *strpbrk(const char *text, char *accept);\nint main(void) { return strpbrk(\"text\", \"x\") != 0; }\n",
+        "char *strpbrk(const char *text, const int *accept);\nint main(void) { return strpbrk(\"text\", 0) != 0; }\n",
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+
+    for (program, expected) in [
+        (
+            "int main(void) { return strpbrk(\"text\", \"x\") != 0; }\n",
+            "undefined function 'strpbrk'",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { return strpbrk(\"text\") != 0; }\n",
+            "function 'strpbrk' expected 2 arguments, got 1",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+
+    let user_definition = r#"
+int strpbrk(int text, int accept) {
+    return text + accept;
+}
+int main(void) {
+    return strpbrk(3, -3);
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strpbrk_pointer_storage_and_lifetime_boundaries() {
+    for (program, expected) in [
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { int value = 0; return strpbrk(&value, \"x\") != 0; }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { int value = 0; return strpbrk(\"text\", &value) != 0; }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nchar *expired(void) { char text[2] = {'x', 0}; return text; }\nint main(void) { return strpbrk(expired(), \"x\") != 0; }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nchar *expired(void) { char accept[2] = {'x', 0}; return accept; }\nint main(void) { return strpbrk(\"text\", expired()) != 0; }\n",
+            "pointer to out-of-scope variable 'accept'",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nchar *escaped(void) { char text[2] = {'x', 0}; return strpbrk(text, \"x\"); }\nint main(void) { return *escaped(); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { return strpbrk((const char *)0, \"x\") != 0; }\n",
+            "null character pointer passed as argument 1 to function 'strpbrk'",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { return strpbrk(\"text\", (const char *)0) != 0; }\n",
+            "null character pointer passed as argument 2 to function 'strpbrk'",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { const char text[1] = {'x'}; return strpbrk(text, \"x\") != 0; }\n",
+            "unterminated character sequence passed as argument 1 to function 'strpbrk'",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { const char accept[1] = {'x'}; return strpbrk(\"text\", accept) != 0; }\n",
+            "unterminated character sequence passed as argument 2 to function 'strpbrk'",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { *strpbrk(\"text\", \"t\") = 'x'; return 0; }\n",
+            "cannot modify read-only array through pointer",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn strpbrk_evaluates_both_pointers_in_source_order_before_validation() {
+    let program = r#"
+char *strpbrk(const char *text, const char *accept);
+int order = 0;
+int *text(void) {
+    static int value = 0;
+    order = 1;
+    return &value;
+}
+char *accept(void) {
+    static char values[1] = {0};
+    return &values[order == 1 ? 2 : -1];
+}
+int main(void) {
+    return strpbrk(text(), accept()) != 0;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "array 'values' index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn normalizes_and_bounds_strpbrk_character_sequences() {
+    let normalized = r#"
+char *strpbrk(const char *text, const char *accept);
+int main(void) {
+    char text[4] = {354, 'y', 'z', 0};
+    char accept[2] = {610, 0};
+    return strpbrk(text, accept) == text ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(normalized).unwrap(), 0);
+
+    let boundary = "x".repeat(4096);
+    let program = format!(
+        "char *strpbrk(const char *text, const char *accept);\nint main(void) {{ const char *text = \"{boundary}\"; return strpbrk(text, \"x\") == text && strpbrk(\"x\", text) != 0 ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&program).unwrap(), 0);
+
+    let oversized = "x".repeat(4097);
+    for (program, expected) in [
+        (
+            format!(
+                "char *strpbrk(const char *text, const char *accept);\nint main(void) {{ return strpbrk(\"{oversized}\", \"x\") != 0; }}\n"
+            ),
+            "argument 1 to function 'strpbrk' exceeded maximum input length of 4096 bytes",
+        ),
+        (
+            format!(
+                "char *strpbrk(const char *text, const char *accept);\nint main(void) {{ return strpbrk(\"x\", \"{oversized}\") != 0; }}\n"
+            ),
+            "argument 2 to function 'strpbrk' exceeded maximum input length of 4096 bytes",
+        ),
+    ] {
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn sizeof_strpbrk_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+char *strpbrk(const char *text, const char *accept);
+char *mark(int *calls) {
+    *calls += 1;
+    return "text";
+}
+int main(void) {
+    int left_calls = 0;
+    int right_calls = 0;
+    int size = sizeof(strpbrk(mark(&left_calls), mark(&right_calls)));
+    return size == sizeof(char *) && left_calls == 0 && right_calls == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { return sizeof(strpbrk(\"text\")); }\n",
+            "function 'strpbrk' expected 2 arguments, got 1",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { int value = 0; return sizeof(strpbrk(&value, \"x\")); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { int value = 0; return sizeof(strpbrk(\"text\", &value)); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { return sizeof(strpbrk(\"text\", 1)); }\n",
+            "function 'strpbrk' requires pointers to character storage",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { return sizeof(*strpbrk(\"text\")); }\n",
+            "function 'strpbrk' expected 2 arguments, got 1",
+        ),
+        (
+            "char *strpbrk(const char *text, const char *accept);\nint main(void) { int value = 0; return sizeof(*strpbrk(&value, \"x\")); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int main(void) { return sizeof(*strpbrk(\"text\", \"x\")); }\n",
+            "undefined function 'strpbrk'",
+        ),
+        (
+            "const char *strpbrk(const char *text, const char *accept);\nint main(void) { return sizeof(*strpbrk(\"text\", \"x\")); }\n",
+            "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn preserves_strrchr_declaration_and_call_boundaries() {
     let expected = "standard library function 'strrchr' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type";
     for program in [

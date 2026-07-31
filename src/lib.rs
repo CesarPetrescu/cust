@@ -16765,6 +16765,9 @@ impl Interpreter {
             if self.has_character_search_prototype(name) {
                 return self.call_character_search_function(name, arg_exprs);
             }
+            if self.has_character_set_search_prototype(name) {
+                return self.call_character_set_search_function(name, arg_exprs);
+            }
             if matches!(name, "abs" | "labs" | "llabs") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
@@ -16794,6 +16797,11 @@ impl Interpreter {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type"
                 )));
+            }
+            if name == "strpbrk" && self.prototypes.contains_key(name) {
+                return Err(CustError::new(
+                    "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
+                ));
             }
             return Err(CustError::new(format!("undefined function '{name}'")));
         };
@@ -17621,6 +17629,61 @@ impl Interpreter {
         Ok(POINTER_SIZE)
     }
 
+    fn has_character_set_search_prototype(&self, name: &str) -> bool {
+        if name != "strpbrk" {
+            return false;
+        }
+        let character_pointer = ParamSignature {
+            ty: ParamType::Scalar(CType::Char),
+            kind: ParamKind::Pointer,
+            points_to_const: true,
+        };
+        let expected = FunctionSignature {
+            return_type: ReturnType::Pointer {
+                ty: PointeeType::Scalar(CType::Char),
+                points_to_const: false,
+            },
+            params: vec![character_pointer.clone(), character_pointer],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_character_set_search_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 2 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 2 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let text_pointer = self.eval_pointer(&arg_exprs[0])?;
+        let accept_pointer = self.eval_pointer(&arg_exprs[1])?;
+        self.validate_character_pointer_argument(name, 1, &text_pointer)?;
+        self.validate_character_pointer_argument(name, 2, &accept_pointer)?;
+        let text = self.read_bounded_character_sequence(name, 1, &text_pointer)?;
+        let accept = self.read_bounded_character_sequence(name, 2, &accept_pointer)?;
+
+        let result = match text.iter().position(|byte| accept.contains(byte)) {
+            Some(0) => text_pointer,
+            Some(offset) => self.offset_array_pointer(&text_pointer, offset as i64)?,
+            None => PointerValue::Null,
+        };
+        Ok(Some(ReturnValue::Pointer {
+            pointer: result,
+            ty: PointeeType::Scalar(CType::Char),
+            points_to_const: false,
+        }))
+    }
+
+    fn sizeof_character_set_search_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        self.sizeof_string_comparison_call(name, args)?;
+        Ok(POINTER_SIZE)
+    }
+
     fn validate_return_value(
         &self,
         function_name: &str,
@@ -18184,8 +18247,22 @@ impl Interpreter {
             Expr::Deref(pointer) => Ok(self
                 .array2d_row_pointer_element_type(pointer)
                 .map(PointeeType::Scalar)),
-            Expr::Call { name, .. } if self.has_character_search_prototype(name) => {
+            Expr::Call { name, args } if self.has_character_search_prototype(name) => {
+                self.sizeof_character_search_call(name, args)?;
                 Ok(Some(PointeeType::Scalar(CType::Char)))
+            }
+            Expr::Call { name, args } if self.has_character_set_search_prototype(name) => {
+                self.sizeof_character_set_search_call(name, args)?;
+                Ok(Some(PointeeType::Scalar(CType::Char)))
+            }
+            Expr::Call { name, .. } if name == "strpbrk" && !self.functions.contains_key(name) => {
+                if self.prototypes.contains_key(name) {
+                    Err(CustError::new(
+                        "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
+                    ))
+                } else {
+                    Err(CustError::new("undefined function 'strpbrk'"))
+                }
             }
             Expr::Call { name, .. } => match self
                 .functions
@@ -24507,6 +24584,7 @@ impl Interpreter {
             Expr::Deref(pointer) => self.array2d_row_pointer_element_type(pointer).is_some(),
             Expr::Call { name, .. } => {
                 self.has_character_search_prototype(name)
+                    || self.has_character_set_search_prototype(name)
                     || matches!(
                         self.functions
                             .get(name)
@@ -25737,6 +25815,9 @@ impl Interpreter {
                 None if self.has_character_search_prototype(name) => {
                     self.sizeof_character_search_call(name, args)
                 }
+                None if self.has_character_set_search_prototype(name) => {
+                    self.sizeof_character_set_search_call(name, args)
+                }
                 None if name == "strncmp" && self.prototypes.contains_key(name) => {
                     Err(CustError::new(
                         "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
@@ -25753,6 +25834,11 @@ impl Interpreter {
                     Err(CustError::new(format!(
                         "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type"
                     )))
+                }
+                None if name == "strpbrk" && self.prototypes.contains_key(name) => {
+                    Err(CustError::new(
+                        "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
+                    ))
                 }
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },

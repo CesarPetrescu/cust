@@ -6,11 +6,11 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ### Language subset
 
-- Added explicitly prototyped bounded C11 `strchr` and `strrchr` calls over interpreter-owned character storage. Calls evaluate arguments once in source order, normalize byte comparisons, return first/last/NUL/null pointers with preserved storage/owner/lifetime/read-only identity, enforce deterministic 4,096-byte traversal, and retain non-evaluating constraint-aware `sizeof`.
+- Added explicitly prototyped bounded C11 `strchr`, `strrchr`, and `strpbrk` calls over interpreter-owned character storage. Calls evaluate arguments once in source order, normalize byte comparisons, return matching/NUL/null pointers with preserved storage/owner/lifetime/read-only identity, enforce deterministic 4,096-byte traversal per sequence, and retain non-evaluating constraint-aware `sizeof`.
 
 ### Diagnostics and verification
 
-- Added exact declaration, arity, scalar-shape, null, wrong-pointee, escaped-owner, unterminated-input, traversal-limit, and read-only-write coverage plus registered warning-free native compiler-oracle fixtures.
+- Added exact declaration, arity, scalar/pointer-shape, null, wrong-pointee, escaped-owner, unterminated-input, traversal-limit, read-only-write, and nested type-query coverage plus registered warning-free native compiler-oracle fixtures.
 
 ## v0.7.0 — 2026-07-31
 
