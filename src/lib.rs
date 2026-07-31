@@ -16371,7 +16371,9 @@ impl Parser {
     }
 }
 
-const MAX_CALL_DEPTH: usize = 32;
+// Interpreted calls recurse through Rust; keep deterministic headroom on the
+// test harness's smaller worker-thread stack as interpreter frames evolve.
+const MAX_CALL_DEPTH: usize = 24;
 const MAX_INTEGER_STRING_BYTES: usize = 4096;
 
 struct Interpreter {
@@ -16754,6 +16756,9 @@ impl Interpreter {
             if self.has_string_comparison_prototype(name) {
                 return self.call_string_comparison_function(name, arg_exprs);
             }
+            if self.has_string_prefix_comparison_prototype(name) {
+                return self.call_string_prefix_comparison_function(name, arg_exprs);
+            }
             if self.has_string_length_prototype(name) {
                 return self.call_string_length_function(name, arg_exprs);
             }
@@ -16770,6 +16775,11 @@ impl Interpreter {
             if name == "strcmp" && self.prototypes.contains_key(name) {
                 return Err(CustError::new(
                     "standard library function 'strcmp' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type",
+                ));
+            }
+            if name == "strncmp" && self.prototypes.contains_key(name) {
+                return Err(CustError::new(
+                    "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
                 ));
             }
             if name == "strlen" && self.prototypes.contains_key(name) {
@@ -17286,6 +17296,139 @@ impl Interpreter {
                 }
             }
         }
+        Ok(INT_SIZE)
+    }
+
+    fn has_string_prefix_comparison_prototype(&self, name: &str) -> bool {
+        if name != "strncmp" {
+            return false;
+        }
+        let character_pointer = ParamSignature {
+            ty: ParamType::Scalar(CType::Char),
+            kind: ParamKind::Pointer,
+            points_to_const: true,
+        };
+        let expected = FunctionSignature {
+            return_type: ReturnType::Scalar(CType::Int),
+            params: vec![
+                character_pointer.clone(),
+                character_pointer,
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                },
+            ],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_string_prefix_comparison_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let left = self.eval_pointer(&arg_exprs[0])?;
+        let right = self.eval_pointer(&arg_exprs[1])?;
+        let count = self.eval_scalar_conversion(CType::Int, &arg_exprs[2])?;
+        self.validate_character_pointer_argument(name, 1, &left)?;
+        self.validate_character_pointer_argument(name, 2, &right)?;
+        if count < 0 {
+            return Err(CustError::new(format!(
+                "function '{name}' requires a nonnegative count, got {count}"
+            )));
+        }
+        let count = usize::try_from(count).map_err(|_| {
+            CustError::new(format!(
+                "function '{name}' count exceeds maximum comparison length of {MAX_INTEGER_STRING_BYTES} bytes"
+            ))
+        })?;
+        if count > MAX_INTEGER_STRING_BYTES {
+            return Err(CustError::new(format!(
+                "function '{name}' count {count} exceeds maximum comparison length of {MAX_INTEGER_STRING_BYTES} bytes"
+            )));
+        }
+
+        for offset in 0..count {
+            let left = self.read_character_comparison_byte(name, 1, &left, offset, count)?;
+            let right = self.read_character_comparison_byte(name, 2, &right, offset, count)?;
+            match left.cmp(&right) {
+                std::cmp::Ordering::Less => return Ok(Some(ReturnValue::Scalar(-1))),
+                std::cmp::Ordering::Greater => return Ok(Some(ReturnValue::Scalar(1))),
+                std::cmp::Ordering::Equal if left == 0 => {
+                    return Ok(Some(ReturnValue::Scalar(0)));
+                }
+                std::cmp::Ordering::Equal => {}
+            }
+        }
+        Ok(Some(ReturnValue::Scalar(0)))
+    }
+
+    fn read_character_comparison_byte(
+        &self,
+        name: &str,
+        argument: usize,
+        pointer: &PointerValue,
+        offset: usize,
+        count: usize,
+    ) -> CustResult<u8> {
+        let byte = match pointer {
+            PointerValue::ArrayBase { array, .. } => array.borrow().elements.get(offset).copied(),
+            PointerValue::ArrayElement { array, index, .. } => index
+                .checked_add(offset)
+                .and_then(|index| array.borrow().elements.get(index).copied()),
+            PointerValue::Scalar { .. }
+            | PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. } => {
+                if offset == 0 {
+                    Some(self.deref_pointer(pointer)?)
+                } else {
+                    None
+                }
+            }
+            PointerValue::Null
+            | PointerValue::Struct { .. }
+            | PointerValue::StructElement { .. }
+            | PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. }
+            | PointerValue::Array2DRow { .. } => {
+                return Err(CustError::new(format!(
+                    "function '{name}' requires character storage for argument {argument}"
+                )));
+            }
+        };
+        byte.map(|byte| byte.rem_euclid(256) as u8)
+            .ok_or_else(|| {
+                CustError::new(format!(
+                    "unterminated character sequence passed as argument {argument} to function '{name}' before requested count {count}"
+                ))
+            })
+    }
+
+    fn sizeof_string_prefix_comparison_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        self.sizeof_string_comparison_call(name, &args[..2])?;
+        if self.expr_is_pointer_value(&args[2])
+            || self.aggregate_expr_type_name(&args[2]).is_ok()
+            || self.expr_is_void_value(&args[2])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        self.sizeof_expr(&args[2])?;
         Ok(INT_SIZE)
     }
 
@@ -25429,8 +25572,16 @@ impl Interpreter {
                 None if self.has_string_comparison_prototype(name) => {
                     self.sizeof_string_comparison_call(name, args)
                 }
+                None if self.has_string_prefix_comparison_prototype(name) => {
+                    self.sizeof_string_prefix_comparison_call(name, args)
+                }
                 None if self.has_string_length_prototype(name) => {
                     self.sizeof_string_length_call(name, args)
+                }
+                None if name == "strncmp" && self.prototypes.contains_key(name) => {
+                    Err(CustError::new(
+                        "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
+                    ))
                 }
                 None if name == "strlen" && self.prototypes.contains_key(name) => {
                     Err(CustError::new(

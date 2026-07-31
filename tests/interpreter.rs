@@ -15257,6 +15257,212 @@ fn supports_bounded_strlen_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strncmp_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/string_prefix_comparison_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strncmp_declaration_call_and_pointer_boundaries() {
+    for (program, expected) in [
+        (
+            "int main(void) { return strncmp(\"left\", \"right\", 1); }\n",
+            "undefined function 'strncmp'",
+        ),
+        (
+            "int strncmp(char *left, const char *right, int count);\nint main(void) { return strncmp(\"left\", \"right\", 1); }\n",
+            "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
+        ),
+        (
+            "char strncmp(const char *left, const char *right, int count);\nint main(void) { return strncmp(\"left\", \"right\", 1); }\n",
+            "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, const int *count);\nint main(void) { return strncmp(\"left\", \"right\", 0); }\n",
+            "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { return strncmp(\"left\", \"right\"); }\n",
+            "function 'strncmp' expected 3 arguments, got 2",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { int value = 0; return strncmp(&value, \"right\", 1); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nchar *expired(void) { char text[2] = {'x', 0}; return text; }\nint main(void) { return strncmp(expired(), \"x\", 1); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { return strncmp((const char *)0, \"right\", 0); }\n",
+            "null character pointer passed as argument 1 to function 'strncmp'",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { return strncmp(\"left\", (const char *)0, 0); }\n",
+            "null character pointer passed as argument 2 to function 'strncmp'",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+
+    let user_definition = r#"
+int strncmp(int left, int right, int count) {
+    return left - right + count;
+}
+int main(void) {
+    return strncmp(7, 4, -3);
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+}
+
+#[test]
+fn strncmp_evaluates_pointer_and_count_arguments_left_to_right_before_validation() {
+    let program = r#"
+int strncmp(const char *left, const char *right, int count);
+int order = 0;
+
+char *left(void) {
+    order = 1;
+    return 0;
+}
+
+char *right(void) {
+    order = order * 10 + 2;
+    return "right";
+}
+
+int count(void) {
+    int values[1] = {0};
+    return values[order == 12 ? 2 : -1];
+}
+
+int main(void) {
+    return strncmp(left(), right(), count());
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "array 'values' index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn strncmp_stops_at_first_difference_or_nul_without_reading_past_it() {
+    let mismatch = r#"
+int strncmp(const char *left, const char *right, int count);
+int main(void) {
+    char left = 'a';
+    char right = 'b';
+    return strncmp(&left, &right, 2) < 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(mismatch).unwrap(), 0);
+
+    let nul = r#"
+int strncmp(const char *left, const char *right, int count);
+int main(void) {
+    char left = 0;
+    char right = 'x';
+    return strncmp(&left, &right, 2) < 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(nul).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strncmp_count_and_prefix_boundaries() {
+    for (program, expected) in [
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { return strncmp(\"left\", \"right\", -1); }\n",
+            "function 'strncmp' requires a nonnegative count, got -1",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { return strncmp(\"left\", \"right\", 4097); }\n",
+            "function 'strncmp' count 4097 exceeds maximum comparison length of 4096 bytes",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { const char left[1] = {'x'}; return strncmp(left, \"x\", 2); }\n",
+            "unterminated character sequence passed as argument 1 to function 'strncmp' before requested count 2",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { const char right[1] = {'x'}; return strncmp(\"x\", right, 2); }\n",
+            "unterminated character sequence passed as argument 2 to function 'strncmp' before requested count 2",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+
+    let normalized_nul = r#"
+int strncmp(const char *left, const char *right, int count);
+int main(void) {
+    char left[3] = {256, 'x', 0};
+    char empty[1] = {0};
+    return strncmp(left, empty, 3) == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(normalized_nul).unwrap(), 0);
+
+    let boundary = "x".repeat(4096);
+    let program = format!(
+        "int strncmp(const char *left, const char *right, int count);\nint main(void) {{ return strncmp(\"{boundary}\", \"{boundary}\", 4096); }}\n"
+    );
+    assert_eq!(interpret(&program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_strncmp_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+int strncmp(const char *left, const char *right, unsigned long int count);
+int mark(int *calls) {
+    *calls += 1;
+    return 2;
+}
+int main(void) {
+    int calls = 0;
+    int size = sizeof(strncmp("left", "right", mark(&calls)));
+    return size == sizeof(int) && calls == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "int strncmp(char *left, const char *right, int count);\nint main(void) { return sizeof(strncmp(\"left\", \"right\", 1)); }\n",
+            "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { return sizeof(strncmp(\"left\", \"right\")); }\n",
+            "function 'strncmp' expected 3 arguments, got 2",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { int value = 0; return sizeof(strncmp(&value, \"right\", 1)); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nint main(void) { int count = 1; return sizeof(strncmp(\"left\", \"right\", &count)); }\n",
+            "function 'strncmp' requires an integer count",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nvoid sink(void) {}\nint main(void) { return sizeof(strncmp(\"left\", \"right\", sink())); }\n",
+            "function 'strncmp' requires an integer count",
+        ),
+        (
+            "int strncmp(const char *left, const char *right, int count);\nvoid sink(void) {}\nint main(void) { return sizeof(strncmp(\"left\", \"right\", 1 ? sink() : sink())); }\n",
+            "function 'strncmp' requires an integer count",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn preserves_strlen_declaration_call_and_pointer_boundaries() {
     for (program, expected) in [
         (
@@ -15559,7 +15765,7 @@ int recurse(int remaining) {
 }
 
 int main(void) {
-    return recurse(30);
+    return recurse(22);
 }
 "#;
 

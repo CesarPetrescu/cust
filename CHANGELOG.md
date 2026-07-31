@@ -10,7 +10,7 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 - Added the first bounded standard-library runtime slice: explicitly prototyped C11 `abs`, `labs`, and `llabs` calls execute inside Cust over its deterministic integer model, evaluate arguments once, and retain scalar `sizeof` metadata without evaluating calls.
 - Added explicitly prototyped C11 `atoi`, `atol`, and `atoll` calls over interpreter-owned NUL-terminated character storage, with C whitespace/sign/decimal parsing, one-time pointer evaluation, a 4,096-byte scan bound, non-evaluating `sizeof`, and deterministic overflow handling.
-- Added explicitly prototyped C11 `strcmp` and `strlen` calls over interpreter-owned character storage, with ordered one-time argument evaluation, unsigned-byte semantics, independent 4,096-byte traversal bounds, lexical sign results or exact lengths, and non-evaluating constraint-aware `sizeof`.
+- Added explicitly prototyped C11 `strcmp`, `strncmp`, and `strlen` calls over interpreter-owned character storage, with ordered one-time argument evaluation, unsigned-byte semantics, deterministic 4,096-byte traversal/count bounds, lexical sign results or exact lengths, and non-evaluating constraint-aware `sizeof`.
 
 ### Diagnostics and verification
 
@@ -21,7 +21,7 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### CLI, packaging, and verification
 
 - Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.7.0`.
-- Verified 1,170 tests at release preparation time: 1,037 interpreter tests, 98 deterministic fuzz-safety tests, and 35 CLI, Docker, compiler-oracle, and repository tests.
+- Verified 1,176 tests at release preparation time: 1,043 interpreter tests, 98 deterministic fuzz-safety tests, and 35 CLI, Docker, compiler-oracle, and repository tests.
 
 ### Known limitations
 

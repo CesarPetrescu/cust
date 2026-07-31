@@ -18,12 +18,21 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-31 — Bounded string prefix comparison
+
+- Official WG14 N1570 §7.24.4.4: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `int strncmp(const char *s1, const char *s2, size_t n)` compares not more than `n` characters and returns an integer greater than, equal to, or less than zero according to the lexical relation of the bounded sequences. The local `man 3 strncmp` page was unavailable.
+- Cust maps the count to its deterministic integer model: negative values and values above 4,096 are exact errors instead of inheriting host `size_t` width/conversion behavior. All three argument expressions evaluate once in source order before either pointer is validated; both pointers are validated even when the count is zero.
+- Comparison must read both character objects lockstep. Independently materializing each requested prefix is incorrect because a mismatch or NUL at the current byte ends the operation before either later byte is required. Values are normalized modulo 256 before lexical comparison and NUL detection; storage exhaustion is reported only if the lockstep traversal reaches it.
+- `sizeof(strncmp(...))` is non-evaluating but still checks the retained signature, arity, pointer shapes, and scalar count shape. Reusing `expr_is_void_value` is necessary for conditional/comma wrappers around void calls; checking only direct `VoidCast` nodes is incomplete. Native compilers remain warning-free fixture oracles only.
+- The first full-suite run after the intrinsic deterministically overflowed the Rust test worker stack in `supports_recursive_calls_within_documented_depth_limit` before Cust's previous 32-call guard. Focused probes showed shallower recursion remained safe; lowering `MAX_CALL_DEPTH` to 24 restores deterministic headroom, preserves a 22-recursive-call success regression, and keeps the exact over-depth Cust diagnostic. This follows the established rule that interpreter frame growth must never let the host stack fail before Cust's guard.
+- Next candidate: bounded explicitly prototyped `strchr` would reuse normalized character traversal but must preserve interpreter pointer identity, owner/lifetime, and read-only metadata in a returned interior pointer or null result.
+
 ## 2026-07-31 — v0.7.0 release closure
 
 - No new language-semantics research was needed. Release consistency remains executable: `env!("CARGO_PKG_VERSION")` drives CLI output, exact CLI and Compose tests pin `0.7.0`, and Cargo metadata confirms the package version.
-- The reconciled release inventory is 1,170 tests: 1,037 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
+- The reconciled release inventory is 1,176 tests: 1,043 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
 - Local and remote `v0.7.0` preflight are empty. The release commit must reach `origin/main` before creating the annotated tag; the remote peeled `refs/tags/v0.7.0^{}` target must then equal the release commit, and an existing tag must never be moved.
-- Next candidate: bounded explicitly prototyped `strncmp` can reuse reviewed character traversal while adding source-ordered count evaluation and at-most-count unsigned-byte prefix comparison.
+- Next candidate: bounded explicitly prototyped `strchr` can reuse normalized character traversal but must return an interior interpreter pointer or null while preserving owner/lifetime and read-only metadata.
 
 ## 2026-07-30 — Bounded string length
 

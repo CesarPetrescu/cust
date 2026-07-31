@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-31 v0.7.0 release-preparation run: focused version assertions are GREEN, package/CLI/Compose metadata agrees on `0.7.0`, the 1,170-test inventory is reconciled, and local/remote tag preflight is empty. Independent review, the canonical gate, release-commit push, annotated-tag publication, and peeled-target verification are required closure steps rather than blockers.
+None. Last reviewed during the 2026-07-31 bounded `strncmp` run: six focused interpreter tests, the registered compiler-oracle fixture, all 1,176 local tests, strict Clippy/formatting, and both Docker Compose gates pass. Independent final review found no blocking/high/medium issue. The runtime image prints `10`.
 
 ## Blocker template
 
