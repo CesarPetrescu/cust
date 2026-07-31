@@ -16801,10 +16801,10 @@ impl Interpreter {
                     "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type"
                 )));
             }
-            if name == "strpbrk" && self.prototypes.contains_key(name) {
-                return Err(CustError::new(
-                    "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
-                ));
+            if matches!(name, "strpbrk" | "strstr") && self.prototypes.contains_key(name) {
+                return Err(CustError::new(format!(
+                    "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
+                )));
             }
             if matches!(name, "strspn" | "strcspn") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
@@ -17638,7 +17638,7 @@ impl Interpreter {
     }
 
     fn has_character_set_search_prototype(&self, name: &str) -> bool {
-        if name != "strpbrk" {
+        if !matches!(name, "strpbrk" | "strstr") {
             return false;
         }
         let character_pointer = ParamSignature {
@@ -17675,7 +17675,17 @@ impl Interpreter {
         let text = self.read_bounded_character_sequence(name, 1, &text_pointer)?;
         let accept = self.read_bounded_character_sequence(name, 2, &accept_pointer)?;
 
-        let result = match text.iter().position(|byte| accept.contains(byte)) {
+        let matched_offset = if name == "strstr" {
+            if accept.is_empty() {
+                Some(0)
+            } else {
+                text.windows(accept.len())
+                    .position(|window| window == accept)
+            }
+        } else {
+            text.iter().position(|byte| accept.contains(byte))
+        };
+        let result = match matched_offset {
             Some(0) => text_pointer,
             Some(offset) => self.offset_array_pointer(&text_pointer, offset as i64)?,
             None => PointerValue::Null,
@@ -17738,9 +17748,22 @@ impl Interpreter {
         self.sizeof_string_comparison_call(name, args)
     }
 
-    fn validate_nested_string_span_calls(&self, expr: &Expr) -> CustResult<()> {
+    fn validate_nested_string_intrinsic_calls(&self, expr: &Expr) -> CustResult<()> {
         match expr {
             Expr::Call { name, args } => {
+                if matches!(name.as_str(), "strpbrk" | "strstr")
+                    && !self.functions.contains_key(name)
+                {
+                    if self.has_character_set_search_prototype(name) {
+                        self.sizeof_character_set_search_call(name, args)?;
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(CustError::new(format!(
+                            "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
+                        )));
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                }
                 if matches!(name.as_str(), "strspn" | "strcspn")
                     && !self.functions.contains_key(name)
                 {
@@ -17755,7 +17778,7 @@ impl Interpreter {
                     }
                 }
                 for arg in args {
-                    self.validate_nested_string_span_calls(arg)?;
+                    self.validate_nested_string_intrinsic_calls(arg)?;
                 }
             }
             Expr::Number(_)
@@ -17785,7 +17808,7 @@ impl Interpreter {
             }
             | Expr::AddressOfAggregateField {
                 aggregate: inner, ..
-            } => self.validate_nested_string_span_calls(inner)?,
+            } => self.validate_nested_string_intrinsic_calls(inner)?,
             Expr::StructArrayGet { index, .. }
             | Expr::StructFieldArrayElementGet { index, .. }
             | Expr::StructElementGet { index, .. }
@@ -17794,18 +17817,18 @@ impl Interpreter {
             | Expr::AddressOfArray { index, .. }
             | Expr::AddressOfStructElementField { index, .. }
             | Expr::AddressOfStructArrayField { index, .. } => {
-                self.validate_nested_string_span_calls(index)?;
+                self.validate_nested_string_intrinsic_calls(index)?;
             }
             Expr::Assign { value, .. }
             | Expr::StructSet { value, .. }
             | Expr::CompoundAssign { value, .. }
             | Expr::StructCompoundSet { value, .. } => {
-                self.validate_nested_string_span_calls(value)?;
+                self.validate_nested_string_intrinsic_calls(value)?;
             }
             Expr::StructPtrArrayGet { pointer, index, .. }
             | Expr::AddressOfStructPtrArrayField { pointer, index, .. } => {
-                self.validate_nested_string_span_calls(pointer)?;
-                self.validate_nested_string_span_calls(index)?;
+                self.validate_nested_string_intrinsic_calls(pointer)?;
+                self.validate_nested_string_intrinsic_calls(index)?;
             }
             Expr::StructFieldArrayElementSet { index, value, .. }
             | Expr::StructFieldArrayElementCompoundSet { index, value, .. }
@@ -17815,15 +17838,15 @@ impl Interpreter {
             | Expr::ArrayCompoundSet { index, value, .. }
             | Expr::StructArrayCompoundSet { index, value, .. }
             | Expr::StructElementCompoundSet { index, value, .. } => {
-                self.validate_nested_string_span_calls(index)?;
-                self.validate_nested_string_span_calls(value)?;
+                self.validate_nested_string_intrinsic_calls(index)?;
+                self.validate_nested_string_intrinsic_calls(value)?;
             }
             Expr::DerefSet { pointer, value }
             | Expr::StructPtrSet { pointer, value, .. }
             | Expr::DerefCompoundSet { pointer, value, .. }
             | Expr::StructPtrCompoundSet { pointer, value, .. } => {
-                self.validate_nested_string_span_calls(pointer)?;
-                self.validate_nested_string_span_calls(value)?;
+                self.validate_nested_string_intrinsic_calls(pointer)?;
+                self.validate_nested_string_intrinsic_calls(value)?;
             }
             Expr::StructElementArrayGet {
                 index, array_index, ..
@@ -17831,8 +17854,8 @@ impl Interpreter {
             | Expr::AddressOfStructElementArrayField {
                 index, array_index, ..
             } => {
-                self.validate_nested_string_span_calls(index)?;
-                self.validate_nested_string_span_calls(array_index)?;
+                self.validate_nested_string_intrinsic_calls(index)?;
+                self.validate_nested_string_intrinsic_calls(array_index)?;
             }
             Expr::StructElementArraySet {
                 index,
@@ -17846,13 +17869,13 @@ impl Interpreter {
                 value,
                 ..
             } => {
-                self.validate_nested_string_span_calls(index)?;
-                self.validate_nested_string_span_calls(array_index)?;
-                self.validate_nested_string_span_calls(value)?;
+                self.validate_nested_string_intrinsic_calls(index)?;
+                self.validate_nested_string_intrinsic_calls(array_index)?;
+                self.validate_nested_string_intrinsic_calls(value)?;
             }
             Expr::Array2DGet { row, column, .. } => {
-                self.validate_nested_string_span_calls(row)?;
-                self.validate_nested_string_span_calls(column)?;
+                self.validate_nested_string_intrinsic_calls(row)?;
+                self.validate_nested_string_intrinsic_calls(column)?;
             }
             Expr::Array2DSet {
                 row, column, value, ..
@@ -17860,9 +17883,9 @@ impl Interpreter {
             | Expr::Array2DCompoundSet {
                 row, column, value, ..
             } => {
-                self.validate_nested_string_span_calls(row)?;
-                self.validate_nested_string_span_calls(column)?;
-                self.validate_nested_string_span_calls(value)?;
+                self.validate_nested_string_intrinsic_calls(row)?;
+                self.validate_nested_string_intrinsic_calls(column)?;
+                self.validate_nested_string_intrinsic_calls(value)?;
             }
             Expr::StructArray2DGet {
                 target,
@@ -17871,8 +17894,8 @@ impl Interpreter {
                 ..
             } => {
                 self.validate_string_span_array_2d_target(target)?;
-                self.validate_nested_string_span_calls(row)?;
-                self.validate_nested_string_span_calls(column)?;
+                self.validate_nested_string_intrinsic_calls(row)?;
+                self.validate_nested_string_intrinsic_calls(column)?;
             }
             Expr::StructArray2DSet {
                 target,
@@ -17889,9 +17912,9 @@ impl Interpreter {
                 ..
             } => {
                 self.validate_string_span_array_2d_target(target)?;
-                self.validate_nested_string_span_calls(row)?;
-                self.validate_nested_string_span_calls(column)?;
-                self.validate_nested_string_span_calls(value)?;
+                self.validate_nested_string_intrinsic_calls(row)?;
+                self.validate_nested_string_intrinsic_calls(column)?;
+                self.validate_nested_string_intrinsic_calls(value)?;
             }
             Expr::ScalarLiteralSet { init, value, .. }
             | Expr::ScalarLiteralCompoundSet { init, value, .. }
@@ -17905,8 +17928,8 @@ impl Interpreter {
                 value,
                 ..
             } => {
-                self.validate_nested_string_span_calls(init)?;
-                self.validate_nested_string_span_calls(value)?;
+                self.validate_nested_string_intrinsic_calls(init)?;
+                self.validate_nested_string_intrinsic_calls(value)?;
             }
             Expr::AggregateLiteral { init, .. } | Expr::AddressOfAggregateLiteral { init, .. } => {
                 self.validate_string_span_struct_initializers(init)?;
@@ -17922,13 +17945,13 @@ impl Interpreter {
                 then_expr,
                 else_expr,
             } => {
-                self.validate_nested_string_span_calls(cond)?;
-                self.validate_nested_string_span_calls(then_expr)?;
-                self.validate_nested_string_span_calls(else_expr)?;
+                self.validate_nested_string_intrinsic_calls(cond)?;
+                self.validate_nested_string_intrinsic_calls(then_expr)?;
+                self.validate_nested_string_intrinsic_calls(else_expr)?;
             }
             Expr::Binary(left, _, right) | Expr::Comma(left, right) => {
-                self.validate_nested_string_span_calls(left)?;
-                self.validate_nested_string_span_calls(right)?;
+                self.validate_nested_string_intrinsic_calls(left)?;
+                self.validate_nested_string_intrinsic_calls(right)?;
             }
         }
         Ok(())
@@ -17938,10 +17961,10 @@ impl Interpreter {
         match target {
             Array2DFieldTarget::Direct { .. } => Ok(()),
             Array2DFieldTarget::Element { index, .. } => {
-                self.validate_nested_string_span_calls(index)
+                self.validate_nested_string_intrinsic_calls(index)
             }
             Array2DFieldTarget::Pointer { pointer, .. } => {
-                self.validate_nested_string_span_calls(pointer)
+                self.validate_nested_string_intrinsic_calls(pointer)
             }
         }
     }
@@ -17953,7 +17976,7 @@ impl Interpreter {
         for initializer in initializers {
             match initializer {
                 ArrayInitializer::Expr(expr) | ArrayInitializer::Designated { value: expr, .. } => {
-                    self.validate_nested_string_span_calls(expr)?;
+                    self.validate_nested_string_intrinsic_calls(expr)?;
                 }
                 ArrayInitializer::StringLiteral(_) => {}
             }
@@ -17967,7 +17990,9 @@ impl Interpreter {
     ) -> CustResult<()> {
         for initializer in initializers {
             match initializer {
-                StructInitializer::Expr(expr) => self.validate_nested_string_span_calls(expr)?,
+                StructInitializer::Expr(expr) => {
+                    self.validate_nested_string_intrinsic_calls(expr)?
+                }
                 StructInitializer::Array(values) => {
                     self.validate_string_span_array_initializers(values)?;
                 }
@@ -18576,13 +18601,16 @@ impl Interpreter {
                 self.sizeof_character_set_search_call(name, args)?;
                 Ok(Some(PointeeType::Scalar(CType::Char)))
             }
-            Expr::Call { name, .. } if name == "strpbrk" && !self.functions.contains_key(name) => {
+            Expr::Call { name, .. }
+                if matches!(name.as_str(), "strpbrk" | "strstr")
+                    && !self.functions.contains_key(name) =>
+            {
                 if self.prototypes.contains_key(name) {
-                    Err(CustError::new(
-                        "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
-                    ))
+                    Err(CustError::new(format!(
+                        "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
+                    )))
                 } else {
-                    Err(CustError::new("undefined function 'strpbrk'"))
+                    Err(CustError::new(format!("undefined function '{name}'")))
                 }
             }
             Expr::Call { name, .. } => match self
@@ -25885,7 +25913,7 @@ impl Interpreter {
     }
 
     fn sizeof_expr(&self, expr: &Expr) -> CustResult<i64> {
-        self.validate_nested_string_span_calls(expr)?;
+        self.validate_nested_string_intrinsic_calls(expr)?;
         match expr {
             Expr::Number(_) => Ok(INT_SIZE),
             Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
@@ -26160,10 +26188,12 @@ impl Interpreter {
                         "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type"
                     )))
                 }
-                None if name == "strpbrk" && self.prototypes.contains_key(name) => {
-                    Err(CustError::new(
-                        "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
-                    ))
+                None if matches!(name.as_str(), "strpbrk" | "strstr")
+                    && self.prototypes.contains_key(name) =>
+                {
+                    Err(CustError::new(format!(
+                        "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
+                    )))
                 }
                 None if matches!(name.as_str(), "strspn" | "strcspn")
                     && self.prototypes.contains_key(name) =>

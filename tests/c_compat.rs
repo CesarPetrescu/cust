@@ -283,6 +283,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/character_search_function.c",
     "tests/fixtures/compat/valid/reverse_character_search_function.c",
     "tests/fixtures/compat/valid/character_set_search_function.c",
+    "tests/fixtures/compat/valid/substring_search_function.c",
     "tests/fixtures/compat/valid/string_span_functions.c",
     "tests/fixtures/compat/valid/line_comments.c",
     "tests/fixtures/compat/valid/bool_type_spellings.c",

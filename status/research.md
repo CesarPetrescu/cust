@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-31 — Bounded substring search
+
+- Local `man 3 strstr` (Linux man-pages 6.18): `char *strstr(const char *haystack, const char *needle)` returns the beginning of the first occurrence of `needle`, null when absent, and exactly `haystack` when `needle` is empty; terminating NUL bytes are not compared.
+- Cust activates only that retained signature and searches two independently bounded normalized byte vectors. A nonempty needle uses slice-window equality; the empty needle takes an explicit offset-zero branch because Rust rejects `windows(0)`. Returning the original or offset haystack `PointerValue` preserves interpreter storage, owner/lifetime, and read-only metadata.
+- Independent review exposed that direct/dereferenced `sizeof` tests did not prove constraints for a `strstr` call nested beneath a scalar binary wrapper. A focused failing regression generalized the existing recursive string-intrinsic validator to `strpbrk`/`strstr`, preserving declaration/arity/pointer checks without evaluating operands.
+- Next candidate: bounded `strcpy` can reuse the two-pointer validation model, but needs a mutable destination, byte-plus-NUL copying, capacity/read-only diagnostics, destination identity return, and overlap kept outside the supported deterministic subset.
+
 ## 2026-07-31 — Bounded string spans and next substring candidate
 
 - Local `man 3 strspn` (Linux man-pages 6.18): `strspn` returns the initial segment length containing only bytes from the accept set; `strcspn` returns the initial segment length containing no bytes from the reject set. Cust maps both to exact integer-returning declarations and two independently bounded, normalized interpreter-owned character sequences.

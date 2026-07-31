@@ -15285,6 +15285,236 @@ fn supports_bounded_strpbrk_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strstr_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/substring_search_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn strstr_returns_the_original_haystack_pointer_for_an_empty_needle() {
+    let program = r#"
+char *strstr(const char *haystack, const char *needle);
+int main(void) {
+    char text[5] = "text";
+    return strstr(text, "") == text ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strstr_declaration_call_and_user_definition_boundaries() {
+    let expected = "standard library function 'strstr' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type";
+    for program in [
+        "const char *strstr(const char *haystack, const char *needle);\nint main(void) { return strstr(\"text\", \"x\") != 0; }\n",
+        "char *strstr(char *haystack, const char *needle);\nint main(void) { return sizeof(strstr(\"text\", \"x\")); }\n",
+        "char *strstr(const char *haystack, char *needle);\nint main(void) { return strstr(\"text\", \"x\") != 0; }\n",
+        "char *strstr(const char *haystack, const int *needle);\nint main(void) { return strstr(\"text\", 0) != 0; }\n",
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    for (program, expected) in [
+        (
+            "int main(void) { return strstr(\"text\", \"x\") != 0; }\n",
+            "undefined function 'strstr'",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { return strstr(\"text\") != 0; }\n",
+            "function 'strstr' expected 2 arguments, got 1",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let user_definition = r#"
+int strstr(int haystack, int needle) {
+    return haystack + needle;
+}
+int main(void) {
+    return strstr(3, -3);
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strstr_pointer_storage_and_lifetime_boundaries() {
+    for (program, expected) in [
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { int value = 0; return strstr(&value, \"x\") != 0; }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { int value = 0; return strstr(\"text\", &value) != 0; }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nchar *expired(void) { char text[2] = {'x', 0}; return text; }\nint main(void) { return strstr(expired(), \"x\") != 0; }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nchar *expired(void) { char needle[2] = {'x', 0}; return needle; }\nint main(void) { return strstr(\"text\", expired()) != 0; }\n",
+            "pointer to out-of-scope variable 'needle'",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nchar *escaped(void) { char text[2] = {'x', 0}; return strstr(text, \"x\"); }\nint main(void) { return *escaped(); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { return strstr((const char *)0, \"x\") != 0; }\n",
+            "null character pointer passed as argument 1 to function 'strstr'",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { return strstr(\"text\", (const char *)0) != 0; }\n",
+            "null character pointer passed as argument 2 to function 'strstr'",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { const char text[1] = {'x'}; return strstr(text, \"x\") != 0; }\n",
+            "unterminated character sequence passed as argument 1 to function 'strstr'",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { const char needle[1] = {'x'}; return strstr(\"text\", needle) != 0; }\n",
+            "unterminated character sequence passed as argument 2 to function 'strstr'",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { *strstr(\"text\", \"t\") = 'x'; return 0; }\n",
+            "cannot modify read-only array through pointer",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn strstr_evaluates_both_pointers_in_source_order_before_validation() {
+    let program = r#"
+char *strstr(const char *haystack, const char *needle);
+int order = 0;
+int *haystack(void) {
+    static int value = 0;
+    order = 1;
+    return &value;
+}
+char *needle(void) {
+    static char values[1] = {0};
+    return &values[order == 1 ? 2 : -1];
+}
+int main(void) {
+    return strstr(haystack(), needle()) != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array 'values' index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn normalizes_and_bounds_strstr_character_sequences() {
+    let normalized = r#"
+char *strstr(const char *haystack, const char *needle);
+int main(void) {
+    char haystack[4] = {354, 355, 'z', 0};
+    char needle[3] = {610, 611, 0};
+    return strstr(haystack, needle) == haystack ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(normalized).unwrap(), 0);
+
+    let boundary = "x".repeat(4096);
+    let program = format!(
+        "char *strstr(const char *haystack, const char *needle);\nint main(void) {{ const char *text = \"{boundary}\"; return strstr(text, \"x\") == text && strstr(text, text) == text ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&program).unwrap(), 0);
+
+    let oversized = "x".repeat(4097);
+    for (program, expected) in [
+        (
+            format!(
+                "char *strstr(const char *haystack, const char *needle);\nint main(void) {{ return strstr(\"{oversized}\", \"x\") != 0; }}\n"
+            ),
+            "argument 1 to function 'strstr' exceeded maximum input length of 4096 bytes",
+        ),
+        (
+            format!(
+                "char *strstr(const char *haystack, const char *needle);\nint main(void) {{ return strstr(\"x\", \"{oversized}\") != 0; }}\n"
+            ),
+            "argument 2 to function 'strstr' exceeded maximum input length of 4096 bytes",
+        ),
+    ] {
+        assert_eq!(interpret(&program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn sizeof_strstr_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+char *strstr(const char *haystack, const char *needle);
+char *mark(int *calls) {
+    *calls += 1;
+    return "text";
+}
+int main(void) {
+    int calls = 0;
+    int pointer_size = sizeof(strstr(mark(&calls), mark(&calls)));
+    int character_size = sizeof(*strstr(mark(&calls), mark(&calls)));
+    return pointer_size == sizeof(char *) && character_size == sizeof(char)
+        && calls == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { return sizeof(strstr(\"text\")); }\n",
+            "function 'strstr' expected 2 arguments, got 1",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { int value = 0; return sizeof(*strstr(&value, \"x\")); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int main(void) { return sizeof(*strstr(\"text\", \"x\")); }\n",
+            "undefined function 'strstr'",
+        ),
+        (
+            "const char *strstr(const char *haystack, const char *needle);\nint main(void) { return sizeof(*strstr(\"text\", \"x\")); }\n",
+            "standard library function 'strstr' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn nested_sizeof_strstr_calls_are_constraint_aware() {
+    for (program, expected) in [
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { return sizeof(strstr(\"text\") != 0); }\n",
+            "function 'strstr' expected 2 arguments, got 1",
+        ),
+        (
+            "char *strstr(const char *haystack, const char *needle);\nint main(void) { int value = 0; return sizeof(strstr(&value, \"x\") != 0); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "int main(void) { return sizeof(strstr(\"text\", \"x\") != 0); }\n",
+            "undefined function 'strstr'",
+        ),
+        (
+            "const char *strstr(const char *haystack, const char *needle);\nint main(void) { return sizeof(strstr(\"text\", \"x\") != 0); }\n",
+            "standard library function 'strstr' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
 fn supports_bounded_strspn_standard_library_function() {
     let program = r#"
 unsigned long int strspn(const char *text, const char *accept);
