@@ -16768,6 +16768,9 @@ impl Interpreter {
             if self.has_character_set_search_prototype(name) {
                 return self.call_character_set_search_function(name, arg_exprs);
             }
+            if self.has_string_span_prototype(name) {
+                return self.call_string_span_function(name, arg_exprs);
+            }
             if matches!(name, "abs" | "labs" | "llabs") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
@@ -16802,6 +16805,11 @@ impl Interpreter {
                 return Err(CustError::new(
                     "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
                 ));
+            }
+            if matches!(name, "strspn" | "strcspn") && self.prototypes.contains_key(name) {
+                return Err(CustError::new(format!(
+                    "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type"
+                )));
             }
             return Err(CustError::new(format!("undefined function '{name}'")));
         };
@@ -17682,6 +17690,319 @@ impl Interpreter {
     fn sizeof_character_set_search_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
         self.sizeof_string_comparison_call(name, args)?;
         Ok(POINTER_SIZE)
+    }
+
+    fn has_string_span_prototype(&self, name: &str) -> bool {
+        if !matches!(name, "strspn" | "strcspn") {
+            return false;
+        }
+        let character_pointer = ParamSignature {
+            ty: ParamType::Scalar(CType::Char),
+            kind: ParamKind::Pointer,
+            points_to_const: true,
+        };
+        let expected = FunctionSignature {
+            return_type: ReturnType::Scalar(CType::Int),
+            params: vec![character_pointer.clone(), character_pointer],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_string_span_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 2 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 2 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let text_pointer = self.eval_pointer(&arg_exprs[0])?;
+        let accept_pointer = self.eval_pointer(&arg_exprs[1])?;
+        self.validate_character_pointer_argument(name, 1, &text_pointer)?;
+        self.validate_character_pointer_argument(name, 2, &accept_pointer)?;
+        let text = self.read_bounded_character_sequence(name, 1, &text_pointer)?;
+        let accept = self.read_bounded_character_sequence(name, 2, &accept_pointer)?;
+        let length = text
+            .iter()
+            .take_while(|byte| accept.contains(byte) == (name == "strspn"))
+            .count() as i64;
+
+        Ok(Some(ReturnValue::Scalar(length)))
+    }
+
+    fn sizeof_string_span_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        self.sizeof_string_comparison_call(name, args)
+    }
+
+    fn validate_nested_string_span_calls(&self, expr: &Expr) -> CustResult<()> {
+        match expr {
+            Expr::Call { name, args } => {
+                if matches!(name.as_str(), "strspn" | "strcspn")
+                    && !self.functions.contains_key(name)
+                {
+                    if self.has_string_span_prototype(name) {
+                        self.sizeof_string_span_call(name, args)?;
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(CustError::new(format!(
+                            "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type"
+                        )));
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                }
+                for arg in args {
+                    self.validate_nested_string_span_calls(arg)?;
+                }
+            }
+            Expr::Number(_)
+            | Expr::StringLiteral(_)
+            | Expr::SizeOfType(_)
+            | Expr::AlignOfType(_)
+            | Expr::Var(_)
+            | Expr::StructGet { .. }
+            | Expr::AddressOf(_)
+            | Expr::AddressOfStructField { .. } => {}
+            Expr::SizeOfValue(inner)
+            | Expr::Deref(inner)
+            | Expr::VoidCast(inner)
+            | Expr::UnaryPlus(inner)
+            | Expr::UnaryMinus(inner)
+            | Expr::BitwiseNot(inner)
+            | Expr::LogicalNot(inner)
+            | Expr::Cast { expr: inner, .. }
+            | Expr::PointerCast { expr: inner, .. }
+            | Expr::ScalarLiteral { init: inner, .. }
+            | Expr::AddressOfScalarLiteral { init: inner, .. }
+            | Expr::Increment { target: inner, .. }
+            | Expr::StructPtrGet { pointer: inner, .. }
+            | Expr::AddressOfStructPtrField { pointer: inner, .. }
+            | Expr::AggregateFieldGet {
+                aggregate: inner, ..
+            }
+            | Expr::AddressOfAggregateField {
+                aggregate: inner, ..
+            } => self.validate_nested_string_span_calls(inner)?,
+            Expr::StructArrayGet { index, .. }
+            | Expr::StructFieldArrayElementGet { index, .. }
+            | Expr::StructElementGet { index, .. }
+            | Expr::ArrayGet { index, .. }
+            | Expr::StringGet { index, .. }
+            | Expr::AddressOfArray { index, .. }
+            | Expr::AddressOfStructElementField { index, .. }
+            | Expr::AddressOfStructArrayField { index, .. } => {
+                self.validate_nested_string_span_calls(index)?;
+            }
+            Expr::Assign { value, .. }
+            | Expr::StructSet { value, .. }
+            | Expr::CompoundAssign { value, .. }
+            | Expr::StructCompoundSet { value, .. } => {
+                self.validate_nested_string_span_calls(value)?;
+            }
+            Expr::StructPtrArrayGet { pointer, index, .. }
+            | Expr::AddressOfStructPtrArrayField { pointer, index, .. } => {
+                self.validate_nested_string_span_calls(pointer)?;
+                self.validate_nested_string_span_calls(index)?;
+            }
+            Expr::StructFieldArrayElementSet { index, value, .. }
+            | Expr::StructFieldArrayElementCompoundSet { index, value, .. }
+            | Expr::ArraySet { index, value, .. }
+            | Expr::StructArraySet { index, value, .. }
+            | Expr::StructElementSet { index, value, .. }
+            | Expr::ArrayCompoundSet { index, value, .. }
+            | Expr::StructArrayCompoundSet { index, value, .. }
+            | Expr::StructElementCompoundSet { index, value, .. } => {
+                self.validate_nested_string_span_calls(index)?;
+                self.validate_nested_string_span_calls(value)?;
+            }
+            Expr::DerefSet { pointer, value }
+            | Expr::StructPtrSet { pointer, value, .. }
+            | Expr::DerefCompoundSet { pointer, value, .. }
+            | Expr::StructPtrCompoundSet { pointer, value, .. } => {
+                self.validate_nested_string_span_calls(pointer)?;
+                self.validate_nested_string_span_calls(value)?;
+            }
+            Expr::StructElementArrayGet {
+                index, array_index, ..
+            }
+            | Expr::AddressOfStructElementArrayField {
+                index, array_index, ..
+            } => {
+                self.validate_nested_string_span_calls(index)?;
+                self.validate_nested_string_span_calls(array_index)?;
+            }
+            Expr::StructElementArraySet {
+                index,
+                array_index,
+                value,
+                ..
+            }
+            | Expr::StructElementArrayCompoundSet {
+                index,
+                array_index,
+                value,
+                ..
+            } => {
+                self.validate_nested_string_span_calls(index)?;
+                self.validate_nested_string_span_calls(array_index)?;
+                self.validate_nested_string_span_calls(value)?;
+            }
+            Expr::Array2DGet { row, column, .. } => {
+                self.validate_nested_string_span_calls(row)?;
+                self.validate_nested_string_span_calls(column)?;
+            }
+            Expr::Array2DSet {
+                row, column, value, ..
+            }
+            | Expr::Array2DCompoundSet {
+                row, column, value, ..
+            } => {
+                self.validate_nested_string_span_calls(row)?;
+                self.validate_nested_string_span_calls(column)?;
+                self.validate_nested_string_span_calls(value)?;
+            }
+            Expr::StructArray2DGet {
+                target,
+                row,
+                column,
+                ..
+            } => {
+                self.validate_string_span_array_2d_target(target)?;
+                self.validate_nested_string_span_calls(row)?;
+                self.validate_nested_string_span_calls(column)?;
+            }
+            Expr::StructArray2DSet {
+                target,
+                row,
+                column,
+                value,
+                ..
+            }
+            | Expr::StructArray2DCompoundSet {
+                target,
+                row,
+                column,
+                value,
+                ..
+            } => {
+                self.validate_string_span_array_2d_target(target)?;
+                self.validate_nested_string_span_calls(row)?;
+                self.validate_nested_string_span_calls(column)?;
+                self.validate_nested_string_span_calls(value)?;
+            }
+            Expr::ScalarLiteralSet { init, value, .. }
+            | Expr::ScalarLiteralCompoundSet { init, value, .. }
+            | Expr::AggregateFieldSet {
+                aggregate: init,
+                value,
+                ..
+            }
+            | Expr::AggregateFieldCompoundSet {
+                aggregate: init,
+                value,
+                ..
+            } => {
+                self.validate_nested_string_span_calls(init)?;
+                self.validate_nested_string_span_calls(value)?;
+            }
+            Expr::AggregateLiteral { init, .. } | Expr::AddressOfAggregateLiteral { init, .. } => {
+                self.validate_string_span_struct_initializers(init)?;
+            }
+            Expr::ArrayLiteral { init, .. } => {
+                self.validate_string_span_array_initializers(init)?;
+            }
+            Expr::AggregateArrayLiteral { init, .. } => {
+                self.validate_string_span_struct_array_initializers(init)?;
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                self.validate_nested_string_span_calls(cond)?;
+                self.validate_nested_string_span_calls(then_expr)?;
+                self.validate_nested_string_span_calls(else_expr)?;
+            }
+            Expr::Binary(left, _, right) | Expr::Comma(left, right) => {
+                self.validate_nested_string_span_calls(left)?;
+                self.validate_nested_string_span_calls(right)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_string_span_array_2d_target(&self, target: &Array2DFieldTarget) -> CustResult<()> {
+        match target {
+            Array2DFieldTarget::Direct { .. } => Ok(()),
+            Array2DFieldTarget::Element { index, .. } => {
+                self.validate_nested_string_span_calls(index)
+            }
+            Array2DFieldTarget::Pointer { pointer, .. } => {
+                self.validate_nested_string_span_calls(pointer)
+            }
+        }
+    }
+
+    fn validate_string_span_array_initializers(
+        &self,
+        initializers: &[ArrayInitializer],
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                ArrayInitializer::Expr(expr) | ArrayInitializer::Designated { value: expr, .. } => {
+                    self.validate_nested_string_span_calls(expr)?;
+                }
+                ArrayInitializer::StringLiteral(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_string_span_struct_initializers(
+        &self,
+        initializers: &[StructInitializer],
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                StructInitializer::Expr(expr) => self.validate_nested_string_span_calls(expr)?,
+                StructInitializer::Array(values) => {
+                    self.validate_string_span_array_initializers(values)?;
+                }
+                StructInitializer::Array2D(rows) => {
+                    for row in rows {
+                        self.validate_string_span_array_initializers(row)?;
+                    }
+                }
+                StructInitializer::Struct(values) => {
+                    self.validate_string_span_struct_initializers(values)?;
+                }
+                StructInitializer::StructArray(values) => {
+                    self.validate_string_span_struct_array_initializers(values)?;
+                }
+                StructInitializer::Designated { value, .. } => {
+                    self.validate_string_span_struct_initializers(std::slice::from_ref(value))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_string_span_struct_array_initializers(
+        &self,
+        initializers: &[StructArrayInitializer],
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                StructArrayInitializer::Element(values)
+                | StructArrayInitializer::Designated { value: values, .. } => {
+                    self.validate_string_span_struct_initializers(values)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn validate_return_value(
@@ -25564,6 +25885,7 @@ impl Interpreter {
     }
 
     fn sizeof_expr(&self, expr: &Expr) -> CustResult<i64> {
+        self.validate_nested_string_span_calls(expr)?;
         match expr {
             Expr::Number(_) => Ok(INT_SIZE),
             Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
@@ -25818,6 +26140,9 @@ impl Interpreter {
                 None if self.has_character_set_search_prototype(name) => {
                     self.sizeof_character_set_search_call(name, args)
                 }
+                None if self.has_string_span_prototype(name) => {
+                    self.sizeof_string_span_call(name, args)
+                }
                 None if name == "strncmp" && self.prototypes.contains_key(name) => {
                     Err(CustError::new(
                         "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
@@ -25839,6 +26164,13 @@ impl Interpreter {
                     Err(CustError::new(
                         "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type",
                     ))
+                }
+                None if matches!(name.as_str(), "strspn" | "strcspn")
+                    && self.prototypes.contains_key(name) =>
+                {
+                    Err(CustError::new(format!(
+                        "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type"
+                    )))
                 }
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },

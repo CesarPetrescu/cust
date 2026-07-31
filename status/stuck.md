@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-31 bounded `strpbrk` run: six focused interpreter tests, the registered compiler-oracle fixture, strict formatting/Clippy, all 1,196 local tests, and both Docker Compose gates pass. Independent review found and drove focused fixes for two nested non-evaluating type-query constraint gaps, then approved the final code/test diff with no blocking/high/medium issue. The runtime image prints `10`.
+None. Last reviewed during the 2026-07-31 bounded `strspn`/`strcspn` run: seven focused interpreter tests, the registered strict native/compiler-oracle fixture, formatting, strict Clippy, all 1,203 local tests, and both Docker Compose gates pass. Independent review found unary/binary and then assignment/nested-`sizeof` constraint gaps; focused RED/GREEN expanded traversal across every expression/initializer child, and final re-review approved with no blocking/high/medium issue. The runtime image prints `10`.
 
 ## Blocker template
 

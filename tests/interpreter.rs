@@ -15285,6 +15285,259 @@ fn supports_bounded_strpbrk_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strspn_standard_library_function() {
+    let program = r#"
+unsigned long int strspn(const char *text, const char *accept);
+int main(void) {
+    return strspn("abcde", "abc") == 3 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn supports_bounded_strcspn_standard_library_function() {
+    let program = r#"
+unsigned long int strcspn(const char *text, const char *reject);
+int main(void) {
+    return strcspn("abcde", "dx") == 3 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn supports_bounded_string_span_standard_library_functions_fixture() {
+    let program = include_str!("fixtures/compat/valid/string_span_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_string_span_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+unsigned long int strspn(const char *text, const char *accept);
+unsigned long int strcspn(const char *text, const char *reject);
+char *mark(int *calls) {
+    *calls += 1;
+    return "abc";
+}
+int main(void) {
+    int calls = 0;
+    int direct = sizeof(strspn(mark(&calls), mark(&calls)));
+    int comma = sizeof((0, strcspn(mark(&calls), mark(&calls))));
+    int unary = sizeof(+strspn(mark(&calls), mark(&calls)));
+    int binary = sizeof(strcspn(mark(&calls), mark(&calls)) + 0);
+    return direct == sizeof(unsigned long int)
+        && comma == sizeof(unsigned long int)
+        && unary == sizeof(unsigned long int)
+        && binary == sizeof(unsigned long int) && calls == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for name in ["strspn", "strcspn"] {
+        for (call, expected) in [
+            (
+                format!("sizeof({name}(\"text\"))"),
+                format!("function '{name}' expected 2 arguments, got 1"),
+            ),
+            (
+                format!("sizeof((0, {name}(&value, \"x\")))"),
+                "cannot convert pointer to int to pointer to char".to_string(),
+            ),
+            (
+                format!("sizeof(+{name}(\"text\"))"),
+                format!("function '{name}' expected 2 arguments, got 1"),
+            ),
+            (
+                format!("sizeof({name}(\"text\") + 0)"),
+                format!("function '{name}' expected 2 arguments, got 1"),
+            ),
+            (
+                format!("sizeof(({name}(\"text\"), 0))"),
+                format!("function '{name}' expected 2 arguments, got 1"),
+            ),
+            (
+                format!("sizeof(0 ? {name}(\"text\") : 0)"),
+                format!("function '{name}' expected 2 arguments, got 1"),
+            ),
+            (
+                format!("sizeof((int){name}(\"text\"))"),
+                format!("function '{name}' expected 2 arguments, got 1"),
+            ),
+            (
+                format!("sizeof(value = {name}(\"text\"))"),
+                format!("function '{name}' expected 2 arguments, got 1"),
+            ),
+            (
+                format!("sizeof(sizeof({name}(\"text\")))"),
+                format!("function '{name}' expected 2 arguments, got 1"),
+            ),
+        ] {
+            let program = format!(
+                "unsigned long int {name}(const char *text, const char *set);\nint main(void) {{ int value = 0; return {call}; }}\n"
+            );
+            let err = interpret(&program).unwrap_err();
+            assert_eq!(err.to_string(), expected);
+        }
+
+        let program = format!(
+            "int {name}(char *text, const char *set);\nint main(void) {{ return sizeof((0, {name}(\"text\", \"x\"))); }}\n"
+        );
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type"
+            )
+        );
+    }
+}
+
+#[test]
+fn preserves_string_span_declaration_call_and_storage_boundaries() {
+    for name in ["strspn", "strcspn"] {
+        let declaration_error = format!(
+            "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type"
+        );
+        for declaration in [
+            format!("const char *{name}(const char *text, const char *set);"),
+            format!("int {name}(char *text, const char *set);"),
+            format!("int {name}(const char *text, const int *set);"),
+        ] {
+            let program =
+                format!("{declaration}\nint main(void) {{ return {name}(\"text\", \"x\"); }}\n");
+            let err = interpret(&program).unwrap_err();
+            assert_eq!(err.to_string(), declaration_error);
+        }
+
+        for (program, expected) in [
+            (
+                format!("int main(void) {{ return {name}(\"text\", \"x\"); }}\n"),
+                format!("undefined function '{name}'"),
+            ),
+            (
+                format!(
+                    "unsigned long int {name}(const char *text, const char *set);\nint main(void) {{ return {name}(\"text\"); }}\n"
+                ),
+                format!("function '{name}' expected 2 arguments, got 1"),
+            ),
+            (
+                format!(
+                    "unsigned long int {name}(const char *text, const char *set);\nint main(void) {{ int value = 0; return {name}(&value, \"x\"); }}\n"
+                ),
+                "cannot convert pointer to int to pointer to char".to_string(),
+            ),
+            (
+                format!(
+                    "unsigned long int {name}(const char *text, const char *set);\nint main(void) {{ return {name}((const char *)0, \"x\"); }}\n"
+                ),
+                format!("null character pointer passed as argument 1 to function '{name}'"),
+            ),
+            (
+                format!(
+                    "unsigned long int {name}(const char *text, const char *set);\nint main(void) {{ return {name}(\"text\", (const char *)0); }}\n"
+                ),
+                format!("null character pointer passed as argument 2 to function '{name}'"),
+            ),
+            (
+                format!(
+                    "unsigned long int {name}(const char *text, const char *set);\nint main(void) {{ const char text[1] = {{'x'}}; return {name}(text, \"x\"); }}\n"
+                ),
+                format!(
+                    "unterminated character sequence passed as argument 1 to function '{name}'"
+                ),
+            ),
+            (
+                format!(
+                    "unsigned long int {name}(const char *text, const char *set);\nint main(void) {{ const char set[1] = {{'x'}}; return {name}(\"text\", set); }}\n"
+                ),
+                format!(
+                    "unterminated character sequence passed as argument 2 to function '{name}'"
+                ),
+            ),
+        ] {
+            let err = interpret(&program).unwrap_err();
+            assert_eq!(err.to_string(), expected);
+        }
+
+        let user_definition = format!(
+            "int {name}(int text, int set) {{ return text + set; }}\nint main(void) {{ return {name}(3, -3); }}\n"
+        );
+        assert_eq!(interpret(&user_definition).unwrap(), 0);
+    }
+}
+
+#[test]
+fn string_span_functions_evaluate_both_pointers_in_source_order_before_validation() {
+    for name in ["strspn", "strcspn"] {
+        let program = format!(
+            r#"
+unsigned long int {name}(const char *text, const char *set);
+int order = 0;
+int *text(void) {{
+    static int value = 0;
+    order = 1;
+    return &value;
+}}
+char *set(void) {{
+    static char values[1] = {{0}};
+    return &values[order == 1 ? 2 : -1];
+}}
+int main(void) {{
+    return {name}(text(), set());
+}}
+"#
+        );
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "array 'values' index 2 out of bounds for length 1"
+        );
+    }
+}
+
+#[test]
+fn normalizes_and_bounds_string_span_character_sequences() {
+    let normalized = r#"
+unsigned long int strspn(const char *text, const char *accept);
+unsigned long int strcspn(const char *text, const char *reject);
+int main(void) {
+    char text[4] = {354, 'y', 'z', 0};
+    char set[2] = {610, 0};
+    return strspn(text, set) == 1 && strcspn(text, set) == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(normalized).unwrap(), 0);
+
+    let boundary = "x".repeat(4096);
+    let program = format!(
+        "unsigned long int strspn(const char *text, const char *set);\nunsigned long int strcspn(const char *text, const char *set);\nint main(void) {{ return strspn(\"{boundary}\", \"x\") == 4096 && strcspn(\"{boundary}\", \"\") == 4096 ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&program).unwrap(), 0);
+
+    let oversized = "x".repeat(4097);
+    for name in ["strspn", "strcspn"] {
+        for (text, set, argument) in [(oversized.as_str(), "x", 1), ("x", oversized.as_str(), 2)] {
+            let program = format!(
+                "unsigned long int {name}(const char *text, const char *set);\nint main(void) {{ return {name}(\"{text}\", \"{set}\"); }}\n"
+            );
+            let err = interpret(&program).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "argument {argument} to function '{name}' exceeded maximum input length of 4096 bytes"
+                )
+            );
+        }
+    }
+}
+
+#[test]
 fn preserves_strpbrk_declaration_and_call_boundaries() {
     let expected = "standard library function 'strpbrk' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type";
     for program in [

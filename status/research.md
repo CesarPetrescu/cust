@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-31 — Bounded string spans and next substring candidate
+
+- Local `man 3 strspn` (Linux man-pages 6.18): `strspn` returns the initial segment length containing only bytes from the accept set; `strcspn` returns the initial segment length containing no bytes from the reject set. Cust maps both to exact integer-returning declarations and two independently bounded, normalized interpreter-owned character sequences.
+- Initial-segment matching excludes both terminating NUL bytes. Empty text returns zero for both calls; an empty accept set makes `strspn` return zero, while an empty reject set makes `strcspn` return the full text length.
+- Independent review found that direct/comma `sizeof` tests did not cover intrinsic calls beneath unary and binary scalar wrappers. Focused RED/GREEN expanded a narrow non-evaluating call validator across unary, binary, comma, conditional, and scalar-cast expression trees without evaluating operands or changing unrelated intrinsic dispatch.
+- Local `man 3 strstr` (Linux man-pages 6.18): `strstr(const char *haystack, const char *needle)` returns the first substring match, null if absent, and the original haystack pointer for an empty needle. This is the next adjacent bounded two-sequence feature and can reuse pointer identity metadata from `strpbrk`.
+
 ## 2026-07-31 — Bounded character-set search
 
 - Local `man 3 strpbrk` (Linux man-pages 6.18): `char *strpbrk(const char *s, const char *accept)` returns the first byte in `s` that occurs in `accept`, or null when no byte matches. Cust maps this to two independently bounded interpreter-owned NUL-terminated character sequences and returns an owner/lifetime/read-only-preserving pointer into the first sequence.
