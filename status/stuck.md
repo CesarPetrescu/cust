@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-31 bounded `strchr` run: seven focused interpreter tests, the registered compiler-oracle fixture, all 1,183 local tests, strict Clippy/formatting, and both Docker Compose gates pass. Independent final review found no blocking/high/medium issue. The runtime image prints `10`.
+None. Last reviewed during the 2026-07-31 bounded `strrchr` run: seven focused interpreter tests, the registered compiler-oracle fixture, all 1,190 local tests, strict Clippy/formatting, and both Docker Compose gates pass. Independent final review found no blocking/high/medium issue; its sole low formatting finding was resolved before the canonical gate. The runtime image prints `10`.
 
 ## Blocker template
 

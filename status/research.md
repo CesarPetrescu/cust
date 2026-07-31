@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-31 — Bounded reverse character search
+
+- Official WG14 N1570 §7.24.5.5: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `char *strrchr(const char *s, int c)` locates the last occurrence of `c` converted to `char`; the terminating NUL is part of the searched string; the result is the located pointer or null when absent.
+- Cust reuses the exact retained signature and runtime/classifier/`sizeof` paths shared with `strchr`, but records the latest normalized-byte offset and scans through NUL before returning. This full traversal is required even after an early match and therefore still rejects a 4,097th non-NUL byte under Cust's deterministic bound.
+- Returning offset zero directly preserves scalar-character NUL pointer identity; nonzero results reuse `offset_array_pointer`, retaining interpreter storage, owner/lifetime, and read-only metadata. The next adjacent candidate is bounded `strpbrk` (N1570 §7.24.5.4), which adds a second bounded character sequence and argument-specific traversal diagnostics.
+
 ## 2026-07-31 — Bounded character search and v0.7.0 tag closure
 
 - Official WG14 N1570 §7.24.5.2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `char *strchr(const char *s, int c)` locates the first occurrence of `c` converted to `char`; the terminating NUL is part of the searched string; the result is the located pointer or null when absent.

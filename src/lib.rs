@@ -16790,10 +16790,10 @@ impl Interpreter {
                     "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
                 ));
             }
-            if name == "strchr" && self.prototypes.contains_key(name) {
-                return Err(CustError::new(
-                    "standard library function 'strchr' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type",
-                ));
+            if matches!(name, "strchr" | "strrchr") && self.prototypes.contains_key(name) {
+                return Err(CustError::new(format!(
+                    "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type"
+                )));
             }
             return Err(CustError::new(format!("undefined function '{name}'")));
         };
@@ -17480,7 +17480,7 @@ impl Interpreter {
     }
 
     fn has_character_search_prototype(&self, name: &str) -> bool {
-        if name != "strchr" {
+        if !matches!(name, "strchr" | "strrchr") {
             return false;
         }
         let expected = FunctionSignature {
@@ -17540,6 +17540,7 @@ impl Interpreter {
             .eval_scalar_conversion(CType::Int, search_expr)?
             .rem_euclid(256) as u8;
         self.validate_character_pointer_argument(name, 1, &pointer)?;
+        let mut last_match = None;
 
         for offset in 0.. {
             let byte = match &pointer {
@@ -17560,14 +17561,15 @@ impl Interpreter {
             })?;
 
             if byte == 0 {
-                let result = if search == 0 {
-                    if offset == 0 {
-                        pointer.clone()
-                    } else {
-                        self.offset_array_pointer(&pointer, offset as i64)?
-                    }
+                let matched_offset = if search == 0 {
+                    Some(offset)
                 } else {
-                    PointerValue::Null
+                    last_match
+                };
+                let result = match matched_offset {
+                    Some(0) => pointer.clone(),
+                    Some(offset) => self.offset_array_pointer(&pointer, offset as i64)?,
+                    None => PointerValue::Null,
                 };
                 return Ok(Some(ReturnValue::Pointer {
                     pointer: result,
@@ -17581,16 +17583,19 @@ impl Interpreter {
                 )));
             }
             if byte == search {
-                let result = if offset == 0 {
-                    pointer.clone()
-                } else {
-                    self.offset_array_pointer(&pointer, offset as i64)?
-                };
-                return Ok(Some(ReturnValue::Pointer {
-                    pointer: result,
-                    ty: PointeeType::Scalar(CType::Char),
-                    points_to_const: false,
-                }));
+                if name == "strchr" {
+                    let result = if offset == 0 {
+                        pointer.clone()
+                    } else {
+                        self.offset_array_pointer(&pointer, offset as i64)?
+                    };
+                    return Ok(Some(ReturnValue::Pointer {
+                        pointer: result,
+                        ty: PointeeType::Scalar(CType::Char),
+                        points_to_const: false,
+                    }));
+                }
+                last_match = Some(offset);
             }
         }
         unreachable!("bounded character search always returns or errors")
@@ -25742,10 +25747,12 @@ impl Interpreter {
                         "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
                     ))
                 }
-                None if name == "strchr" && self.prototypes.contains_key(name) => {
-                    Err(CustError::new(
-                        "standard library function 'strchr' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type",
-                    ))
+                None if matches!(name.as_str(), "strchr" | "strrchr")
+                    && self.prototypes.contains_key(name) =>
+                {
+                    Err(CustError::new(format!(
+                        "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type"
+                    )))
                 }
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },

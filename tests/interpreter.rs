@@ -15271,6 +15271,198 @@ fn supports_bounded_strchr_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strrchr_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/reverse_character_search_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strrchr_declaration_and_call_boundaries() {
+    let expected = "standard library function 'strrchr' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type";
+    for program in [
+        "const char *strrchr(const char *text, int search);\nint main(void) { return strrchr(\"text\", 'x') != 0; }\n",
+        "const char *strrchr(const char *text, int search);\nint main(void) { return sizeof(strrchr(\"text\", 'x')); }\n",
+        "char *strrchr(char *text, int search);\nint main(void) { return strrchr(\"text\", 'x') != 0; }\n",
+        "char *strrchr(const char *text, const int *search);\nint main(void) { return strrchr(\"text\", 0) != 0; }\n",
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+
+    for (program, expected) in [
+        (
+            "int main(void) { return strrchr(\"text\", 'x') != 0; }\n",
+            "undefined function 'strrchr'",
+        ),
+        (
+            "char *strrchr(const char *text, int search);\nint main(void) { return strrchr(\"text\") != 0; }\n",
+            "function 'strrchr' expected 2 arguments, got 1",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+
+    let user_definition = r#"
+int strrchr(int text, int search) {
+    return text + search;
+}
+int main(void) {
+    return strrchr(3, -3);
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+}
+
+#[test]
+fn strrchr_returns_a_matching_scalar_nul_pointer_without_offsetting_it() {
+    let program = r#"
+char *strrchr(const char *text, int search);
+int main(void) {
+    char value = 0;
+    return strrchr(&value, 0) == &value ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strrchr_pointer_search_and_storage_boundaries() {
+    for (program, expected) in [
+        (
+            "char *strrchr(const char *text, int search);\nint main(void) { int value = 0; return strrchr(&value, 0) != 0; }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strrchr(const char *text, int search);\nint main(void) { int search = 0; return strrchr(\"text\", &search) != 0; }\n",
+            "function 'strrchr' requires an integer search value",
+        ),
+        (
+            "char *strrchr(const char *text, int search);\nchar *expired(void) { char text[2] = {'x', 0}; return text; }\nint main(void) { return strrchr(expired(), 'x') != 0; }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "char *strrchr(const char *text, int search);\nchar *escaped(void) { char text[2] = {'x', 0}; return strrchr(text, 'x'); }\nint main(void) { return *escaped(); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "char *strrchr(const char *text, int search);\nint main(void) { return strrchr((const char *)0, 0) != 0; }\n",
+            "null character pointer passed as argument 1 to function 'strrchr'",
+        ),
+        (
+            "char *strrchr(const char *text, int search);\nint main(void) { const char text[1] = {'x'}; return strrchr(text, 'x') != 0; }\n",
+            "unterminated character sequence passed as argument 1 to function 'strrchr'",
+        ),
+        (
+            "char *strrchr(const char *text, int search);\nint main(void) { *strrchr(\"text\", 't') = 'x'; return 0; }\n",
+            "cannot modify read-only array through pointer",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn strrchr_evaluates_text_and_search_once_in_source_order_before_validation() {
+    let program = r#"
+char *strrchr(const char *text, int search);
+int order = 0;
+char *text(void) {
+    order = 1;
+    return 0;
+}
+int search(void) {
+    int values[1] = {0};
+    return values[order == 1 ? 2 : -1];
+}
+int main(void) {
+    return strrchr(text(), search()) != 0;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "array 'values' index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn normalizes_and_bounds_strrchr_character_searches() {
+    let normalized = r#"
+char *strrchr(const char *text, int search);
+int main(void) {
+    char text[4] = {354, 'y', 354, 0};
+    return strrchr(text, 'b') == &text[2] && strrchr(text, 256) == &text[3] ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(normalized).unwrap(), 0);
+
+    let boundary = "x".repeat(4096);
+    let program = format!(
+        "char *strrchr(const char *text, int search);\nint main(void) {{ const char *text = \"{boundary}\"; return strrchr(text, 'x') == text + 4095 && strrchr(text, 0) == text + 4096 ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&program).unwrap(), 0);
+
+    let oversized = "x".repeat(4097);
+    let program = format!(
+        "char *strrchr(const char *text, int search);\nint main(void) {{ return strrchr(\"{oversized}\", 'x') != 0; }}\n"
+    );
+    let err = interpret(&program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "argument 1 to function 'strrchr' exceeded maximum input length of 4096 bytes"
+    );
+}
+
+#[test]
+fn sizeof_strrchr_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+char *strrchr(const char *text, int search);
+char *mark_text(int *calls) {
+    *calls += 1;
+    return "text";
+}
+int mark_search(int *calls) {
+    *calls += 1;
+    return 'x';
+}
+int main(void) {
+    int text_calls = 0;
+    int search_calls = 0;
+    int size = sizeof(strrchr(mark_text(&text_calls), mark_search(&search_calls)));
+    return size == sizeof(char *) && text_calls == 0 && search_calls == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "char *strrchr(const char *text, int search);\nint main(void) { return sizeof(strrchr(\"text\")); }\n",
+            "function 'strrchr' expected 2 arguments, got 1",
+        ),
+        (
+            "char *strrchr(const char *text, int search);\nint main(void) { int value = 0; return sizeof(strrchr(&value, 'x')); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strrchr(const char *text, int search);\nint main(void) { int search = 0; return sizeof(strrchr(\"text\", &search)); }\n",
+            "function 'strrchr' requires an integer search value",
+        ),
+        (
+            "char *strrchr(const char *text, int search);\nvoid sink(void) {}\nint main(void) { return sizeof(strrchr(\"text\", 1 ? sink() : sink())); }\n",
+            "function 'strrchr' requires an integer search value",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn strchr_returns_a_matching_scalar_character_pointer_without_offsetting_it() {
     let program = r#"
 char *strchr(const char *text, int search);
