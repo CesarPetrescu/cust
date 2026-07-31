@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-07-31 — Bounded character search and v0.7.0 tag closure
+
+- Official WG14 N1570 §7.24.5.2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `char *strchr(const char *s, int c)` locates the first occurrence of `c` converted to `char`; the terminating NUL is part of the searched string; the result is the located pointer or null when absent.
+- Cust activates only that exact retained signature and keeps user definitions authoritative. `call_character_search_function` evaluates `s` then `c` once before pointer validation and normalizes search/stored values modulo 256 to match Cust's deterministic byte model used by `strcmp`/`strncmp`.
+- A terminating NUL at offset 4,096 is accepted, while a 4,097th non-NUL byte is rejected before matching. Offset-zero matches return the original pointer directly so scalar character pointers avoid unsupported arithmetic; array offsets reuse `offset_array_pointer`, preserving owner, source label, storage identity, and read-only enforcement.
+- Remote tag `refs/tags/v0.7.0` is annotated object `61cfe4f003a81177408a537539095e537c844deb`; its peeled target is release commit `9492683140610f3ed35521186751132ccbe6967f`.
+
 ## 2026-07-31 — Bounded string prefix comparison
 
 - Official WG14 N1570 §7.24.4.4: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `int strncmp(const char *s1, const char *s2, size_t n)` compares not more than `n` characters and returns an integer greater than, equal to, or less than zero according to the lexical relation of the bounded sequences. The local `man 3 strncmp` page was unavailable.

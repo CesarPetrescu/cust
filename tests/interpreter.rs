@@ -15264,6 +15264,203 @@ fn supports_bounded_strncmp_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strchr_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/character_search_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn strchr_returns_a_matching_scalar_character_pointer_without_offsetting_it() {
+    let program = r#"
+char *strchr(const char *text, int search);
+int main(void) {
+    char value = 'x';
+    return strchr(&value, 'x') == &value ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strchr_declaration_and_call_boundaries() {
+    for (program, expected) in [
+        (
+            "int main(void) { return strchr(\"text\", 'x') != 0; }\n",
+            "undefined function 'strchr'",
+        ),
+        (
+            "const char *strchr(const char *text, int search);\nint main(void) { return strchr(\"text\", 'x') != 0; }\n",
+            "standard library function 'strchr' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type",
+        ),
+        (
+            "char *strchr(char *text, int search);\nint main(void) { return strchr(\"text\", 'x') != 0; }\n",
+            "standard library function 'strchr' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type",
+        ),
+        (
+            "char *strchr(const char *text, const int *search);\nint main(void) { return strchr(\"text\", 0) != 0; }\n",
+            "standard library function 'strchr' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nint main(void) { return strchr(\"text\") != 0; }\n",
+            "function 'strchr' expected 2 arguments, got 1",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+
+    let user_definition = r#"
+int strchr(int text, int search) {
+    return text + search;
+}
+int main(void) {
+    return strchr(3, -3);
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strchr_pointer_search_and_storage_boundaries() {
+    for (program, expected) in [
+        (
+            "char *strchr(const char *text, int search);\nint main(void) { int value = 0; return strchr(&value, 0) != 0; }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nint main(void) { int search = 0; return strchr(\"text\", &search) != 0; }\n",
+            "function 'strchr' requires an integer search value",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nchar *expired(void) { char text[2] = {'x', 0}; return text; }\nint main(void) { return strchr(expired(), 'x') != 0; }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nchar *escaped(void) { char text[2] = {'x', 0}; return strchr(text, 'x'); }\nint main(void) { return *escaped(); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nint main(void) { return strchr((const char *)0, 0) != 0; }\n",
+            "null character pointer passed as argument 1 to function 'strchr'",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nint main(void) { const char text[1] = {'x'}; return strchr(text, 'z') != 0; }\n",
+            "unterminated character sequence passed as argument 1 to function 'strchr'",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nint main(void) { *strchr(\"text\", 'e') = 'x'; return 0; }\n",
+            "cannot modify read-only array through pointer",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn strchr_evaluates_text_and_search_once_in_source_order_before_validation() {
+    let program = r#"
+char *strchr(const char *text, int search);
+int order = 0;
+char *text(void) {
+    order = 1;
+    return 0;
+}
+int search(void) {
+    int values[1] = {0};
+    return values[order == 1 ? 2 : -1];
+}
+int main(void) {
+    return strchr(text(), search()) != 0;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "array 'values' index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn normalizes_and_bounds_strchr_character_searches() {
+    let normalized = r#"
+char *strchr(const char *text, int search);
+int main(void) {
+    char text[3] = {354, 'y', 0};
+    return strchr(text, 'b') == text && strchr(text, 256) == &text[2] ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(normalized).unwrap(), 0);
+
+    let boundary = "x".repeat(4096);
+    let program = format!(
+        "char *strchr(const char *text, int search);\nint main(void) {{ const char *text = \"{boundary}\"; return strchr(text, 0) == text + 4096 ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&program).unwrap(), 0);
+
+    let oversized = "x".repeat(4097);
+    let program = format!(
+        "char *strchr(const char *text, int search);\nint main(void) {{ return strchr(\"{oversized}\", 'z') != 0; }}\n"
+    );
+    let err = interpret(&program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "argument 1 to function 'strchr' exceeded maximum input length of 4096 bytes"
+    );
+}
+
+#[test]
+fn sizeof_strchr_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+char *strchr(const char *text, int search);
+char *mark_text(int *calls) {
+    *calls += 1;
+    return "text";
+}
+int mark_search(int *calls) {
+    *calls += 1;
+    return 'x';
+}
+int main(void) {
+    int text_calls = 0;
+    int search_calls = 0;
+    int size = sizeof(strchr(mark_text(&text_calls), mark_search(&search_calls)));
+    return size == sizeof(char *) && text_calls == 0 && search_calls == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "const char *strchr(const char *text, int search);\nint main(void) { return sizeof(strchr(\"text\", 'x')); }\n",
+            "standard library function 'strchr' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nint main(void) { return sizeof(strchr(\"text\")); }\n",
+            "function 'strchr' expected 2 arguments, got 1",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nint main(void) { int value = 0; return sizeof(strchr(&value, 'x')); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nint main(void) { int search = 0; return sizeof(strchr(\"text\", &search)); }\n",
+            "function 'strchr' requires an integer search value",
+        ),
+        (
+            "char *strchr(const char *text, int search);\nvoid sink(void) {}\nint main(void) { return sizeof(strchr(\"text\", 1 ? sink() : sink())); }\n",
+            "function 'strchr' requires an integer search value",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn preserves_strncmp_declaration_call_and_pointer_boundaries() {
     for (program, expected) in [
         (

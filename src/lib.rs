@@ -16762,6 +16762,9 @@ impl Interpreter {
             if self.has_string_length_prototype(name) {
                 return self.call_string_length_function(name, arg_exprs);
             }
+            if self.has_character_search_prototype(name) {
+                return self.call_character_search_function(name, arg_exprs);
+            }
             if matches!(name, "abs" | "labs" | "llabs") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
@@ -16785,6 +16788,11 @@ impl Interpreter {
             if name == "strlen" && self.prototypes.contains_key(name) {
                 return Err(CustError::new(
                     "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
+                ));
+            }
+            if name == "strchr" && self.prototypes.contains_key(name) {
+                return Err(CustError::new(
+                    "standard library function 'strchr' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type",
                 ));
             }
             return Err(CustError::new(format!("undefined function '{name}'")));
@@ -17471,6 +17479,143 @@ impl Interpreter {
         self.sizeof_integer_string_conversion_call(name, args)
     }
 
+    fn has_character_search_prototype(&self, name: &str) -> bool {
+        if name != "strchr" {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Pointer {
+                ty: PointeeType::Scalar(CType::Char),
+                points_to_const: false,
+            },
+            params: vec![
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Char),
+                    kind: ParamKind::Pointer,
+                    points_to_const: true,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                },
+            ],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_character_search_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 2 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 2 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let pointer = self.eval_pointer(&arg_exprs[0])?;
+        let search_expr = &arg_exprs[1];
+        if self.expr_is_pointer_value(search_expr) {
+            self.eval_pointer(search_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer search value"
+            )));
+        }
+        if self.aggregate_expr_type_name(search_expr).is_ok() {
+            self.eval_struct_expr(search_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer search value"
+            )));
+        }
+        if self.expr_is_void_value(search_expr) {
+            self.eval_discard(search_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer search value"
+            )));
+        }
+        let search = self
+            .eval_scalar_conversion(CType::Int, search_expr)?
+            .rem_euclid(256) as u8;
+        self.validate_character_pointer_argument(name, 1, &pointer)?;
+
+        for offset in 0.. {
+            let byte = match &pointer {
+                PointerValue::ArrayBase { array, .. } => {
+                    array.borrow().elements.get(offset).copied()
+                }
+                PointerValue::ArrayElement { array, index, .. } => index
+                    .checked_add(offset)
+                    .and_then(|index| array.borrow().elements.get(index).copied()),
+                _ if offset == 0 => Some(self.deref_pointer(&pointer)?),
+                _ => None,
+            }
+            .map(|byte| byte.rem_euclid(256) as u8)
+            .ok_or_else(|| {
+                CustError::new(format!(
+                    "unterminated character sequence passed as argument 1 to function '{name}'"
+                ))
+            })?;
+
+            if byte == 0 {
+                let result = if search == 0 {
+                    if offset == 0 {
+                        pointer.clone()
+                    } else {
+                        self.offset_array_pointer(&pointer, offset as i64)?
+                    }
+                } else {
+                    PointerValue::Null
+                };
+                return Ok(Some(ReturnValue::Pointer {
+                    pointer: result,
+                    ty: PointeeType::Scalar(CType::Char),
+                    points_to_const: false,
+                }));
+            }
+            if offset >= MAX_INTEGER_STRING_BYTES {
+                return Err(CustError::new(format!(
+                    "argument 1 to function '{name}' exceeded maximum input length of {MAX_INTEGER_STRING_BYTES} bytes"
+                )));
+            }
+            if byte == search {
+                let result = if offset == 0 {
+                    pointer.clone()
+                } else {
+                    self.offset_array_pointer(&pointer, offset as i64)?
+                };
+                return Ok(Some(ReturnValue::Pointer {
+                    pointer: result,
+                    ty: PointeeType::Scalar(CType::Char),
+                    points_to_const: false,
+                }));
+            }
+        }
+        unreachable!("bounded character search always returns or errors")
+    }
+
+    fn sizeof_character_search_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 2 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 2 arguments, got {}",
+                args.len()
+            )));
+        }
+        self.sizeof_integer_string_conversion_call(name, &args[..1])?;
+        if self.expr_is_pointer_value(&args[1])
+            || self.aggregate_expr_type_name(&args[1]).is_ok()
+            || self.expr_is_void_value(&args[1])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer search value"
+            )));
+        }
+        self.sizeof_expr(&args[1])?;
+        Ok(POINTER_SIZE)
+    }
+
     fn validate_return_value(
         &self,
         function_name: &str,
@@ -18034,6 +18179,9 @@ impl Interpreter {
             Expr::Deref(pointer) => Ok(self
                 .array2d_row_pointer_element_type(pointer)
                 .map(PointeeType::Scalar)),
+            Expr::Call { name, .. } if self.has_character_search_prototype(name) => {
+                Ok(Some(PointeeType::Scalar(CType::Char)))
+            }
             Expr::Call { name, .. } => match self
                 .functions
                 .get(name)
@@ -24352,12 +24500,15 @@ impl Interpreter {
             ),
             Expr::Increment { target, .. } => self.expr_is_pointer_value(target),
             Expr::Deref(pointer) => self.array2d_row_pointer_element_type(pointer).is_some(),
-            Expr::Call { name, .. } => matches!(
-                self.functions
-                    .get(name)
-                    .map(|function| &function.return_type),
-                Some(ReturnType::Pointer { .. } | ReturnType::Array2DPointer { .. })
-            ),
+            Expr::Call { name, .. } => {
+                self.has_character_search_prototype(name)
+                    || matches!(
+                        self.functions
+                            .get(name)
+                            .map(|function| &function.return_type),
+                        Some(ReturnType::Pointer { .. } | ReturnType::Array2DPointer { .. })
+                    )
+            }
             Expr::Conditional {
                 then_expr,
                 else_expr,
@@ -25578,6 +25729,9 @@ impl Interpreter {
                 None if self.has_string_length_prototype(name) => {
                     self.sizeof_string_length_call(name, args)
                 }
+                None if self.has_character_search_prototype(name) => {
+                    self.sizeof_character_search_call(name, args)
+                }
                 None if name == "strncmp" && self.prototypes.contains_key(name) => {
                     Err(CustError::new(
                         "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
@@ -25586,6 +25740,11 @@ impl Interpreter {
                 None if name == "strlen" && self.prototypes.contains_key(name) => {
                     Err(CustError::new(
                         "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
+                    ))
+                }
+                None if name == "strchr" && self.prototypes.contains_key(name) => {
+                    Err(CustError::new(
+                        "standard library function 'strchr' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type",
                     ))
                 }
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
