@@ -25,6 +25,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Independent review found recursive constraint validation traversed nested character-intrinsic arguments repeatedly. At depth 18 the RED probe took 28.6 seconds. Runtime calls now perform only shallow shape validation before one-time recursive evaluation, while non-evaluating `sizeof` performs one recursive constraint pass; nested-validator and direct-`sizeof` dispatch return after that pass instead of walking the same subtree again. A repeated depth-10/depth-40 scaling regression protects linear growth.
 - Next package: bounded v0.10.0 release synchronization/publication for the completed C11 `<ctype.h>` classification and conversion surface.
 
+## 2026-08-02 — v0.10.0 release consistency and next pseudorandom slice
+
+- Release consistency remains executable: exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.9.0`, then passed after Cargo/lock and both image tags moved to `0.10.0`. `cargo test -- --list` inventory accounting is 1,255 tests: 1,122 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
+- Publication order remains release commit to `origin/main` first, then a new non-conflicting annotated `v0.10.0` tag, then exact remote peeled-target verification. Status wording describes the release as prepared and the tag as reserved until those operations succeed.
+- Official WG14 N1570 §7.22.2.1-2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `rand()` returns a pseudorandom integer in `0..=RAND_MAX`; `srand(seed)` starts a new sequence; the same seed must reproduce the same sequence; and the initial unseeded state must behave as if `srand(1)` had been called. The algorithm and exact values are implementation-defined, so Cust can use a documented deterministic interpreter-owned generator while native fixtures assert only standard relationships, not matching host values.
+
 ## 2026-08-01 — v0.9.0 release consistency and next character-conversion slice
 
 - Release consistency remains executable rather than prose-only: exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.8.0`, then passed after Cargo/lock and both image tags moved to `0.9.0`. `cargo test -- --list` inventory accounting is 1,252 tests: 1,119 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.

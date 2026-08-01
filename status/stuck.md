@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-02 bounded C11 `tolower`/`toupper` closure: focused behavior and nested-validation scaling went RED/GREEN; final independent review returned `APPROVED`; formatting, strict Clippy, all 1,255 local tests, strict compiler-oracle parity, both Docker Compose gates, and the diff check pass.
+None. Last reviewed during the 2026-08-02 bounded v0.10.0 release preparation: exact CLI and Compose expectations went RED against `0.9.0` and GREEN at `0.10.0`; Cargo/lock, Docker, README, changelog, status, and the 1,255-test inventory are synchronized. The non-conflicting `v0.10.0` tag remains reserved until the release diff is independently approved, the canonical local/Docker gate passes, and the verified commit is accepted by `origin/main`; no publication is claimed yet.
 
 ## Blocker template
 

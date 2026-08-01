@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.10.0 — 2026-08-02
+
+### Language subset
+
+- Added exact-prototype C11 `tolower` and `toupper` intrinsics with user-definition precedence, one-time scalar evaluation, deterministic ASCII/C-locale conversion, and unchanged EOF or nonmatching unsigned-character values without host libc.
+
+### Diagnostics and verification
+
+- Added exact missing/incompatible declaration, arity, pointer/aggregate/void shape, and out-of-domain value diagnostics while direct and nested `sizeof` remain non-evaluating but constraint-aware. Review-driven regressions removed repeated nested-intrinsic validation and prove validation cost remains linear with expression depth.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.10.0`.
+- Verified 1,255 tests at release preparation time: 1,122 interpreter tests, 98 deterministic fuzz-safety tests, and 35 CLI, Docker, compiler-oracle, and repository tests.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls beyond the explicitly prototyped bounded integer/string/character families, locale-sensitive behavior outside Cust's fixed ASCII/C-locale model, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported.
+
 ## v0.9.0 — 2026-08-01
 
 ### Language subset
