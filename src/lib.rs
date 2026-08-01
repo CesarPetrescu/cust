@@ -16810,7 +16810,8 @@ impl Interpreter {
                     "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                 )));
             }
-            if matches!(name, "strcpy" | "strcat") && self.prototypes.contains_key(name) {
+            if matches!(name, "strcpy" | "strcat" | "strncat") && self.prototypes.contains_key(name)
+            {
                 return Err(Self::unsupported_string_copy_declaration_error(name));
             }
             if matches!(name, "strspn" | "strcspn") && self.prototypes.contains_key(name) {
@@ -17736,33 +17737,46 @@ impl Interpreter {
     }
 
     fn has_string_copy_prototype(&self, name: &str) -> bool {
-        if !matches!(name, "strcpy" | "strcat") {
+        if !matches!(name, "strcpy" | "strcat" | "strncat") {
             return false;
+        }
+        let mut params = vec![
+            ParamSignature {
+                ty: ParamType::Scalar(CType::Char),
+                kind: ParamKind::Pointer,
+                points_to_const: false,
+            },
+            ParamSignature {
+                ty: ParamType::Scalar(CType::Char),
+                kind: ParamKind::Pointer,
+                points_to_const: true,
+            },
+        ];
+        if name == "strncat" {
+            params.push(ParamSignature {
+                ty: ParamType::Scalar(CType::Int),
+                kind: ParamKind::Scalar,
+                points_to_const: false,
+            });
         }
         let expected = FunctionSignature {
             return_type: ReturnType::Pointer {
                 ty: PointeeType::Scalar(CType::Char),
                 points_to_const: false,
             },
-            params: vec![
-                ParamSignature {
-                    ty: ParamType::Scalar(CType::Char),
-                    kind: ParamKind::Pointer,
-                    points_to_const: false,
-                },
-                ParamSignature {
-                    ty: ParamType::Scalar(CType::Char),
-                    kind: ParamKind::Pointer,
-                    points_to_const: true,
-                },
-            ],
+            params,
         };
         self.prototypes.get(name) == Some(&expected)
     }
 
     fn unsupported_string_copy_declaration_error(name: &str) -> CustError {
+        let count = if name == "strncat" {
+            ", one integer count"
+        } else {
+            ""
+        };
         CustError::new(format!(
-            "standard library function '{name}' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type"
+            "standard library function '{name}' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter{count}, and a pointer-to-character return type"
         ))
     }
 
@@ -17771,16 +17785,41 @@ impl Interpreter {
         name: &str,
         arg_exprs: &[Expr],
     ) -> CustResult<Option<ReturnValue>> {
-        if arg_exprs.len() != 2 {
+        let expected_args = if name == "strncat" { 3 } else { 2 };
+        if arg_exprs.len() != expected_args {
             return Err(CustError::new(format!(
-                "function '{name}' expected 2 arguments, got {}",
+                "function '{name}' expected {expected_args} arguments, got {}",
                 arg_exprs.len()
             )));
         }
 
         let destination = self.eval_pointer(&arg_exprs[0])?;
         let source = self.eval_pointer(&arg_exprs[1])?;
-        for (index, argument) in arg_exprs.iter().enumerate() {
+        let count = if name == "strncat" {
+            let count_expr = &arg_exprs[2];
+            if self.expr_is_pointer_value(count_expr) {
+                self.eval_pointer(count_expr)?;
+                return Err(CustError::new(format!(
+                    "function '{name}' requires an integer count"
+                )));
+            }
+            if self.aggregate_expr_type_name(count_expr).is_ok() {
+                self.eval_struct_expr(count_expr)?;
+                return Err(CustError::new(format!(
+                    "function '{name}' requires an integer count"
+                )));
+            }
+            if self.expr_is_void_value(count_expr) {
+                self.eval_discard(count_expr)?;
+                return Err(CustError::new(format!(
+                    "function '{name}' requires an integer count"
+                )));
+            }
+            Some(self.eval_scalar_conversion(CType::Int, count_expr)?)
+        } else {
+            None
+        };
+        for (index, argument) in arg_exprs[..2].iter().enumerate() {
             if self.array2d_row_pointer_element_type(argument).is_some() {
                 return Err(CustError::new(format!(
                     "function '{name}' requires character storage for argument {}",
@@ -17791,14 +17830,23 @@ impl Interpreter {
         self.ensure_pointer_conversion_preserves_const(false, &arg_exprs[0])?;
         self.validate_character_pointer_argument(name, 1, &destination)?;
         self.validate_character_pointer_argument(name, 2, &source)?;
+        let count = count
+            .map(|count| Self::validate_string_copy_count(name, count))
+            .transpose()?;
 
-        let destination_length = if name == "strcat" {
+        let destination_length = if matches!(name, "strcat" | "strncat") {
             self.read_bounded_character_sequence(name, 1, &destination)?
                 .len()
         } else {
             0
         };
-        let mut bytes = self.read_bounded_character_sequence(name, 2, &source)?;
+        let (mut bytes, source_len) = if let Some(count) = count {
+            self.read_bounded_character_prefix(name, 2, &source, count)?
+        } else {
+            let bytes = self.read_bounded_character_sequence(name, 2, &source)?;
+            let source_len = bytes.len().saturating_add(1);
+            (bytes, source_len)
+        };
         bytes.push(0);
         let current = self.deref_pointer(&destination)?;
         self.assign_deref_pointer(&destination, current)?;
@@ -17809,7 +17857,7 @@ impl Interpreter {
             &destination,
             required,
             &source,
-            bytes.len(),
+            source_len,
         )?;
         for (offset, byte) in bytes.into_iter().enumerate() {
             let offset = destination_length.saturating_add(offset);
@@ -17825,6 +17873,84 @@ impl Interpreter {
             ty: PointeeType::Scalar(CType::Char),
             points_to_const: false,
         }))
+    }
+
+    fn validate_string_copy_count(name: &str, count: i64) -> CustResult<usize> {
+        if count < 0 {
+            return Err(CustError::new(format!(
+                "function '{name}' requires a nonnegative count, got {count}"
+            )));
+        }
+        let count = usize::try_from(count).map_err(|_| {
+            CustError::new(format!(
+                "function '{name}' count exceeds maximum append length of {MAX_INTEGER_STRING_BYTES} bytes"
+            ))
+        })?;
+        if count > MAX_INTEGER_STRING_BYTES {
+            return Err(CustError::new(format!(
+                "function '{name}' count {count} exceeds maximum append length of {MAX_INTEGER_STRING_BYTES} bytes"
+            )));
+        }
+        Ok(count)
+    }
+
+    fn read_bounded_character_prefix(
+        &self,
+        name: &str,
+        argument: usize,
+        pointer: &PointerValue,
+        count: usize,
+    ) -> CustResult<(Vec<u8>, usize)> {
+        let mut bytes = Vec::with_capacity(count);
+        for offset in 0..count {
+            let value = match pointer {
+                PointerValue::ArrayBase { array, .. } => {
+                    let array = array.borrow();
+                    let end = Self::character_sequence_array_end(&array, 0);
+                    (offset < end).then(|| array.elements[offset])
+                }
+                PointerValue::ArrayElement { array, index, .. } => {
+                    let array = array.borrow();
+                    let end = Self::character_sequence_array_end(&array, *index);
+                    index
+                        .checked_add(offset)
+                        .filter(|position| *position < end)
+                        .map(|position| array.elements[position])
+                }
+                PointerValue::Scalar { .. }
+                | PointerValue::StructField { .. }
+                | PointerValue::StructFieldElementField { .. }
+                    if offset == 0 =>
+                {
+                    Some(self.deref_pointer(pointer)?)
+                }
+                PointerValue::Scalar { .. }
+                | PointerValue::StructField { .. }
+                | PointerValue::StructFieldElementField { .. } => None,
+                PointerValue::Null
+                | PointerValue::Struct { .. }
+                | PointerValue::StructElement { .. }
+                | PointerValue::StructFieldElement { .. }
+                | PointerValue::NestedStructArrayElement { .. }
+                | PointerValue::Array2DRow { .. } => {
+                    return Err(CustError::new(format!(
+                        "function '{name}' requires character storage for argument {argument}"
+                    )));
+                }
+            };
+            let byte = value
+                .map(|value| value.rem_euclid(256) as u8)
+                .ok_or_else(|| {
+                    CustError::new(format!(
+                        "unterminated character sequence passed as argument {argument} to function '{name}' before requested count {count}"
+                    ))
+                })?;
+            if byte == 0 {
+                return Ok((bytes, offset.saturating_add(1)));
+            }
+            bytes.push(byte);
+        }
+        Ok((bytes, count))
     }
 
     fn ensure_string_copy_destination_capacity(
@@ -17869,6 +17995,9 @@ impl Interpreter {
         source: &PointerValue,
         source_len: usize,
     ) -> CustResult<()> {
+        if destination_len == 0 || source_len == 0 {
+            return Ok(());
+        }
         let overlaps = match (
             Self::character_array_pointer_position(destination),
             Self::character_array_pointer_position(source),
@@ -17899,13 +18028,14 @@ impl Interpreter {
     }
 
     fn sizeof_string_copy_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
-        if args.len() != 2 {
+        let expected_args = if name == "strncat" { 3 } else { 2 };
+        if args.len() != expected_args {
             return Err(CustError::new(format!(
-                "function '{name}' expected 2 arguments, got {}",
+                "function '{name}' expected {expected_args} arguments, got {}",
                 args.len()
             )));
         }
-        if args
+        if args[..2]
             .iter()
             .any(|argument| self.array2d_row_pointer_element_type(argument).is_some())
         {
@@ -17913,11 +18043,22 @@ impl Interpreter {
                 "function '{name}' requires pointers to character storage"
             )));
         }
-        self.sizeof_string_comparison_call(name, args)?;
+        self.sizeof_string_comparison_call(name, &args[..2])?;
         if !matches!(args[0], Expr::Number(0)) && self.pointer_expr_points_to_const(&args[0]) {
             return Err(CustError::new(
                 "cannot discard const qualifier from pointer target",
             ));
+        }
+        if name == "strncat" {
+            if self.expr_is_pointer_value(&args[2])
+                || self.aggregate_expr_type_name(&args[2]).is_ok()
+                || self.expr_is_void_value(&args[2])
+            {
+                return Err(CustError::new(format!(
+                    "function '{name}' requires an integer count"
+                )));
+            }
+            self.sizeof_expr(&args[2])?;
         }
         Ok(POINTER_SIZE)
     }
@@ -17984,7 +18125,7 @@ impl Interpreter {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
                 }
-                if matches!(name.as_str(), "strcpy" | "strcat")
+                if matches!(name.as_str(), "strcpy" | "strcat" | "strncat")
                     && !self.functions.contains_key(name)
                 {
                     if self.has_string_copy_prototype(name) {
@@ -18852,7 +18993,7 @@ impl Interpreter {
                 }
             }
             Expr::Call { name, .. }
-                if matches!(name.as_str(), "strcpy" | "strcat")
+                if matches!(name.as_str(), "strcpy" | "strcat" | "strncat")
                     && !self.functions.contains_key(name) =>
             {
                 if self.prototypes.contains_key(name) {
@@ -26531,7 +26672,7 @@ impl Interpreter {
                         "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                     )))
                 }
-                None if matches!(name.as_str(), "strcpy" | "strcat")
+                None if matches!(name.as_str(), "strcpy" | "strcat" | "strncat")
                     && self.prototypes.contains_key(name) =>
                 {
                     Err(Self::unsupported_string_copy_declaration_error(name))

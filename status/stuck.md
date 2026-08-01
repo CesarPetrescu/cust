@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-01 bounded `strcat` run: nine focused interpreter tests, the registered strict native/compiler-oracle fixture, formatting, strict Clippy, all 1,229 local tests, and both Docker Compose gates pass. A focused RED/GREEN regression fixed append-range overlap detection; independent review found no semantic blocker, requested formatting plus fixture staging, and final re-review returned `APPROVED`. The runtime image prints `10`.
+None. Last reviewed during the 2026-08-01 bounded `strncat` run: six focused interpreter tests, the registered strict native/compiler-oracle fixture, formatting, strict Clippy, all 1,235 local tests, and both Docker Compose gates pass. Runtime count-shape diagnostics received focused RED/GREEN coverage; independent review found one blocking early-source-NUL test gap and no implementation defect, the added exact-capacity regression passes, and final re-review reported no blocking findings. The runtime image prints `10`.
 
 ## Blocker template
 

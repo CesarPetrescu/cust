@@ -15306,6 +15306,253 @@ fn supports_bounded_strcat_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strncat_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/bounded_string_concatenation_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn strncat_evaluates_destination_source_and_count_in_order_before_validation() {
+    let program = r#"
+char *strncat(char *destination, const char *source, unsigned long int count);
+int order = 0;
+int *destination(void) {
+    static int value = 0;
+    order = 1;
+    return &value;
+}
+char *source(void) {
+    static char value[1] = {0};
+    if (order == 1) {
+        order = 2;
+    }
+    return value;
+}
+int count(void) {
+    static int values[1] = {0};
+    return values[order == 2 ? 2 : -1];
+}
+int main(void) {
+    return strncat(destination(), source(), count()) != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array 'values' index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn validates_strncat_count_and_bounded_source_semantics() {
+    for (program, expected) in [
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[3] = \"x\"; int count = 1; return strncat(out, \"y\", &count) != out; }\n",
+            "function 'strncat' requires an integer count",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[3] = \"x\"; return strncat(out, \"y\", -1) != out; }\n",
+            "function 'strncat' requires a nonnegative count, got -1",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[3] = \"x\"; return strncat(out, \"y\", 4097) != out; }\n",
+            "function 'strncat' count 4097 exceeds maximum append length of 4096 bytes",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[3] = \"x\"; return strncat(out, (const char *)0, 0) != out; }\n",
+            "null character pointer passed as argument 2 to function 'strncat'",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[4] = \"x\"; char source[1] = {'y'}; return strncat(out, source, 2) != out; }\n",
+            "unterminated character sequence passed as argument 2 to function 'strncat' before requested count 2",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let bounded = r#"
+char *strncat(char *destination, const char *source, unsigned long int count);
+int main(void) {
+    char out[3] = "x";
+    char source[1] = {355};
+    return strncat(out, source, 1) == out && out[0] == 'x'
+        && out[1] == 99 && out[2] == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(bounded).unwrap(), 0);
+
+    let early_terminator = r#"
+char *strncat(char *destination, const char *source, unsigned long int count);
+int main(void) {
+    char out[3] = "a";
+    return strncat(out, "x", 4096) == out && out[0] == 'a'
+        && out[1] == 'x' && out[2] == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(early_terminator).unwrap(), 0);
+
+    let boundary = "x".repeat(4096);
+    let program = format!(
+        "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) {{ char out[4098] = \"a\"; return strncat(out, \"{boundary}\", 4096) == out && out[0] == 'a' && out[4096] == 'x' && out[4097] == 0 ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strncat_storage_overlap_and_row_boundaries() {
+    for (program, expected) in [
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[3] = \"ab\"; return strncat(out, \"c\", 1) != out; }\n",
+            "destination argument 1 to function 'strncat' requires 4 bytes, but only 3 bytes are available",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { const char out[3] = \"x\"; return strncat(out, \"y\", 1) != 0; }\n",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nchar *expired(void) { char source[2] = {'x', 0}; return source; }\nint main(void) { char out[3] = \"y\"; return strncat(out, expired(), 1) != out; }\n",
+            "pointer to out-of-scope variable 'source'",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char text[8] = {'a', 0, 'x', 'y', 0}; return strncat(text, text + 2, 1) != text; }\n",
+            "overlapping source and destination ranges passed to function 'strncat'",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char rows[2][4] = {{0}, {'x', 'y', 'z', 'q'}}; char out[8] = \"a\"; return strncat(out, *(rows + 1), 5) != out; }\n",
+            "unterminated character sequence passed as argument 2 to function 'strncat' before requested count 5",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char rows[2][4] = {{'a', 0}, {0}}; return strncat(*rows, \"xyz\", 3) != *rows; }\n",
+            "destination argument 1 to function 'strncat' requires 5 bytes, but only 4 bytes are available",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char rows[2][4] = {{0}}; return sizeof(strncat(rows, \"x\", 1)); }\n",
+            "function 'strncat' requires pointers to character storage",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "program unexpectedly matched a different boundary: {program}"
+        );
+    }
+
+    let zero_overlap = r#"
+char *strncat(char *destination, const char *source, unsigned long int count);
+int main(void) {
+    char text[4] = "hi";
+    return strncat(text, text, 0) == text && text[0] == 'h'
+        && text[1] == 'i' && text[2] == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(zero_overlap).unwrap(), 0);
+
+    let row_prefix = r#"
+char *strncat(char *destination, const char *source, unsigned long int count);
+int main(void) {
+    char rows[2][4] = {{0}, {'x', 'y', 'z', 'q'}};
+    char out[6] = "a";
+    return strncat(out, *(rows + 1), 4) == out && out[1] == 'x'
+        && out[4] == 'q' && out[5] == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(row_prefix).unwrap(), 0);
+}
+
+#[test]
+fn classifies_strncat_sizeof_calls_without_evaluating_arguments() {
+    let program = r#"
+char *strncat(char *destination, const char *source, unsigned long int count);
+int marker = 0;
+char *destination(void) {
+    static char out[4] = "x";
+    marker = marker + 1;
+    return out;
+}
+char *source(void) {
+    marker = marker + 10;
+    return "y";
+}
+int count(void) {
+    marker = marker + 100;
+    return 1;
+}
+int main(void) {
+    if (sizeof(strncat(destination(), source(), count())) != sizeof(char *)) {
+        return 1;
+    }
+    if (sizeof(*strncat(destination(), source(), count())) != sizeof(char)) {
+        return 2;
+    }
+    return marker;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    let pointer_count = r#"
+char *strncat(char *destination, const char *source, unsigned long int count);
+int main(void) {
+    char out[3] = "x";
+    int count = 1;
+    return sizeof(strncat(out, "y", &count));
+}
+"#;
+    assert_eq!(
+        interpret(pointer_count).unwrap_err().to_string(),
+        "function 'strncat' requires an integer count"
+    );
+}
+
+#[test]
+fn preserves_strncat_declaration_call_and_user_definition_boundaries() {
+    let expected = "standard library function 'strncat' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, one integer count, and a pointer-to-character return type";
+    for program in [
+        "const char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[3] = \"x\"; return strncat(out, \"y\", 1) != out; }\n",
+        "char *strncat(const char *destination, const char *source, unsigned long int count);\nint main(void) { char out[3] = \"x\"; return strncat(out, \"y\", 1) != out; }\n",
+        "char *strncat(char *destination, char *source, unsigned long int count);\nint main(void) { char out[3] = \"x\"; return sizeof(strncat(out, out, 1)); }\n",
+        "char *strncat(char *destination, const char *source, int *count);\nint main(void) { char out[3] = \"x\"; return strncat(out, \"y\", 0) != out; }\n",
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    for (program, expected) in [
+        (
+            "int main(void) { char out[3] = \"x\"; return strncat(out, \"y\", 1) != out; }\n",
+            "undefined function 'strncat'",
+        ),
+        (
+            "char *strncat(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[3] = \"x\"; return strncat(out, \"y\") != out; }\n",
+            "function 'strncat' expected 3 arguments, got 2",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let user_definition = r#"
+int strncat(int destination, int source, int count) {
+    return destination + source + count;
+}
+int main(void) {
+    return strncat(3, -3, 0);
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+
+    let matching_user_definition = r#"
+char *strncat(char *destination, const char *source, unsigned long int count);
+char *strncat(char *destination, const char *source, unsigned long int count) {
+    return destination;
+}
+int main(void) {
+    char rows[2][4] = {{0}};
+    return sizeof(*strncat((char *)rows, "x", 1)) == sizeof(char) ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(matching_user_definition).unwrap(), 0);
+}
+
+#[test]
 fn preserves_strcat_declaration_call_and_user_definition_boundaries() {
     let expected = "standard library function 'strcat' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type";
     for program in [

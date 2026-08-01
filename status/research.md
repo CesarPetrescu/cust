@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-01 — Bounded string prefix concatenation
+
+- Linux man-pages 6.18 `strncat(3)` specifies `char *strncat(char *restrict dst, const char *restrict src, size_t ssize)`: append at most `ssize` non-NUL source bytes, then write a terminating NUL, return `dst`, require destination room for `strlen(dst) + strnlen(src, ssize) + 1`, and leave overlap undefined. A source object need not contain NUL within the requested prefix.
+- Cust maps `size_t` to its deterministic integer model, rejecting negative and above-4,096 counts. Both pointers remain validated at zero count, while source storage is not dereferenced; an early NUL shortens source read/capacity/overlap ranges, and reaching count without NUL is valid. Two-dimensional rows remain distinct character subobjects.
+- `Interpreter::call_string_copy_function()` shares explicit prototype activation, source-order argument evaluation, mutable-destination validation, owner/lifetime identity, capacity, full-range overlap, and pointer return metadata across `strcpy`/`strcat`/`strncat`. A dedicated bounded-prefix reader normalizes bytes and returns both copied bytes and the actually accessed source range; `sizeof` validates all three shapes without evaluation.
+- Independent review found the early-source-NUL branch lacked focused coverage. An exact-capacity `strncat(out, "x", 4096)` regression now proves that early termination appends only one byte plus NUL instead of preflighting the requested maximum as destination capacity.
+- Next candidate: `strncpy` reuses the three-argument mutable-copy activation but differs materially: it writes exactly `count` bytes, truncates without guaranteeing destination NUL when the source prefix fills count, and pads the remainder with NUL after an early source terminator.
+
 ## 2026-08-01 — Bounded string concatenation
 
 - Linux man-pages 6.18 `strcat(3)` specifies `char *strcat(char *restrict dst, const char *restrict src)`, appending by overwriting destination's terminating NUL, requiring destination space for `strlen(dst) + strlen(src) + 1`, returning `dst`, and leaving overlap undefined. Cust maps those caller obligations to deterministic capacity and overlap diagnostics over interpreter-owned storage.

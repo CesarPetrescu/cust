@@ -286,6 +286,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/substring_search_function.c",
     "tests/fixtures/compat/valid/string_copy_function.c",
     "tests/fixtures/compat/valid/string_concatenation_function.c",
+    "tests/fixtures/compat/valid/bounded_string_concatenation_function.c",
     "tests/fixtures/compat/valid/string_span_functions.c",
     "tests/fixtures/compat/valid/line_comments.c",
     "tests/fixtures/compat/valid/bool_type_spellings.c",
