@@ -15320,6 +15320,199 @@ fn supports_bounded_strncpy_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strtok_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/string_tokenization_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strtok_mutability_lifetime_and_input_boundaries() {
+    for (program, expected) in [
+        (
+            "char *strtok(char *string, const char *delimiters);\nint main(void) { return strtok(\"a,b\", \",\") != 0; }\n",
+            "cannot modify read-only array through pointer",
+        ),
+        (
+            "char *strtok(char *string, const char *delimiters);\nvoid begin(void) { char text[4] = \"a,b\"; strtok(text, \",\"); }\nint main(void) { begin(); return strtok(0, \",\") != 0; }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "char *strtok(char *string, const char *delimiters);\nint main(void) { char text[2] = \"a\"; return strtok(text, (const char *)0) != 0; }\n",
+            "null character pointer passed as argument 2 to function 'strtok'",
+        ),
+        (
+            "char *strtok(char *string, const char *delimiters);\nint main(void) { char text[2] = {'a', 'b'}; return strtok(text, \",\") != 0; }\n",
+            "unterminated character sequence passed as argument 1 to function 'strtok'",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "program unexpectedly matched a different boundary: {program}"
+        );
+    }
+}
+
+#[test]
+fn strtok_rejects_character_storage_without_a_tracked_lifetime() {
+    let program = r#"
+char *strtok(char *string, const char *delimiters);
+int main(void) {
+    return strtok((char[]){'a', ',', 'b', 0}, ",") != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'strtok' requires character storage with a tracked lifetime"
+    );
+}
+
+#[test]
+fn strtok_validates_typed_null_continuation_arguments_at_runtime_and_in_sizeof() {
+    for (declaration, expected) in [
+        (
+            "int *invalid = 0;",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "const char *invalid = 0;",
+            "cannot discard const qualifier from pointer target",
+        ),
+    ] {
+        for expression in ["strtok(invalid, \",\")", "sizeof(strtok(invalid, \",\"))"] {
+            let program = format!(
+                "char *strtok(char *string, const char *delimiters);\nint main(void) {{ {declaration} return {expression} != 0; }}\n"
+            );
+            assert_eq!(
+                interpret(&program).expect_err(&program).to_string(),
+                expected,
+                "program unexpectedly matched a different typed-null boundary: {program}"
+            );
+        }
+    }
+}
+
+#[test]
+fn strtok_evaluates_string_and_delimiters_in_source_order_before_validation() {
+    let program = r#"
+char *strtok(char *string, const char *delimiters);
+int order = 0;
+int *string(void) {
+    static int value = 0;
+    order = 1;
+    return &value;
+}
+char *delimiters(void) {
+    static char values[1] = {0};
+    return values + (order == 1 ? 2 : -1);
+}
+int main(void) {
+    return strtok(string(), delimiters()) != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array pointer index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn supports_non_evaluating_sizeof_strtok_calls() {
+    let program = r#"
+char *strtok(char *string, const char *delimiters);
+int marker = 0;
+char text[4] = "a,b";
+char *string(void) {
+    marker = marker + 1;
+    return text;
+}
+const char *delimiters(void) {
+    marker = marker + 2;
+    return ",";
+}
+int main(void) {
+    return sizeof(strtok(string(), delimiters())) == sizeof(char *)
+            && sizeof(*strtok(string(), delimiters())) == sizeof(char)
+            && marker == 0
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn strtok_requires_its_exact_explicit_prototype() {
+    let unsupported = "standard library function 'strtok' has an unsupported declaration; expected one pointer-to-character string parameter, one pointer-to-const-character delimiter parameter, and a pointer-to-character return type";
+    for program in [
+        "char *strtok(const char *string, const char *delimiters);\nint main(void) { return strtok(\"a\", \",\") != 0; }\n",
+        "const char *strtok(char *string, const char *delimiters);\nint main(void) { char text[2] = \"a\"; return strtok(text, \",\") != 0; }\n",
+        "char *strtok(char *string, char *delimiters);\nint main(void) { char text[2] = \"a\"; return sizeof(strtok(text, text)); }\n",
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            unsupported,
+            "program unexpectedly matched a different declaration: {program}"
+        );
+    }
+
+    assert_eq!(
+        interpret("int main(void) { char text[2] = \"a\"; return strtok(text, \",\") != 0; }\n")
+            .unwrap_err()
+            .to_string(),
+        "undefined function 'strtok'"
+    );
+    for (call, expected) in [
+        (
+            "strtok(text)",
+            "function 'strtok' expected 2 arguments, got 1",
+        ),
+        (
+            "strtok(text, \",\", \":\")",
+            "function 'strtok' expected 2 arguments, got 3",
+        ),
+    ] {
+        let program = format!(
+            "char *strtok(char *string, const char *delimiters);\nint main(void) {{ char text[2] = \"a\"; return {call} != 0; }}\n"
+        );
+        assert_eq!(interpret(&program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn strtok_accepts_4096_bytes_and_rejects_longer_character_sequences() {
+    let valid_contents = "a".repeat(4096);
+    let valid_program = format!(
+        "char *strtok(char *string, const char *delimiters);\nint main(void) {{ char text[4097] = \"{valid_contents}\"; return strtok(text, \"\") == text ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&valid_program).unwrap(), 0);
+
+    let invalid_contents = "a".repeat(4097);
+    let invalid_program = format!(
+        "char *strtok(char *string, const char *delimiters);\nint main(void) {{ char text[4097] = \"{invalid_contents}\"; return strtok(text, \"\") != 0; }}\n"
+    );
+    assert_eq!(
+        interpret(&invalid_program).unwrap_err().to_string(),
+        "argument 1 to function 'strtok' exceeded maximum input length of 4096 bytes"
+    );
+
+    let delimiter_program = format!(
+        "char *strtok(char *string, const char *delimiters);\nint main(void) {{ char text[2] = \"a\"; char delimiters[4097] = \"{invalid_contents}\"; return strtok(text, delimiters) != 0; }}\n"
+    );
+    assert_eq!(
+        interpret(&delimiter_program).unwrap_err().to_string(),
+        "argument 2 to function 'strtok' exceeded maximum input length of 4096 bytes"
+    );
+
+    let only_delimiters = "char *strtok(char *string, const char *delimiters);\nint main(void) { char text[4] = \",,,\"; return strtok(text, \",\") == 0 && strtok(0, \",\") == 0 ? 0 : 1; }\n";
+    assert_eq!(interpret(only_delimiters).unwrap(), 0);
+}
+
+#[test]
 fn strncpy_evaluates_destination_source_and_count_in_order_before_validation() {
     let program = r#"
 char *strncpy(char *destination, const char *source, unsigned long int count);

@@ -16390,6 +16390,7 @@ struct Interpreter {
     loop_iterations: usize,
     next_compound_literal_id: usize,
     function_name_arrays: HashMap<String, Rc<RefCell<ArrayValue>>>,
+    strtok_next: Option<PointerValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16679,6 +16680,7 @@ impl Interpreter {
             loop_iterations: 0,
             next_compound_literal_id: 0,
             function_name_arrays: HashMap::new(),
+            strtok_next: None,
         }
     }
 
@@ -16769,6 +16771,9 @@ impl Interpreter {
             if self.has_character_set_search_prototype(name) {
                 return self.call_character_set_search_function(name, arg_exprs);
             }
+            if self.has_string_tokenization_prototype(name) {
+                return self.call_string_tokenization_function(name, arg_exprs);
+            }
             if self.has_string_copy_prototype(name) {
                 return self.call_string_copy_function(name, arg_exprs);
             }
@@ -16809,6 +16814,9 @@ impl Interpreter {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                 )));
+            }
+            if name == "strtok" && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_string_tokenization_declaration_error());
             }
             if matches!(name, "strcpy" | "strcat" | "strncat" | "strncpy")
                 && self.prototypes.contains_key(name)
@@ -17737,6 +17745,162 @@ impl Interpreter {
         Ok(POINTER_SIZE)
     }
 
+    fn has_string_tokenization_prototype(&self, name: &str) -> bool {
+        if name != "strtok" {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Pointer {
+                ty: PointeeType::Scalar(CType::Char),
+                points_to_const: false,
+            },
+            params: vec![
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Char),
+                    kind: ParamKind::Pointer,
+                    points_to_const: false,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Char),
+                    kind: ParamKind::Pointer,
+                    points_to_const: true,
+                },
+            ],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn unsupported_string_tokenization_declaration_error() -> CustError {
+        CustError::new(
+            "standard library function 'strtok' has an unsupported declaration; expected one pointer-to-character string parameter, one pointer-to-const-character delimiter parameter, and a pointer-to-character return type",
+        )
+    }
+
+    fn call_string_tokenization_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 2 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 2 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let string = self.eval_pointer(&arg_exprs[0])?;
+        let delimiters = self.eval_pointer(&arg_exprs[1])?;
+        if self
+            .array2d_row_pointer_element_type(&arg_exprs[0])
+            .is_some()
+            || self
+                .array2d_row_pointer_element_type(&arg_exprs[1])
+                .is_some()
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires pointers to character storage"
+            )));
+        }
+        self.sizeof_string_comparison_call(name, arg_exprs)?;
+        if !matches!(arg_exprs[0], Expr::Number(0))
+            && self.pointer_expr_points_to_const(&arg_exprs[0])
+        {
+            return Err(CustError::new(
+                "cannot discard const qualifier from pointer target",
+            ));
+        }
+        self.validate_character_pointer_argument(name, 2, &delimiters)?;
+        let delimiter_bytes = self.read_bounded_character_sequence(name, 2, &delimiters)?;
+
+        let cursor = if matches!(string, PointerValue::Null) {
+            let Some(cursor) = self.strtok_next.clone() else {
+                return Ok(Some(ReturnValue::Pointer {
+                    pointer: PointerValue::Null,
+                    ty: PointeeType::Scalar(CType::Char),
+                    points_to_const: false,
+                }));
+            };
+            cursor
+        } else {
+            self.validate_character_pointer_argument(name, 1, &string)?;
+            self.attach_array_pointer_owner(string)
+        };
+        self.validate_character_pointer_argument(name, 1, &cursor)?;
+        let current = self.deref_pointer(&cursor)?;
+        self.assign_deref_pointer(&cursor, current)?;
+        if matches!(
+            &cursor,
+            PointerValue::ArrayBase { owner: None, .. }
+                | PointerValue::ArrayElement { owner: None, .. }
+        ) {
+            return Err(CustError::new(format!(
+                "function '{name}' requires character storage with a tracked lifetime"
+            )));
+        }
+        let bytes = self.read_bounded_character_sequence(name, 1, &cursor)?;
+        let Some(token_start) = bytes
+            .iter()
+            .position(|byte| !delimiter_bytes.contains(byte))
+        else {
+            self.strtok_next = None;
+            return Ok(Some(ReturnValue::Pointer {
+                pointer: PointerValue::Null,
+                ty: PointeeType::Scalar(CType::Char),
+                points_to_const: false,
+            }));
+        };
+        let token_end = bytes[token_start..]
+            .iter()
+            .position(|byte| delimiter_bytes.contains(byte))
+            .map(|offset| token_start.saturating_add(offset));
+        let token = if token_start == 0 {
+            cursor.clone()
+        } else {
+            self.offset_array_pointer(&cursor, token_start as i64)?
+        };
+        self.strtok_next = if let Some(token_end) = token_end {
+            let delimiter = if token_end == 0 {
+                cursor.clone()
+            } else {
+                self.offset_array_pointer(&cursor, token_end as i64)?
+            };
+            self.assign_deref_pointer(&delimiter, 0)?;
+            Some(self.offset_array_pointer(&cursor, token_end.saturating_add(1) as i64)?)
+        } else {
+            None
+        };
+
+        Ok(Some(ReturnValue::Pointer {
+            pointer: token,
+            ty: PointeeType::Scalar(CType::Char),
+            points_to_const: false,
+        }))
+    }
+
+    fn sizeof_string_tokenization_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 2 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 2 arguments, got {}",
+                args.len()
+            )));
+        }
+        if args
+            .iter()
+            .any(|argument| self.array2d_row_pointer_element_type(argument).is_some())
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires pointers to character storage"
+            )));
+        }
+        self.sizeof_string_comparison_call(name, args)?;
+        if !matches!(args[0], Expr::Number(0)) && self.pointer_expr_points_to_const(&args[0]) {
+            return Err(CustError::new(
+                "cannot discard const qualifier from pointer target",
+            ));
+        }
+        Ok(POINTER_SIZE)
+    }
+
     fn has_string_copy_prototype(&self, name: &str) -> bool {
         if !matches!(name, "strcpy" | "strcat" | "strncat" | "strncpy") {
             return false;
@@ -18135,6 +18299,15 @@ impl Interpreter {
                         return Err(CustError::new(format!(
                             "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                         )));
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                }
+                if name == "strtok" && !self.functions.contains_key(name) {
+                    if self.has_string_tokenization_prototype(name) {
+                        self.sizeof_string_tokenization_call(name, args)?;
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(Self::unsupported_string_tokenization_declaration_error());
                     } else {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
@@ -18989,6 +19162,13 @@ impl Interpreter {
                 Ok(Some(PointeeType::Scalar(CType::Char)))
             }
             Expr::Call { name, args }
+                if self.has_string_tokenization_prototype(name)
+                    && !self.functions.contains_key(name) =>
+            {
+                self.sizeof_string_tokenization_call(name, args)?;
+                Ok(Some(PointeeType::Scalar(CType::Char)))
+            }
+            Expr::Call { name, args }
                 if self.has_string_copy_prototype(name) && !self.functions.contains_key(name) =>
             {
                 self.sizeof_string_copy_call(name, args)?;
@@ -19002,6 +19182,13 @@ impl Interpreter {
                     Err(CustError::new(format!(
                         "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                     )))
+                } else {
+                    Err(CustError::new(format!("undefined function '{name}'")))
+                }
+            }
+            Expr::Call { name, .. } if name == "strtok" && !self.functions.contains_key(name) => {
+                if self.prototypes.contains_key(name) {
+                    Err(Self::unsupported_string_tokenization_declaration_error())
                 } else {
                     Err(CustError::new(format!("undefined function '{name}'")))
                 }
@@ -25421,6 +25608,7 @@ impl Interpreter {
             Expr::Call { name, .. } => {
                 self.has_character_search_prototype(name)
                     || self.has_character_set_search_prototype(name)
+                    || self.has_string_tokenization_prototype(name)
                     || self.has_string_copy_prototype(name)
                     || matches!(
                         self.functions
@@ -26656,6 +26844,9 @@ impl Interpreter {
                 None if self.has_character_set_search_prototype(name) => {
                     self.sizeof_character_set_search_call(name, args)
                 }
+                None if self.has_string_tokenization_prototype(name) => {
+                    self.sizeof_string_tokenization_call(name, args)
+                }
                 None if self.has_string_copy_prototype(name) => {
                     self.sizeof_string_copy_call(name, args)
                 }
@@ -26685,6 +26876,9 @@ impl Interpreter {
                     Err(CustError::new(format!(
                         "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                     )))
+                }
+                None if name == "strtok" && self.prototypes.contains_key(name) => {
+                    Err(Self::unsupported_string_tokenization_declaration_error())
                 }
                 None if matches!(name.as_str(), "strcpy" | "strcat" | "strncat" | "strncpy")
                     && self.prototypes.contains_key(name) =>

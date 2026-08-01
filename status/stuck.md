@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-01 bounded v0.8.0 release preparation: exact CLI and Compose version tests went RED on `0.7.0` and GREEN on `0.8.0`; Cargo metadata and local CLI output report `0.8.0`; local and remote `v0.8.0` tag preflight is clear. Independent diff review and the canonical local/Docker release gate remain required before the release commit can be pushed and the reserved annotated tag can be published.
+None. Last reviewed during the 2026-08-01 bounded `strtok` slice: focused runtime, non-evaluating, owner/lifetime, type/const, 4,096-byte, and native-oracle coverage passes; independent final review found no blocking security or logic errors. The prior v0.8.0 release and annotated tag are published and remotely verified.
 
 ## Blocker template
 
