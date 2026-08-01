@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-01 bounded `strncpy` run: six focused interpreter tests, the registered strict native/compiler-oracle fixture, formatting, strict Clippy, all 1,241 local tests, and both Docker Compose gates pass. Independent review returned `APPROVED` with no blocking/high/medium findings; its sole low padding-capacity coverage note was resolved before the canonical gate. The runtime image prints `10`.
+None. Last reviewed during the 2026-08-01 bounded v0.8.0 release preparation: exact CLI and Compose version tests went RED on `0.7.0` and GREEN on `0.8.0`; Cargo metadata and local CLI output report `0.8.0`; local and remote `v0.8.0` tag preflight is clear. Independent diff review and the canonical local/Docker release gate remain required before the release commit can be pushed and the reserved annotated tag can be published.
 
 ## Blocker template
 

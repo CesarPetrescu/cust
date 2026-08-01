@@ -18,6 +18,11 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-01 — v0.8.0 release closure and next string slice
+
+- Cargo metadata, exact CLI output, and both Compose image tags are treated as one tested release-consistency surface: focused expectations first failed on `0.7.0`, then passed after all package/runtime metadata moved to `0.8.0`. Local and remote annotated-tag preflight found no existing `v0.8.0`; publication remains ordered release-commit push first, tag second.
+- Linux man-pages 6.18 `strtok(3)` specifies `char *strtok(char *restrict str, const char *restrict delim)`: a non-null first argument starts tokenization, later null first arguments continue saved state, delimiter runs and leading/trailing delimiters produce only nonempty tokens, found delimiters are overwritten with NUL, delimiter sets may change between calls, and exhausted scans return null. Cust's planned slice will keep that hidden continuation as interpreter-owned identity/offset metadata rather than a host address.
+
 ## 2026-08-01 — Bounded fixed-count string copy
 
 - Linux man-pages 6.18 `strncpy(3)` specifies `char *strncpy(char *restrict dst, const char *restrict src, size_t dsize)`: return `dst`, copy non-NUL source bytes up to `dsize`, truncate without guaranteeing a destination NUL when the source fills the count, and pad every remaining destination byte with NUL after an early source terminator. Overlap is outside the valid contract.
@@ -92,7 +97,7 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 ## 2026-07-31 — v0.7.0 release closure
 
 - No new language-semantics research was needed. Release consistency remains executable: `env!("CARGO_PKG_VERSION")` drives CLI output, exact CLI and Compose tests pin `0.7.0`, and Cargo metadata confirms the package version.
-- The reconciled release inventory is 1,176 tests: 1,043 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
+- The reconciled release inventory is 1,170 tests: 1,037 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. The later `strncmp` slice is post-tag work for v0.8.0, not part of v0.7.0.
 - Local and remote `v0.7.0` preflight are empty. The release commit must reach `origin/main` before creating the annotated tag; the remote peeled `refs/tags/v0.7.0^{}` target must then equal the release commit, and an existing tag must never be moved.
 - Next candidate: bounded explicitly prototyped `strchr` can reuse normalized character traversal but must return an interior interpreter pointer or null while preserving owner/lifetime and read-only metadata.
 

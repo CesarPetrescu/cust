@@ -4,14 +4,27 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.8.0 — 2026-08-01
+
 ### Language subset
 
-- Added explicitly prototyped bounded C11 `strchr`, `strrchr`, and `strpbrk` calls over interpreter-owned character storage. Calls evaluate arguments once in source order, normalize byte comparisons, return matching/NUL/null pointers with preserved storage/owner/lifetime/read-only identity, enforce deterministic 4,096-byte traversal per sequence, and retain non-evaluating constraint-aware `sizeof`.
-- Added explicitly prototyped bounded C11 `strspn` and `strcspn` calls. They evaluate both character pointers once left-to-right, normalize and independently bound both NUL-terminated sequences, and return deterministic initial membership/non-membership segment lengths with direct and nested non-evaluating constraint-aware `sizeof`.
+- Added explicitly prototyped bounded C11 `strncmp`, `strchr`, `strrchr`, `strpbrk`, `strspn`, `strcspn`, and `strstr` calls over interpreter-owned character storage. Calls evaluate arguments once in source order, normalize byte comparisons, enforce deterministic 4,096-byte bounds, and retain non-evaluating constraint-aware `sizeof`.
+- Added explicitly prototyped bounded C11 `strcpy`, `strcat`, `strncat`, and `strncpy`. Mutable calls preflight destination capacity and overlap before mutation, preserve returned destination identity, enforce owner/lifetime/read-only and two-dimensional row boundaries, and implement exact NUL append, prefix, truncation, and padding behavior without a host libc path.
 
 ### Diagnostics and verification
 
-- Added exact declaration, arity, scalar/pointer-shape, null, wrong-pointee, escaped-owner, unterminated-input, traversal-limit, read-only-write, and nested type-query coverage plus registered warning-free native compiler-oracle fixtures, including strict C11 parity for `strspn`/`strcspn`.
+- Added exact declaration, arity, scalar/pointer-shape, null, wrong-pointee, escaped-owner, unterminated-input, count/traversal-limit, capacity, overlap, read-only-write, row-boundary, and nested type-query coverage plus registered warning-free native compiler-oracle fixtures.
+- Added review-driven regressions for lockstep early termination, nested non-evaluating call validation, scalar-character pointer identity, normalized byte handling, source-order one-time evaluation, complete append-range overlap, and early-NUL destination-capacity accounting.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.8.0`.
+- Verified 1,241 tests at release preparation time: 1,108 interpreter tests, 98 deterministic fuzz-safety tests, and 35 CLI, Docker, compiler-oracle, and repository tests.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls beyond the explicitly prototyped bounded integer/string families, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported.
 
 ## v0.7.0 — 2026-07-31
 
@@ -19,7 +32,7 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 - Added the first bounded standard-library runtime slice: explicitly prototyped C11 `abs`, `labs`, and `llabs` calls execute inside Cust over its deterministic integer model, evaluate arguments once, and retain scalar `sizeof` metadata without evaluating calls.
 - Added explicitly prototyped C11 `atoi`, `atol`, and `atoll` calls over interpreter-owned NUL-terminated character storage, with C whitespace/sign/decimal parsing, one-time pointer evaluation, a 4,096-byte scan bound, non-evaluating `sizeof`, and deterministic overflow handling.
-- Added explicitly prototyped C11 `strcmp`, `strncmp`, and `strlen` calls over interpreter-owned character storage, with ordered one-time argument evaluation, unsigned-byte semantics, deterministic 4,096-byte traversal/count bounds, lexical sign results or exact lengths, and non-evaluating constraint-aware `sizeof`.
+- Added explicitly prototyped C11 `strcmp` and `strlen` calls over interpreter-owned character storage, with ordered one-time argument evaluation, unsigned-byte semantics, deterministic 4,096-byte traversal bounds, lexical sign results or exact lengths, and non-evaluating constraint-aware `sizeof`.
 
 ### Diagnostics and verification
 
@@ -30,7 +43,7 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### CLI, packaging, and verification
 
 - Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.7.0`.
-- Verified 1,176 tests at release preparation time: 1,043 interpreter tests, 98 deterministic fuzz-safety tests, and 35 CLI, Docker, compiler-oracle, and repository tests.
+- Verified 1,170 tests at release preparation time: 1,037 interpreter tests, 98 deterministic fuzz-safety tests, and 35 CLI, Docker, compiler-oracle, and repository tests.
 
 ### Known limitations
 
