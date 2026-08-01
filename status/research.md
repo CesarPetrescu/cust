@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-01 — Bounded string concatenation
+
+- Linux man-pages 6.18 `strcat(3)` specifies `char *strcat(char *restrict dst, const char *restrict src)`, appending by overwriting destination's terminating NUL, requiring destination space for `strlen(dst) + strlen(src) + 1`, returning `dst`, and leaving overlap undefined. Cust maps those caller obligations to deterministic capacity and overlap diagnostics over interpreter-owned storage.
+- `Interpreter::call_string_copy_function()` now reuses exact `strcpy` prototype/runtime/`sizeof` dispatch but pre-scans `strcat`'s destination independently, snapshots normalized source bytes, and preflights the complete resulting destination range against source storage before mutation. The overlap helper accepts separate destination/source lengths; this closes the case where source begins after the old destination NUL but is overwritten by the append.
+- The next adjacent package is `strncat`: local `man 3 strncat` specifies at most `n` source bytes followed by a terminating NUL and the same destination return/overlap obligations. Cust should additionally define deterministic negative/above-limit count diagnostics under its integer model and preserve count-zero pointer validation/non-evaluation conventions.
+
 ## 2026-07-31 — Bounded string copy and next concatenation package
 
 - Linux man-pages 6.18 `strcpy(3)` documents `char *strcpy(char *restrict dst, const char *restrict src)`, copying `strlen(src) + 1` bytes including NUL and returning `dst`; it places destination sizing on the caller and states that source/destination may not overlap. Cust turns those native undefined-behavior boundaries into deterministic capacity and overlap diagnostics over interpreter-owned storage.

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-07-31 bounded `strcpy` run: nine focused interpreter tests, the registered strict native/compiler-oracle fixture, formatting, strict Clippy, all 1,220 local tests, and both Docker Compose gates pass. Independent review drove focused RED/GREEN fixes for unevaluated arity ordering, enum-shadowed row metadata, row compound wrappers, overlap, cross-row two-dimensional arithmetic, and matching user-definition precedence; final re-review returned `APPROVED`. The runtime image prints `10`.
+None. Last reviewed during the 2026-08-01 bounded `strcat` run: nine focused interpreter tests, the registered strict native/compiler-oracle fixture, formatting, strict Clippy, all 1,229 local tests, and both Docker Compose gates pass. A focused RED/GREEN regression fixed append-range overlap detection; independent review found no semantic blocker, requested formatting plus fixture staging, and final re-review returned `APPROVED`. The runtime image prints `10`.
 
 ## Blocker template
 

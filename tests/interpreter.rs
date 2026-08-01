@@ -15299,6 +15299,328 @@ fn supports_bounded_strcpy_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strcat_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/string_concatenation_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strcat_declaration_call_and_user_definition_boundaries() {
+    let expected = "standard library function 'strcat' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type";
+    for program in [
+        "const char *strcat(char *destination, const char *source);\nint main(void) { char out[3] = \"x\"; return strcat(out, \"y\") != out; }\n",
+        "char *strcat(const char *destination, const char *source);\nint main(void) { char out[3] = \"x\"; return strcat(out, \"y\") != out; }\n",
+        "char *strcat(char *destination, char *source);\nint main(void) { char out[3] = \"x\"; return sizeof(strcat(out, out)); }\n",
+        "char *strcat(char *destination, const int *source);\nint main(void) { char out[3] = \"x\"; return strcat(out, 0) != out; }\n",
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    for (program, expected) in [
+        (
+            "int main(void) { char out[3] = \"x\"; return strcat(out, \"y\") != out; }\n",
+            "undefined function 'strcat'",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char out[3] = \"x\"; return strcat(out) != out; }\n",
+            "function 'strcat' expected 2 arguments, got 1",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let user_definition = r#"
+int strcat(int destination, int source) {
+    return destination + source;
+}
+int main(void) {
+    return strcat(3, -3);
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+
+    let matching_user_definition = r#"
+char *strcat(char *destination, const char *source);
+char *strcat(char *destination, const char *source) {
+    return destination;
+}
+int main(void) {
+    char rows[2][4] = {{0}};
+    return sizeof(*strcat((char *)rows, "x")) == sizeof(char) ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(matching_user_definition).unwrap(), 0);
+}
+
+#[test]
+fn rejects_strcat_append_ranges_that_overlap_the_source() {
+    let expected = "overlapping source and destination ranges passed to function 'strcat'";
+    for program in [
+        "char *strcat(char *destination, const char *source);\nint main(void) { char text[8] = \"abc\"; return strcat(text, text) != text; }\n",
+        "char *strcat(char *destination, const char *source);\nint main(void) { char text[8] = \"abc\"; return strcat(text, text + 1) != text; }\n",
+        "char *strcat(char *destination, const char *source);\nint main(void) { char text[8] = {'a', 0, 'x', 0}; return strcat(text, text + 2) != text; }\n",
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn preserves_strcat_pointer_storage_lifetime_and_capacity_boundaries() {
+    for (program, expected) in [
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { int value = 0; return strcat(&value, \"x\") != 0; }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char out[3] = \"x\"; int value = 0; return strcat(out, &value) != out; }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nchar *expired(void) { char out[3] = \"x\"; return out; }\nint main(void) { return strcat(expired(), \"y\") != 0; }\n",
+            "pointer to out-of-scope variable 'out'",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nchar *expired(void) { char source[2] = {'x', 0}; return source; }\nint main(void) { char out[3] = \"y\"; return strcat(out, expired()) != out; }\n",
+            "pointer to out-of-scope variable 'source'",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { return strcat((char *)0, \"x\") != 0; }\n",
+            "null character pointer passed as argument 1 to function 'strcat'",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char out[3] = \"x\"; return strcat(out, (const char *)0) != out; }\n",
+            "null character pointer passed as argument 2 to function 'strcat'",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char out[2] = {'x', 'y'}; return strcat(out, \"z\") != out; }\n",
+            "unterminated character sequence passed as argument 1 to function 'strcat'",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char out[3] = \"x\"; const char source[1] = {'y'}; return strcat(out, source) != out; }\n",
+            "unterminated character sequence passed as argument 2 to function 'strcat'",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { return strcat(\"x\", \"y\") != 0; }\n",
+            "cannot modify read-only array through pointer",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { const char out[3] = \"x\"; return strcat(out, \"y\") != 0; }\n",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char out[3] = \"ab\"; return strcat(out, \"c\") != out; }\n",
+            "destination argument 1 to function 'strcat' requires 4 bytes, but only 3 bytes are available",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char out[5] = {'x', 'a', 0}; return strcat(out + 1, \"cat\") != out + 1; }\n",
+            "destination argument 1 to function 'strcat' requires 5 bytes, but only 4 bytes are available",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let scalar = r#"
+char *strcat(char *destination, const char *source);
+int main(void) {
+    char destination = 0;
+    return strcat(&destination, "") == &destination && destination == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(scalar).unwrap(), 0);
+}
+
+#[test]
+fn strcat_evaluates_both_pointers_in_source_order_before_validation() {
+    let program = r#"
+char *strcat(char *destination, const char *source);
+int order = 0;
+int *destination(void) {
+    static int value = 0;
+    order = 1;
+    return &value;
+}
+char *source(void) {
+    static char values[1] = {0};
+    return &values[order == 1 ? 2 : -1];
+}
+int main(void) {
+    return strcat(destination(), source()) != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array 'values' index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn normalizes_and_bounds_strcat_character_sequences() {
+    let normalized = r#"
+char *strcat(char *destination, const char *source);
+int main(void) {
+    char destination[3] = {354, 0};
+    char source[2] = {355, 0};
+    strcat(destination, source);
+    return destination[0] == 354 && destination[1] == 99 && destination[2] == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(normalized).unwrap(), 0);
+
+    let boundary = "x".repeat(4096);
+    let program = format!(
+        "char *strcat(char *destination, const char *source);\nint main(void) {{ char out[4097] = \"{boundary}\"; return strcat(out, \"\") == out && out[4095] == 'x' && out[4096] == 0 ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&program).unwrap(), 0);
+
+    let oversized = "x".repeat(4097);
+    for (program, expected) in [
+        (
+            format!(
+                "char *strcat(char *destination, const char *source);\nint main(void) {{ char out[4098] = \"{oversized}\"; return strcat(out, \"\") != out; }}\n"
+            ),
+            "argument 1 to function 'strcat' exceeded maximum input length of 4096 bytes",
+        ),
+        (
+            format!(
+                "char *strcat(char *destination, const char *source);\nint main(void) {{ char out[4099] = \"x\"; return strcat(out, \"{oversized}\") != out; }}\n"
+            ),
+            "argument 2 to function 'strcat' exceeded maximum input length of 4096 bytes",
+        ),
+    ] {
+        assert_eq!(interpret(&program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn sizeof_strcat_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+char *strcat(char *destination, const char *source);
+char *mark_destination(int *calls, char *destination) {
+    *calls += 1;
+    return destination;
+}
+const char *mark_source(int *calls, const char *source) {
+    *calls += 1;
+    return source;
+}
+int main(void) {
+    int calls = 0;
+    char out[5] = "x";
+    int pointer_size = sizeof(strcat(mark_destination(&calls, out), mark_source(&calls, "y")));
+    int character_size = sizeof(*strcat(mark_destination(&calls, out), mark_source(&calls, "y")));
+    int nested = sizeof(strcat(out, "y") != 0);
+    return pointer_size == sizeof(char *) && character_size == sizeof(char)
+        && nested == sizeof(int) && calls == 0 && out[1] == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    let unsupported = "standard library function 'strcat' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type";
+    for (program, expected) in [
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char out[3] = \"x\"; return sizeof(strcat(out)); }\n",
+            "function 'strcat' expected 2 arguments, got 1",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char out[3] = \"x\"; return sizeof(strcat(out) != 0); }\n",
+            "function 'strcat' expected 2 arguments, got 1",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { int value = 0; return sizeof(*strcat(&value, \"x\")); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { const char out[3] = \"x\"; return sizeof(strcat(out, \"y\")); }\n",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "int main(void) { char out[3] = \"x\"; return sizeof(strcat(out, \"y\") != 0); }\n",
+            "undefined function 'strcat'",
+        ),
+        (
+            "const char *strcat(char *destination, const char *source);\nint main(void) { char out[3] = \"x\"; return sizeof(*strcat(out, \"y\")); }\n",
+            unsupported,
+        ),
+        (
+            "const char *strcat(char *destination, const char *source);\nint main(void) { char out[3] = \"x\"; return sizeof(strcat(out, \"y\") != 0); }\n",
+            unsupported,
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}}; return sizeof(strcat(rows, \"x\")); }\n",
+            "function 'strcat' requires pointers to character storage",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn strcat_preserves_two_dimensional_row_boundaries() {
+    let valid = r#"
+char *strcat(char *destination, const char *source);
+int main(void) {
+    char rows[2][4] = {{0}, {'a', 0}};
+    return strcat(*(rows + 1), "b") == *(rows + 1)
+        && rows[1][0] == 'a' && rows[1][1] == 'b' && rows[1][2] == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(valid).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char out[2][4] = {{'a', 0}, {'z', 0}}; char (*row)[4] = out; return strcat(*row, \"123\") != *row; }\n",
+            "destination argument 1 to function 'strcat' requires 5 bytes, but only 4 bytes are available",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}, {'z', 0}}; return strcat(*rows + 4, \"x\") != *rows + 4; }\n",
+            "two-dimensional array row pointer index 4 out of bounds for row 0 with length 4",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}, {'z', 0}}; char out[4] = \"a\"; return strcat(out, *(rows + 1) - 1) != out; }\n",
+            "two-dimensional array row pointer index 3 out of bounds for row 1 with length 4",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char destination[2][4] = {{'a', 'b', 'c', 'd'}, {0}}; char (*row)[4] = destination; return strcat(*row, \"x\") != *row; }\n",
+            "unterminated character sequence passed as argument 1 to function 'strcat'",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char source[2][4] = {{'a', 'b', 'c', 'd'}, {0}}; char (*row)[4] = source; char out[8] = \"x\"; return strcat(out, *row) != out; }\n",
+            "unterminated character sequence passed as argument 2 to function 'strcat'",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nstruct Frame { char rows[2][4]; };\nint main(void) { struct Frame frame = {{{0}, {'z', 0}}}; return strcat(&frame.rows, \"x\") != 0; }\n",
+            "function 'strcat' requires character storage for argument 1",
+        ),
+        (
+            "char *strcat(char *destination, const char *source);\nint main(void) { char rows[2][4] = {{0}}; char (*row)[4] = rows; return sizeof(strcat(row += 0, \"x\")); }\n",
+            "function 'strcat' requires pointers to character storage",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn strcat_row_pointer_metadata_respects_enum_shadowing() {
+    let program = r#"
+char *strcat(char *destination, const char *source);
+int main(void) {
+    char rows[2][4] = {{0}};
+    char (*slot)[4] = rows;
+    int used = slot == rows;
+    {
+        enum { slot = 0 };
+        return used && sizeof(strcat((char *)slot, "x")) == sizeof(char *) ? 0 : 1;
+    }
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn preserves_strcpy_declaration_call_and_user_definition_boundaries() {
     let expected = "standard library function 'strcpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type";
     for program in [

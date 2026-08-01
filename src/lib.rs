@@ -16810,10 +16810,8 @@ impl Interpreter {
                     "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                 )));
             }
-            if name == "strcpy" && self.prototypes.contains_key(name) {
-                return Err(CustError::new(
-                    "standard library function 'strcpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type",
-                ));
+            if matches!(name, "strcpy" | "strcat") && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_string_copy_declaration_error(name));
             }
             if matches!(name, "strspn" | "strcspn") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
@@ -17738,7 +17736,7 @@ impl Interpreter {
     }
 
     fn has_string_copy_prototype(&self, name: &str) -> bool {
-        if name != "strcpy" {
+        if !matches!(name, "strcpy" | "strcat") {
             return false;
         }
         let expected = FunctionSignature {
@@ -17760,6 +17758,12 @@ impl Interpreter {
             ],
         };
         self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn unsupported_string_copy_declaration_error(name: &str) -> CustError {
+        CustError::new(format!(
+            "standard library function '{name}' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type"
+        ))
     }
 
     fn call_string_copy_function(
@@ -17788,13 +17792,27 @@ impl Interpreter {
         self.validate_character_pointer_argument(name, 1, &destination)?;
         self.validate_character_pointer_argument(name, 2, &source)?;
 
+        let destination_length = if name == "strcat" {
+            self.read_bounded_character_sequence(name, 1, &destination)?
+                .len()
+        } else {
+            0
+        };
         let mut bytes = self.read_bounded_character_sequence(name, 2, &source)?;
         bytes.push(0);
         let current = self.deref_pointer(&destination)?;
         self.assign_deref_pointer(&destination, current)?;
-        self.ensure_string_copy_destination_capacity(name, &destination, bytes.len())?;
-        self.ensure_string_copy_ranges_do_not_overlap(name, &destination, &source, bytes.len())?;
+        let required = destination_length.saturating_add(bytes.len());
+        self.ensure_string_copy_destination_capacity(name, &destination, required)?;
+        self.ensure_string_copy_ranges_do_not_overlap(
+            name,
+            &destination,
+            required,
+            &source,
+            bytes.len(),
+        )?;
         for (offset, byte) in bytes.into_iter().enumerate() {
+            let offset = destination_length.saturating_add(offset);
             if offset == 0 {
                 self.assign_deref_pointer(&destination, i64::from(byte))?;
             } else {
@@ -17847,8 +17865,9 @@ impl Interpreter {
         &self,
         name: &str,
         destination: &PointerValue,
+        destination_len: usize,
         source: &PointerValue,
-        len: usize,
+        source_len: usize,
     ) -> CustResult<()> {
         let overlaps = match (
             Self::character_array_pointer_position(destination),
@@ -17856,8 +17875,8 @@ impl Interpreter {
         ) {
             (Some((destination_array, destination_start)), Some((source_array, source_start))) => {
                 Rc::ptr_eq(destination_array, source_array)
-                    && destination_start < source_start.saturating_add(len)
-                    && source_start < destination_start.saturating_add(len)
+                    && destination_start < source_start.saturating_add(source_len)
+                    && source_start < destination_start.saturating_add(destination_len)
             }
             _ => Self::pointer_eq(destination, source),
         };
@@ -17965,15 +17984,15 @@ impl Interpreter {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
                 }
-                if name == "strcpy" && !self.functions.contains_key(name) {
+                if matches!(name.as_str(), "strcpy" | "strcat")
+                    && !self.functions.contains_key(name)
+                {
                     if self.has_string_copy_prototype(name) {
                         self.sizeof_string_copy_call(name, args)?;
                     } else if self.prototypes.contains_key(name) {
-                        return Err(CustError::new(
-                            "standard library function 'strcpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type",
-                        ));
+                        return Err(Self::unsupported_string_copy_declaration_error(name));
                     } else {
-                        return Err(CustError::new("undefined function 'strcpy'"));
+                        return Err(CustError::new(format!("undefined function '{name}'")));
                     }
                 }
                 if matches!(name.as_str(), "strspn" | "strcspn")
@@ -18832,13 +18851,14 @@ impl Interpreter {
                     Err(CustError::new(format!("undefined function '{name}'")))
                 }
             }
-            Expr::Call { name, .. } if name == "strcpy" && !self.functions.contains_key(name) => {
+            Expr::Call { name, .. }
+                if matches!(name.as_str(), "strcpy" | "strcat")
+                    && !self.functions.contains_key(name) =>
+            {
                 if self.prototypes.contains_key(name) {
-                    Err(CustError::new(
-                        "standard library function 'strcpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type",
-                    ))
+                    Err(Self::unsupported_string_copy_declaration_error(name))
                 } else {
-                    Err(CustError::new("undefined function 'strcpy'"))
+                    Err(CustError::new(format!("undefined function '{name}'")))
                 }
             }
             Expr::Call { name, .. } => match self
@@ -26511,10 +26531,10 @@ impl Interpreter {
                         "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                     )))
                 }
-                None if name == "strcpy" && self.prototypes.contains_key(name) => {
-                    Err(CustError::new(
-                        "standard library function 'strcpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, and a pointer-to-character return type",
-                    ))
+                None if matches!(name.as_str(), "strcpy" | "strcat")
+                    && self.prototypes.contains_key(name) =>
+                {
+                    Err(Self::unsupported_string_copy_declaration_error(name))
                 }
                 None if matches!(name.as_str(), "strspn" | "strcspn")
                     && self.prototypes.contains_key(name) =>
