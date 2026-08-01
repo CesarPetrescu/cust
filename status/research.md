@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-01 — v0.9.0 release consistency and next character-conversion slice
+
+- Release consistency remains executable rather than prose-only: exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.8.0`, then passed after Cargo/lock and both image tags moved to `0.9.0`. `cargo test -- --list` inventory accounting is 1,252 tests: 1,119 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
+- Publication order remains release commit to `origin/main` first, then a new non-conflicting annotated `v0.9.0` tag, then exact remote peeled-target verification. Independent diff-only review approved the synchronized release surface, and the complete local/Docker gate passes; status text still describes the tag as reserved until publication succeeds.
+- Official WG14 N1570 §7.4.2.1-2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `tolower` and `toupper` each take and return `int`; defined inputs are EOF or unsigned-character values, matching-case ASCII letters convert in the C locale, and all other defined inputs are unchanged. This makes the pair the next deterministic package adjacent to the completed classifiers.
+
 ## 2026-08-01 — C11 character classification
 
 - Official WG14 N1570 §7.4 and §7.4.1: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — every classification function takes `int`; a defined argument is EOF or a value representable as `unsigned char`; classification returns nonzero exactly when the described predicate holds; behavior is locale-sensitive outside the `"C"` locale.

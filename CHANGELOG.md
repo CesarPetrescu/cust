@@ -4,6 +4,8 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.9.0 — 2026-08-01
+
 ### Language subset
 
 - Added exact-prototype C11 `isalnum`, `isalpha`, `isblank`, `iscntrl`, `isdigit`, `isgraph`, `islower`, `isprint`, `ispunct`, `isspace`, `isupper`, and `isxdigit` intrinsics with user-definition precedence, one-time scalar evaluation, deterministic ASCII/C-locale classes, canonical nonzero/zero results, and defined EOF plus unsigned-character-domain behavior without host libc.
@@ -14,6 +16,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 - Added exact character-classification missing/incompatible declaration, arity, pointer/aggregate/void shape, and out-of-domain value diagnostics; nested and direct `sizeof` calls remain non-evaluating but constraint-aware. Three focused interpreter tests, one registered warning-free native fixture, final independent approval, all 1,252 local tests, and both Docker gates pass.
 - Added exact declaration, arity, type, qualification, null, read-only, expired-owner, ownerless-hidden-storage, two-dimensional-row, and independent 4,096-byte source/delimiter boundaries; runtime and nested `sizeof` paths share constraint checks while `sizeof` remains non-evaluating.
 - Added eight focused interpreter regressions and one registered warning-free compiler-oracle fixture; all 1,249 local tests pass and independent final review found no blocking security or logic errors.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.9.0`.
+- Verified 1,252 tests at release preparation time: 1,119 interpreter tests, 98 deterministic fuzz-safety tests, and 35 CLI, Docker, compiler-oracle, and repository tests.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls beyond the explicitly prototyped bounded integer/string/classification families, locale-sensitive behavior outside Cust's fixed ASCII/C-locale model, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported.
 
 ## v0.8.0 — 2026-08-01
 

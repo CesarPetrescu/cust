@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-01 bounded C11 character-classification slice: focused runtime, exact declaration, arity/shape/value, EOF/unsigned-character-domain, nested non-evaluating, and native-oracle coverage passes; independent final review found no blocking security, logic, C-semantics, precedence, or dispatch errors. The prior v0.8.0 release and annotated tag remain published and remotely verified.
+None. Last reviewed during the 2026-08-01 bounded v0.9.0 release preparation: exact CLI and Compose expectations went RED against `0.8.0` and GREEN at `0.9.0`; Cargo/lock, Docker, README, changelog, status, and the 1,252-test inventory are synchronized; independent review and the canonical local/Docker gate pass. The non-conflicting `v0.9.0` tag remains reserved until the verified release commit is accepted by `origin/main`; no publication is claimed yet.
 
 ## Blocker template
 
