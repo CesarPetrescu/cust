@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-01 — Bounded fixed-count string copy
+
+- Linux man-pages 6.18 `strncpy(3)` specifies `char *strncpy(char *restrict dst, const char *restrict src, size_t dsize)`: return `dst`, copy non-NUL source bytes up to `dsize`, truncate without guaranteeing a destination NUL when the source fills the count, and pad every remaining destination byte with NUL after an early source terminator. Overlap is outside the valid contract.
+- Cust maps `size_t` to its deterministic integer model with exact 0..=4,096 bounds, validates both character pointers at zero count, normalizes copied bytes, and uses the bounded-prefix reader's actual accessed source length for overlap while requiring exactly count destination bytes for capacity. Two-dimensional rows remain separate source and destination subobjects.
+- `Interpreter::call_string_copy_function()` now shares counted prototype/runtime/`sizeof` dispatch across `strncat` and `strncpy`; only write construction differs. `strncat` appends the prefix plus one NUL after scanning the existing destination, while `strncpy` resizes the prefix to exactly count bytes with zero padding and never scans the destination string.
+- GCC's strict warning set rejects a direct zero-count `strncpy(destination, destination, 0)` fixture with `-Werror=stringop-truncation`; that deterministic count-zero pointer/overlap boundary remains interpreter-only, while the registered native fixture stays warning-free.
+
 ## 2026-08-01 — Bounded string prefix concatenation
 
 - Linux man-pages 6.18 `strncat(3)` specifies `char *strncat(char *restrict dst, const char *restrict src, size_t ssize)`: append at most `ssize` non-NUL source bytes, then write a terminating NUL, return `dst`, require destination room for `strlen(dst) + strnlen(src, ssize) + 1`, and leave overlap undefined. A source object need not contain NUL within the requested prefix.

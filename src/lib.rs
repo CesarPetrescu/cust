@@ -16810,7 +16810,8 @@ impl Interpreter {
                     "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                 )));
             }
-            if matches!(name, "strcpy" | "strcat" | "strncat") && self.prototypes.contains_key(name)
+            if matches!(name, "strcpy" | "strcat" | "strncat" | "strncpy")
+                && self.prototypes.contains_key(name)
             {
                 return Err(Self::unsupported_string_copy_declaration_error(name));
             }
@@ -17737,7 +17738,7 @@ impl Interpreter {
     }
 
     fn has_string_copy_prototype(&self, name: &str) -> bool {
-        if !matches!(name, "strcpy" | "strcat" | "strncat") {
+        if !matches!(name, "strcpy" | "strcat" | "strncat" | "strncpy") {
             return false;
         }
         let mut params = vec![
@@ -17752,7 +17753,7 @@ impl Interpreter {
                 points_to_const: true,
             },
         ];
-        if name == "strncat" {
+        if matches!(name, "strncat" | "strncpy") {
             params.push(ParamSignature {
                 ty: ParamType::Scalar(CType::Int),
                 kind: ParamKind::Scalar,
@@ -17770,7 +17771,7 @@ impl Interpreter {
     }
 
     fn unsupported_string_copy_declaration_error(name: &str) -> CustError {
-        let count = if name == "strncat" {
+        let count = if matches!(name, "strncat" | "strncpy") {
             ", one integer count"
         } else {
             ""
@@ -17785,7 +17786,11 @@ impl Interpreter {
         name: &str,
         arg_exprs: &[Expr],
     ) -> CustResult<Option<ReturnValue>> {
-        let expected_args = if name == "strncat" { 3 } else { 2 };
+        let expected_args = if matches!(name, "strncat" | "strncpy") {
+            3
+        } else {
+            2
+        };
         if arg_exprs.len() != expected_args {
             return Err(CustError::new(format!(
                 "function '{name}' expected {expected_args} arguments, got {}",
@@ -17795,7 +17800,7 @@ impl Interpreter {
 
         let destination = self.eval_pointer(&arg_exprs[0])?;
         let source = self.eval_pointer(&arg_exprs[1])?;
-        let count = if name == "strncat" {
+        let count = if matches!(name, "strncat" | "strncpy") {
             let count_expr = &arg_exprs[2];
             if self.expr_is_pointer_value(count_expr) {
                 self.eval_pointer(count_expr)?;
@@ -17847,7 +17852,11 @@ impl Interpreter {
             let source_len = bytes.len().saturating_add(1);
             (bytes, source_len)
         };
-        bytes.push(0);
+        if name == "strncpy" {
+            bytes.resize(count.unwrap_or_default(), 0);
+        } else {
+            bytes.push(0);
+        }
         let current = self.deref_pointer(&destination)?;
         self.assign_deref_pointer(&destination, current)?;
         let required = destination_length.saturating_add(bytes.len());
@@ -17881,14 +17890,15 @@ impl Interpreter {
                 "function '{name}' requires a nonnegative count, got {count}"
             )));
         }
+        let operation = if name == "strncpy" { "copy" } else { "append" };
         let count = usize::try_from(count).map_err(|_| {
             CustError::new(format!(
-                "function '{name}' count exceeds maximum append length of {MAX_INTEGER_STRING_BYTES} bytes"
+                "function '{name}' count exceeds maximum {operation} length of {MAX_INTEGER_STRING_BYTES} bytes"
             ))
         })?;
         if count > MAX_INTEGER_STRING_BYTES {
             return Err(CustError::new(format!(
-                "function '{name}' count {count} exceeds maximum append length of {MAX_INTEGER_STRING_BYTES} bytes"
+                "function '{name}' count {count} exceeds maximum {operation} length of {MAX_INTEGER_STRING_BYTES} bytes"
             )));
         }
         Ok(count)
@@ -18028,7 +18038,11 @@ impl Interpreter {
     }
 
     fn sizeof_string_copy_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
-        let expected_args = if name == "strncat" { 3 } else { 2 };
+        let expected_args = if matches!(name, "strncat" | "strncpy") {
+            3
+        } else {
+            2
+        };
         if args.len() != expected_args {
             return Err(CustError::new(format!(
                 "function '{name}' expected {expected_args} arguments, got {}",
@@ -18049,7 +18063,7 @@ impl Interpreter {
                 "cannot discard const qualifier from pointer target",
             ));
         }
-        if name == "strncat" {
+        if matches!(name, "strncat" | "strncpy") {
             if self.expr_is_pointer_value(&args[2])
                 || self.aggregate_expr_type_name(&args[2]).is_ok()
                 || self.expr_is_void_value(&args[2])
@@ -18125,7 +18139,7 @@ impl Interpreter {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
                 }
-                if matches!(name.as_str(), "strcpy" | "strcat" | "strncat")
+                if matches!(name.as_str(), "strcpy" | "strcat" | "strncat" | "strncpy")
                     && !self.functions.contains_key(name)
                 {
                     if self.has_string_copy_prototype(name) {
@@ -18993,7 +19007,7 @@ impl Interpreter {
                 }
             }
             Expr::Call { name, .. }
-                if matches!(name.as_str(), "strcpy" | "strcat" | "strncat")
+                if matches!(name.as_str(), "strcpy" | "strcat" | "strncat" | "strncpy")
                     && !self.functions.contains_key(name) =>
             {
                 if self.prototypes.contains_key(name) {
@@ -26672,7 +26686,7 @@ impl Interpreter {
                         "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
                     )))
                 }
-                None if matches!(name.as_str(), "strcpy" | "strcat" | "strncat")
+                None if matches!(name.as_str(), "strcpy" | "strcat" | "strncat" | "strncpy")
                     && self.prototypes.contains_key(name) =>
                 {
                     Err(Self::unsupported_string_copy_declaration_error(name))

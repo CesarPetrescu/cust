@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-01 bounded `strncat` run: six focused interpreter tests, the registered strict native/compiler-oracle fixture, formatting, strict Clippy, all 1,235 local tests, and both Docker Compose gates pass. Runtime count-shape diagnostics received focused RED/GREEN coverage; independent review found one blocking early-source-NUL test gap and no implementation defect, the added exact-capacity regression passes, and final re-review reported no blocking findings. The runtime image prints `10`.
+None. Last reviewed during the 2026-08-01 bounded `strncpy` run: six focused interpreter tests, the registered strict native/compiler-oracle fixture, formatting, strict Clippy, all 1,241 local tests, and both Docker Compose gates pass. Independent review returned `APPROVED` with no blocking/high/medium findings; its sole low padding-capacity coverage note was resolved before the canonical gate. The runtime image prints `10`.
 
 ## Blocker template
 

@@ -15313,6 +15313,236 @@ fn supports_bounded_strncat_standard_library_function() {
 }
 
 #[test]
+fn supports_bounded_strncpy_standard_library_function() {
+    let program = include_str!("fixtures/compat/valid/bounded_string_copy_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn strncpy_evaluates_destination_source_and_count_in_order_before_validation() {
+    let program = r#"
+char *strncpy(char *destination, const char *source, unsigned long int count);
+int order = 0;
+int *destination(void) {
+    static int value = 0;
+    order = 1;
+    return &value;
+}
+char *source(void) {
+    static char value[1] = {0};
+    if (order == 1) {
+        order = 2;
+    }
+    return value;
+}
+int count(void) {
+    static int values[1] = {0};
+    return values[order == 2 ? 2 : -1];
+}
+int main(void) {
+    return strncpy(destination(), source(), count()) != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array 'values' index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn validates_strncpy_count_and_bounded_source_semantics() {
+    for (program, expected) in [
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; int count = 1; return strncpy(out, \"x\", &count) != out; }\n",
+            "function 'strncpy' requires an integer count",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strncpy(out, \"x\", -1) != out; }\n",
+            "function 'strncpy' requires a nonnegative count, got -1",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strncpy(out, \"x\", 4097) != out; }\n",
+            "function 'strncpy' count 4097 exceeds maximum copy length of 4096 bytes",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[1] = {0}; return strncpy(out, (const char *)0, 0) != out; }\n",
+            "null character pointer passed as argument 2 to function 'strncpy'",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; char source[1] = {'x'}; return strncpy(out, source, 2) != out; }\n",
+            "unterminated character sequence passed as argument 2 to function 'strncpy' before requested count 2",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let truncates_without_nul = r#"
+char *strncpy(char *destination, const char *source, unsigned long int count);
+int main(void) {
+    char out[3] = {0, 0, 'z'};
+    char source[2] = {355, 'x'};
+    return strncpy(out, source, 2) == out && out[0] == 99
+        && out[1] == 'x' && out[2] == 'z' ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(truncates_without_nul).unwrap(), 0);
+
+    let boundary = "x".repeat(4096);
+    let program = format!(
+        "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) {{ char out[4096] = {{0}}; return strncpy(out, \"{boundary}\", 4096) == out && out[0] == 'x' && out[4095] == 'x' ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&program).unwrap(), 0);
+}
+
+#[test]
+fn preserves_strncpy_storage_overlap_and_row_boundaries() {
+    for (program, expected) in [
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strncpy(out, \"cat\", 3) != out; }\n",
+            "destination argument 1 to function 'strncpy' requires 3 bytes, but only 2 bytes are available",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strncpy(out, \"x\", 3) != out; }\n",
+            "destination argument 1 to function 'strncpy' requires 3 bytes, but only 2 bytes are available",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { const char out[2] = {0}; return strncpy(out, \"x\", 1) != 0; }\n",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nchar *expired(void) { char source[2] = {'x', 0}; return source; }\nint main(void) { char out[2] = {0}; return strncpy(out, expired(), 1) != out; }\n",
+            "pointer to out-of-scope variable 'source'",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char text[4] = {'a', 'b', 0}; return strncpy(text, text + 1, 2) != text; }\n",
+            "overlapping source and destination ranges passed to function 'strncpy'",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char rows[2][3] = {{0}, {'x', 'y', 'z'}}; char out[4] = {0}; return strncpy(out, *(rows + 1), 4) != out; }\n",
+            "unterminated character sequence passed as argument 2 to function 'strncpy' before requested count 4",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char rows[2][3] = {{0}}; return strncpy(*rows, \"cat\", 4) != *rows; }\n",
+            "destination argument 1 to function 'strncpy' requires 4 bytes, but only 3 bytes are available",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char rows[2][3] = {{0}}; return sizeof(strncpy(rows, \"x\", 1)); }\n",
+            "function 'strncpy' requires pointers to character storage",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "program unexpectedly matched a different boundary: {program}"
+        );
+    }
+
+    let zero_overlap = r#"
+char *strncpy(char *destination, const char *source, unsigned long int count);
+int main(void) {
+    char text[3] = "hi";
+    return strncpy(text, text, 0) == text && text[0] == 'h'
+        && text[1] == 'i' && text[2] == 0 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(zero_overlap).unwrap(), 0);
+}
+
+#[test]
+fn classifies_strncpy_sizeof_calls_without_evaluating_arguments() {
+    let program = r#"
+char *strncpy(char *destination, const char *source, unsigned long int count);
+int marker = 0;
+char *destination(void) {
+    static char out[4] = {0};
+    marker = marker + 1;
+    return out;
+}
+char *source(void) {
+    marker = marker + 10;
+    return "y";
+}
+int count(void) {
+    marker = marker + 100;
+    return 1;
+}
+int main(void) {
+    if (sizeof(strncpy(destination(), source(), count())) != sizeof(char *)) {
+        return 1;
+    }
+    if (sizeof(*strncpy(destination(), source(), count())) != sizeof(char)) {
+        return 2;
+    }
+    return marker;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    let pointer_count = r#"
+char *strncpy(char *destination, const char *source, unsigned long int count);
+int main(void) {
+    char out[2] = {0};
+    int count = 1;
+    return sizeof(strncpy(out, "y", &count));
+}
+"#;
+    assert_eq!(
+        interpret(pointer_count).unwrap_err().to_string(),
+        "function 'strncpy' requires an integer count"
+    );
+}
+
+#[test]
+fn preserves_strncpy_declaration_call_and_user_definition_boundaries() {
+    let expected = "standard library function 'strncpy' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, one integer count, and a pointer-to-character return type";
+    for program in [
+        "const char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strncpy(out, \"x\", 1) != out; }\n",
+        "char *strncpy(const char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strncpy(out, \"x\", 1) != out; }\n",
+        "char *strncpy(char *destination, char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return sizeof(strncpy(out, out, 1)); }\n",
+        "char *strncpy(char *destination, const char *source, int *count);\nint main(void) { char out[2] = {0}; return strncpy(out, \"x\", 1) != out; }\n",
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    for (program, expected) in [
+        (
+            "int main(void) { char out[2] = {0}; return strncpy(out, \"x\", 1) != out; }\n",
+            "undefined function 'strncpy'",
+        ),
+        (
+            "char *strncpy(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strncpy(out, \"x\") != out; }\n",
+            "function 'strncpy' expected 3 arguments, got 2",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let user_definition = r#"
+int strncpy(int destination, int source, int count) {
+    return destination + source + count;
+}
+int main(void) {
+    return strncpy(3, -3, 0);
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+
+    let matching_user_definition = r#"
+char *strncpy(char *destination, const char *source, unsigned long int count);
+char *strncpy(char *destination, const char *source, unsigned long int count) {
+    return destination;
+}
+int main(void) {
+    char rows[2][3] = {{0}};
+    return sizeof(*strncpy((char *)rows, "x", 1)) == sizeof(char) ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(matching_user_definition).unwrap(), 0);
+}
+
+#[test]
 fn strncat_evaluates_destination_source_and_count_in_order_before_validation() {
     let program = r#"
 char *strncat(char *destination, const char *source, unsigned long int count);
