@@ -14961,6 +14961,86 @@ fn supports_integer_absolute_value_standard_library_functions() {
 }
 
 #[test]
+fn supports_character_classification_standard_library_functions() {
+    let program = include_str!("fixtures/compat/valid/character_classification_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_classification_functions_require_exact_explicit_prototypes() {
+    let names = [
+        "isalnum", "isalpha", "isblank", "iscntrl", "isdigit", "isgraph", "islower", "isprint",
+        "ispunct", "isspace", "isupper", "isxdigit",
+    ];
+    for name in names {
+        let unsupported = format!(
+            "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
+        );
+        for program in [
+            format!("char {name}(int value);\nint main(void) {{ return {name}('A'); }}\n"),
+            format!("int {name}(char *value);\nint main(void) {{ return sizeof({name}(0)); }}\n"),
+        ] {
+            assert_eq!(
+                interpret(&program).expect_err(&program).to_string(),
+                unsupported,
+                "program unexpectedly matched a different declaration: {program}"
+            );
+        }
+    }
+
+    assert_eq!(
+        interpret("int main(void) { return isalpha('A'); }\n")
+            .unwrap_err()
+            .to_string(),
+        "undefined function 'isalpha'"
+    );
+    assert_eq!(
+        interpret("int isalpha(int value) { return value + 1; }\nint main(void) { return isalpha(6) == 7 ? 0 : 1; }\n").unwrap(),
+        0
+    );
+}
+
+#[test]
+fn character_classification_functions_preserve_argument_and_value_boundaries() {
+    for (call, expected) in [
+        (
+            "isalpha()",
+            "function 'isalpha' expected 1 arguments, got 0",
+        ),
+        (
+            "isalpha(1, 2)",
+            "function 'isalpha' expected 1 arguments, got 2",
+        ),
+        (
+            "isalpha(&value)",
+            "function 'isalpha' requires an integer character value",
+        ),
+        (
+            "sizeof(isalpha(&value) + 1)",
+            "function 'isalpha' requires an integer character value",
+        ),
+        (
+            "isalpha(-2)",
+            "function 'isalpha' requires EOF or an unsigned-character value, got -2",
+        ),
+        (
+            "isalpha(256)",
+            "function 'isalpha' requires EOF or an unsigned-character value, got 256",
+        ),
+    ] {
+        let program = format!(
+            "int isalpha(int character);\nint main(void) {{ int value = 0; return {call}; }}\n"
+        );
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            expected,
+            "program unexpectedly matched a different boundary: {program}"
+        );
+    }
+}
+
+#[test]
 fn reports_integer_absolute_value_overflow_for_the_minimum_cust_integer() {
     for (name, declaration) in [
         ("abs", "int abs(int value);"),

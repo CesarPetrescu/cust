@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-01 bounded `strtok` slice: focused runtime, non-evaluating, owner/lifetime, type/const, 4,096-byte, and native-oracle coverage passes; independent final review found no blocking security or logic errors. The prior v0.8.0 release and annotated tag are published and remotely verified.
+None. Last reviewed during the 2026-08-01 bounded C11 character-classification slice: focused runtime, exact declaration, arity/shape/value, EOF/unsigned-character-domain, nested non-evaluating, and native-oracle coverage passes; independent final review found no blocking security, logic, C-semantics, precedence, or dispatch errors. The prior v0.8.0 release and annotated tag remain published and remotely verified.
 
 ## Blocker template
 

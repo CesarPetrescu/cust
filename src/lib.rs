@@ -16750,6 +16750,9 @@ impl Interpreter {
 
     fn call_function(&mut self, name: &str, arg_exprs: &[Expr]) -> CustResult<Option<ReturnValue>> {
         let Some(function) = self.functions.get(name).cloned() else {
+            if self.has_character_classification_prototype(name) {
+                return self.call_character_classification_function(name, arg_exprs);
+            }
             if self.has_integer_absolute_value_prototype(name) {
                 return self.call_integer_absolute_value_function(name, arg_exprs);
             }
@@ -16779,6 +16782,9 @@ impl Interpreter {
             }
             if self.has_string_span_prototype(name) {
                 return self.call_string_span_function(name, arg_exprs);
+            }
+            if Self::is_character_classification_name(name) && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_character_classification_declaration_error(name));
             }
             if matches!(name, "abs" | "labs" | "llabs") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
@@ -17029,6 +17035,100 @@ impl Interpreter {
             }],
         };
         self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn is_character_classification_name(name: &str) -> bool {
+        matches!(
+            name,
+            "isalnum"
+                | "isalpha"
+                | "isblank"
+                | "iscntrl"
+                | "isdigit"
+                | "isgraph"
+                | "islower"
+                | "isprint"
+                | "ispunct"
+                | "isspace"
+                | "isupper"
+                | "isxdigit"
+        )
+    }
+
+    fn has_character_classification_prototype(&self, name: &str) -> bool {
+        if !Self::is_character_classification_name(name) {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Scalar(CType::Int),
+            params: vec![ParamSignature {
+                ty: ParamType::Scalar(CType::Int),
+                kind: ParamKind::Scalar,
+                points_to_const: false,
+            }],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn unsupported_character_classification_declaration_error(name: &str) -> CustError {
+        CustError::new(format!(
+            "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
+        ))
+    }
+
+    fn validate_character_classification_call(&self, name: &str, args: &[Expr]) -> CustResult<()> {
+        if args.len() != 1 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 1 arguments, got {}",
+                args.len()
+            )));
+        }
+        if self.expr_is_pointer_value(&args[0])
+            || self.aggregate_expr_type_name(&args[0]).is_ok()
+            || self.expr_is_void_value(&args[0])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer character value"
+            )));
+        }
+        self.sizeof_expr(&args[0])?;
+        Ok(())
+    }
+
+    fn call_character_classification_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        self.validate_character_classification_call(name, arg_exprs)?;
+        let value = self.eval_scalar_conversion(CType::Int, &arg_exprs[0])?;
+        if !(-1..=255).contains(&value) {
+            return Err(CustError::new(format!(
+                "function '{name}' requires EOF or an unsigned-character value, got {value}"
+            )));
+        }
+        let is_ascii_alphanumeric = matches!(value, 48..=57 | 65..=90 | 97..=122);
+        let classified = match name {
+            "isalnum" => is_ascii_alphanumeric,
+            "isalpha" => matches!(value, 65..=90 | 97..=122),
+            "isblank" => matches!(value, 9 | 32),
+            "iscntrl" => matches!(value, 0..=31 | 127),
+            "isdigit" => matches!(value, 48..=57),
+            "isgraph" => matches!(value, 33..=126),
+            "islower" => matches!(value, 97..=122),
+            "isprint" => matches!(value, 32..=126),
+            "ispunct" => matches!(value, 33..=126) && !is_ascii_alphanumeric,
+            "isspace" => matches!(value, 9..=13 | 32),
+            "isupper" => matches!(value, 65..=90),
+            "isxdigit" => matches!(value, 48..=57 | 65..=70 | 97..=102),
+            _ => return Err(CustError::new("internal character classification mismatch")),
+        };
+        Ok(Some(ReturnValue::Scalar(i64::from(classified))))
+    }
+
+    fn sizeof_character_classification_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        self.validate_character_classification_call(name, args)?;
+        Ok(INT_SIZE)
     }
 
     fn call_integer_absolute_value_function(
@@ -18290,6 +18390,19 @@ impl Interpreter {
     fn validate_nested_string_intrinsic_calls(&self, expr: &Expr) -> CustResult<()> {
         match expr {
             Expr::Call { name, args } => {
+                if Self::is_character_classification_name(name)
+                    && !self.functions.contains_key(name)
+                {
+                    if self.has_character_classification_prototype(name) {
+                        self.sizeof_character_classification_call(name, args)?;
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(
+                            Self::unsupported_character_classification_declaration_error(name),
+                        );
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                }
                 if matches!(name.as_str(), "strpbrk" | "strstr")
                     && !self.functions.contains_key(name)
                 {
@@ -26825,6 +26938,9 @@ impl Interpreter {
                     .ok_or_else(|| {
                         CustError::new(format!("void function '{name}' used as scalar expression"))
                     }),
+                None if self.has_character_classification_prototype(name) => {
+                    self.sizeof_character_classification_call(name, args)
+                }
                 None if self.has_integer_absolute_value_prototype(name) => Ok(INT_SIZE),
                 None if self.has_integer_string_conversion_prototype(name) => {
                     self.sizeof_integer_string_conversion_call(name, args)
@@ -26852,6 +26968,11 @@ impl Interpreter {
                 }
                 None if self.has_string_span_prototype(name) => {
                     self.sizeof_string_span_call(name, args)
+                }
+                None if Self::is_character_classification_name(name)
+                    && self.prototypes.contains_key(name) =>
+                {
+                    Err(Self::unsupported_character_classification_declaration_error(name))
                 }
                 None if name == "strncmp" && self.prototypes.contains_key(name) => {
                     Err(CustError::new(

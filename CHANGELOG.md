@@ -6,10 +6,12 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ### Language subset
 
+- Added exact-prototype C11 `isalnum`, `isalpha`, `isblank`, `iscntrl`, `isdigit`, `isgraph`, `islower`, `isprint`, `ispunct`, `isspace`, `isupper`, and `isxdigit` intrinsics with user-definition precedence, one-time scalar evaluation, deterministic ASCII/C-locale classes, canonical nonzero/zero results, and defined EOF plus unsigned-character-domain behavior without host libc.
 - Added explicitly prototyped bounded C11 `strtok` over tracked mutable interpreter-owned character storage. It skips delimiter runs, writes token-ending NUL bytes in place, returns only nonempty first/continuation tokens, permits changed delimiter sets, and preserves continuation owner/lifetime identity without a host libc path.
 
 ### Diagnostics and verification
 
+- Added exact character-classification missing/incompatible declaration, arity, pointer/aggregate/void shape, and out-of-domain value diagnostics; nested and direct `sizeof` calls remain non-evaluating but constraint-aware. Three focused interpreter tests, one registered warning-free native fixture, final independent approval, all 1,252 local tests, and both Docker gates pass.
 - Added exact declaration, arity, type, qualification, null, read-only, expired-owner, ownerless-hidden-storage, two-dimensional-row, and independent 4,096-byte source/delimiter boundaries; runtime and nested `sizeof` paths share constraint checks while `sizeof` remains non-evaluating.
 - Added eight focused interpreter regressions and one registered warning-free compiler-oracle fixture; all 1,249 local tests pass and independent final review found no blocking security or logic errors.
 

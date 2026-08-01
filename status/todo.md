@@ -4,6 +4,8 @@ The autonomous agent should complete a meaningful roadmap work package per cron 
 
 ## Next recommended tasks
 
+Latest completed language slice (2026-08-01): bounded explicitly prototyped C11 character classification now supports all twelve standard `is*` functions behind exact integer declarations with user-definition precedence. Calls evaluate one scalar argument once, classify EOF and `0..=255` through deterministic ASCII/C-locale rules, return canonical nonzero/zero values, and preserve exact declaration/arity/shape/value plus nested non-evaluating `sizeof` diagnostics. Three focused tests, initial `undefined function` RED/GREEN, final independent approval, one registered warning-free native fixture, all 1,252 local tests, and both Docker gates pass without host libc.
+
 Latest completed language slice (2026-08-01): bounded explicitly prototyped C11 `strtok` now tokenizes tracked mutable interpreter-owned character storage in place, skips delimiter runs, returns only nonempty first/continuation tokens, allows changed delimiter sets, preserves continuation owner/lifetime identity, and independently bounds source/delimiter scans at 4,096 bytes. Eight focused interpreter tests, owner/lifetime and typed-null RED/GREEN fixes, final independent approval, one registered warning-free native fixture, and all 1,249 local tests pass without host libc. Ownerless scalar-array compound-literal storage remains an exact safe-subset boundary rather than receiving incorrect extended lifetime.
 
 Latest completed release slice (2026-08-01): bounded v0.8.0 is published. Remote annotated tag object `255460a2d335e613cffea674db327251d692810c` peels to release commit `b9abbcb46075153d83c872ccd1e354df784c92ae`.
@@ -78,7 +80,9 @@ Latest completed language slice (2026-07-30): bounded C11 `_Pragma("once")` now 
 
 20. [x] Implement bounded explicitly prototyped C11 `strtok`. Exact activation/user-definition precedence, source-order one-time evaluation, tracked mutable storage, delimiter-run skipping, in-place NUL termination, nonempty first/subsequent tokens, changed delimiters, owner/lifetime/read-only identity, independent 4,096-byte bounds, runtime/nested non-evaluating diagnostics, review-driven RED/GREEN, and warning-free native parity are complete.
 
-21. [ ] Implement a bounded explicitly prototyped C11 `<ctype.h>` classification package. Cover the twelve standard `is*` classifiers with exact integer declarations, user-definition precedence, one-time scalar evaluation, deterministic ASCII/C-locale classes including EOF handling, runtime and non-evaluating diagnostics, focused TDD, and warning-free native parity under the C locale.
+21. [x] Implement a bounded explicitly prototyped C11 `<ctype.h>` classification package. Exact declarations and user-definition precedence, one-time scalar evaluation, deterministic ASCII/C-locale classes for EOF and unsigned-character values, canonical nonzero/zero results, runtime and nested non-evaluating diagnostics, focused TDD, independent approval, and warning-free native parity are complete.
+
+22. [ ] Prepare and publish bounded v0.9.0. Synchronize Cargo/lock/CLI/Docker versions, README/changelog/status claims, and the verified test inventory; prove version assertions RED/GREEN; independently review and canonically verify the release commit; push `origin/main` before creating the annotated tag; then verify the remote peeled `v0.9.0` target exactly.
 
 Latest completed language slice (2026-07-30): bounded `#pragma once` now suppresses repeated project-relative quoted headers by opened `(device, inode)` identity across direct/digraph directives, symlink/hard-link aliases, and recursive includes. Inactive directives remain inert; exact malformed/unsupported diagnostics, secure-resolution ordering, native parity, review-driven hard-link RED/GREEN, Windows cross-target checking, all 1,139 tests, and both Docker gates pass.
 

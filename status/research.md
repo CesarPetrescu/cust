@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-01 — C11 character classification
+
+- Official WG14 N1570 §7.4 and §7.4.1: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — every classification function takes `int`; a defined argument is EOF or a value representable as `unsigned char`; classification returns nonzero exactly when the described predicate holds; behavior is locale-sensitive outside the `"C"` locale.
+- Cust fixes this package to deterministic ASCII/C-locale semantics rather than consulting host libc or process locale. The exact domain is EOF (`-1`) plus `0..=255`; other integers receive a deterministic diagnostic instead of inheriting C undefined behavior. Results use canonical `1`/`0`, because C guarantees only nonzero/zero rather than a particular host bitmask.
+- N1570's ASCII note and C-locale clauses define printing bytes `0x20..=0x7e`, controls `0x00..=0x1f` plus `0x7f`, blanks space/tab, whitespace space/form-feed/newline/carriage-return/tab/vertical-tab, and the ordinary decimal/hex/upper/lower/alphanumeric relationships used by `Interpreter::call_character_classification_function()`.
+- Exact prototype dispatch and recursive non-evaluating call validation reuse the reviewed standard-library intrinsic model: a compatible unresolved declaration activates Cust behavior, a user function wins, incompatible declarations remain targeted, and `sizeof(call)` validates constraints without evaluating side effects.
+- Next package: bounded v0.9.0 release consistency and publication for post-v0.8 `strtok` plus character classification.
+
 ## 2026-08-01 — v0.8.0 release closure and next string slice
 
 - Cargo metadata, exact CLI output, and both Compose image tags are treated as one tested release-consistency surface: focused expectations first failed on `0.7.0`, then passed after all package/runtime metadata moved to `0.8.0`. Local and remote annotated-tag preflight found no existing `v0.8.0`; publication remains ordered release-commit push first, tag second.
