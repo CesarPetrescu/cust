@@ -17052,6 +17052,8 @@ impl Interpreter {
                 | "isspace"
                 | "isupper"
                 | "isxdigit"
+                | "tolower"
+                | "toupper"
         )
     }
 
@@ -17091,7 +17093,6 @@ impl Interpreter {
                 "function '{name}' requires an integer character value"
             )));
         }
-        self.sizeof_expr(&args[0])?;
         Ok(())
     }
 
@@ -17108,26 +17109,30 @@ impl Interpreter {
             )));
         }
         let is_ascii_alphanumeric = matches!(value, 48..=57 | 65..=90 | 97..=122);
-        let classified = match name {
-            "isalnum" => is_ascii_alphanumeric,
-            "isalpha" => matches!(value, 65..=90 | 97..=122),
-            "isblank" => matches!(value, 9 | 32),
-            "iscntrl" => matches!(value, 0..=31 | 127),
-            "isdigit" => matches!(value, 48..=57),
-            "isgraph" => matches!(value, 33..=126),
-            "islower" => matches!(value, 97..=122),
-            "isprint" => matches!(value, 32..=126),
-            "ispunct" => matches!(value, 33..=126) && !is_ascii_alphanumeric,
-            "isspace" => matches!(value, 9..=13 | 32),
-            "isupper" => matches!(value, 65..=90),
-            "isxdigit" => matches!(value, 48..=57 | 65..=70 | 97..=102),
+        let result = match name {
+            "isalnum" => i64::from(is_ascii_alphanumeric),
+            "isalpha" => i64::from(matches!(value, 65..=90 | 97..=122)),
+            "isblank" => i64::from(matches!(value, 9 | 32)),
+            "iscntrl" => i64::from(matches!(value, 0..=31 | 127)),
+            "isdigit" => i64::from(matches!(value, 48..=57)),
+            "isgraph" => i64::from(matches!(value, 33..=126)),
+            "islower" => i64::from(matches!(value, 97..=122)),
+            "isprint" => i64::from(matches!(value, 32..=126)),
+            "ispunct" => i64::from(matches!(value, 33..=126) && !is_ascii_alphanumeric),
+            "isspace" => i64::from(matches!(value, 9..=13 | 32)),
+            "isupper" => i64::from(matches!(value, 65..=90)),
+            "isxdigit" => i64::from(matches!(value, 48..=57 | 65..=70 | 97..=102)),
+            "tolower" if matches!(value, 65..=90) => value + 32,
+            "toupper" if matches!(value, 97..=122) => value - 32,
+            "tolower" | "toupper" => value,
             _ => return Err(CustError::new("internal character classification mismatch")),
         };
-        Ok(Some(ReturnValue::Scalar(i64::from(classified))))
+        Ok(Some(ReturnValue::Scalar(result)))
     }
 
     fn sizeof_character_classification_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
         self.validate_character_classification_call(name, args)?;
+        self.sizeof_expr(&args[0])?;
         Ok(INT_SIZE)
     }
 
@@ -18402,6 +18407,9 @@ impl Interpreter {
                     } else {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
+                    // sizeof_character_classification_call recursively validates the
+                    // argument; traversing it again here makes nested calls exponential.
+                    return Ok(());
                 }
                 if matches!(name.as_str(), "strpbrk" | "strstr")
                     && !self.functions.contains_key(name)
@@ -26939,7 +26947,9 @@ impl Interpreter {
                         CustError::new(format!("void function '{name}' used as scalar expression"))
                     }),
                 None if self.has_character_classification_prototype(name) => {
-                    self.sizeof_character_classification_call(name, args)
+                    // The entry validation above already checked this intrinsic and
+                    // its argument tree, so validating it again would duplicate work.
+                    Ok(INT_SIZE)
                 }
                 None if self.has_integer_absolute_value_prototype(name) => Ok(INT_SIZE),
                 None if self.has_integer_string_conversion_prototype(name) => {

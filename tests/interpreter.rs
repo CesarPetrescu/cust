@@ -14968,10 +14968,40 @@ fn supports_character_classification_standard_library_functions() {
 }
 
 #[test]
+fn supports_character_conversion_standard_library_functions() {
+    let program = include_str!("fixtures/compat/valid/character_conversion_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn nested_character_conversion_validation_remains_linear() {
+    fn run_nested(depth: usize, iterations: usize) -> std::time::Duration {
+        let expression = (0..depth).fold("'A'".to_string(), |inner, _| format!("tolower({inner})"));
+        let program =
+            format!("int tolower(int value);\nint main(void) {{ return {expression}; }}\n");
+        let started = std::time::Instant::now();
+
+        for _ in 0..iterations {
+            assert_eq!(interpret(&program).unwrap(), i64::from(b'a'));
+        }
+        started.elapsed()
+    }
+
+    let shallow = run_nested(10, 20);
+    let deep = run_nested(40, 20);
+    let allowed = (shallow * 8).max(std::time::Duration::from_millis(5));
+    assert!(
+        deep < allowed,
+        "nested character conversion validation scaled nonlinearly: {shallow:?} at depth 10 and {deep:?} at depth 40"
+    );
+}
+
+#[test]
 fn character_classification_functions_require_exact_explicit_prototypes() {
     let names = [
         "isalnum", "isalpha", "isblank", "iscntrl", "isdigit", "isgraph", "islower", "isprint",
-        "ispunct", "isspace", "isupper", "isxdigit",
+        "ispunct", "isspace", "isupper", "isxdigit", "tolower", "toupper",
     ];
     for name in names {
         let unsupported = format!(
@@ -14997,6 +15027,10 @@ fn character_classification_functions_require_exact_explicit_prototypes() {
     );
     assert_eq!(
         interpret("int isalpha(int value) { return value + 1; }\nint main(void) { return isalpha(6) == 7 ? 0 : 1; }\n").unwrap(),
+        0
+    );
+    assert_eq!(
+        interpret("int tolower(int value) { return value + 1; }\nint main(void) { return tolower(6) == 7 ? 0 : 1; }\n").unwrap(),
         0
     );
 }
@@ -15038,6 +15072,53 @@ fn character_classification_functions_preserve_argument_and_value_boundaries() {
             "program unexpectedly matched a different boundary: {program}"
         );
     }
+}
+
+#[test]
+fn character_conversion_functions_preserve_argument_and_value_boundaries() {
+    for (call, expected) in [
+        (
+            "tolower()",
+            "function 'tolower' expected 1 arguments, got 0",
+        ),
+        (
+            "toupper(1, 2)",
+            "function 'toupper' expected 1 arguments, got 2",
+        ),
+        (
+            "tolower(&value)",
+            "function 'tolower' requires an integer character value",
+        ),
+        (
+            "sizeof(toupper(&value) + 1)",
+            "function 'toupper' requires an integer character value",
+        ),
+        (
+            "tolower(-2)",
+            "function 'tolower' requires EOF or an unsigned-character value, got -2",
+        ),
+        (
+            "toupper(256)",
+            "function 'toupper' requires EOF or an unsigned-character value, got 256",
+        ),
+    ] {
+        let program = format!(
+            "int tolower(int character);\nint toupper(int character);\nint main(void) {{ int value = 0; return {call}; }}\n"
+        );
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            expected,
+            "program unexpectedly matched a different boundary: {program}"
+        );
+    }
+
+    assert_eq!(
+        interpret(
+            "int tolower(int character);\nint toupper(int character);\nint main(void) { return tolower(-1) == -1 && toupper(255) == 255 ? 0 : 1; }\n"
+        )
+        .unwrap(),
+        0
+    );
 }
 
 #[test]

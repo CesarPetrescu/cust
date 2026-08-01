@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-02 — C11 character conversion and bounded validation
+
+- Official WG14 N1570 §7.4.2.1-2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `tolower` and `toupper` accept `int`; behavior is defined only for EOF or an unsigned-character value; the C locale converts matching uppercase/lowercase letters and leaves every other defined input unchanged. Cust fixes those rules to ASCII and diagnoses values outside `-1..=255` rather than invoking C undefined behavior.
+- Cust's supported `short`/`long`/signed/unsigned spellings intentionally normalize to deterministic `CType::Int`, so intrinsic activation compares normalized scalar signatures. `char`, pointer, aggregate, and void signatures remain incompatible, and user definitions always outrank intrinsic dispatch.
+- Independent review found recursive constraint validation traversed nested character-intrinsic arguments repeatedly. At depth 18 the RED probe took 28.6 seconds. Runtime calls now perform only shallow shape validation before one-time recursive evaluation, while non-evaluating `sizeof` performs one recursive constraint pass; nested-validator and direct-`sizeof` dispatch return after that pass instead of walking the same subtree again. A repeated depth-10/depth-40 scaling regression protects linear growth.
+- Next package: bounded v0.10.0 release synchronization/publication for the completed C11 `<ctype.h>` classification and conversion surface.
+
 ## 2026-08-01 — v0.9.0 release consistency and next character-conversion slice
 
 - Release consistency remains executable rather than prose-only: exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.8.0`, then passed after Cargo/lock and both image tags moved to `0.9.0`. `cargo test -- --list` inventory accounting is 1,252 tests: 1,119 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.

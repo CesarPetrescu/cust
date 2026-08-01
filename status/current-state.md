@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 ## Latest autonomous verification
+
+Bounded explicitly prototyped C11 `tolower` and `toupper` are complete. Compatible unresolved normalized integer signatures activate Cust-owned intrinsics only when no user definition exists. Arguments are shape-checked without evaluation, evaluated exactly once at runtime, accepted only for EOF (`-1`) or `0..=255`, and converted with deterministic ASCII/C-locale rules: uppercase letters lower, lowercase letters upper, and EOF/nonmatching bytes remain unchanged. Runtime calls, direct and nested non-evaluating `sizeof`, missing/incompatible declarations, arity, pointer/aggregate/void shapes, and out-of-domain values retain exact diagnostics without host libc.
+
+TDD and review evidence: the registered warning-free fixture and focused interpreter behavior first failed with `undefined function 'tolower'`. Independent review then exposed repeated nested-intrinsic validation: depth-18 conversion took 28.6 seconds before duplicate traversals were removed, and a second scaling RED exposed remaining runtime subtree revalidation. Runtime validation is now shallow while `sizeof` recursively validates once; a repeated depth-10/depth-40 scaling regression stays linear and passed 10/10 repeated probes. Final independent review returned `APPROVED`. Formatting, warning-denied Clippy, all 1,255 local tests (1,122 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test), both Docker Compose gates, strict native parity, and `git diff --check` pass; the runtime image prints `10`.
 
 Bounded Cust v0.9.0 is published. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README support/limitations/roadmap text, changelog notes, and all five status files are synchronized for `0.9.0`. The release packages post-v0.8 stateful `strtok` and the twelve deterministic C11 character classifiers. The verified inventory remains 1,252 tests: 1,119 interpreter tests, 98 deterministic fuzz-safety tests, 31 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 
