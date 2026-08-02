@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.10.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.11.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -67,7 +67,7 @@ Both Compose services use `pull_policy: build`, so `docker compose run --rm test
 
 The `test` service keeps a writable container overlay so Cargo can update `target/`, but it has no host source mount, no network, dropped capabilities, and no privilege escalation.
 
-## Supported v0.10.0 language
+## Supported v0.11.0 language
 
 Cust currently supports this C subset:
 
@@ -95,7 +95,7 @@ Features:
 - `int main() { ... }` or `int main(void) { ... }` plus additional `int`, `char`, `void`, supported `struct`, supported `union`, or direct named-`enum` function definitions/prototypes; prototypes may use C-style unnamed parameter declarations such as `int add(int, int);` or `void use(int [], struct Point *);`
 - function calls with scalar/struct/union/pointer arguments, local function parameters, C-style empty `void` parameter lists, and by-value scalar/aggregate return types including top-level `const` spellings such as `const int f(void)` / `const struct Point make(void)`
 - integer, character, and string literals
-- manually declared C11 integer library calls: `abs`, `labs`, and `llabs` over Cust integers; `atoi`, `atol`, and `atoll` over interpreter-owned NUL-terminated `char` storage; deterministic ASCII/C-locale `isalnum`/`isalpha`/`isblank`/`iscntrl`/`isdigit`/`isgraph`/`islower`/`isprint`/`ispunct`/`isspace`/`isupper`/`isxdigit` classification plus `tolower`/`toupper` conversion; bounded unsigned-byte lexical `strcmp`/`strncmp`; bounded `strlen`; pointer-preserving bounded `strchr`/`strrchr`/`strpbrk`/`strstr`; initial-segment `strspn`/`strcspn`; capacity-checked mutable `strcpy`/`strcat`/`strncat`/`strncpy`; and stateful in-place `strtok` over tracked mutable storage, with one-time ordered argument evaluation, non-evaluating `sizeof`, deterministic scan/copy limits, and exact pointer/string diagnostics
+- manually declared C11 integer library calls: `abs`, `labs`, and `llabs` over Cust integers; `atoi`, `atol`, and `atoll` over interpreter-owned NUL-terminated `char` storage; deterministic ASCII/C-locale `isalnum`/`isalpha`/`isblank`/`iscntrl`/`isdigit`/`isgraph`/`islower`/`isprint`/`ispunct`/`isspace`/`isupper`/`isxdigit` classification plus `tolower`/`toupper` conversion; bounded unsigned-byte lexical `strcmp`/`strncmp`; bounded `strlen`; pointer-preserving bounded `strchr`/`strrchr`/`strpbrk`/`strstr`; initial-segment `strspn`/`strcspn`; capacity-checked mutable `strcpy`/`strcat`/`strncat`/`strncpy`; stateful in-place `strtok` over tracked mutable storage; and deterministic per-interpreter `rand`/`srand`, with one-time ordered argument evaluation, non-evaluating `sizeof`, deterministic bounds/state, and exact diagnostics
 - deterministic scalar spellings for `_Bool`, `char`, `short`, `int`, `long`, signed/unsigned permutations, and typedef aliases; Cust intentionally normalizes these onto its own fixed scalar model rather than host ABI widths
 - named and anonymous structs/unions, named and typedef-backed enums, nested aggregates, scalar/aggregate array fields, pointer fields, aggregate arrays, by-value parameters/returns/copies, designated initializers, and scalar/array/aggregate compound literals
 - declarations: initialized or zero/default-initialized `int`/`char` scalars, arrays, supported pointer variables, first-pass `const int` / `const char` scalars and arrays, direct named-`enum` variables, typedef aliases, structs, unions, and enum constants, such as `int x = 1;`, `int y;`, `char c;`, `const int limit = 5;`, `enum StateTag state = READY_TAG;`, `const enum StateTag saved = RUNNING_TAG;`, `int xs[3];`, `char text[4];`, `int *p;`, `typedef int Count;`, `struct Point { int x; char y; };`, anonymous object declarations such as `struct { int x; int y; } point = {1, 2};`, `typedef struct Pair { int left; int right; } Pair;`, `typedef enum { READY = 1, RUNNING } State;`, block-local aggregate typedef definitions that may shadow outer tags, and `enum StateTag { READY_TAG = 1, RUNNING_TAG };`
@@ -123,7 +123,7 @@ Features:
 - comments: `// line comments` and `/* block comments */`
 - `sizeof` and `_Alignof` for supported type names and expressions, including aggregate, enum, pointer, array, qualified, conditional, comma, and assignment-result forms, with non-evaluating operand semantics and Cust-defined sizes (`int = 8`, `char = 1`, pointer = `8`, no native struct padding)
 - C11 `_Static_assert`, storage-class/function-specifier syntax, supported `const`/`volatile`/`restrict`/`_Atomic` qualification, and per-function read-only `__func__` arrays
-- explicitly prototyped C11 `rand(void)` / `srand(unsigned int)` with interpreter-owned deterministic state, default-seed equivalence, reproducible seeded sequences, and results in Cust's fixed `0..=32767` range
+
 
 ## CLI
 
@@ -207,7 +207,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: prepare and publish bounded v0.11.0 metadata for the deterministic `rand`/`srand` package after focused version TDD, independent review, and canonical local/Docker verification.
+- Next milestone: scope an explicitly prototyped C11 termination package (`exit`, `_Exit`, and `abort`) with interpreter-owned control flow, exact observable-result semantics, non-evaluating validation, and no host-process termination path; implement the bounded slice when the design is complete.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider floating-point values, multiple pointer levels, and broader C conformance fixtures.
 

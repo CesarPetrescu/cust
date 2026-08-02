@@ -4,9 +4,21 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.11.0 — 2026-08-02
+
 ### Language subset
 
 - Added explicitly prototyped C11 `rand(void)` and `srand(unsigned int)` intrinsics with deterministic interpreter-owned state, default-seed equivalence, repeatable reseeding, a fixed `0..=32767` result range, user-definition precedence, exact call diagnostics, and non-evaluating `sizeof` validation.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.11.0`.
+- Verified 1,259 tests at release preparation time: 1,126 interpreter tests, 98 deterministic fuzz-safety tests, and 35 CLI, Docker, compiler-oracle, and repository tests.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls beyond the explicitly prototyped bounded integer/string/character/random families, locale-sensitive behavior outside Cust's fixed ASCII/C-locale model, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported.
 
 ## v0.10.0 — 2026-08-02
 

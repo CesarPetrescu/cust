@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-02 — v0.11.0 release consistency and next termination slice
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.10.0`, then passed after Cargo/lock and both image tags moved to `0.11.0`. `cargo test -- --list` inventory accounting is 1,259 tests: 1,126 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
+- Local and remote `v0.11.0` annotated-tag preflight returned no refs. Independent diff-only review returned `APPROVED`, and the complete local/rebuilt-Docker gate passed before commit. Publication remains ordered: verified release commit to `origin/main`, annotated tag creation/push second, exact remote peeled-target comparison last.
+- The next candidate is an explicitly prototyped C11 `exit`/`_Exit`/`abort` package. Before TDD, its design must map nonlocal termination onto interpreter-owned control flow and deterministic library/CLI results; it must never call host `exit`, `_Exit`, or `abort`. The pointer-to-pointer `endptr` required by `strtol`/`strtoul` keeps that conversion family behind a larger type-system prerequisite.
+
 ## 2026-08-02 — Deterministic random standard-library slice
 
 - Official WG14 N1570 §7.22.2.1-2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf and local `man 3 rand` agree that `rand()` returns `0..=RAND_MAX`, equal `srand` seeds reproduce equal sequences, and an unseeded program behaves as if seeded with `1`. Exact generator values are implementation-defined, so the native fixture checks only those standard relationships.
