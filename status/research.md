@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-02 — v0.13.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.12.0`, then passed after Cargo/lock and both image tags moved to `0.13.0`. `cargo test -- --list` inventory accounting is 1,279 tests: 1,145 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
+- Local and remote `v0.13.0` annotated-tag preflight returned no refs. Independent read-only release review returned `APPROVED`; formatting, strict Clippy, all 1,279 local tests, the rebuilt Docker test gate, runtime output `10`, local/container version `cust 0.13.0`, Cargo metadata, and the diff check pass. Publication remains ordered: verified release commit to `origin/main`, annotated tag creation/push second, exact remote tag-object and peeled-target comparison last.
+- Release queue decision: `strtol`/`strtoul` cannot safely expose non-null `endptr` until Cust supports a narrow interpreter-owned `char **` output slot. The next milestone must preserve pointer storage identity, owner/lifetime, qualification, and null behavior without general host addresses or premature intrinsic activation.
+
 ## 2026-08-02 — Bounded C-locale `strcoll` and `strxfrm`
 
 - WG14 N1570 §7.24.4.3 and §7.24.4.5 (`https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf`) define locale-aware `strcoll`, require transformed-string `strcmp` sign to agree with `strcoll`, and define `strxfrm`'s return as the transformed length excluding NUL with at most `n` output characters. POSIX `strxfrm` (`https://pubs.opengroup.org/onlinepubs/9799919799/functions/strxfrm.html`) documents the zero-count/null-destination query route. Cust fixes this surface to deterministic unsigned-byte C-locale semantics and never delegates to host locale/libc.

@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.13.0 — 2026-08-02
+
+### Language subset
+
+- Added exact-prototype C11 `strcoll` and `strxfrm` intrinsics under Cust's deterministic C-locale model. `strcoll` performs normalized unsigned-byte ordering; `strxfrm` returns the complete transformed length, writes at most the requested count, supports zero-count null-destination queries, and never delegates to host locale or libc.
+
+### Diagnostics and verification
+
+- Added exact declaration, user-definition precedence, arity, pointer/count shape, null, const, owner, lifetime, two-dimensional-row, destination-capacity, overlap, and 4,096-byte bound coverage. Runtime arguments evaluate once in source order, direct and nested `sizeof` remain non-evaluating but constraint-aware, and a review-driven depth regression keeps nested validation linear.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.13.0`.
+- Verified 1,279 tests at release preparation time: 1,145 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls beyond the explicitly prototyped bounded integer/string/character/random/termination families, locale-sensitive behavior outside Cust's fixed ASCII/C-locale model, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported. `strtol` and `strtoul` remain deferred until safe pointer-to-pointer `endptr` semantics exist.
+
 ## v0.12.0 — 2026-08-02
 
 ### Language subset
