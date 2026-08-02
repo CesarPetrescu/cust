@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-02 — Deterministic random standard-library slice
+
+- Official WG14 N1570 §7.22.2.1-2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf and local `man 3 rand` agree that `rand()` returns `0..=RAND_MAX`, equal `srand` seeds reproduce equal sequences, and an unseeded program behaves as if seeded with `1`. Exact generator values are implementation-defined, so the native fixture checks only those standard relationships.
+- Cust uses interpreter-owned wrapping 32-bit state with `state = state * 1103515245 + 12345` and returns `(state / 65536) % 32768`. The fixed public range is `0..=32767`; state is created per `interpret` run, and no host libc or host-global state participates.
+- Function-signature matching follows Cust's established deterministic scalar normalization: signed/unsigned/short/long integer spellings all lower to `CType::Int`, while `char`, pointer, aggregate, and void signatures remain incompatible. A retained explicit `(void)` marker distinguishes `rand(void)` from an old-style empty parameter list, and user function definitions always win.
+- Non-evaluating validation must reject void calls at arbitrary nested scalar-use depth without rejecting a valid comma expression whose discarded left operand is void. The shared metadata-only void-shape walker therefore descends unary, cast, nested-`sizeof`, binary, and conditional scalar positions but follows only the value-producing right side of comma expressions. The same check rejects a mixed void/scalar conditional passed to `srand` without evaluating either branch.
+- The published annotated `v0.10.0` tag object `0597e5280acb3bfae99bae989b7f76a153756162` peels to release commit `366f24934b6ed4a6b12f97d46069c4a48da9cd42`. Next package: bounded v0.11.0 release synchronization and publication for `rand`/`srand`.
+
 ## 2026-08-02 — C11 character conversion and bounded validation
 
 - Official WG14 N1570 §7.4.2.1-2: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf — `tolower` and `toupper` accept `int`; behavior is defined only for EOF or an unsigned-character value; the C locale converts matching uppercase/lowercase letters and leaves every other defined input unchanged. Cust fixes those rules to ASCII and diagnoses values outside `-1..=255` rather than invoking C undefined behavior.

@@ -4,6 +4,10 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added explicitly prototyped C11 `rand(void)` and `srand(unsigned int)` intrinsics with deterministic interpreter-owned state, default-seed equivalence, repeatable reseeding, a fixed `0..=32767` result range, user-definition precedence, exact call diagnostics, and non-evaluating `sizeof` validation.
+
 ## v0.10.0 — 2026-08-02
 
 ### Language subset

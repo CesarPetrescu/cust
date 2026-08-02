@@ -4,6 +4,7 @@ Last updated: 2026-08-02
 
 ## Latest autonomous verification
 
+Bounded explicitly prototyped C11 `rand`/`srand` is complete on top of the publis...[truncated]
 Bounded Cust v0.10.0 is prepared for atomic publication. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README support/limitations/roadmap text, changelog notes, and all five status files are synchronized for `0.10.0`. The release packages the complete deterministic C11 `<ctype.h>` surface: twelve classifiers plus `tolower` and `toupper`. The verified inventory is 1,255 tests: 1,122 interpreter tests, 98 deterministic fuzz-safety tests, 31 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 
 Release TDD evidence: exact CLI and Compose expectations first failed against package/image version `0.9.0`, then passed after Cargo/lock and both Compose images moved to `0.10.0`. The non-conflicting annotated `v0.10.0` tag is reserved for the independently reviewed, canonically verified release commit and may be created only after `origin/main` accepts it; publication and remote peeled-target verification are not claimed by this release-preparation diff.

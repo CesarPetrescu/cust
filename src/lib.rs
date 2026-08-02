@@ -691,6 +691,7 @@ struct Program {
     globals: Vec<Stmt>,
     functions: HashMap<String, Function>,
     prototypes: HashMap<String, FunctionSignature>,
+    explicit_void_parameter_prototypes: HashSet<String>,
     struct_types: HashMap<String, StructTypeDef>,
 }
 
@@ -6860,6 +6861,7 @@ impl Parser {
         let mut globals = Vec::new();
         let mut functions = HashMap::new();
         let mut prototypes = HashMap::new();
+        let mut explicit_void_parameter_prototypes = HashSet::new();
         while !self.check(&Token::Eof) {
             if self.check(&Token::RBrace) {
                 return Err(Self::error_at(
@@ -6982,7 +6984,7 @@ impl Parser {
                 || self.starts_malformed_function_definition()
                 || self.check(&Token::Void)
             {
-                let (name, top_level_function, inline_return_enum_decl) =
+                let (name, top_level_function, inline_return_enum_decl, explicit_void_parameters) =
                     self.parse_function_declaration()?;
                 if let Some(stmt) = inline_return_enum_decl {
                     globals.push(stmt);
@@ -7005,6 +7007,9 @@ impl Parser {
                         }
                     }
                     TopLevelFunction::Prototype(signature) => {
+                        if explicit_void_parameters {
+                            explicit_void_parameter_prototypes.insert(name.clone());
+                        }
                         match functions.get(&name) {
                             Some(function)
                                 if FunctionSignature::from_function(function) != signature =>
@@ -7122,6 +7127,7 @@ impl Parser {
             globals,
             functions,
             prototypes,
+            explicit_void_parameter_prototypes,
             struct_types: self.struct_types.clone(),
         })
     }
@@ -8713,7 +8719,7 @@ impl Parser {
 
     fn parse_function_declaration(
         &mut self,
-    ) -> CustResult<(String, TopLevelFunction, Option<Stmt>)> {
+    ) -> CustResult<(String, TopLevelFunction, Option<Stmt>, bool)> {
         self.pending_inline_enum_constants = None;
         let (mut return_type, leading_return_const) = self.parse_function_return_type()?;
         let inline_return_enum_decl = self.take_pending_inline_enum_decl();
@@ -8745,6 +8751,8 @@ impl Parser {
             name
         };
         let allow_unnamed_params = self.parameter_list_is_prototype();
+        let explicit_void_parameters =
+            self.check(&Token::Void) && matches!(self.peek_next(), Token::RParen);
         self.aggregate_type_scopes.push(HashMap::new());
         let parsed = (|| {
             let params = self.parse_params(allow_unnamed_params)?;
@@ -8777,6 +8785,7 @@ impl Parser {
                     name,
                     TopLevelFunction::Prototype(FunctionSignature::new(return_type, &params)),
                     inline_return_enum_decl,
+                    explicit_void_parameters,
                 ));
             }
             let previous_parsing_function_body = self.parsing_function_body;
@@ -8795,6 +8804,7 @@ impl Parser {
                     body,
                 }),
                 inline_return_enum_decl,
+                explicit_void_parameters,
             ))
         })();
         self.aggregate_type_scopes.pop();
@@ -9632,7 +9642,7 @@ impl Parser {
 
     fn parse_local_function_prototype_decl(&mut self) -> CustResult<Stmt> {
         let declaration_start = self.peek_located().clone();
-        let (_, declaration, _) = self.parse_function_declaration()?;
+        let (_, declaration, _, _) = self.parse_function_declaration()?;
         match declaration {
             TopLevelFunction::Prototype(_) => Ok(Stmt::Empty),
             TopLevelFunction::Definition(_) => Err(Self::error_at(
@@ -16375,6 +16385,8 @@ impl Parser {
 // test harness's smaller worker-thread stack as interpreter frames evolve.
 const MAX_CALL_DEPTH: usize = 24;
 const MAX_INTEGER_STRING_BYTES: usize = 4096;
+const CUST_RAND_MAX: u32 = 32_767;
+const CUST_RAND_DEFAULT_SEED: u32 = 1;
 
 struct Interpreter {
     scopes: Vec<Scope>,
@@ -16383,6 +16395,7 @@ struct Interpreter {
     next_scope_id: usize,
     functions: HashMap<String, Function>,
     prototypes: HashMap<String, FunctionSignature>,
+    explicit_void_parameter_prototypes: HashSet<String>,
     struct_types: HashMap<String, StructTypeDef>,
     call_depth: usize,
     return_type_stack: Vec<ReturnType>,
@@ -16391,6 +16404,7 @@ struct Interpreter {
     next_compound_literal_id: usize,
     function_name_arrays: HashMap<String, Rc<RefCell<ArrayValue>>>,
     strtok_next: Option<PointerValue>,
+    random_state: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16673,6 +16687,7 @@ impl Interpreter {
             next_scope_id: 0,
             functions: HashMap::new(),
             prototypes: HashMap::new(),
+            explicit_void_parameter_prototypes: HashSet::new(),
             struct_types: HashMap::new(),
             call_depth: 0,
             return_type_stack: Vec::new(),
@@ -16681,6 +16696,7 @@ impl Interpreter {
             next_compound_literal_id: 0,
             function_name_arrays: HashMap::new(),
             strtok_next: None,
+            random_state: CUST_RAND_DEFAULT_SEED,
         }
     }
 
@@ -16719,6 +16735,8 @@ impl Interpreter {
     fn run(&mut self, program: &Program) -> CustResult<i64> {
         self.functions = program.functions.clone();
         self.prototypes = program.prototypes.clone();
+        self.explicit_void_parameter_prototypes =
+            program.explicit_void_parameter_prototypes.clone();
         self.struct_types = program.struct_types.clone();
         self.push_scope();
         for global in &program.globals {
@@ -16756,6 +16774,9 @@ impl Interpreter {
             if self.has_integer_absolute_value_prototype(name) {
                 return self.call_integer_absolute_value_function(name, arg_exprs);
             }
+            if self.has_random_prototype(name) {
+                return self.call_random_function(name, arg_exprs);
+            }
             if self.has_integer_string_conversion_prototype(name) {
                 return self.call_integer_string_conversion_function(name, arg_exprs);
             }
@@ -16790,6 +16811,9 @@ impl Interpreter {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
                 )));
+            }
+            if matches!(name, "rand" | "srand") && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_random_declaration_error(name));
             }
             if matches!(name, "atoi" | "atol" | "atoll") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
@@ -17035,6 +17059,78 @@ impl Interpreter {
             }],
         };
         self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn has_random_prototype(&self, name: &str) -> bool {
+        let expected = match name {
+            "rand" => FunctionSignature {
+                return_type: ReturnType::Scalar(CType::Int),
+                params: Vec::new(),
+            },
+            "srand" => FunctionSignature {
+                return_type: ReturnType::Void,
+                params: vec![ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                }],
+            },
+            _ => return false,
+        };
+        self.prototypes.get(name) == Some(&expected)
+            && (name != "rand" || self.explicit_void_parameter_prototypes.contains(name))
+    }
+
+    fn unsupported_random_declaration_error(name: &str) -> CustError {
+        let expected = if name == "rand" {
+            "no parameters and an integer return type"
+        } else {
+            "one unsigned-integer parameter and a void return type"
+        };
+        CustError::new(format!(
+            "standard library function '{name}' has an unsupported declaration; expected {expected}"
+        ))
+    }
+
+    fn validate_random_call(&self, name: &str, args: &[Expr]) -> CustResult<()> {
+        let expected_args = usize::from(name == "srand");
+        if args.len() != expected_args {
+            return Err(CustError::new(format!(
+                "function '{name}' expected {expected_args} arguments, got {}",
+                args.len()
+            )));
+        }
+        if name == "srand"
+            && (self.expr_is_pointer_value(&args[0])
+                || self.aggregate_expr_type_name(&args[0]).is_ok()
+                || self.expr_is_void_value(&args[0]))
+        {
+            return Err(CustError::new("function 'srand' requires an integer seed"));
+        }
+        if name == "srand" && self.reject_void_scalar_operand(&args[0]).is_err() {
+            return Err(CustError::new("function 'srand' requires an integer seed"));
+        }
+        Ok(())
+    }
+
+    fn call_random_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        self.validate_random_call(name, arg_exprs)?;
+        if name == "srand" {
+            let seed = self.eval_scalar_conversion(CType::Int, &arg_exprs[0])?;
+            self.random_state = seed as u32;
+            return Ok(None);
+        }
+
+        self.random_state = self
+            .random_state
+            .wrapping_mul(1_103_515_245)
+            .wrapping_add(12_345);
+        let value = (self.random_state / 65_536) % (CUST_RAND_MAX + 1);
+        Ok(Some(ReturnValue::Scalar(i64::from(value))))
     }
 
     fn is_character_classification_name(name: &str) -> bool {
@@ -18409,6 +18505,19 @@ impl Interpreter {
                     }
                     // sizeof_character_classification_call recursively validates the
                     // argument; traversing it again here makes nested calls exponential.
+                    return Ok(());
+                }
+                if matches!(name.as_str(), "rand" | "srand") && !self.functions.contains_key(name) {
+                    if self.has_random_prototype(name) {
+                        self.validate_random_call(name, args)?;
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(Self::unsupported_random_declaration_error(name));
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                    for arg in args {
+                        self.validate_nested_string_intrinsic_calls(arg)?;
+                    }
                     return Ok(());
                 }
                 if matches!(name.as_str(), "strpbrk" | "strstr")
@@ -26269,12 +26378,14 @@ impl Interpreter {
     fn expr_is_void_value(&self, expr: &Expr) -> bool {
         match expr {
             Expr::VoidCast(_) => true,
-            Expr::Call { name, .. } => matches!(
-                self.functions
-                    .get(name)
-                    .map(|function| &function.return_type),
-                Some(ReturnType::Void)
-            ),
+            Expr::Call { name, .. } => {
+                matches!(
+                    self.functions
+                        .get(name)
+                        .map(|function| &function.return_type),
+                    Some(ReturnType::Void)
+                ) || (name == "srand" && self.has_random_prototype(name))
+            }
             Expr::Conditional {
                 then_expr,
                 else_expr,
@@ -26740,7 +26851,11 @@ impl Interpreter {
                     })?;
                 Ok(len as i64 * element_size)
             }
-            Expr::SizeOfType(_) | Expr::SizeOfValue(_) | Expr::AlignOfType(_) => Ok(INT_SIZE),
+            Expr::SizeOfType(_) | Expr::AlignOfType(_) => Ok(INT_SIZE),
+            Expr::SizeOfValue(inner) => {
+                self.sizeof_expr(inner)?;
+                Ok(INT_SIZE)
+            }
             Expr::Var(name) => self.sizeof_variable(name),
             Expr::StructGet { name, fields } => self.sizeof_struct_field(name, fields),
             Expr::StructArrayGet {
@@ -26919,10 +27034,13 @@ impl Interpreter {
             } => self.sizeof_struct_pointer_field(pointer, fields),
             Expr::Increment { target, .. } => self.sizeof_expr(target),
             Expr::VoidCast(_) => Err(CustError::new("void expression used as scalar")),
-            Expr::Cast { ty, .. }
-            | Expr::ScalarLiteral { ty, .. }
-            | Expr::ScalarLiteralSet { ty, .. }
-            | Expr::ScalarLiteralCompoundSet { ty, .. } => Ok(ty.size()),
+            Expr::Cast { ty, expr: inner } | Expr::ScalarLiteral { ty, init: inner } => {
+                self.reject_void_scalar_operand(inner)?;
+                Ok(ty.size())
+            }
+            Expr::ScalarLiteralSet { ty, .. } | Expr::ScalarLiteralCompoundSet { ty, .. } => {
+                Ok(ty.size())
+            }
             Expr::AggregateLiteral { type_name, .. } => self
                 .struct_types
                 .get(type_name)
@@ -26950,6 +27068,15 @@ impl Interpreter {
                     // The entry validation above already checked this intrinsic and
                     // its argument tree, so validating it again would duplicate work.
                     Ok(INT_SIZE)
+                }
+                None if self.has_random_prototype(name) => {
+                    if name == "srand" {
+                        Err(CustError::new(
+                            "void function 'srand' used as scalar expression",
+                        ))
+                    } else {
+                        Ok(INT_SIZE)
+                    }
                 }
                 None if self.has_integer_absolute_value_prototype(name) => Ok(INT_SIZE),
                 None if self.has_integer_string_conversion_prototype(name) => {
@@ -27025,17 +27152,60 @@ impl Interpreter {
                 }
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },
-            Expr::UnaryPlus(_)
-            | Expr::UnaryMinus(_)
-            | Expr::BitwiseNot(_)
-            | Expr::LogicalNot(_)
-            | Expr::Binary(_, _, _) => Ok(INT_SIZE),
+            Expr::UnaryPlus(inner)
+            | Expr::UnaryMinus(inner)
+            | Expr::BitwiseNot(inner)
+            | Expr::LogicalNot(inner) => {
+                self.reject_void_scalar_operand(inner)?;
+                Ok(INT_SIZE)
+            }
+            Expr::Binary(left, _, right) => {
+                self.reject_void_scalar_operand(left)?;
+                self.reject_void_scalar_operand(right)?;
+                Ok(INT_SIZE)
+            }
             Expr::Conditional { .. } => self.sizeof_conditional_expr(expr),
             Expr::Comma(_, right) => self.sizeof_expr(right),
         }
     }
 
+    fn reject_void_scalar_operand(&self, expr: &Expr) -> CustResult<()> {
+        if self.expr_is_void_value(expr) {
+            if let Expr::Call { name, .. } = expr {
+                return Err(CustError::new(format!(
+                    "void function '{name}' used as scalar expression"
+                )));
+            }
+            return Err(CustError::new("void expression used as scalar"));
+        }
+        match expr {
+            Expr::SizeOfValue(inner)
+            | Expr::UnaryPlus(inner)
+            | Expr::UnaryMinus(inner)
+            | Expr::BitwiseNot(inner)
+            | Expr::LogicalNot(inner)
+            | Expr::Cast { expr: inner, .. }
+            | Expr::ScalarLiteral { init: inner, .. } => self.reject_void_scalar_operand(inner),
+            Expr::Binary(left, _, right) => {
+                self.reject_void_scalar_operand(left)?;
+                self.reject_void_scalar_operand(right)
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                self.reject_void_scalar_operand(cond)?;
+                self.reject_void_scalar_operand(then_expr)?;
+                self.reject_void_scalar_operand(else_expr)
+            }
+            Expr::Comma(_, right) => self.reject_void_scalar_operand(right),
+            _ => Ok(()),
+        }
+    }
+
     fn sizeof_conditional_expr(&self, expr: &Expr) -> CustResult<i64> {
+        self.reject_void_scalar_operand(expr)?;
         match self.aggregate_expr_type_name(expr) {
             Ok(type_name) => self
                 .struct_types

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-02 bounded v0.10.0 release preparation: exact CLI and Compose expectations went RED against `0.9.0` and GREEN at `0.10.0`; Cargo/lock, Docker, README, changelog, status, and the 1,255-test inventory are synchronized. The non-conflicting `v0.10.0` tag remains reserved until the release diff is independently approved, the canonical local/Docker gate passes, and the verified commit is accepted by `origin/main`; no publication is claimed yet.
+None. Last reviewed during the 2026-08-02 deterministic `rand`/`srand` completion. Focused RED/GREEN, final independent review, formatting, warning-denied Clippy, all 1,259 local tests, rebuilt Docker test execution, runtime output `10`, and `git diff --check` pass. Published `v0.10.0` remains verified at peeled commit `366f24934b6ed4a6b12f97d46069c4a48da9cd42`; no active implementation, Docker, Git, or research blocker exists.
 
 ## Blocker template
 

@@ -14975,6 +14975,205 @@ fn supports_character_conversion_standard_library_functions() {
 }
 
 #[test]
+fn supports_deterministic_random_standard_library_functions() {
+    let program = r#"
+int rand(void);
+void srand(unsigned int seed);
+
+int main(void) {
+    int default_first = rand();
+    int default_second = rand();
+
+    srand(1);
+    if (rand() != default_first || rand() != default_second) {
+        return 1;
+    }
+
+    srand(123);
+    int seeded_first = rand();
+    int seeded_second = rand();
+    srand(123);
+    if (rand() != seeded_first || rand() != seeded_second) {
+        return 2;
+    }
+
+    srand(124);
+    if (rand() == seeded_first) {
+        return 3;
+    }
+
+    srand(99);
+    for (int i = 0; i < 64; i++) {
+        int value = rand();
+        if (value < 0 || value > 32767) {
+            return 4;
+        }
+    }
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn random_functions_require_exact_explicit_prototypes_and_preserve_user_definitions() {
+    for (program, expected) in [
+        (
+            "char rand(void);\nint main(void) { return rand(); }\n",
+            "standard library function 'rand' has an unsupported declaration; expected no parameters and an integer return type",
+        ),
+        (
+            "int rand(int seed);\nint main(void) { return rand(1); }\n",
+            "standard library function 'rand' has an unsupported declaration; expected no parameters and an integer return type",
+        ),
+        (
+            "int rand();\nint main(void) { return rand(); }\n",
+            "standard library function 'rand' has an unsupported declaration; expected no parameters and an integer return type",
+        ),
+        (
+            "int srand(unsigned int seed);\nint main(void) { srand(1); return 0; }\n",
+            "standard library function 'srand' has an unsupported declaration; expected one unsigned-integer parameter and a void return type",
+        ),
+        (
+            "void srand(char *seed);\nint main(void) { srand(0); return 0; }\n",
+            "standard library function 'srand' has an unsupported declaration; expected one unsigned-integer parameter and a void return type",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "program unexpectedly matched a different declaration: {program}"
+        );
+    }
+
+    assert_eq!(
+        interpret("int main(void) { return rand(); }\n")
+            .unwrap_err()
+            .to_string(),
+        "undefined function 'rand'"
+    );
+    assert_eq!(
+        interpret(
+            "int rand(void);\nvoid srand(unsigned int seed);\nint marker = 0;\nint rand(void) { return 7; }\nvoid srand(unsigned int seed) { marker = seed; }\nint main(void) { srand(9); return rand() == 7 && marker == 9 ? 0 : 1; }\n"
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        interpret(
+            "int rand(int value) { return value + 4; }\nvoid srand(char *seed) { *seed += 1; }\nint main(void) { char seed = 8; srand(&seed); return rand(seed) == 13 ? 0 : 1; }\n"
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn random_functions_preserve_arity_and_seed_shape_boundaries() {
+    for (call, expected) in [
+        ("rand(1)", "function 'rand' expected 0 arguments, got 1"),
+        ("srand()", "function 'srand' expected 1 arguments, got 0"),
+        (
+            "srand(1, 2)",
+            "function 'srand' expected 1 arguments, got 2",
+        ),
+        ("srand(&value)", "function 'srand' requires an integer seed"),
+        (
+            "srand((void)0)",
+            "function 'srand' requires an integer seed",
+        ),
+        (
+            "srand(0 ? srand(1) : 7)",
+            "function 'srand' requires an integer seed",
+        ),
+    ] {
+        let program = format!(
+            "int rand(void);\nvoid srand(unsigned int seed);\nint main(void) {{ int value = 0; {call}; return 0; }}\n"
+        );
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            expected,
+            "program unexpectedly matched a different boundary: {program}"
+        );
+    }
+}
+
+#[test]
+fn sizeof_random_calls_is_non_evaluating_and_constraint_aware() {
+    let program = r#"
+int rand(void);
+void srand(unsigned int seed);
+
+int mark(int *counter, int seed) {
+    *counter += 1;
+    return seed;
+}
+
+int main(void) {
+    int counter = 0;
+    srand(42);
+    int expected = rand();
+    srand(42);
+    int direct_size = sizeof(rand());
+    int nested_size = sizeof((srand(mark(&counter, 7)), rand()) + mark(&counter, 1));
+    int observed = rand();
+    return direct_size == sizeof(int)
+        && nested_size == sizeof(int)
+        && counter == 0
+        && observed == expected ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (expr, expected) in [
+        (
+            "sizeof(rand(1) + 1)",
+            "function 'rand' expected 0 arguments, got 1",
+        ),
+        (
+            "sizeof((srand(&value), rand()) + 1)",
+            "function 'srand' requires an integer seed",
+        ),
+        (
+            "sizeof(srand(1))",
+            "void function 'srand' used as scalar expression",
+        ),
+        (
+            "sizeof(1 + srand(7))",
+            "void function 'srand' used as scalar expression",
+        ),
+        (
+            "sizeof(-srand(7))",
+            "void function 'srand' used as scalar expression",
+        ),
+        (
+            "sizeof(1 + (2 + srand(7)))",
+            "void function 'srand' used as scalar expression",
+        ),
+        (
+            "sizeof((int)srand(7))",
+            "void function 'srand' used as scalar expression",
+        ),
+        (
+            "sizeof(sizeof(srand(7)))",
+            "void function 'srand' used as scalar expression",
+        ),
+    ] {
+        let source = format!(
+            "int rand(void);\nvoid srand(unsigned int seed);\nint main(void) {{ int value = 0; return {expr}; }}\n"
+        );
+        assert_eq!(
+            interpret(&source).expect_err(&source).to_string(),
+            expected,
+            "expression unexpectedly matched a different boundary: {expr}"
+        );
+    }
+}
+
+#[test]
 fn nested_character_conversion_validation_remains_linear() {
     fn run_nested(depth: usize, iterations: usize) -> std::time::Duration {
         let expression = (0..depth).fold("'A'".to_string(), |inner, _| format!("tolower({inner})"));
