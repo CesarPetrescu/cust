@@ -156,6 +156,36 @@ fn ast_flag_reports_parser_errors_without_interpreting_source() {
 }
 
 #[test]
+fn run_mode_surfaces_interpreted_termination_without_terminating_the_test_host() {
+    let exit_path =
+        write_temp_source("void exit(int status);\nint main(void) { exit(29); return 0; }\n");
+    let exit_output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&exit_path)
+        .output()
+        .expect("cust binary should run exit program");
+    fs::remove_file(&exit_path).expect("temporary exit source should be removable");
+
+    assert!(exit_output.status.success());
+    assert_eq!(String::from_utf8_lossy(&exit_output.stdout), "29\n");
+    assert_eq!(String::from_utf8_lossy(&exit_output.stderr), "");
+
+    let abort_path =
+        write_temp_source("void abort(void);\nint main(void) { abort(); return 0; }\n");
+    let abort_output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&abort_path)
+        .output()
+        .expect("cust binary should run abort program");
+    fs::remove_file(&abort_path).expect("temporary abort source should be removable");
+
+    assert_eq!(abort_output.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&abort_output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&abort_output.stderr),
+        "cust: program aborted\n"
+    );
+}
+
+#[test]
 fn max_steps_flag_limits_total_loop_iterations() {
     let path =
         write_temp_source("int main() {\nint i = 0;\nwhile (1) {\ni = i + 1;\n}\nreturn i;\n}\n");

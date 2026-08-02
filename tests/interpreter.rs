@@ -15018,6 +15018,311 @@ int main(void) {
 }
 
 #[test]
+fn exit_unwinds_nested_calls_to_an_interpreter_owned_result() {
+    let program = r#"
+void exit(int status);
+int marker = 0;
+
+void inner(int status) {
+    marker = 1;
+    exit(status);
+    marker = 2;
+}
+
+int outer(void) {
+    inner(37);
+    marker = 3;
+    return 99;
+}
+
+int main(void) {
+    int result = outer();
+    marker = 4;
+    return result;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 37);
+    assert_eq!(interpret("int main(void) { return 5; }\n").unwrap(), 5);
+}
+
+#[test]
+fn immediate_exit_unwinds_control_flow_without_terminating_the_host() {
+    let program = r#"
+void _Exit(int status);
+int marker = 0;
+
+int main(void) {
+    marker = 1;
+    _Exit(41);
+    marker = 2;
+    return marker;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 41);
+    assert_eq!(interpret("int main(void) { return 6; }\n").unwrap(), 6);
+}
+
+#[test]
+fn abort_unwinds_as_a_recoverable_interpreter_error() {
+    let program = r#"
+void abort(void);
+int marker = 0;
+
+void inner(void) {
+    marker = 1;
+    abort();
+    marker = 2;
+}
+
+int main(void) {
+    inner();
+    marker = 3;
+    return marker;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "program aborted"
+    );
+    assert_eq!(interpret("int main(void) { return 7; }\n").unwrap(), 7);
+}
+
+#[test]
+fn termination_in_global_initialization_uses_the_public_result_surface() {
+    assert_eq!(
+        interpret(
+            "void exit(int status);\nint value = (exit(12), 0);\nint main(void) { return value; }\n"
+        )
+        .unwrap(),
+        12
+    );
+    assert_eq!(
+        interpret(
+            "void abort(void);\nint value = (abort(), 0);\nint main(void) { return value; }\n"
+        )
+        .unwrap_err()
+        .to_string(),
+        "program aborted"
+    );
+}
+
+#[test]
+fn termination_calls_in_scalar_value_contexts_are_rejected_before_unwinding() {
+    for (program, expected) in [
+        (
+            "void exit(int status);\nint main(void) { return exit(7); }\n",
+            "void function 'exit' used as scalar expression",
+        ),
+        (
+            "void _Exit(int status);\nint main(void) { int value = _Exit(8); return value; }\n",
+            "void function '_Exit' used as scalar expression",
+        ),
+        (
+            "void abort(void);\nint main(void) { return 1 + abort(); }\n",
+            "void function 'abort' used as scalar expression",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "value context unexpectedly unwound: {program}"
+        );
+    }
+}
+
+#[test]
+fn termination_calls_in_aggregate_value_contexts_are_rejected_before_unwinding() {
+    let program = r#"
+void exit(int status);
+struct Result { int value; };
+
+struct Result make(void) {
+    return exit(17);
+}
+
+int main(void) {
+    struct Result result = make();
+    return result.value;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "void function 'exit' used as struct expression"
+    );
+}
+
+#[test]
+fn termination_calls_in_pointer_value_contexts_are_rejected_before_unwinding() {
+    let program = r#"
+void exit(int status);
+
+int *make(void) {
+    return exit(18);
+}
+
+int main(void) {
+    int *result = make();
+    return result == 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "void function 'exit' used as pointer expression"
+    );
+}
+
+#[test]
+fn termination_functions_require_exact_prototypes_and_preserve_user_definitions() {
+    for (program, expected) in [
+        (
+            "int exit(int status);\nint main(void) { exit(1); return 0; }\n",
+            "standard library function 'exit' has an unsupported declaration; expected one integer parameter and a void return type",
+        ),
+        (
+            "void _Exit(char *status);\nint main(void) { _Exit(0); return 0; }\n",
+            "standard library function '_Exit' has an unsupported declaration; expected one integer parameter and a void return type",
+        ),
+        (
+            "int abort(void);\nint main(void) { abort(); return 0; }\n",
+            "standard library function 'abort' has an unsupported declaration; expected no parameters and a void return type",
+        ),
+        (
+            "void abort();\nint main(void) { abort(); return 0; }\n",
+            "standard library function 'abort' has an unsupported declaration; expected no parameters and a void return type",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "program unexpectedly matched a different declaration: {program}"
+        );
+    }
+
+    assert_eq!(
+        interpret("int main(void) { exit(1); return 0; }\n")
+            .unwrap_err()
+            .to_string(),
+        "undefined function 'exit'"
+    );
+    assert_eq!(
+        interpret(
+            "void exit(int status);\nvoid _Exit(int status);\nvoid abort(void);\nint marker = 0;\nvoid exit(int status) { marker = status; }\nvoid _Exit(int status) { marker += status; }\nvoid abort(void) { marker += 4; }\nint main(void) { exit(2); _Exit(3); abort(); return marker == 9 ? 0 : 1; }\n"
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        interpret(
+            "int exit(char *value) { return *value; }\nint _Exit(void) { return 3; }\nint abort(int value) { return value + 1; }\nint main(void) { char value = 2; return exit(&value) + _Exit() + abort(4) == 10 ? 0 : 1; }\n"
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn termination_functions_preserve_arity_and_status_shape_boundaries() {
+    for (call, expected) in [
+        ("exit()", "function 'exit' expected 1 arguments, got 0"),
+        (
+            "_Exit(1, 2)",
+            "function '_Exit' expected 1 arguments, got 2",
+        ),
+        ("abort(1)", "function 'abort' expected 0 arguments, got 1"),
+        (
+            "exit(&value)",
+            "function 'exit' requires an integer termination status",
+        ),
+        (
+            "_Exit((void)0)",
+            "function '_Exit' requires an integer termination status",
+        ),
+        (
+            "exit(0 ? abort() : 7)",
+            "function 'exit' requires an integer termination status",
+        ),
+    ] {
+        let program = format!(
+            "void exit(int status);\nvoid _Exit(int status);\nvoid abort(void);\nint main(void) {{ int value = 0; {call}; return 0; }}\n"
+        );
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            expected,
+            "program unexpectedly matched a different boundary: {program}"
+        );
+    }
+}
+
+#[test]
+fn termination_status_arguments_evaluate_once() {
+    for (name, base, expected) in [("exit", 40, 41), ("_Exit", 50, 51)] {
+        let program = format!(
+            "void {name}(int status);\nint mark(int *calls, int base) {{ *calls += 1; return base + *calls; }}\nint main(void) {{ int calls = 0; {name}(mark(&calls, {base})); return 99; }}\n"
+        );
+        assert_eq!(interpret(&program).unwrap(), expected);
+    }
+}
+
+#[test]
+fn sizeof_termination_calls_is_non_evaluating_and_constraint_aware() {
+    let program = r#"
+void exit(int status);
+void _Exit(int status);
+void abort(void);
+
+int mark(int *counter, int status) {
+    *counter += 1;
+    return status;
+}
+
+int main(void) {
+    int counter = 0;
+    int size = sizeof((exit(mark(&counter, 11)), _Exit(mark(&counter, 12)), abort(), 1));
+    return size == sizeof(int) && counter == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (expr, expected) in [
+        (
+            "sizeof(exit(1))",
+            "void function 'exit' used as scalar expression",
+        ),
+        (
+            "sizeof(1 + _Exit(2))",
+            "void function '_Exit' used as scalar expression",
+        ),
+        (
+            "sizeof(-abort())",
+            "void function 'abort' used as scalar expression",
+        ),
+        (
+            "sizeof((exit(&value), 1))",
+            "function 'exit' requires an integer termination status",
+        ),
+        (
+            "sizeof((abort(1), 1))",
+            "function 'abort' expected 0 arguments, got 1",
+        ),
+    ] {
+        let source = format!(
+            "void exit(int status);\nvoid _Exit(int status);\nvoid abort(void);\nint main(void) {{ int value = 0; return {expr}; }}\n"
+        );
+        assert_eq!(
+            interpret(&source).expect_err(&source).to_string(),
+            expected,
+            "expression unexpectedly matched a different boundary: {expr}"
+        );
+    }
+}
+
+#[test]
 fn random_functions_require_exact_explicit_prototypes_and_preserve_user_definitions() {
     for (program, expected) in [
         (

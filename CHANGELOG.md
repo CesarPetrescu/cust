@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added exact-prototype C11 `exit(int)`, `_Exit(int)`, and `abort(void)` intrinsics with interpreter-owned whole-program unwinding. `exit` and `_Exit` surface their one-time-evaluated status as Cust's program result; `abort` surfaces a recoverable `program aborted` error, and no intrinsic invokes host termination.
+
+### Diagnostics and verification
+
+- Added exact missing/incompatible declaration, arity, pointer/aggregate/void status-shape, user-definition precedence, nested control-flow, CLI, compiler-oracle, and non-evaluating constraint-aware `sizeof` coverage. Cust intentionally does not model `atexit`, stdio flushing, or signal delivery in this bounded slice.
+
 ## v0.11.0 — 2026-08-02
 
 ### Language subset

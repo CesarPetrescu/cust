@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-02 — Bounded termination semantics and interpreter boundary
+
+- Local `man 3 exit`, `man 3 _Exit`, and `man 3 abort` confirm C11 signatures `void exit(int)`, `void _Exit(int)`, and `void abort(void)` and that all three are non-returning. Native `exit` performs registered-handler and stdio processing, `_Exit` omits those hooks/flushes, and `abort` raises `SIGABRT`; these host-process effects are intentionally outside Cust's deterministic safe subset.
+- Implementation decision: exact prototypes activate interpreter intrinsics only when no user definition exists. `exit`/`_Exit` preserve Cust's full deterministic `i64` program-result surface rather than applying POSIX parent-process low-byte truncation; `abort` maps to the recoverable exact error `program aborted`. Private compact error markers carry unwinding through existing evaluator frames and are consumed only by `Interpreter::run`, avoiding host termination and avoiding the stack-size regression caused by widening `CustError`.
+- Value contexts must validate call constraints before unwinding. Independent review exposed aggregate and pointer siblings after the scalar RED; `eval`, `eval_pointer`, and `eval_struct_expr` now share contextual pre-dispatch rejection, while discard/comma/control-flow routes still perform whole-program unwinding. The warning-free native fixture checks only reachable status relationships, not `abort` signals or cleanup side effects.
+
 ## 2026-08-02 — v0.11.0 release consistency and next termination slice
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.10.0`, then passed after Cargo/lock and both image tags moved to `0.11.0`. `cargo test -- --list` inventory accounting is 1,259 tests: 1,126 interpreter, 98 deterministic fuzz-safety, 31 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.

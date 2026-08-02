@@ -18,6 +18,12 @@ use std::rc::Rc;
 pub type CustResult<T> = Result<T, CustError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum ProgramTermination {
+    Exit(i64),
+    Abort,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustError {
     message: Box<str>,
     io_error: bool,
@@ -36,6 +42,34 @@ impl CustError {
             message: message.into().into_boxed_str(),
             io_error: true,
         }
+    }
+
+    // Keep interpreter-only unwinding in the existing compact error payload. Widening
+    // CustError increases every recursive evaluator frame enough to exhaust the test
+    // worker stack in large compiler-oracle fixtures. These private markers are
+    // consumed by Interpreter::run and never escape through the public API.
+    fn exit(status: i64) -> Self {
+        Self {
+            message: format!("\0cust-exit:{status}").into_boxed_str(),
+            io_error: false,
+        }
+    }
+
+    fn abort() -> Self {
+        Self {
+            message: "\0cust-abort".into(),
+            io_error: false,
+        }
+    }
+
+    fn program_termination(&self) -> Option<ProgramTermination> {
+        if self.message.as_ref() == "\0cust-abort" {
+            return Some(ProgramTermination::Abort);
+        }
+        self.message
+            .strip_prefix("\0cust-exit:")
+            .and_then(|status| status.parse().ok())
+            .map(ProgramTermination::Exit)
     }
 
     /// Whether this error came from reading the primary source file.
@@ -16739,31 +16773,44 @@ impl Interpreter {
             program.explicit_void_parameter_prototypes.clone();
         self.struct_types = program.struct_types.clone();
         self.push_scope();
-        for global in &program.globals {
-            match self.exec_stmt(global)? {
-                ExecFlow::None => {}
-                ExecFlow::Return(_) => return Err(CustError::new("return outside function")),
-                ExecFlow::Break(token) => {
-                    return Err(Self::break_outside_loop_or_switch_error(&token));
+        let result = (|| {
+            for global in &program.globals {
+                match self.exec_stmt(global)? {
+                    ExecFlow::None => {}
+                    ExecFlow::Return(_) => {
+                        return Err(CustError::new("return outside function"));
+                    }
+                    ExecFlow::Break(token) => {
+                        return Err(Self::break_outside_loop_or_switch_error(&token));
+                    }
+                    ExecFlow::Continue(token) => {
+                        return Err(Self::continue_outside_loop_error(&token));
+                    }
                 }
-                ExecFlow::Continue(token) => return Err(Self::continue_outside_loop_error(&token)),
             }
-        }
 
-        let result = match self.call_function("main", &[])? {
-            Some(ReturnValue::Scalar(value)) => Ok(value),
-            Some(ReturnValue::Pointer { .. }) => Err(CustError::new(
-                "pointer function 'main' used as program entry point",
-            )),
-            Some(ReturnValue::Struct { .. }) => Err(CustError::new(
-                "struct function 'main' used as program entry point",
-            )),
-            None => Err(CustError::new(
-                "int function 'main' returned without a value",
-            )),
-        };
+            match self.call_function("main", &[])? {
+                Some(ReturnValue::Scalar(value)) => Ok(value),
+                Some(ReturnValue::Pointer { .. }) => Err(CustError::new(
+                    "pointer function 'main' used as program entry point",
+                )),
+                Some(ReturnValue::Struct { .. }) => Err(CustError::new(
+                    "struct function 'main' used as program entry point",
+                )),
+                None => Err(CustError::new(
+                    "int function 'main' returned without a value",
+                )),
+            }
+        })();
         self.pop_scope();
-        result
+        match result {
+            Err(error) => match error.program_termination() {
+                Some(ProgramTermination::Exit(status)) => Ok(status),
+                Some(ProgramTermination::Abort) => Err(CustError::new("program aborted")),
+                None => Err(error),
+            },
+            result => result,
+        }
     }
 
     fn call_function(&mut self, name: &str, arg_exprs: &[Expr]) -> CustResult<Option<ReturnValue>> {
@@ -16773,6 +16820,12 @@ impl Interpreter {
             }
             if self.has_integer_absolute_value_prototype(name) {
                 return self.call_integer_absolute_value_function(name, arg_exprs);
+            }
+            if self.has_exit_prototype(name) {
+                return self.call_exit_function(name, arg_exprs);
+            }
+            if self.has_abort_prototype(name) {
+                return self.call_abort_function(arg_exprs);
             }
             if self.has_random_prototype(name) {
                 return self.call_random_function(name, arg_exprs);
@@ -16811,6 +16864,9 @@ impl Interpreter {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one integer parameter and an integer return type"
                 )));
+            }
+            if matches!(name, "exit" | "_Exit" | "abort") && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_termination_declaration_error(name));
             }
             if matches!(name, "rand" | "srand") && self.prototypes.contains_key(name) {
                 return Err(Self::unsupported_random_declaration_error(name));
@@ -17059,6 +17115,100 @@ impl Interpreter {
             }],
         };
         self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn has_exit_prototype(&self, name: &str) -> bool {
+        if !matches!(name, "exit" | "_Exit") {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Void,
+            params: vec![ParamSignature {
+                ty: ParamType::Scalar(CType::Int),
+                kind: ParamKind::Scalar,
+                points_to_const: false,
+            }],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn unsupported_termination_declaration_error(name: &str) -> CustError {
+        let expected = if name == "abort" {
+            "no parameters and a void return type"
+        } else {
+            "one integer parameter and a void return type"
+        };
+        CustError::new(format!(
+            "standard library function '{name}' has an unsupported declaration; expected {expected}"
+        ))
+    }
+
+    fn call_exit_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        self.validate_termination_call(name, arg_exprs)?;
+        let status = self.eval_scalar_conversion(CType::Int, &arg_exprs[0])?;
+        Err(CustError::exit(status))
+    }
+
+    fn validate_termination_call(&self, name: &str, arg_exprs: &[Expr]) -> CustResult<()> {
+        let expected_args = usize::from(name != "abort");
+        if arg_exprs.len() != expected_args {
+            return Err(CustError::new(format!(
+                "function '{name}' expected {expected_args} arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+        if name == "abort" {
+            return Ok(());
+        }
+        let status_expr = &arg_exprs[0];
+        if self.expr_is_pointer_value(status_expr)
+            || self.aggregate_expr_type_name(status_expr).is_ok()
+            || self.expr_is_void_value(status_expr)
+            || self.reject_void_scalar_operand(status_expr).is_err()
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer termination status"
+            )));
+        }
+        Ok(())
+    }
+
+    fn has_abort_prototype(&self, name: &str) -> bool {
+        if name != "abort" {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Void,
+            params: Vec::new(),
+        };
+        self.prototypes.get(name) == Some(&expected)
+            && self.explicit_void_parameter_prototypes.contains(name)
+    }
+
+    fn call_abort_function(&self, arg_exprs: &[Expr]) -> CustResult<Option<ReturnValue>> {
+        self.validate_termination_call("abort", arg_exprs)?;
+        Err(CustError::abort())
+    }
+
+    fn reject_termination_call_in_value_context(
+        &self,
+        name: &str,
+        arg_exprs: &[Expr],
+        context: &str,
+    ) -> CustResult<()> {
+        if self.functions.contains_key(name)
+            || !(self.has_exit_prototype(name) || self.has_abort_prototype(name))
+        {
+            return Ok(());
+        }
+        self.validate_termination_call(name, arg_exprs)?;
+        Err(CustError::new(format!(
+            "void function '{name}' used as {context} expression"
+        )))
     }
 
     fn has_random_prototype(&self, name: &str) -> bool {
@@ -18505,6 +18655,26 @@ impl Interpreter {
                     }
                     // sizeof_character_classification_call recursively validates the
                     // argument; traversing it again here makes nested calls exponential.
+                    return Ok(());
+                }
+                if matches!(name.as_str(), "exit" | "_Exit" | "abort")
+                    && !self.functions.contains_key(name)
+                {
+                    let supported = if name == "abort" {
+                        self.has_abort_prototype(name)
+                    } else {
+                        self.has_exit_prototype(name)
+                    };
+                    if supported {
+                        self.validate_termination_call(name, args)?;
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(Self::unsupported_termination_declaration_error(name));
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                    for arg in args {
+                        self.validate_nested_string_intrinsic_calls(arg)?;
+                    }
                     return Ok(());
                 }
                 if matches!(name.as_str(), "rand" | "srand") && !self.functions.contains_key(name) {
@@ -24436,18 +24606,21 @@ impl Interpreter {
                 };
                 self.offset_array_pointer(&current, offset)
             }
-            Expr::Call { name, args } => match self.call_function(name, args)? {
-                Some(ReturnValue::Pointer { pointer, .. }) => Ok(pointer),
-                Some(ReturnValue::Scalar(_)) => Err(CustError::new(format!(
-                    "scalar function '{name}' used as pointer expression"
-                ))),
-                Some(ReturnValue::Struct { .. }) => Err(CustError::new(format!(
-                    "struct function '{name}' used as pointer expression"
-                ))),
-                None => Err(CustError::new(format!(
-                    "void function '{name}' used as pointer expression"
-                ))),
-            },
+            Expr::Call { name, args } => {
+                self.reject_termination_call_in_value_context(name, args, "pointer")?;
+                match self.call_function(name, args)? {
+                    Some(ReturnValue::Pointer { pointer, .. }) => Ok(pointer),
+                    Some(ReturnValue::Scalar(_)) => Err(CustError::new(format!(
+                        "scalar function '{name}' used as pointer expression"
+                    ))),
+                    Some(ReturnValue::Struct { .. }) => Err(CustError::new(format!(
+                        "struct function '{name}' used as pointer expression"
+                    ))),
+                    None => Err(CustError::new(format!(
+                        "void function '{name}' used as pointer expression"
+                    ))),
+                }
+            }
             Expr::Assign { name, value } => match self.find_variable(name).cloned() {
                 Some(Value::Pointer {
                     pointer: current_pointer,
@@ -26385,6 +26558,9 @@ impl Interpreter {
                         .map(|function| &function.return_type),
                     Some(ReturnType::Void)
                 ) || (name == "srand" && self.has_random_prototype(name))
+                    || ((matches!(name.as_str(), "exit" | "_Exit")
+                        && self.has_exit_prototype(name))
+                        || (name == "abort" && self.has_abort_prototype(name)))
             }
             Expr::Conditional {
                 then_expr,
@@ -27069,6 +27245,9 @@ impl Interpreter {
                     // its argument tree, so validating it again would duplicate work.
                     Ok(INT_SIZE)
                 }
+                None if self.has_exit_prototype(name) || self.has_abort_prototype(name) => Err(
+                    CustError::new(format!("void function '{name}' used as scalar expression")),
+                ),
                 None if self.has_random_prototype(name) => {
                     if name == "srand" {
                         Err(CustError::new(
@@ -28255,20 +28434,23 @@ impl Interpreter {
                     fields: StructFieldValue::deep_clone_fields(fields),
                 })
             }
-            Expr::Call { name, args } => match self.call_function(name, args)? {
-                Some(ReturnValue::Struct { type_name, fields }) => {
-                    Ok(ReturnValue::Struct { type_name, fields })
+            Expr::Call { name, args } => {
+                self.reject_termination_call_in_value_context(name, args, "struct")?;
+                match self.call_function(name, args)? {
+                    Some(ReturnValue::Struct { type_name, fields }) => {
+                        Ok(ReturnValue::Struct { type_name, fields })
+                    }
+                    Some(ReturnValue::Scalar(_)) => Err(CustError::new(format!(
+                        "scalar function '{name}' used as struct expression"
+                    ))),
+                    Some(ReturnValue::Pointer { .. }) => Err(CustError::new(format!(
+                        "pointer function '{name}' used as struct expression"
+                    ))),
+                    None => Err(CustError::new(format!(
+                        "void function '{name}' used as struct expression"
+                    ))),
                 }
-                Some(ReturnValue::Scalar(_)) => Err(CustError::new(format!(
-                    "scalar function '{name}' used as struct expression"
-                ))),
-                Some(ReturnValue::Pointer { .. }) => Err(CustError::new(format!(
-                    "pointer function '{name}' used as struct expression"
-                ))),
-                None => Err(CustError::new(format!(
-                    "void function '{name}' used as struct expression"
-                ))),
-            },
+            }
             _ => Err(CustError::new("expected struct expression")),
         }
     }
@@ -29499,21 +29681,24 @@ impl Interpreter {
                     ))
                 })
             }
-            Expr::Call { name, args } => match self.call_function(name, args)? {
-                Some(ReturnValue::Scalar(value)) => Ok(value),
-                Some(ReturnValue::Pointer { .. }) => Err(CustError::new(format!(
-                    "pointer function '{name}' used as scalar expression"
-                ))),
-                Some(ReturnValue::Struct { type_name, .. }) => {
-                    let aggregate_kind = self.aggregate_kind_label(&type_name);
-                    Err(CustError::new(format!(
-                        "{aggregate_kind} function '{name}' used as scalar expression"
-                    )))
+            Expr::Call { name, args } => {
+                self.reject_termination_call_in_value_context(name, args, "scalar")?;
+                match self.call_function(name, args)? {
+                    Some(ReturnValue::Scalar(value)) => Ok(value),
+                    Some(ReturnValue::Pointer { .. }) => Err(CustError::new(format!(
+                        "pointer function '{name}' used as scalar expression"
+                    ))),
+                    Some(ReturnValue::Struct { type_name, .. }) => {
+                        let aggregate_kind = self.aggregate_kind_label(&type_name);
+                        Err(CustError::new(format!(
+                            "{aggregate_kind} function '{name}' used as scalar expression"
+                        )))
+                    }
+                    None => Err(CustError::new(format!(
+                        "void function '{name}' used as scalar expression"
+                    ))),
                 }
-                None => Err(CustError::new(format!(
-                    "void function '{name}' used as scalar expression"
-                ))),
-            },
+            }
             Expr::Cast { ty, expr } => self.eval_scalar_conversion(*ty, expr),
             Expr::VoidCast(expr) => {
                 self.eval_discard(expr)?;

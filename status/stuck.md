@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-02 v0.11.0 release preparation. Focused version RED/GREEN, independent diff-only approval, formatting, warning-denied Clippy, all 1,259 local tests, rebuilt Docker test execution, runtime output `10`, container version `cust 0.11.0`, and `git diff --check` pass; local/remote annotated-tag preflight is empty. Published `v0.10.0` remains verified at peeled commit `366f24934b6ed4a6b12f97d46069c4a48da9cd42`; no active implementation, Docker, Git, tag-conflict, or research blocker exists.
+None. Last reviewed during the 2026-08-02 bounded termination implementation. Focused interpreter/CLI/compiler-oracle tests and independent final review pass after review-driven scalar, aggregate, and pointer value-context RED/GREEN fixes. Formatting, warning-denied Clippy, all 1,271 local tests, the rebuilt Docker test gate, runtime output `10`, and `git diff --check` pass; no active implementation, Docker, Git, research, or environment blocker exists. `strtol`/`strtoul` remain a documented roadmap dependency on unsupported pointer-to-pointer `endptr`, not an active blocker for the next v0.12.0 release package.
 
 ## Blocker template
 
