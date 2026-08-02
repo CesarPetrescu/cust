@@ -16836,6 +16836,9 @@ impl Interpreter {
             if self.has_string_comparison_prototype(name) {
                 return self.call_string_comparison_function(name, arg_exprs);
             }
+            if self.has_string_transform_prototype(name) {
+                return self.call_string_transform_function(name, arg_exprs);
+            }
             if self.has_string_prefix_comparison_prototype(name) {
                 return self.call_string_prefix_comparison_function(name, arg_exprs);
             }
@@ -16876,10 +16879,11 @@ impl Interpreter {
                     "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type"
                 )));
             }
-            if name == "strcmp" && self.prototypes.contains_key(name) {
-                return Err(CustError::new(
-                    "standard library function 'strcmp' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type",
-                ));
+            if matches!(name, "strcmp" | "strcoll") && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_string_comparison_declaration_error(name));
+            }
+            if name == "strxfrm" && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_string_transform_declaration_error());
             }
             if name == "strncmp" && self.prototypes.contains_key(name) {
                 return Err(CustError::new(
@@ -17550,7 +17554,7 @@ impl Interpreter {
     }
 
     fn has_string_comparison_prototype(&self, name: &str) -> bool {
-        if name != "strcmp" {
+        if !matches!(name, "strcmp" | "strcoll") {
             return false;
         }
         let character_pointer = ParamSignature {
@@ -17563,6 +17567,12 @@ impl Interpreter {
             params: vec![character_pointer.clone(), character_pointer],
         };
         self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn unsupported_string_comparison_declaration_error(name: &str) -> CustError {
+        CustError::new(format!(
+            "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type"
+        ))
     }
 
     fn call_string_comparison_function(
@@ -17714,6 +17724,161 @@ impl Interpreter {
                 }
             }
         }
+        Ok(INT_SIZE)
+    }
+
+    fn has_string_transform_prototype(&self, name: &str) -> bool {
+        if name != "strxfrm" {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Scalar(CType::Int),
+            params: vec![
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Char),
+                    kind: ParamKind::Pointer,
+                    points_to_const: false,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Char),
+                    kind: ParamKind::Pointer,
+                    points_to_const: true,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                },
+            ],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn unsupported_string_transform_declaration_error() -> CustError {
+        CustError::new(
+            "standard library function 'strxfrm' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, one integer count, and an integer return type",
+        )
+    }
+
+    fn call_string_transform_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let destination = self.eval_pointer(&arg_exprs[0])?;
+        let source = self.eval_pointer(&arg_exprs[1])?;
+        let count_expr = &arg_exprs[2];
+        let count = if self.expr_is_pointer_value(count_expr) {
+            self.eval_pointer(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        } else if self.aggregate_expr_type_name(count_expr).is_ok() {
+            self.eval_struct_expr(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        } else if self.expr_is_void_value(count_expr) {
+            self.eval_discard(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        } else {
+            self.eval_scalar_conversion(CType::Int, count_expr)?
+        };
+
+        self.sizeof_string_transform_call(name, arg_exprs)?;
+        let count = Self::validate_string_transform_count(name, count)?;
+        self.validate_character_pointer_argument(name, 2, &source)?;
+        let bytes = self.read_bounded_character_sequence(name, 2, &source)?;
+        let transformed_length = i64::try_from(bytes.len()).map_err(|_| {
+            CustError::new(format!(
+                "function '{name}' transformed length exceeds supported integer range"
+            ))
+        })?;
+
+        if count > 0 {
+            self.validate_character_pointer_argument(name, 1, &destination)?;
+            let current = self.deref_pointer(&destination)?;
+            self.assign_deref_pointer(&destination, current)?;
+            self.ensure_string_copy_destination_capacity(name, &destination, count)?;
+            self.ensure_string_copy_ranges_do_not_overlap(
+                name,
+                &destination,
+                count,
+                &source,
+                bytes.len().saturating_add(1),
+            )?;
+            let mut transformed = bytes;
+            transformed.push(0);
+            for (offset, byte) in transformed.into_iter().take(count).enumerate() {
+                if offset == 0 {
+                    self.assign_deref_pointer(&destination, i64::from(byte))?;
+                } else {
+                    self.assign_pointer_index(&destination, offset as i64, i64::from(byte))?;
+                }
+            }
+        }
+
+        Ok(Some(ReturnValue::Scalar(transformed_length)))
+    }
+
+    fn validate_string_transform_count(name: &str, count: i64) -> CustResult<usize> {
+        if count < 0 {
+            return Err(CustError::new(format!(
+                "function '{name}' requires a nonnegative count, got {count}"
+            )));
+        }
+        let count = usize::try_from(count).map_err(|_| {
+            CustError::new(format!(
+                "function '{name}' count exceeds maximum transform length of {MAX_INTEGER_STRING_BYTES} bytes"
+            ))
+        })?;
+        if count > MAX_INTEGER_STRING_BYTES {
+            return Err(CustError::new(format!(
+                "function '{name}' count {count} exceeds maximum transform length of {MAX_INTEGER_STRING_BYTES} bytes"
+            )));
+        }
+        Ok(count)
+    }
+
+    fn sizeof_string_transform_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        if args[..2]
+            .iter()
+            .any(|argument| self.array2d_row_pointer_element_type(argument).is_some())
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires pointers to character storage"
+            )));
+        }
+        self.sizeof_string_comparison_call(name, &args[..2])?;
+        if !matches!(args[0], Expr::Number(0)) && self.pointer_expr_points_to_const(&args[0]) {
+            return Err(CustError::new(
+                "cannot discard const qualifier from pointer target",
+            ));
+        }
+        if self.expr_is_pointer_value(&args[2])
+            || self.aggregate_expr_type_name(&args[2]).is_ok()
+            || self.expr_is_void_value(&args[2])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        self.sizeof_expr(&args[2])?;
         Ok(INT_SIZE)
     }
 
@@ -18688,6 +18853,32 @@ impl Interpreter {
                     for arg in args {
                         self.validate_nested_string_intrinsic_calls(arg)?;
                     }
+                    return Ok(());
+                }
+                if matches!(name.as_str(), "strcmp" | "strcoll")
+                    && !self.functions.contains_key(name)
+                {
+                    if self.has_string_comparison_prototype(name) {
+                        self.sizeof_string_comparison_call(name, args)?;
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(Self::unsupported_string_comparison_declaration_error(name));
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                }
+                if name == "strxfrm" && !self.functions.contains_key(name) {
+                    if self.has_string_transform_prototype(name) {
+                        self.sizeof_string_transform_call(name, args)?;
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(Self::unsupported_string_transform_declaration_error());
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                    for argument in &args[..2] {
+                        self.validate_nested_string_intrinsic_calls(argument)?;
+                    }
+                    // sizeof_string_transform_call recursively validates the count;
+                    // traversing it again here makes nested transforms exponential.
                     return Ok(());
                 }
                 if matches!(name.as_str(), "strpbrk" | "strstr")
@@ -27263,6 +27454,11 @@ impl Interpreter {
                 }
                 None if self.has_string_comparison_prototype(name) => {
                     self.sizeof_string_comparison_call(name, args)
+                }
+                None if self.has_string_transform_prototype(name) => {
+                    // Entry validation already checked the transform call and its count
+                    // tree; re-running the helper here makes nested calls exponential.
+                    Ok(INT_SIZE)
                 }
                 None if self.has_string_prefix_comparison_prototype(name) => {
                     self.sizeof_string_prefix_comparison_call(name, args)

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-02 bounded v0.12.0 release preparation. Focused CLI and Compose version assertions went RED on `0.11.0` and GREEN on `0.12.0`; local/remote tag preflight is empty; independent review and the complete local/rebuilt-Docker gate pass. No active implementation, Docker, Git, research, or environment blocker exists. `strtol`/`strtoul` remain a documented roadmap dependency on unsupported pointer-to-pointer `endptr`, not an active blocker for the next deterministic C-locale `strcoll`/`strxfrm` package.
+None. Last reviewed during the 2026-08-02 bounded `strcoll`/`strxfrm` implementation. Focused RED/GREEN, compiler-oracle parity, independent review, formatting, strict Clippy, all 1,279 local tests, the rebuilt Docker test gate, runtime output `10`, and `git diff --check` pass. No active implementation, Docker, Git, research, or environment blocker exists. `strtol`/`strtoul` remain a documented roadmap dependency on unsupported pointer-to-pointer `endptr`, not an active blocker for v0.13.0 release closure.
 
 ## Blocker template
 

@@ -15915,6 +15915,313 @@ int main(void) {
 }
 
 #[test]
+fn supports_bounded_string_collation_standard_library_functions() {
+    let program = include_str!("fixtures/compat/valid/string_collation_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn string_collation_transform_returns_full_length_and_writes_c_locale_prefix() {
+    let program = r#"
+unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);
+int main(void) {
+    char transformed[5] = {'x', 'x', 'x', 'x', 'x'};
+    char normalized[3] = {355, 'q', 0};
+    if (strxfrm(transformed, normalized, 2) != 2
+            || transformed[0] != 99 || transformed[1] != 'q'
+            || transformed[2] != 'x') {
+        return 1;
+    }
+    if (strxfrm(transformed, "cab", 5) != 3
+            || transformed[0] != 'c' || transformed[1] != 'a'
+            || transformed[2] != 'b' || transformed[3] != 0
+            || transformed[4] != 'x') {
+        return 2;
+    }
+    return strxfrm(0, "measure", 0) == 7 ? 0 : 3;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn string_collation_transform_evaluates_arguments_in_source_order_before_validation() {
+    let program = r#"
+unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);
+int order = 0;
+int *destination(void) {
+    static int value = 0;
+    order = 1;
+    return &value;
+}
+char *source(void) {
+    static char text[1] = {0};
+    if (order == 1) {
+        order = 2;
+    }
+    return text;
+}
+int count(void) {
+    static int values[1] = {0};
+    return values[order == 2 ? 2 : -1];
+}
+int main(void) {
+    return strxfrm(destination(), source(), count());
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array 'values' index 2 out of bounds for length 1"
+    );
+}
+
+#[test]
+fn string_collation_transform_preserves_count_storage_and_overlap_boundaries() {
+    for (program, expected) in [
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; int count = 1; return strxfrm(out, \"x\", &count); }\n",
+            "function 'strxfrm' requires an integer count",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strxfrm(out, \"x\", -1); }\n",
+            "function 'strxfrm' requires a nonnegative count, got -1",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strxfrm(out, \"x\", 4097); }\n",
+            "function 'strxfrm' count 4097 exceeds maximum transform length of 4096 bytes",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strxfrm(out, (const char *)0, 0); }\n",
+            "null character pointer passed as argument 2 to function 'strxfrm'",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strxfrm(out, \"x\", 3); }\n",
+            "destination argument 1 to function 'strxfrm' requires 3 bytes, but only 2 bytes are available",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { const char out[2] = {0}; return strxfrm(out, \"x\", 1); }\n",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { char text[4] = \"cat\"; return strxfrm(text, text, 4); }\n",
+            "overlapping source and destination ranges passed to function 'strxfrm'",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nchar *expired(void) { char text[2] = \"x\"; return text; }\nint main(void) { char out[2] = {0}; return strxfrm(out, expired(), 2); }\n",
+            "pointer to out-of-scope variable 'text'",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { char rows[2][3] = {{0}}; return strxfrm(*rows, \"cat\", 4); }\n",
+            "destination argument 1 to function 'strxfrm' requires 4 bytes, but only 3 bytes are available",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { char rows[2][3] = {{0}}; return sizeof(strxfrm(rows, \"x\", 1)); }\n",
+            "function 'strxfrm' requires pointers to character storage",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "program unexpectedly matched a different boundary: {program}"
+        );
+    }
+
+    let no_write_overlap = r#"
+unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);
+int main(void) {
+    char text[3] = "hi";
+    return strxfrm(text, text, 0) == 2 && text[0] == 'h' ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(no_write_overlap).unwrap(), 0);
+}
+
+#[test]
+fn string_collation_calls_require_exact_declarations_and_preserve_user_definitions() {
+    let comparison_error = "standard library function 'strcoll' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type";
+    for declaration in [
+        "int strcoll(char *left, const char *right);",
+        "char strcoll(const char *left, const char *right);",
+        "int strcoll(const char *left, const int *right);",
+    ] {
+        let program =
+            format!("{declaration}\nint main(void) {{ return strcoll(\"left\", \"right\"); }}\n");
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            comparison_error
+        );
+    }
+
+    let transform_error = "standard library function 'strxfrm' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, one integer count, and an integer return type";
+    for declaration in [
+        "char *strxfrm(char *destination, const char *source, unsigned long int count);",
+        "unsigned long int strxfrm(const char *destination, const char *source, unsigned long int count);",
+        "unsigned long int strxfrm(char *destination, char *source, unsigned long int count);",
+        "unsigned long int strxfrm(char *destination, const char *source, int *count);",
+    ] {
+        let program = format!(
+            "{declaration}\nint main(void) {{ char out[2] = {{0}}; return strxfrm(out, \"x\", 2); }}\n"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            transform_error
+        );
+    }
+
+    for (program, expected) in [
+        (
+            "int main(void) { return strcoll(\"a\", \"b\"); }\n",
+            "undefined function 'strcoll'",
+        ),
+        (
+            "int main(void) { char out[2] = {0}; return strxfrm(out, \"x\", 2); }\n",
+            "undefined function 'strxfrm'",
+        ),
+        (
+            "int strcoll(const char *left, const char *right);\nint main(void) { return strcoll(\"a\"); }\n",
+            "function 'strcoll' expected 2 arguments, got 1",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; return strxfrm(out, \"x\"); }\n",
+            "function 'strxfrm' expected 3 arguments, got 2",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let user_definitions = r#"
+int strcoll(int left, int right) {
+    return left - right;
+}
+int strxfrm(int destination, int source, int count) {
+    return destination + source + count;
+}
+int main(void) {
+    return strcoll(7, 4) == 3 && strxfrm(1, 2, 3) == 6 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(user_definitions).unwrap(), 0);
+}
+
+#[test]
+fn string_collation_sizeof_calls_are_non_evaluating_and_constraint_aware() {
+    let program = r#"
+int strcoll(const char *left, const char *right);
+unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);
+int marker = 0;
+char *destination(void) {
+    static char out[4] = {0};
+    marker = marker + 1;
+    return out;
+}
+char *source(void) {
+    marker = marker + 10;
+    return "x";
+}
+int count(void) {
+    marker = marker + 100;
+    return 2;
+}
+int main(void) {
+    return sizeof(1 + strcoll(source(), source())) == sizeof(int)
+            && sizeof(strxfrm(destination(), source(), count()))
+                   == sizeof(unsigned long int)
+            && marker == 0
+        ? 0
+        : 1;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "int strcoll(const char *left, const char *right);\nint main(void) { int value = 0; return sizeof(1 + strcoll(&value, \"x\")); }\n",
+            "cannot convert pointer to int to pointer to char",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) { char out[2] = {0}; int count = 1; return sizeof(1 + strxfrm(out, \"x\", &count)); }\n",
+            "function 'strxfrm' requires an integer count",
+        ),
+        (
+            "unsigned long int strxfrm(const char *destination, const char *source, unsigned long int count);\nint main(void) { return sizeof(1 + strxfrm(0, \"x\", 0)); }\n",
+            "standard library function 'strxfrm' has an unsupported declaration; expected one pointer-to-character destination parameter, one pointer-to-const-character source parameter, one integer count, and an integer return type",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nchar *id(int ignored) { static char out[2] = {0}; return out; }\nint main(void) { return sizeof(strxfrm(id(strcoll(\"x\", \"x\")), \"x\", 1)); }\n",
+            "undefined function 'strcoll'",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nconst char *id(int ignored) { return \"x\"; }\nint main(void) { return sizeof(strxfrm(0, id(strcoll(\"x\", \"x\")), 0)); }\n",
+            "undefined function 'strcoll'",
+        ),
+        (
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint strcoll(char *left, const char *right);\nint main(void) { return sizeof(strxfrm(0, \"x\", strcoll(\"x\", \"x\"))); }\n",
+            "standard library function 'strcoll' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "nested string collation validation unexpectedly matched a different boundary: {program}"
+        );
+    }
+}
+
+#[test]
+fn nested_string_collation_transform_validation_remains_linear() {
+    fn run_nested(depth: usize, iterations: usize) -> std::time::Duration {
+        let expression = (0..depth).fold("0".to_string(), |inner, _| {
+            format!("strxfrm(0, \"x\", {inner})")
+        });
+        let program = format!(
+            "unsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) {{ return sizeof({expression}) == sizeof(unsigned long int) ? 0 : 1; }}\n"
+        );
+        let started = std::time::Instant::now();
+
+        for _ in 0..iterations {
+            assert_eq!(interpret(&program).unwrap(), 0);
+        }
+        started.elapsed()
+    }
+
+    let shallow = run_nested(6, 10);
+    let deep = run_nested(18, 10);
+    let allowed = (shallow * 8).max(std::time::Duration::from_millis(10));
+    assert!(
+        deep < allowed,
+        "nested string transform validation scaled nonlinearly: {shallow:?} at depth 6 and {deep:?} at depth 18"
+    );
+}
+
+#[test]
+fn string_collation_functions_accept_4096_bytes_and_reject_longer_inputs() {
+    let boundary = "x".repeat(4096);
+    let valid_program = format!(
+        "int strcoll(const char *left, const char *right);\nunsigned long int strxfrm(char *destination, const char *source, unsigned long int count);\nint main(void) {{ char out[4096] = {{0}}; return strcoll(\"{boundary}\", \"{boundary}\") == 0 && strxfrm(out, \"{boundary}\", 4096) == 4096 && out[4095] == 'x' ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&valid_program).unwrap(), 0);
+
+    let oversized = "x".repeat(4097);
+    for (call, expected) in [
+        (
+            format!("strcoll(\"{oversized}\", \"x\")"),
+            "argument 1 to function 'strcoll' exceeded maximum input length of 4096 bytes",
+        ),
+        (
+            format!("strxfrm(0, \"{oversized}\", 0)"),
+            "argument 2 to function 'strxfrm' exceeded maximum input length of 4096 bytes",
+        ),
+    ] {
+        let declarations = "int strcoll(const char *left, const char *right);\nunsigned long int strxfrm(char *destination, const char *source, unsigned long int count);";
+        let program = format!("{declarations}\nint main(void) {{ return {call}; }}\n");
+        assert_eq!(interpret(&program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
 fn supports_bounded_strlen_standard_library_function() {
     let program = include_str!("fixtures/compat/valid/string_length_function.c");
 

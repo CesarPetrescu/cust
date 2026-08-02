@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-02 — Bounded C-locale `strcoll` and `strxfrm`
+
+- WG14 N1570 §7.24.4.3 and §7.24.4.5 (`https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf`) define locale-aware `strcoll`, require transformed-string `strcmp` sign to agree with `strcoll`, and define `strxfrm`'s return as the transformed length excluding NUL with at most `n` output characters. POSIX `strxfrm` (`https://pubs.opengroup.org/onlinepubs/9799919799/functions/strxfrm.html`) documents the zero-count/null-destination query route. Cust fixes this surface to deterministic unsigned-byte C-locale semantics and never delegates to host locale/libc.
+- Exact normalized signatures activate only with retained explicit declarations and no user definition. Runtime evaluates destination, source, and count once in source order before shape validation. Source/count are bounded at 4,096 bytes; nonzero writes preflight mutable character storage, complete destination capacity, lexical lifetime, two-dimensional row boundaries, constness, and read/write overlap before mutation.
+- Independent review found exponential nested `sizeof(strxfrm(..., strxfrm(...)))` validation. The focused depth-6/depth-18 RED exceeded 300 seconds. Count-tree validation now has one owner, destination/source subtrees are each traversed once, and final `sizeof` dispatch returns the already-validated scalar size; the same probe completes in about 0.01 seconds and protects linear scaling. See `references/cust-string-collation-functions.md`.
+
 ## 2026-08-02 — v0.12.0 release consistency and C-locale collation
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.11.0`, then passed after Cargo/lock and both image tags moved to `0.12.0`. Inventory arithmetic remains 1,271 tests: 1,137 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
