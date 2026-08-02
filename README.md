@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.11.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.12.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -67,7 +67,7 @@ Both Compose services use `pull_policy: build`, so `docker compose run --rm test
 
 The `test` service keeps a writable container overlay so Cargo can update `target/`, but it has no host source mount, no network, dropped capabilities, and no privilege escalation.
 
-## Supported v0.11.0 language
+## Supported v0.12.0 language
 
 Cust currently supports this C subset:
 
@@ -207,7 +207,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: scope the next bounded standard-library package; `strtol`/`strtoul` remain blocked on safe pointer-to-pointer `endptr` support, so prefer a complete one-level-pointer or scalar-only family with exact prototype and non-evaluating validation.
+- Next milestone: implement bounded explicitly prototyped C11 `strcoll` and `strxfrm` under Cust's fixed C-locale model, with exact declaration/user-definition precedence, one-time ordered evaluation, deterministic 4,096-byte bounds, destination capacity/overlap safety, non-evaluating validation, and warning-free native C-locale relationships. `strtol`/`strtoul` remain blocked on safe pointer-to-pointer `endptr` support.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider floating-point values, multiple pointer levels, and broader C conformance fixtures.
 

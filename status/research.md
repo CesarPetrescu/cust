@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-02 — v0.12.0 release consistency and C-locale collation
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.11.0`, then passed after Cargo/lock and both image tags moved to `0.12.0`. Inventory arithmetic remains 1,271 tests: 1,137 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
+- Local and remote `v0.12.0` annotated-tag preflight returned no refs. Independent diff-only review returned `APPROVED`, and the complete local/rebuilt-Docker gate passed before commit. Publication remains ordered: verified release commit to `origin/main`, annotated tag creation/push second, exact remote peeled-target comparison last.
+- Local `man 3 strcoll` and `man 3 strxfrm` confirm C11 signatures `int strcoll(const char *, const char *)` and `size_t strxfrm(char *restrict, const char *restrict, size_t)`. In the C locale `strcoll` is equivalent to `strcmp`; `strxfrm` returns the transformed byte length excluding NUL, and a return at least as large as the destination extent means destination contents are indeterminate. Cust's next bounded package will fix the locale to C, reuse normalized bounded character storage, avoid host libc dispatch, and expose only deterministic capacity-safe writes.
+
 ## 2026-08-02 — Bounded termination semantics and interpreter boundary
 
 - Local `man 3 exit`, `man 3 _Exit`, and `man 3 abort` confirm C11 signatures `void exit(int)`, `void _Exit(int)`, and `void abort(void)` and that all three are non-returning. Native `exit` performs registered-handler and stdio processing, `_Exit` omits those hooks/flushes, and `abort` raises `SIGABRT`; these host-process effects are intentionally outside Cust's deterministic safe subset.

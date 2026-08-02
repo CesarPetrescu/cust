@@ -4,6 +4,8 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.12.0 — 2026-08-02
+
 ### Language subset
 
 - Added exact-prototype C11 `exit(int)`, `_Exit(int)`, and `abort(void)` intrinsics with interpreter-owned whole-program unwinding. `exit` and `_Exit` surface their one-time-evaluated status as Cust's program result; `abort` surfaces a recoverable `program aborted` error, and no intrinsic invokes host termination.
@@ -11,6 +13,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Diagnostics and verification
 
 - Added exact missing/incompatible declaration, arity, pointer/aggregate/void status-shape, user-definition precedence, nested control-flow, CLI, compiler-oracle, and non-evaluating constraint-aware `sizeof` coverage. Cust intentionally does not model `atexit`, stdio flushing, or signal delivery in this bounded slice.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.12.0`.
+- Verified 1,271 tests at release preparation time: 1,137 interpreter tests, 98 deterministic fuzz-safety tests, and 36 CLI, Docker, compiler-oracle, and repository tests.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls beyond the explicitly prototyped bounded integer/string/character/random/termination families, locale-sensitive behavior outside Cust's fixed ASCII/C-locale model, floating-point and complex runtime values, multiple pointer levels and `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported.
 
 ## v0.11.0 — 2026-08-02
 
