@@ -4,6 +4,27 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.14.0 — 2026-08-03
+
+### Language subset
+
+- Added a narrow safe unqualified `char **` output-parameter model over interpreter-owned mutable `char *` slots. Calls can forward output slots, read or write null/non-null character pointers through them, and preserve lexical owner, lifetime, storage identity, and read-only metadata without host addresses.
+- Added exact-prototype C11 `strtol`, `strtoll`, `strtoul`, and `strtoull` intrinsics with base 0 or 2 through 36 selection, C whitespace/sign/prefix/maximal-digit behavior, deterministic signed/unsigned 64-bit bounds, 4,096-byte scans, and absent, null, or non-null `endptr` handling.
+
+### Diagnostics and verification
+
+- Added exact qualified/deeper-pointer, incompatible/const output slot, outer-slot mutation/address-taking, enum-shadowing, expired owner, ownerless escaping storage, base, declaration, arity, shape, overflow, and nested non-evaluating diagnostics. Review-driven regressions preserve one-time source-order evaluation and linear validation.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.14.0`.
+- Verified 1,310 tests at release preparation time: 1,176 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls beyond the explicitly prototyped bounded integer/string/character/random/termination families, locale-sensitive behavior outside Cust's fixed ASCII/C-locale model, floating-point and complex runtime values, general multiple-pointer-level objects beyond the narrow `char **` output-parameter model, `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported. Cust reports deterministic conversion overflow rather than modeling host-width `errno` behavior.
+
 ## v0.13.0 — 2026-08-02
 
 ### Language subset

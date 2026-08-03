@@ -21,8 +21,8 @@ fn version_flag_prints_package_version_without_requiring_a_source_file() {
         "--version should exit successfully, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(env!("CARGO_PKG_VERSION"), "0.13.0");
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "cust 0.13.0\n");
+    assert_eq!(env!("CARGO_PKG_VERSION"), "0.14.0");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "cust 0.14.0\n");
     assert_eq!(String::from_utf8_lossy(&output.stderr), "");
 }
 

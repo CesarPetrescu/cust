@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-03 — v0.14.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.13.0`, then passed after Cargo/lock and both image tags moved to `0.14.0`. Executable `cargo test -- --list` accounting is 1,310 tests: 1,176 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
+- Local and remote `v0.14.0` annotated-tag preflight returned no refs. Independent review found one stale next-task sentence; the corrected diff received `APPROVED`. Formatting, strict Clippy, all 1,310 local tests, the rebuilt Docker gate, runtime output `10`, local/container version `cust 0.14.0`, Cargo metadata, and the diff check pass. Publication remains ordered: verified release commit to `origin/main`, annotated tag creation/push second, exact remote tag-object and peeled-target comparison last.
+- The next bounded language package will generalize the reviewed unqualified `char **` output-parameter representation to ordinary tracked objects initialized from mutable `char *` slots. It must preserve interpreter owner/lifetime/qualification metadata and retain exact no-host-address, no-arithmetic, and no-deeper-pointer boundaries.
+
 ## 2026-08-03 — Bounded base-aware integer string conversions
 
 - C11/POSIX-family `strto*` relationships needed by Cust can be implemented without host libc: skip C whitespace, accept one sign, select base 0 or 2..=36, require a valid hexadecimal digit before consuming `0x`, consume the maximal valid digit sequence, and set `endptr` to the original input when no conversion occurs.

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-03 bounded base-aware integer string-conversion package. Focused RED/GREEN, independent review and approved re-review, formatting, strict Clippy, all 1,310 local tests, the rebuilt Docker test gate, runtime output `10`, the compiler-oracle harness, security scan, and `git diff --check` pass. No active implementation, Docker, Git, research, or environment blocker exists. The completed package makes bounded v0.14.0 release preparation the next roadmap item.
+None. Last reviewed during the 2026-08-03 bounded v0.14.0 release preparation. Focused CLI and Compose version assertions went RED against `0.13.0` and GREEN at `0.14.0`; local/remote tag preflight is empty; independent re-review returned `APPROVED`; formatting, strict Clippy, all 1,310 local tests, the rebuilt Docker test gate, runtime output `10`, local/container version `cust 0.14.0`, Cargo metadata, and `git diff --check` pass. No active implementation, Docker, Git, research, or environment blocker exists.
 
 ## Blocker template
 
