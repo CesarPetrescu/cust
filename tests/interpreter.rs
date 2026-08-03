@@ -11094,6 +11094,493 @@ int main(void) {
 }
 
 #[test]
+fn character_pointer_objects_read_and_write_through_local_slots() {
+    let program = r#"
+int main(void) {
+    char text[] = "abc";
+    char *slot = 0;
+    char **output = &slot;
+    char **alias = output;
+
+    *alias = text + 1;
+    return slot == text + 1 && **output == 'b' && alias == output ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_objects_preserve_global_and_static_slot_identity() {
+    let program = r#"
+char *global_slot = 0;
+char **global_output = &global_slot;
+static char *file_slot = 0;
+static char **file_output = &file_slot;
+
+void set_output(char **output, char *value) {
+    *output = value;
+}
+
+int update_static(char *value) {
+    static char *local_slot = 0;
+    static char **local_output = &local_slot;
+    set_output(local_output, value + 2);
+    return *local_slot;
+}
+
+int main(void) {
+    char text[] = "abcd";
+    set_output(global_output, text + 1);
+    *file_output = text + 3;
+    return *global_slot == 'b' && *file_slot == 'd' && update_static(text) == 'c' ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_objects_preserve_null_truthiness_and_forwarding() {
+    let program = r#"
+void set_output(char **output, char *value) {
+    if (output) {
+        *output = value;
+    }
+}
+
+int main(void) {
+    char text[] = "x";
+    char *slot = 0;
+    char **null_output = 0;
+
+    set_output(null_output, text);
+    return null_output == 0 && !null_output && slot == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_sizeof_is_pointer_sized_and_non_evaluating() {
+    let program = r#"
+int calls = 0;
+char *mark(char *value) {
+    calls = calls + 1;
+    return value;
+}
+
+int main(void) {
+    char text[] = "x";
+    char *slot = 0;
+    char **output = &slot;
+    int outer = sizeof(output);
+    int inner = sizeof(*output);
+    int assignment = sizeof(*output = mark(text));
+    return outer == sizeof(char *) && inner == sizeof(char *)
+        && assignment == sizeof(char *) && calls == 0 && slot == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_conditional_sizeof_validates_indirect_assignment_types() {
+    let program = r#"
+int main(void) {
+    int value = 0;
+    int *wrong = &value;
+    char *slot = 0;
+    char *ok = 0;
+    char **output = &slot;
+    return sizeof(1 ? (*output = wrong) : (*output = ok));
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot convert pointer to int to pointer to char"
+    );
+}
+
+#[test]
+fn character_pointer_object_conditional_sizeof_rejects_const_discard() {
+    let program = r#"
+int main(void) {
+    const char *read_only = "x";
+    char *slot = 0;
+    char *ok = 0;
+    char **output = &slot;
+    return sizeof(1 ? (*output = read_only) : (*output = ok));
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn character_pointer_object_conditional_sizeof_is_non_evaluating() {
+    let program = r#"
+int calls = 0;
+char *mark(char *value) {
+    calls = calls + 1;
+    return value;
+}
+
+int main(void) {
+    char text[] = "x";
+    char *slot = 0;
+    char **output = &slot;
+    int size = sizeof(1 ? (*output = mark(text)) : (*output = mark(text)));
+    return size == sizeof(char *) && calls == 0 && slot == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_objects_reject_deeper_and_array_declarators() {
+    for (source, expected) in [
+        (
+            "char ***output = 0; int main(void) { return 0; }",
+            "pointer-to-pointer declarations are not supported at line 1, column 8",
+        ),
+        (
+            "char **first = 0, ***second = 0; int main(void) { return 0; }",
+            "pointer-to-pointer declarations are not supported at line 1, column 21",
+        ),
+        (
+            "char **outputs[2]; int main(void) { return 0; }",
+            "pointer array declarations are not supported at line 1, column 15",
+        ),
+    ] {
+        let err = interpret(source).unwrap_err();
+        assert_eq!(err.to_string(), expected, "source: {source}");
+    }
+}
+
+#[test]
+fn character_pointer_object_reassignment_and_increment_are_rejected() {
+    for operation in [
+        "output = &other",
+        "output += 1",
+        "output++",
+        "++output",
+        "sizeof(output = &other)",
+        "sizeof(output += 1)",
+        "sizeof(output++)",
+    ] {
+        let program = format!(
+            "int main(void) {{ char *slot = 0; char *other = 0; char **output = &slot; {operation}; return 0; }}\n"
+        );
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "character pointer output parameter reassignment is not supported",
+            "operation: {operation}"
+        );
+    }
+}
+
+#[test]
+fn character_pointer_object_qualifiers_have_source_located_diagnostics() {
+    for (declaration, column) in [
+        ("const char **output = 0;", 1),
+        ("char * const *output = 0;", 8),
+        ("char ** const output = 0;", 9),
+    ] {
+        let program = format!("{declaration}\nint main(void) {{ return 0; }}\n");
+
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "qualified character pointer objects are not supported at line 1, column {column}"
+            ),
+            "declaration: {declaration}"
+        );
+    }
+}
+
+#[test]
+fn character_pointer_object_declarator_lists_reject_qualified_base_aliases() {
+    let program = r#"
+typedef volatile char VolatileChar;
+VolatileChar *slot = 0, **output = &slot;
+int main(void) { return output != 0; }
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "qualified character pointer objects are not supported at line 3, column 1"
+    );
+}
+
+#[test]
+fn character_pointer_object_declarator_lists_preserve_qualified_scalar_bases() {
+    let program = r#"
+typedef volatile char VolatileChar;
+VolatileChar marker = 0, **output = 0;
+int main(void) { return output != 0 || marker != 0; }
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "qualified character pointer objects are not supported at line 3, column 1"
+    );
+}
+
+#[test]
+fn character_pointer_object_declarator_lists_preserve_qualified_array_bases() {
+    let program = r#"
+volatile char bytes[1] = {0}, **output = 0;
+int main(void) { return output != 0 || bytes[0] != 0; }
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "qualified character pointer objects are not supported at line 2, column 1"
+    );
+}
+
+#[test]
+fn character_pointer_object_initializers_reject_incompatible_or_const_slots() {
+    for declaration in [
+        "int slot = 0; char **output = &slot;",
+        "const char *slot = 0; char **output = &slot;",
+        "char * const slot = 0; char **output = &slot;",
+        "char *slot = 0; char **output = slot;",
+        "char **output = 1;",
+    ] {
+        let program = format!("int main(void) {{ {declaration} return 0; }}\n");
+
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "character pointer object 'output' initializer requires null, another character pointer output object, or the address of a mutable char pointer variable",
+            "declaration: {declaration}"
+        );
+    }
+}
+
+#[test]
+fn character_pointer_object_initializers_reject_qualified_character_pointer_slots() {
+    for declaration in [
+        "volatile char *slot = 0; char **output = &slot;",
+        "char * volatile slot = 0; char **output = &slot;",
+        "char * restrict slot = 0; char **output = &slot;",
+        "_Atomic(char) *slot = 0; char **output = &slot;",
+        "char * _Atomic slot = 0; char **output = &slot;",
+        "typedef volatile char VChar; VChar *slot = 0; char **output = &slot;",
+        "typedef char * volatile VSlot; VSlot slot = 0; char **output = &slot;",
+    ] {
+        let program = format!("int main(void) {{ {declaration} return 0; }}\n");
+
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "character pointer object 'output' initializer requires null, another character pointer output object, or the address of a mutable char pointer variable",
+            "declaration: {declaration}"
+        );
+    }
+}
+
+#[test]
+fn character_pointer_object_sizeof_validates_both_conditional_assignment_branches() {
+    for conditional in ["1 ? ok : wrong", "1 ? wrong : ok"] {
+        let program = format!(
+            r#"
+int main(void) {{
+    int value = 0;
+    int *wrong = &value;
+    char *ok = 0;
+    char *slot = 0;
+    char **output = &slot;
+    return sizeof(*output = ({conditional}));
+}}
+"#
+        );
+
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cannot convert pointer to int to pointer to char",
+            "conditional: {conditional}"
+        );
+    }
+}
+
+#[test]
+fn character_pointer_objects_reject_expired_target_slots_before_observation() {
+    let program = r#"
+int observe(int second_call) {
+    char *slot = 0;
+    static char **output = &slot;
+    return second_call ? output != 0 : 0;
+}
+
+int main(void) {
+    observe(0);
+    return observe(1);
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "static character pointer object initializer requires a char pointer slot with static storage duration"
+    );
+}
+
+#[test]
+fn character_pointer_object_arithmetic_is_rejected_in_evaluated_and_sizeof_contexts() {
+    for expr in [
+        "output + 1",
+        "1 + output",
+        "output - 1",
+        "sizeof(output + 1)",
+        "output * 1",
+        "sizeof(output * 1)",
+        "output << 1",
+        "sizeof(output << 1)",
+        "output & 1",
+        "sizeof(output & 1)",
+        "+output",
+        "sizeof(+output)",
+        "~output",
+        "sizeof(~output)",
+    ] {
+        let program =
+            format!("int main(void) {{ char *slot = 0; char **output = &slot; return {expr}; }}\n");
+
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "character pointer output arithmetic is not supported",
+            "expression: {expr}"
+        );
+    }
+}
+
+#[test]
+fn block_static_character_pointer_objects_cannot_expose_placeholder_addresses() {
+    let program = r#"
+void zero(_Bool *value) {
+    *value = 0;
+}
+
+int main(void) {
+    static char **output = 0;
+    zero(&output);
+    return 0;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "taking the address of a character pointer output parameter is not supported"
+    );
+}
+
+#[test]
+fn enum_constants_shadow_character_pointer_object_placeholders() {
+    let program = r#"
+int main(void) {
+    char *slot = 0;
+    char **output = &slot;
+    {
+        enum { output = 0 };
+        return output == 0 && !output && sizeof(output) == sizeof(int) ? 0 : 1;
+    }
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn static_character_pointer_objects_require_constant_initializers() {
+    for program in [
+        r#"
+char *slot = 0;
+char **first = &slot;
+char **second = first;
+int main(void) { return 0; }
+"#,
+        r#"
+int main(void) {
+    static char *slot = 0;
+    static char **first = &slot;
+    static char **second = first;
+    return 0;
+}
+"#,
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "static character pointer object initializer must be null or the address of a mutable char pointer variable with static storage duration"
+        );
+    }
+}
+
+#[test]
+fn character_pointer_objects_support_declarator_lists() {
+    let program = r#"
+char *global_a = 0, *global_b = 0;
+char **global_first = &global_a, **global_second = &global_b;
+
+int main(void) {
+    char *local_a = 0, *local_b = 0, *mixed_slot = 0, **mixed = &mixed_slot;
+    char **local_first = &local_a, **local_second = &local_b;
+    static char *static_a = 0, *static_b = 0;
+    static char **static_first = &static_a, **static_second = &static_b;
+
+    *global_first = "g";
+    *global_second = "h";
+    *local_first = "i";
+    *local_second = "l";
+    *static_first = "s";
+    *static_second = "t";
+    *mixed = "m";
+    return global_a[0] == 'g' && global_b[0] == 'h' &&
+           local_a[0] == 'i' && local_b[0] == 'l' &&
+           static_a[0] == 's' && static_b[0] == 't' &&
+           mixed_slot[0] == 'm' ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_objects_compare_with_direct_slot_addresses() {
+    let program = r#"
+int main(void) {
+    char *first = 0;
+    char *second = 0;
+    char **output = &first;
+    return output == &first && &first == output &&
+           output != &second && &second != output ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn character_pointer_output_parameters_compare_equal_to_null() {
     let program = r#"
 int output_is_null(char **out) {

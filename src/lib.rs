@@ -1196,6 +1196,11 @@ enum Stmt {
         expr: Expr,
         is_const: bool,
         points_to_const: bool,
+        is_qualified: bool,
+    },
+    CharacterPointerOutputDecl {
+        name: String,
+        expr: Expr,
     },
     Array2DPointerDecl {
         name: String,
@@ -9858,6 +9863,7 @@ impl Parser {
             Stmt::EnumDecl { constants } => Ok(Stmt::EnumDecl { constants }),
             declaration @ (Stmt::VarDecl { .. }
             | Stmt::PointerDecl { .. }
+            | Stmt::CharacterPointerOutputDecl { .. }
             | Stmt::Array2DPointerDecl { .. }
             | Stmt::ArrayDecl { .. }
             | Stmt::Array2DDecl { .. }
@@ -10065,8 +10071,28 @@ impl Parser {
     fn parse_var_decl_with_semi(&mut self, require_semi: bool) -> CustResult<Stmt> {
         self.last_decl_had_initializer = false;
         self.consume_alignment_specifiers()?;
+        let declaration_type_token = self.peek_located().clone();
+        let declaration_alias_is_qualified = match &declaration_type_token.kind {
+            Token::Ident(name) => self.type_alias_is_qualified(name),
+            _ => false,
+        };
+        let declaration_type_start = self.pos;
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("declaration type")?;
+        let declaration_type_qualifier = self.tokens[declaration_type_start..self.pos]
+            .iter()
+            .find(|token| {
+                matches!(
+                    token.kind,
+                    Token::Const | Token::Volatile | Token::Restrict | Token::Atomic
+                )
+            })
+            .cloned();
+        let declaration_base_qualifier = if declaration_alias_is_qualified {
+            Some(declaration_type_token.clone())
+        } else {
+            declaration_type_qualifier.clone()
+        };
         if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
             if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
                 return Err(Self::error_at(
@@ -10087,7 +10113,49 @@ impl Parser {
             ));
         }
         let has_explicit_star = self.matches(&Token::Star);
+        let post_star_qualifier = if has_explicit_star {
+            self.leading_type_qualifier_token()
+        } else {
+            None
+        };
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
+        if has_explicit_star
+            && matches!(decl_type, DeclType::Scalar(CType::Char))
+            && self.check(&Token::Star)
+        {
+            if let Some(qualifier) = declaration_base_qualifier.clone().or(post_star_qualifier) {
+                return Err(Self::error_at(
+                    "qualified character pointer objects are not supported".to_string(),
+                    &qualifier,
+                ));
+            }
+            self.expect(Token::Star)?;
+            if let Some(qualifier) = self.leading_type_qualifier_token() {
+                return Err(Self::error_at(
+                    "qualified character pointer objects are not supported".to_string(),
+                    &qualifier,
+                ));
+            }
+            if self.check(&Token::Star) {
+                return Err(Self::error_at(
+                    "pointer-to-pointer declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            let stmt = self.parse_character_pointer_output_declarator_tail()?;
+            if require_semi && self.matches(&Token::Comma) {
+                return self.parse_declarator_list_tail_with_base_qualifier(
+                    stmt,
+                    decl_type,
+                    leading_const,
+                    declaration_base_qualifier.clone(),
+                );
+            }
+            if require_semi {
+                self.expect_semicolon_after("character pointer object declaration")?;
+            }
+            return Ok(stmt);
+        }
         if matches!(
             decl_type,
             DeclType::Pointer { .. } | DeclType::Array2DPointer { .. }
@@ -10178,7 +10246,12 @@ impl Parser {
                 points_to_const,
             )?;
             if require_semi && self.matches(&Token::Comma) {
-                return self.parse_declarator_list_tail(stmt, decl_type, leading_const);
+                return self.parse_declarator_list_tail_with_base_qualifier(
+                    stmt,
+                    decl_type,
+                    leading_const,
+                    declaration_base_qualifier.clone(),
+                );
             }
             if require_semi {
                 self.expect_semicolon_after("two-dimensional row pointer declaration")?;
@@ -10325,9 +10398,17 @@ impl Parser {
                 expr,
                 is_const,
                 points_to_const,
+                is_qualified: declaration_alias_is_qualified
+                    || declaration_type_qualifier.is_some()
+                    || post_star_qualifier.is_some(),
             };
             if require_semi && self.matches(&Token::Comma) {
-                return self.parse_declarator_list_tail(stmt, decl_type, leading_const);
+                return self.parse_declarator_list_tail_with_base_qualifier(
+                    stmt,
+                    decl_type,
+                    leading_const,
+                    declaration_base_qualifier.clone(),
+                );
             }
             if require_semi {
                 let context = match &decl_type {
@@ -10485,10 +10566,11 @@ impl Parser {
                         is_const: leading_const,
                     };
                     if require_semi && self.matches(&Token::Comma) {
-                        return self.parse_declarator_list_tail(
+                        return self.parse_declarator_list_tail_with_base_qualifier(
                             stmt,
                             DeclType::Scalar(ty),
                             leading_const,
+                            declaration_base_qualifier.clone(),
                         );
                     }
                     if require_semi {
@@ -10512,7 +10594,12 @@ impl Parser {
                 is_const: leading_const,
             };
             if require_semi && self.matches(&Token::Comma) {
-                return self.parse_declarator_list_tail(stmt, DeclType::Scalar(ty), leading_const);
+                return self.parse_declarator_list_tail_with_base_qualifier(
+                    stmt,
+                    DeclType::Scalar(ty),
+                    leading_const,
+                    declaration_base_qualifier.clone(),
+                );
             }
             if require_semi {
                 self.expect_semicolon_after("array declaration")?;
@@ -10521,10 +10608,11 @@ impl Parser {
         }
         let first_decl = self.parse_scalar_declarator_tail(name, ty, leading_const)?;
         if require_semi && self.matches(&Token::Comma) {
-            return self.parse_declarator_list_tail(
+            return self.parse_declarator_list_tail_with_base_qualifier(
                 first_decl,
                 DeclType::Scalar(ty),
                 leading_const,
+                declaration_base_qualifier.clone(),
             );
         }
         if require_semi {
@@ -10614,9 +10702,28 @@ impl Parser {
         base_type: DeclType,
         leading_const: bool,
     ) -> CustResult<Stmt> {
+        self.parse_declarator_list_tail_with_base_qualifier(
+            first_decl,
+            base_type,
+            leading_const,
+            None,
+        )
+    }
+
+    fn parse_declarator_list_tail_with_base_qualifier(
+        &mut self,
+        first_decl: Stmt,
+        base_type: DeclType,
+        leading_const: bool,
+        base_qualifier: Option<LocatedToken>,
+    ) -> CustResult<Stmt> {
         let mut declarations = vec![first_decl];
         loop {
-            declarations.push(self.parse_additional_declarator(base_type.clone(), leading_const)?);
+            declarations.push(self.parse_additional_declarator(
+                base_type.clone(),
+                leading_const,
+                base_qualifier.as_ref(),
+            )?);
             if !self.matches(&Token::Comma) {
                 break;
             }
@@ -10625,10 +10732,34 @@ impl Parser {
         Ok(Stmt::Many(declarations))
     }
 
+    fn parse_character_pointer_output_declarator_tail(&mut self) -> CustResult<Stmt> {
+        let name = self.parse_declarator_name("character pointer object name after '**'")?;
+        if self.check(&Token::LBracket) {
+            return Err(Self::error_at(
+                "pointer array declarations are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
+        let expr = if self.matches(&Token::Assign) {
+            self.last_decl_had_initializer = true;
+            self.reject_missing_declaration_initializer_expr(
+                "character pointer object declaration",
+            )?;
+            self.parse_assignment_expr()?
+        } else if matches!(self.peek(), Token::Semi | Token::Comma) {
+            Expr::Number(0)
+        } else {
+            self.expect_assign_after("character pointer object declaration")?;
+            unreachable!("expect_assign_after only returns Ok after consuming '='")
+        };
+        Ok(Stmt::CharacterPointerOutputDecl { name, expr })
+    }
+
     fn parse_additional_declarator(
         &mut self,
         base_type: DeclType,
         leading_const: bool,
+        base_qualifier: Option<&LocatedToken>,
     ) -> CustResult<Stmt> {
         if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
             if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
@@ -10643,7 +10774,39 @@ impl Parser {
             ));
         }
         let has_explicit_star = self.matches(&Token::Star);
+        let post_star_qualifier = if has_explicit_star {
+            self.leading_type_qualifier_token()
+        } else {
+            None
+        };
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
+        if has_explicit_star
+            && matches!(base_type, DeclType::Scalar(CType::Char))
+            && self.check(&Token::Star)
+        {
+            if base_qualifier.is_some() || leading_const || post_star_qualifier.is_some() {
+                return Err(Self::error_at(
+                    "qualified character pointer objects are not supported".to_string(),
+                    base_qualifier
+                        .or(post_star_qualifier.as_ref())
+                        .unwrap_or_else(|| self.peek_located()),
+                ));
+            }
+            self.expect(Token::Star)?;
+            if let Some(qualifier) = self.leading_type_qualifier_token() {
+                return Err(Self::error_at(
+                    "qualified character pointer objects are not supported".to_string(),
+                    &qualifier,
+                ));
+            }
+            if self.check(&Token::Star) {
+                return Err(Self::error_at(
+                    "pointer-to-pointer declarations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            return self.parse_character_pointer_output_declarator_tail();
+        }
         if matches!(
             base_type,
             DeclType::Pointer { .. } | DeclType::Array2DPointer { .. }
@@ -10833,6 +10996,9 @@ impl Parser {
                 expr,
                 is_const,
                 points_to_const,
+                is_qualified: base_qualifier.is_some()
+                    || leading_const
+                    || post_star_qualifier.is_some(),
             });
         }
 
@@ -12317,6 +12483,7 @@ impl Parser {
                 expr,
                 is_const,
                 points_to_const,
+                is_qualified: is_const || points_to_const,
             };
             if self.matches(&Token::Comma) {
                 return self.parse_declarator_list_tail(
@@ -16508,6 +16675,7 @@ struct Scope {
     static_local_ids: HashMap<String, usize>,
     enum_constants: HashMap<String, i64>,
     const_variables: HashSet<String>,
+    qualified_pointer_variables: HashSet<String>,
     array2d_pointer_types: HashMap<String, (CType, usize)>,
 }
 
@@ -16523,6 +16691,8 @@ struct StaticLocalStorage {
     name: String,
     value: Value,
     is_const: bool,
+    pointer_is_qualified: bool,
+    character_pointer_output: Option<CharacterPointerOutput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19742,8 +19912,13 @@ impl Interpreter {
             if scope.values.contains_key(name) {
                 return scope.character_pointer_outputs.get(name);
             }
-            if scope.static_local_ids.contains_key(name) || scope.enum_constants.contains_key(name)
-            {
+            if let Some(id) = scope.static_local_ids.get(name) {
+                return self
+                    .static_locals
+                    .get(id)
+                    .and_then(|storage| storage.character_pointer_output.as_ref());
+            }
+            if scope.enum_constants.contains_key(name) {
                 return None;
             }
         }
@@ -19751,10 +19926,77 @@ impl Interpreter {
     }
 
     fn character_pointer_output_expr(&self, expr: &Expr) -> Option<CharacterPointerOutput> {
-        let Expr::Var(name) = expr else {
-            return None;
-        };
-        self.find_character_pointer_output(name).cloned()
+        match expr {
+            Expr::Var(name) => self.find_character_pointer_output(name).cloned(),
+            Expr::AddressOf(name) => self.find_character_pointer_slot_address(name),
+            _ => None,
+        }
+    }
+
+    fn expr_is_character_pointer_output_value(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Var(name) => self.find_character_pointer_output(name).is_some(),
+            Expr::AddressOf(name) => self.find_character_pointer_slot_address(name).is_some(),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.expr_is_character_pointer_output_value(then_expr)
+                    || self.expr_is_character_pointer_output_value(else_expr)
+            }
+            Expr::Comma(_, right) => self.expr_is_character_pointer_output_value(right),
+            _ => false,
+        }
+    }
+
+    fn find_character_pointer_slot_address(&self, name: &str) -> Option<CharacterPointerOutput> {
+        for scope in self.scopes.iter().rev() {
+            if scope.enum_constants.contains_key(name) {
+                return None;
+            }
+            if let Some(value) = scope.values.get(name) {
+                return match value {
+                    Value::Pointer {
+                        ty: PointeeType::Scalar(CType::Char),
+                        points_to_const: false,
+                        ..
+                    } if !scope.const_variables.contains(name)
+                        && !scope.qualified_pointer_variables.contains(name)
+                        && !scope.array2d_pointer_types.contains_key(name) =>
+                    {
+                        Some(CharacterPointerOutput::Slot {
+                            scope_id: scope.id,
+                            name: name.to_string(),
+                        })
+                    }
+                    _ => None,
+                };
+            }
+            if let Some(storage) = scope
+                .static_local_ids
+                .get(name)
+                .and_then(|id| self.static_locals.get(id))
+            {
+                return match &storage.value {
+                    Value::Pointer {
+                        ty: PointeeType::Scalar(CType::Char),
+                        points_to_const: false,
+                        ..
+                    } if !storage.is_const
+                        && !storage.pointer_is_qualified
+                        && !scope.array2d_pointer_types.contains_key(name) =>
+                    {
+                        Some(CharacterPointerOutput::Slot {
+                            scope_id: storage.scope_id,
+                            name: name.to_string(),
+                        })
+                    }
+                    _ => None,
+                };
+            }
+        }
+        None
     }
 
     fn identifier_resolves_to_enum_constant(&self, name: &str) -> bool {
@@ -19783,11 +20025,17 @@ impl Interpreter {
             {
                 Ok(CharacterPointerOutput::Null)
             }
-            Expr::Var(name) => self.find_character_pointer_output(name).cloned().ok_or_else(|| {
-                CustError::new(format!(
-                    "function '{function_name}' parameter '{param_name}' requires a char pointer slot address"
-                ))
-            }),
+            Expr::Var(name) => {
+                let output = self.find_character_pointer_output(name).ok_or_else(|| {
+                    CustError::new(format!(
+                        "function '{function_name}' parameter '{param_name}' requires a char pointer slot address"
+                    ))
+                })?;
+                if matches!(output, CharacterPointerOutput::Slot { .. }) {
+                    self.read_character_pointer_output(output)?;
+                }
+                Ok(output.clone())
+            }
             Expr::AddressOf(name) => {
                 for scope in self.scopes.iter().rev() {
                     if scope.enum_constants.contains_key(name) {
@@ -19802,6 +20050,7 @@ impl Interpreter {
                                 points_to_const: false,
                                 ..
                             } if !scope.const_variables.contains(name)
+                                && !scope.qualified_pointer_variables.contains(name)
                                 && !scope.array2d_pointer_types.contains_key(name) =>
                             {
                                 Ok(CharacterPointerOutput::Slot {
@@ -19825,11 +20074,12 @@ impl Interpreter {
                                 points_to_const: false,
                                 ..
                             } if !storage.is_const
+                                && !storage.pointer_is_qualified
                                 && !scope.array2d_pointer_types.contains_key(name) =>
                             {
                                 Ok(CharacterPointerOutput::Slot {
-                                scope_id: storage.scope_id,
-                                name: name.clone(),
+                                    scope_id: storage.scope_id,
+                                    name: name.clone(),
                                 })
                             }
                             _ => Err(CustError::new(format!(
@@ -19844,6 +20094,60 @@ impl Interpreter {
                 "function '{function_name}' parameter '{param_name}' requires a char pointer slot address"
             ))),
         }
+    }
+
+    fn eval_character_pointer_output_initializer(
+        &self,
+        name: &str,
+        expr: &Expr,
+    ) -> CustResult<CharacterPointerOutput> {
+        self.eval_character_pointer_output_argument(
+            "character pointer object initializer",
+            name,
+            expr,
+        )
+        .map_err(|error| {
+            if error.message.starts_with("pointer to out-of-scope variable") {
+                error
+            } else {
+                CustError::new(format!(
+                    "character pointer object '{name}' initializer requires null, another character pointer output object, or the address of a mutable char pointer variable"
+                ))
+            }
+        })
+    }
+
+    fn character_pointer_output_target_has_static_storage(
+        &self,
+        output: &CharacterPointerOutput,
+    ) -> bool {
+        let CharacterPointerOutput::Slot { scope_id, .. } = output else {
+            return true;
+        };
+        self.scopes
+            .first()
+            .is_some_and(|scope| scope.id == *scope_id)
+            || self
+                .static_locals
+                .values()
+                .any(|storage| storage.scope_id == *scope_id)
+    }
+
+    fn character_pointer_output_initializer_is_static_constant(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Number(0) | Expr::AddressOf(_) => true,
+            Expr::Var(name) => {
+                self.identifier_resolves_to_enum_constant(name)
+                    && self.find_enum_constant(name) == Some(0)
+            }
+            _ => false,
+        }
+    }
+
+    fn static_character_pointer_output_initializer_error() -> CustError {
+        CustError::new(
+            "static character pointer object initializer must be null or the address of a mutable char pointer variable with static storage duration",
+        )
     }
 
     fn read_character_pointer_output(
@@ -19968,6 +20272,7 @@ impl Interpreter {
             static_local_ids: HashMap::new(),
             enum_constants: HashMap::new(),
             const_variables,
+            qualified_pointer_variables: HashSet::new(),
             array2d_pointer_types: HashMap::new(),
         });
     }
@@ -20069,11 +20374,42 @@ impl Interpreter {
         Ok(None)
     }
 
+    fn validate_character_pointer_output_assignment_expr(&self, value: &Expr) -> CustResult<()> {
+        if let Expr::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } = value
+        {
+            self.validate_character_pointer_output_assignment_expr(then_expr)?;
+            self.validate_character_pointer_output_assignment_expr(else_expr)?;
+            return Ok(());
+        }
+        self.ensure_pointer_conversion_preserves_const(false, value)?;
+        match self.pointer_expr_pointee_type(value)? {
+            Some(PointeeType::Scalar(CType::Char)) => Ok(()),
+            Some(actual) => Err(CustError::new(format!(
+                "cannot convert pointer to {} to pointer to char",
+                self.pointee_label(&actual)
+            ))),
+            None if matches!(value, Expr::Number(0))
+                || matches!(value, Expr::Var(name) if self.identifier_resolves_to_enum_constant(name) && self.find_enum_constant(name) == Some(0)) =>
+            {
+                Ok(())
+            }
+            None => Err(CustError::new("expected pointer expression")),
+        }
+    }
+
     fn pointer_expr_pointee_type(&self, expr: &Expr) -> CustResult<Option<PointeeType>> {
         match expr {
-            Expr::Deref(pointer) | Expr::DerefSet { pointer, .. }
+            Expr::Deref(pointer) if self.character_pointer_output_expr(pointer).is_some() => {
+                Ok(Some(PointeeType::Scalar(CType::Char)))
+            }
+            Expr::DerefSet { pointer, value }
                 if self.character_pointer_output_expr(pointer).is_some() =>
             {
+                self.validate_character_pointer_output_assignment_expr(value)?;
                 Ok(Some(PointeeType::Scalar(CType::Char)))
             }
             Expr::Var(name) | Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
@@ -21470,15 +21806,23 @@ impl Interpreter {
     }
 
     fn find_variable(&self, name: &str) -> Option<&Value> {
-        self.scopes.iter().rev().find_map(|scope| {
-            scope.values.get(name).or_else(|| {
-                scope
-                    .static_local_ids
-                    .get(name)
-                    .and_then(|id| self.static_locals.get(id))
-                    .map(|storage| &storage.value)
-            })
-        })
+        for scope in self.scopes.iter().rev() {
+            if let Some(value) = scope.values.get(name) {
+                return Some(value);
+            }
+            if let Some(value) = scope
+                .static_local_ids
+                .get(name)
+                .and_then(|id| self.static_locals.get(id))
+                .map(|storage| &storage.value)
+            {
+                return Some(value);
+            }
+            if scope.enum_constants.contains_key(name) {
+                return None;
+            }
+        }
+        None
     }
 
     fn find_variable_mut(&mut self, name: &str) -> Option<&mut Value> {
@@ -21490,6 +21834,9 @@ impl Interpreter {
             if let Some(id) = scope.static_local_ids.get(name) {
                 static_id = Some(*id);
                 break;
+            }
+            if scope.enum_constants.contains_key(name) {
+                return None;
             }
         }
         if let Some(id) = static_id {
@@ -25086,6 +25433,11 @@ impl Interpreter {
                 .get(name)
                 .and_then(|id| self.static_locals.get(id))
             {
+                if storage.character_pointer_output.is_some() {
+                    return Err(CustError::new(
+                        "taking the address of a character pointer output parameter is not supported",
+                    ));
+                }
                 return match &storage.value {
                     Value::Scalar { .. } => Ok(PointerValue::Scalar {
                         scope_id: storage.scope_id,
@@ -27165,6 +27517,9 @@ impl Interpreter {
         if let Expr::Var(name) = expr
             && let Some(output) = self.find_character_pointer_output(name)
         {
+            if matches!(output, CharacterPointerOutput::Slot { .. }) {
+                self.read_character_pointer_output(output)?;
+            }
             return Ok(matches!(output, CharacterPointerOutput::Slot { .. }));
         }
         if self.expr_is_pointer_value(expr) {
@@ -27802,6 +28157,7 @@ impl Interpreter {
                 self.sizeof_expr(inner)?;
                 Ok(INT_SIZE)
             }
+            Expr::Var(name) if self.identifier_resolves_to_enum_constant(name) => Ok(INT_SIZE),
             Expr::Var(name) if self.find_character_pointer_output(name).is_some() => {
                 Ok(POINTER_SIZE)
             }
@@ -27946,16 +28302,8 @@ impl Interpreter {
             Expr::DerefSet { pointer, value }
                 if self.character_pointer_output_expr(pointer).is_some() =>
             {
-                self.ensure_pointer_conversion_preserves_const(false, value)?;
-                match self.pointer_expr_pointee_type(value)? {
-                    Some(PointeeType::Scalar(CType::Char)) => Ok(POINTER_SIZE),
-                    Some(actual) => Err(CustError::new(format!(
-                        "cannot convert pointer to {} to pointer to char",
-                        self.pointee_label(&actual)
-                    ))),
-                    None if matches!(value.as_ref(), Expr::Number(0)) => Ok(POINTER_SIZE),
-                    None => Err(CustError::new("expected pointer expression")),
-                }
+                self.validate_character_pointer_output_assignment_expr(value)?;
+                Ok(POINTER_SIZE)
             }
             Expr::DerefSet { pointer, .. } | Expr::DerefCompoundSet { pointer, .. } => {
                 self.sizeof_deref(pointer)
@@ -28146,12 +28494,39 @@ impl Interpreter {
                 }
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },
+            Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::BitwiseNot(inner)
+                if self.expr_is_character_pointer_output_value(inner) =>
+            {
+                Err(CustError::new(
+                    "character pointer output arithmetic is not supported",
+                ))
+            }
             Expr::UnaryPlus(inner)
             | Expr::UnaryMinus(inner)
             | Expr::BitwiseNot(inner)
             | Expr::LogicalNot(inner) => {
                 self.reject_void_scalar_operand(inner)?;
                 Ok(INT_SIZE)
+            }
+            Expr::Binary(
+                left,
+                BinaryOp::Add
+                | BinaryOp::Sub
+                | BinaryOp::Mul
+                | BinaryOp::Div
+                | BinaryOp::Rem
+                | BinaryOp::ShiftLeft
+                | BinaryOp::ShiftRight
+                | BinaryOp::BitAnd
+                | BinaryOp::BitXor
+                | BinaryOp::BitOr,
+                right,
+            ) if self.expr_is_character_pointer_output_value(left)
+                || self.expr_is_character_pointer_output_value(right) =>
+            {
+                Err(CustError::new(
+                    "character pointer output arithmetic is not supported",
+                ))
             }
             Expr::Binary(left, _, right) => {
                 self.reject_void_scalar_operand(left)?;
@@ -29055,6 +29430,14 @@ impl Interpreter {
         let left_output = self.character_pointer_output_expr(left);
         let right_output = self.character_pointer_output_expr(right);
         if left_output.is_some() || right_output.is_some() {
+            for output in [left_output.as_ref(), right_output.as_ref()]
+                .into_iter()
+                .flatten()
+            {
+                if matches!(output, CharacterPointerOutput::Slot { .. }) {
+                    self.read_character_pointer_output(output)?;
+                }
+            }
             let equal = match (left_output, right_output) {
                 (Some(left), Some(right)) => left == right,
                 (Some(output), None) => {
@@ -29376,6 +29759,7 @@ impl Interpreter {
             | Stmt::Array2DDecl { name, is_const, .. }
             | Stmt::StructVarDecl { name, is_const, .. }
             | Stmt::StructArrayDecl { name, is_const, .. } => Ok((name, *is_const)),
+            Stmt::CharacterPointerOutputDecl { name, .. } => Ok((name, false)),
             _ => Err(CustError::new(
                 "static local declarations must declare variables",
             )),
@@ -29403,6 +29787,10 @@ impl Interpreter {
                     points_to_const: *points_to_const,
                 })
             }
+            Stmt::CharacterPointerOutputDecl { .. } => Ok(Value::Scalar {
+                value: 0,
+                ty: CType::Bool,
+            }),
             Stmt::Array2DPointerDecl {
                 elem_type,
                 columns,
@@ -29462,7 +29850,29 @@ impl Interpreter {
             )));
         }
         if !self.static_locals.contains_key(&id) {
+            let character_pointer_output = match decl {
+                Stmt::CharacterPointerOutputDecl { name, expr } => {
+                    if !self.character_pointer_output_initializer_is_static_constant(expr) {
+                        return Err(Self::static_character_pointer_output_initializer_error());
+                    }
+                    let output = self.eval_character_pointer_output_initializer(name, expr)?;
+                    if !self.character_pointer_output_target_has_static_storage(&output) {
+                        return Err(CustError::new(
+                            "static character pointer object initializer requires a char pointer slot with static storage duration",
+                        ));
+                    }
+                    Some(output)
+                }
+                _ => None,
+            };
             let value = self.initialize_static_local(decl)?;
+            let pointer_is_qualified = matches!(
+                decl,
+                Stmt::PointerDecl {
+                    is_qualified: true,
+                    ..
+                }
+            );
             let scope_id = self.next_scope_id;
             self.next_scope_id += 1;
             self.live_scope_ids.insert(scope_id);
@@ -29473,6 +29883,8 @@ impl Interpreter {
                     name: name.to_string(),
                     value,
                     is_const,
+                    pointer_is_qualified,
+                    character_pointer_output,
                 },
             );
         }
@@ -29528,6 +29940,7 @@ impl Interpreter {
                 expr,
                 is_const,
                 points_to_const,
+                is_qualified,
             } => {
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
@@ -29549,6 +29962,45 @@ impl Interpreter {
                 if *is_const {
                     self.mark_current_variable_const(name);
                 }
+                if *is_qualified {
+                    self.scopes
+                        .last_mut()
+                        .expect("pointer declarations execute in a current scope")
+                        .qualified_pointer_variables
+                        .insert(name.clone());
+                }
+                Ok(ExecFlow::None)
+            }
+            Stmt::CharacterPointerOutputDecl { name, expr } => {
+                let has_static_storage = self.scopes.len() == 1;
+                if has_static_storage
+                    && !self.character_pointer_output_initializer_is_static_constant(expr)
+                {
+                    return Err(Self::static_character_pointer_output_initializer_error());
+                }
+                let output = self.eval_character_pointer_output_initializer(name, expr)?;
+                if has_static_storage
+                    && !self.character_pointer_output_target_has_static_storage(&output)
+                {
+                    return Err(Self::static_character_pointer_output_initializer_error());
+                }
+                if self.current_scope_has_identifier(name) {
+                    return Err(CustError::new(format!(
+                        "variable '{name}' already declared in this scope"
+                    )));
+                }
+                let scope = self
+                    .scopes
+                    .last_mut()
+                    .expect("variable declarations execute in a current scope");
+                scope.values.insert(
+                    name.clone(),
+                    Value::Scalar {
+                        value: i64::from(matches!(output, CharacterPointerOutput::Slot { .. })),
+                        ty: CType::Bool,
+                    },
+                );
+                scope.character_pointer_outputs.insert(name.clone(), output);
                 Ok(ExecFlow::None)
             }
             Stmt::Array2DPointerDecl {
@@ -30591,6 +31043,13 @@ impl Interpreter {
             } => self
                 .eval_aggregate_literal_field_scalar(aggregate, path)
                 .map(|(value, _, _)| value),
+            Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::BitwiseNot(inner)
+                if self.expr_is_character_pointer_output_value(inner) =>
+            {
+                Err(CustError::new(
+                    "character pointer output arithmetic is not supported",
+                ))
+            }
             Expr::UnaryPlus(inner) => self.eval(inner),
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::BitwiseNot(inner) => Ok(!self.eval(inner)?),
@@ -30626,6 +31085,23 @@ impl Interpreter {
                     }
                 }
                 BinaryOp::Eq | BinaryOp::Ne => self.eval_equality(left, op, right),
+                BinaryOp::Add
+                | BinaryOp::Sub
+                | BinaryOp::Mul
+                | BinaryOp::Div
+                | BinaryOp::Rem
+                | BinaryOp::ShiftLeft
+                | BinaryOp::ShiftRight
+                | BinaryOp::BitAnd
+                | BinaryOp::BitXor
+                | BinaryOp::BitOr
+                    if self.expr_is_character_pointer_output_value(left)
+                        || self.expr_is_character_pointer_output_value(right) =>
+                {
+                    Err(CustError::new(
+                        "character pointer output arithmetic is not supported",
+                    ))
+                }
                 BinaryOp::Add | BinaryOp::Sub => {
                     if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
                         match (self.eval_pointer(left), self.eval_pointer(right)) {
