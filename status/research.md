@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-03 — Safe `char **` output-parameter foundation
+
+- WG14 N1570 §6.5.16.1 and §7.22.1.4 (`https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf`) motivate the bounded slice: a future `strtol`/`strtoul` call must be able to assign either the original input pointer or the first unrecognized character through a non-null `char **endptr`, while a null `endptr` performs no write. Cust retains interpreter-owned pointer identity rather than host addresses.
+- Implementation decision: only direct unqualified `char **` parameters are admitted. They may target mutable `char *` variable slots at local/global/static scope, preserve owner/lifetime/const metadata when written or forwarded, and support null/equality/truthiness plus `*out`. Qualified/deeper spellings and outer-slot mutation/address-taking stay outside the slice with exact diagnostics.
+- Independent review exposed four safety gaps in the initial inherited implementation: enum-shadow lookup could reach an outer slot; volatile/atomic qualifiers widened the allowlist; the temporary scalar surrogate was mutable through increment; and `&out` exposed it as `_Bool *`, including non-evaluating routes. Focused RED/GREEN regressions closed each path, and a final read-only review returned `APPROVED`. See `references/cust-character-pointer-output-parameters.md`.
+
 ## 2026-08-02 — v0.13.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.12.0`, then passed after Cargo/lock and both image tags moved to `0.13.0`. `cargo test -- --list` inventory accounting is 1,279 tests: 1,145 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.

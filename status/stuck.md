@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-02 bounded v0.13.0 release preparation. Focused version RED/GREEN, local/remote tag preflight, independent approval, formatting, strict Clippy, all 1,279 local tests, the rebuilt Docker test gate, runtime output `10`, local/container version output, Cargo metadata, and `git diff --check` pass. No active implementation, Docker, Git, research, or environment blocker exists. `strtol`/`strtoul` remain a documented roadmap dependency on unsupported pointer-to-pointer `endptr`, not an active release blocker.
+None. Last reviewed during the 2026-08-03 safe two-level character-pointer slice. Focused RED/GREEN, three rounds of independent read-only review with all findings resolved, formatting, strict Clippy, all 1,295 local tests, the rebuilt Docker test gate, runtime output `10`, and `git diff --check` pass. No active implementation, Docker, Git, research, or environment blocker exists. The completed `char **endptr` foundation unblocks bounded `strtol`/`strtoul` as the next roadmap package.
 
 ## Blocker template
 

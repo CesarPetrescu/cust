@@ -1,9 +1,10 @@
 # Cust Current State
 
-Last updated: 2026-08-02
+Last updated: 2026-08-03
 
 ## Latest autonomous verification
 
+The first safe two-level characte...[truncated]
 Bounded Cust v0.13.0 is prepared for atomic publication. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README support/limitations/roadmap text, changelog notes, and all five status files are synchronized for `0.13.0`. The release packages deterministic C-locale `strcoll` and `strxfrm`. The enumerated inventory is 1,279 tests: 1,145 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 
 Release TDD evidence: exact CLI and Compose expectations first failed against package/image version `0.12.0`, then passed after Cargo/lock and both Compose images moved to `0.13.0`. Local and remote annotated-tag preflight found no `v0.13.0`. Independent read-only review returned `APPROVED` with no blocking/high/medium/low findings. Formatting, warning-denied Clippy, all 1,279 local tests, the rebuilt 1,279-test Docker gate, runtime output `10`, local/container version `cust 0.13.0`, Cargo metadata `cust 0.13.0`, and `git diff --check` pass. The tag remains reserved for this verified release commit and may be created only after `origin/main` accepts it; publication and remote peeled-target verification are not claimed by this release-preparation diff.

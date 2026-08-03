@@ -11057,6 +11057,389 @@ fn supports_scalar_pointer_parameters() {
 }
 
 #[test]
+fn character_pointer_output_parameters_write_null_and_interior_pointers() {
+    let program = r#"
+void set_end(char **out, char *value) {
+    if (out) {
+        *out = value;
+    }
+}
+
+void forward_end(char **out, char *value) {
+    set_end(out, value);
+}
+
+int main(void) {
+    char text[] = "123abc";
+    char *end = 0;
+
+    set_end(0, text);
+    if (end != 0) {
+        return 1;
+    }
+    set_end(&end, text + 3);
+    if (*end != 'a') {
+        return 2;
+    }
+    set_end(&end, 0);
+    if (end != 0) {
+        return 3;
+    }
+    forward_end(&end, text + 1);
+    return end[0] == '2' ? 0 : 4;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_output_parameters_compare_equal_to_null() {
+    let program = r#"
+int output_is_null(char **out) {
+    return out == 0;
+}
+
+int output_is_non_null(char **out) {
+    return out != 0;
+}
+
+int main(void) {
+    char *end = 0;
+    return output_is_null(0) && output_is_non_null(&end) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_output_parameter_sizeof_is_pointer_sized() {
+    let program = r#"
+int inspect(char **out) {
+    return sizeof(out) == sizeof(char *) && sizeof(*out) == sizeof(char *);
+}
+
+int main(void) {
+    char *end = 0;
+    return inspect(&end) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_output_sizeof_assignment_is_non_evaluating() {
+    let program = r#"
+int calls = 0;
+
+char *mark(char *value) {
+    calls = calls + 1;
+    return value;
+}
+
+int inspect(char **out, char *value) {
+    int bytes = sizeof(*out = mark(value));
+    return bytes == sizeof(char *) && calls == 0 && *out == 0;
+}
+
+int main(void) {
+    char text[] = "42";
+    char *end = 0;
+    return inspect(&end, text) && end == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_output_sizeof_assignment_checks_the_stored_pointer_type() {
+    let program = r#"
+int inspect(char **out, int *wrong) {
+    return sizeof(*out = wrong);
+}
+
+int main(void) {
+    int value = 1;
+    int *wrong = &value;
+    char *end = 0;
+    return inspect(&end, wrong);
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot convert pointer to int to pointer to char"
+    );
+}
+
+#[test]
+fn character_pointer_output_parameters_preserve_stored_pointer_lifetimes() {
+    let program = r#"
+void capture_local(char **out) {
+    {
+        char text[] = "xy";
+        *out = text + 1;
+    }
+}
+
+int main(void) {
+    char *end = 0;
+    capture_local(&end);
+    return *end;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "pointer to out-of-scope variable 'text'");
+}
+
+#[test]
+fn character_pointer_output_arguments_respect_enum_shadowing() {
+    let program = r#"
+void set_end(char **out, char *value) {
+    *out = value;
+}
+
+int main(void) {
+    char text[] = "x";
+    char *end = 0;
+    {
+        enum { end = 0 };
+        set_end(&end, text);
+    }
+    return 0;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "function 'set_end' parameter 'out' requires the address of a mutable char pointer variable"
+    );
+}
+
+#[test]
+fn character_pointer_output_parameters_reject_qualified_forms() {
+    let cases = [
+        ("volatile char **out", 14),
+        ("const char **out", 14),
+        ("char *volatile *out", 20),
+        ("char *const *out", 20),
+        ("char **volatile out", 21),
+        ("char **const out", 21),
+        ("_Atomic(char) **out", 14),
+    ];
+
+    for (parameter, column) in cases {
+        let program = format!("void set_end({parameter}) {{}}\nint main(void) {{ return 0; }}\n");
+
+        let err = interpret(&program).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "qualified character pointer output parameters are not supported at line 1, column {column}"
+            ),
+            "parameter: {parameter}"
+        );
+    }
+    let alias_program = "typedef volatile char VolatileChar;\nvoid set_end(VolatileChar **out) {}\nint main(void) { return 0; }\n";
+    let err = interpret(alias_program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "qualified character pointer output parameters are not supported at line 2, column 14"
+    );
+}
+
+#[test]
+fn character_pointer_output_parameters_update_global_and_static_slots() {
+    let program = r#"
+char *global_end = 0;
+static char *file_end = 0;
+
+void set_end(char **out, char *value) {
+    *out = value;
+}
+
+int update_static(char *value) {
+    static char *local_end = 0;
+    set_end(&local_end, value + 2);
+    return *local_end;
+}
+
+int main(void) {
+    char text[] = "abcd";
+    set_end(&global_end, text + 1);
+    set_end(&file_end, text + 3);
+    return *global_end == 'b' && *file_end == 'd' && update_static(text) == 'c' ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_output_arguments_reject_incompatible_slots() {
+    let cases = [
+        "int value = 0; int *slot = &value;",
+        "const char *slot = 0;",
+        "char * const slot = 0;",
+    ];
+
+    for declaration in cases {
+        let program = format!(
+            "void set_end(char **out) {{ *out = 0; }}\nint main(void) {{ {declaration} set_end(&slot); return 0; }}\n"
+        );
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "function 'set_end' parameter 'out' requires the address of a mutable char pointer variable",
+            "declaration: {declaration}"
+        );
+    }
+}
+
+#[test]
+fn character_pointer_output_parameters_match_compatible_prototypes() {
+    let program = r#"
+void set_end(char **out, char *value);
+
+void set_end(char **out, char *value) {
+    *out = value;
+}
+
+int main(void) {
+    char text[] = "ok";
+    char *end = 0;
+    set_end(&end, text + 1);
+    return *end == 'k' ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_output_parameters_reject_deeper_pointers() {
+    let program = "void reject(char ***out) {}\nint main(void) { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "pointer-to-pointer parameters are not supported at line 1, column 20"
+    );
+}
+
+#[test]
+fn character_pointer_output_parameter_increment_is_rejected() {
+    for operation in ["out++", "++out", "out--", "--out"] {
+        let program = format!(
+            "void adjust(char **out) {{ {operation}; }}\nint main(void) {{ char *slot = 0; adjust(&slot); return 0; }}\n"
+        );
+
+        let err = interpret(&program).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "character pointer output parameter reassignment is not supported",
+            "operation: {operation}"
+        );
+    }
+    let program = "void adjust(char **out) { sizeof(out++); }\nint main(void) { char *slot = 0; adjust(&slot); return 0; }\n";
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "character pointer output parameter reassignment is not supported"
+    );
+}
+
+#[test]
+fn taking_address_of_character_pointer_output_parameter_is_rejected() {
+    let program = r#"
+int inspect(char **out) {
+    return &out != 0;
+}
+
+int main(void) {
+    char *slot = 0;
+    return inspect(&slot);
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "taking the address of a character pointer output parameter is not supported"
+    );
+    let program = "void inspect(char **out) { sizeof(&out); }\nint main(void) { char *slot = 0; inspect(&slot); return 0; }\n";
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "taking the address of a character pointer output parameter is not supported"
+    );
+}
+
+#[test]
+fn address_of_respects_enum_shadowing_over_character_pointer_outputs() {
+    let program = r#"
+void zero(_Bool *pointer) {
+    *pointer = 0;
+}
+
+int inspect(char **out) {
+    {
+        enum { out = 0 };
+        zero(&out);
+    }
+    return 0;
+}
+
+int main(void) {
+    char *slot = 0;
+    return inspect(&slot);
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "cannot take the address of enum constant 'out'"
+    );
+}
+
+#[test]
+fn character_pointer_output_parameter_reassignment_is_rejected() {
+    let program = r#"
+void clear_local(char **out) {
+    out = 0;
+}
+
+int main(void) {
+    char *end = 0;
+    clear_local(&end);
+    return 0;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "character pointer output parameter reassignment is not supported"
+    );
+}
+
+#[test]
 fn supports_array_decay_to_pointer_parameters_and_pointer_indexing() {
     let program = include_str!("fixtures/valid/pointer_arrays.c");
 
