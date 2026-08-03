@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 ## Latest autonomous verification
+
+Bounded Cust v0.15.0 is prepared for atomic publication around ordinary tracked unqualified `char **` objects. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README support/limitations/roadmap text, changelog notes, and all five status files are synchronized for `0.15.0`. The executable inventory is 1,333 tests: 1,199 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+Release TDD evidence: exact CLI and Compose expectations first failed against package/image version `0.14.0`, then passed after Cargo/lock and both image tags moved to `0.15.0`. Local and remote annotated-tag preflight found no `v0.15.0`. Independent read-only review identified three low stale temporal claims; after they were rewritten as historical progression, re-review returned `APPROVED` with no findings. Formatting, warning-denied Clippy, all 1,333 local tests, the rebuilt 1,333-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.15.0`, and `git diff --check` pass. The tag remains reserved for this verified release commit and may be created only after `origin/main` accepts it; publication and remote peeled-target verification are not claimed by this preparation diff.
 
 Ordinary tracked unqualified `char **` objects are complete. Local, file-global, and block-static objects may initialize from mutable unqualified `char *` slot addresses, default or initialize to null, forward through existing `char **` parameters, observe/write null and non-null pointees through `*output`, preserve interpreter-owned outer-slot and pointee owner/lifetime/read-only identity, and participate in equality, truthiness, and non-evaluating `sizeof` without host addresses. Qualified target slots, incompatible/const/deeper/array forms, expired slots or pointees, object reassignment/increment/address-taking, and arithmetic remain exact boundaries.
 

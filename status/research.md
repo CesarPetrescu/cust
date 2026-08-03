@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-04 — v0.15.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.14.0`, then passed after Cargo/lock and both image tags moved to `0.15.0`. Executable `cargo test -- --list` accounting is 1,333 tests: 1,199 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
+- Local and remote `v0.15.0` annotated-tag preflight returned no refs. Independent review identified three low stale temporal claims; after rewriting them as historical progression, re-review returned `APPROVED` with no findings. Formatting, strict Clippy, all 1,333 local tests, the rebuilt Docker gate, runtime output `10`, local/Cargo/container version `cust 0.15.0`, and the diff check pass. Release status wording remains preparation-only until release-commit-first branch publication, annotated-tag publication, and exact remote peeled-target verification complete.
+- The next bounded language package is safe `char **` expression parity: conditional/comma object-value forwarding, qualified function-parameter slot-address rejection, and exact relational-comparison boundaries without host addresses or deeper pointers.
+
 ## 2026-08-03 — Ordinary tracked unqualified `char **` objects
 
 - The safe representation extends the existing output-parameter metadata rather than adding host addresses: each non-null object stores a lexical `scope_id` plus mutable `char *` slot name, while static objects retain the same metadata in static-local storage. Reads and writes re-resolve that identity and verify both the outer slot and pointee owner are still live.
@@ -29,7 +35,7 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.13.0`, then passed after Cargo/lock and both image tags moved to `0.14.0`. Executable `cargo test -- --list` accounting is 1,310 tests: 1,176 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.
 - Local and remote `v0.14.0` annotated-tag preflight returned no refs. Independent review found one stale next-task sentence; the corrected diff received `APPROVED`. Formatting, strict Clippy, all 1,310 local tests, the rebuilt Docker gate, runtime output `10`, local/container version `cust 0.14.0`, Cargo metadata, and the diff check pass. Publication then completed in the required order: release commit `c3c0ff3bc029f538e673dc6bfe506084fe9f1c23` reached `origin/main`, annotated tag object `c6981f850ff6e95d08cc39addc430fa4b159b253` was pushed second, and the remote peeled target matched exactly.
-- The subsequent bounded language package generalized the reviewed unqualified `char **` output-parameter representation to ordinary tracked objects initialized from mutable `char *` slots while preserving interpreter owner/lifetime/qualification metadata and exact no-host-address, no-arithmetic, and no-deeper-pointer boundaries. Bounded v0.15.0 release consistency is next.
+- The subsequent bounded language package generalized the reviewed unqualified `char **` output-parameter representation to ordinary tracked objects initialized from mutable `char *` slots while preserving interpreter owner/lifetime/qualification metadata and exact no-host-address, no-arithmetic, and no-deeper-pointer boundaries. Bounded v0.15.0 release consistency therefore became the next package at that point.
 
 ## 2026-08-03 — Bounded base-aware integer string conversions
 

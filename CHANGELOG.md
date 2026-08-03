@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.15.0 — 2026-08-04
+
+### Language subset
+
+- Extended the narrow safe unqualified `char **` model from function output parameters to ordinary local, file-global, and block-static objects. Objects may default or initialize to null or bind to a mutable unqualified `char *` slot, then support indirect null/non-null reads and writes plus forwarding through existing `char **` parameters.
+
+### Diagnostics and verification
+
+- Preserved interpreter-owned outer-slot and pointee owner, lifetime, type, qualification, and read-only identity without host addresses. Exact diagnostics retain the bounded subset around qualified or incompatible target slots, const/deeper/array declarators, expired storage, outer-object reassignment/increment/address-taking, arithmetic, and incompatible conditional assignment branches under non-evaluating `sizeof`.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.15.0`.
+- Verified 1,333 executable tests at release preparation time: 1,199 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls beyond the explicitly prototyped bounded integer/string/character/random/termination families, locale-sensitive behavior outside Cust's fixed ASCII/C-locale model, floating-point and complex runtime values, general multiple-pointer-level objects beyond the narrow tracked unqualified `char **` model, `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported. Cust reports deterministic conversion overflow rather than modeling host-width `errno` behavior.
+
 ## v0.14.0 — 2026-08-03
 
 ### Language subset
