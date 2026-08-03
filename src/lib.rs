@@ -16899,6 +16899,9 @@ impl Interpreter {
             if self.has_integer_string_conversion_prototype(name) {
                 return self.call_integer_string_conversion_function(name, arg_exprs);
             }
+            if self.has_base_integer_string_conversion_prototype(name) {
+                return self.call_base_integer_string_conversion_function(name, arg_exprs);
+            }
             if self.has_string_comparison_prototype(name) {
                 return self.call_string_comparison_function(name, arg_exprs);
             }
@@ -16944,6 +16947,13 @@ impl Interpreter {
                 return Err(CustError::new(format!(
                     "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type"
                 )));
+            }
+            if matches!(name, "strtol" | "strtoll" | "strtoul" | "strtoull")
+                && self.prototypes.contains_key(name)
+            {
+                return Err(
+                    Self::unsupported_base_integer_string_conversion_declaration_error(name),
+                );
             }
             if matches!(name, "strcmp" | "strcoll") && self.prototypes.contains_key(name) {
                 return Err(Self::unsupported_string_comparison_declaration_error(name));
@@ -17632,6 +17642,229 @@ impl Interpreter {
                 "function '{name}' requires a pointer to character storage"
             ))),
         }
+    }
+
+    fn has_base_integer_string_conversion_prototype(&self, name: &str) -> bool {
+        if !matches!(name, "strtol" | "strtoll" | "strtoul" | "strtoull") {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Scalar(CType::Int),
+            params: vec![
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Char),
+                    kind: ParamKind::Pointer,
+                    points_to_const: true,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Char),
+                    kind: ParamKind::CharacterPointerOutput,
+                    points_to_const: false,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                },
+            ],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn unsupported_base_integer_string_conversion_declaration_error(name: &str) -> CustError {
+        CustError::new(format!(
+            "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter, one character-pointer output parameter, one integer base, and an integer return type"
+        ))
+    }
+
+    fn call_base_integer_string_conversion_function(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if args.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                args.len()
+            )));
+        }
+
+        let input = self.eval_pointer(&args[0])?;
+        let output = self.eval_character_pointer_output_argument(name, "endptr", &args[1]);
+        let base = self.eval_scalar_conversion(CType::Int, &args[2])?;
+        let output = output?;
+        if base != 0 && !(2..=36).contains(&base) {
+            return Err(CustError::new(format!(
+                "function '{name}' requires base 0 or a value from 2 through 36"
+            )));
+        }
+
+        self.validate_character_pointer_argument(name, 1, &input)?;
+        let input = self.attach_array_pointer_owner(input);
+        if matches!(output, CharacterPointerOutput::Slot { .. })
+            && matches!(
+                &input,
+                PointerValue::ArrayBase {
+                    array,
+                    owner: None,
+                    ..
+                } | PointerValue::ArrayElement {
+                    array,
+                    owner: None,
+                    ..
+                } if !array.borrow().read_only
+            )
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' cannot retain an end pointer into ownerless character storage"
+            )));
+        }
+        let bytes = self.read_bounded_character_sequence(name, 1, &input)?;
+        let (value, end_offset) = Self::parse_bounded_base_integer_string(
+            name,
+            &bytes,
+            base,
+            matches!(name, "strtoul" | "strtoull"),
+        )?;
+        if matches!(output, CharacterPointerOutput::Slot { .. }) {
+            let end = if end_offset == 0 {
+                input
+            } else {
+                self.offset_array_pointer(&input, end_offset as i64)?
+            };
+            self.write_character_pointer_output(output, end)?;
+        }
+        Ok(Some(ReturnValue::Scalar(value)))
+    }
+
+    fn parse_bounded_base_integer_string(
+        name: &str,
+        bytes: &[u8],
+        requested_base: i64,
+        unsigned: bool,
+    ) -> CustResult<(i64, usize)> {
+        let mut cursor = 0;
+        while bytes
+            .get(cursor)
+            .is_some_and(|byte| matches!(byte, 9..=13 | 32))
+        {
+            cursor += 1;
+        }
+
+        let negative = match bytes.get(cursor) {
+            Some(b'+') => {
+                cursor += 1;
+                false
+            }
+            Some(b'-') => {
+                cursor += 1;
+                true
+            }
+            _ => false,
+        };
+
+        let mut base = requested_base;
+        if base == 0 {
+            base = if bytes.get(cursor) == Some(&b'0') {
+                if matches!(bytes.get(cursor + 1), Some(b'x' | b'X'))
+                    && bytes
+                        .get(cursor + 2)
+                        .and_then(|byte| Self::integer_string_digit(*byte))
+                        .is_some_and(|digit| digit < 16)
+                {
+                    cursor += 2;
+                    16
+                } else {
+                    8
+                }
+            } else {
+                10
+            };
+        } else if base == 16
+            && bytes.get(cursor) == Some(&b'0')
+            && matches!(bytes.get(cursor + 1), Some(b'x' | b'X'))
+            && bytes
+                .get(cursor + 2)
+                .and_then(|byte| Self::integer_string_digit(*byte))
+                .is_some_and(|digit| digit < 16)
+        {
+            cursor += 2;
+        }
+
+        let digit_start = cursor;
+        let mut magnitude = 0_u64;
+        while let Some(digit) = bytes
+            .get(cursor)
+            .and_then(|byte| Self::integer_string_digit(*byte))
+            .filter(|digit| *digit < base)
+        {
+            magnitude = magnitude
+                .checked_mul(base as u64)
+                .and_then(|value| value.checked_add(digit as u64))
+                .ok_or_else(|| {
+                    CustError::new(format!(
+                        "integer string conversion overflow in function '{name}'"
+                    ))
+                })?;
+            cursor += 1;
+        }
+
+        if cursor == digit_start {
+            return Ok((0, 0));
+        }
+
+        let value = if unsigned {
+            let value = if negative {
+                magnitude.wrapping_neg()
+            } else {
+                magnitude
+            };
+            value as i64
+        } else if negative && magnitude == (1_u64 << 63) {
+            i64::MIN
+        } else {
+            let magnitude = i64::try_from(magnitude).map_err(|_| {
+                CustError::new(format!(
+                    "integer string conversion overflow in function '{name}'"
+                ))
+            })?;
+            if negative { -magnitude } else { magnitude }
+        };
+        Ok((value, cursor))
+    }
+
+    fn integer_string_digit(byte: u8) -> Option<i64> {
+        match byte {
+            b'0'..=b'9' => Some(i64::from(byte - b'0')),
+            b'a'..=b'z' => Some(i64::from(byte - b'a') + 10),
+            b'A'..=b'Z' => Some(i64::from(byte - b'A') + 10),
+            _ => None,
+        }
+    }
+
+    fn validate_base_integer_string_conversion_call(
+        &self,
+        name: &str,
+        args: &[Expr],
+    ) -> CustResult<()> {
+        if args.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        self.sizeof_integer_string_conversion_call(name, &args[..1])?;
+        self.eval_character_pointer_output_argument(name, "endptr", &args[1])?;
+        if self.expr_is_pointer_value(&args[2])
+            || self.aggregate_expr_type_name(&args[2]).is_ok()
+            || self.expr_is_void_value(&args[2])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer base"
+            )));
+        }
+        self.sizeof_expr(&args[2])?;
+        Ok(())
     }
 
     fn has_string_comparison_prototype(&self, name: &str) -> bool {
@@ -18936,6 +19169,25 @@ impl Interpreter {
                     }
                     return Ok(());
                 }
+                if matches!(name.as_str(), "strtol" | "strtoll" | "strtoul" | "strtoull")
+                    && !self.functions.contains_key(name)
+                {
+                    if self.has_base_integer_string_conversion_prototype(name) {
+                        self.validate_base_integer_string_conversion_call(name, args)?;
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(
+                            Self::unsupported_base_integer_string_conversion_declaration_error(
+                                name,
+                            ),
+                        );
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                    // The helper owns recursive validation of the base expression;
+                    // only the pointer argument still needs an explicit nested-call walk.
+                    self.validate_nested_string_intrinsic_calls(&args[0])?;
+                    return Ok(());
+                }
                 if matches!(name.as_str(), "strcmp" | "strcoll")
                     && !self.functions.contains_key(name)
                 {
@@ -19525,6 +19777,12 @@ impl Interpreter {
     ) -> CustResult<CharacterPointerOutput> {
         match expr {
             Expr::Number(0) => Ok(CharacterPointerOutput::Null),
+            Expr::Var(name)
+                if self.identifier_resolves_to_enum_constant(name)
+                    && self.find_enum_constant(name) == Some(0) =>
+            {
+                Ok(CharacterPointerOutput::Null)
+            }
             Expr::Var(name) => self.find_character_pointer_output(name).cloned().ok_or_else(|| {
                 CustError::new(format!(
                     "function '{function_name}' parameter '{param_name}' requires a char pointer slot address"
@@ -19626,6 +19884,20 @@ impl Interpreter {
         let output = self
             .character_pointer_output_expr(output_expr)
             .ok_or_else(|| CustError::new("expected a character pointer output parameter"))?;
+
+        self.ensure_pointer_conversion_preserves_const(false, value)?;
+        let pointer = self.eval_pointer(value)?;
+        let pointer = self.attach_array_pointer_owner(pointer);
+        self.ensure_pointer_type_matches(&PointeeType::Scalar(CType::Char), &pointer)?;
+
+        self.write_character_pointer_output(output, pointer)
+    }
+
+    fn write_character_pointer_output(
+        &mut self,
+        output: CharacterPointerOutput,
+        pointer: PointerValue,
+    ) -> CustResult<PointerValue> {
         let CharacterPointerOutput::Slot { scope_id, name } = output else {
             return Err(CustError::new("null pointer dereference"));
         };
@@ -19634,11 +19906,6 @@ impl Interpreter {
                 "pointer to out-of-scope variable '{name}'"
             )));
         }
-
-        self.ensure_pointer_conversion_preserves_const(false, value)?;
-        let pointer = self.eval_pointer(value)?;
-        let pointer = self.attach_array_pointer_owner(pointer);
-        self.ensure_pointer_type_matches(&PointeeType::Scalar(CType::Char), &pointer)?;
 
         if let Some(scope) = self.scopes.iter_mut().find(|scope| scope.id == scope_id) {
             return match scope.values.get_mut(&name) {
@@ -27798,6 +28065,7 @@ impl Interpreter {
                 None if self.has_integer_string_conversion_prototype(name) => {
                     self.sizeof_integer_string_conversion_call(name, args)
                 }
+                None if self.has_base_integer_string_conversion_prototype(name) => Ok(INT_SIZE),
                 None if self.has_string_comparison_prototype(name) => {
                     self.sizeof_string_comparison_call(name, args)
                 }
@@ -27841,6 +28109,11 @@ impl Interpreter {
                     Err(CustError::new(
                         "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
                     ))
+                }
+                None if matches!(name.as_str(), "strtol" | "strtoll" | "strtoul" | "strtoull")
+                    && self.prototypes.contains_key(name) =>
+                {
+                    Err(Self::unsupported_base_integer_string_conversion_declaration_error(name))
                 }
                 None if matches!(name.as_str(), "strchr" | "strrchr")
                     && self.prototypes.contains_key(name) =>

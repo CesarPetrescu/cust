@@ -16259,6 +16259,378 @@ fn supports_integer_string_conversion_standard_library_functions() {
 }
 
 #[test]
+fn supports_base_integer_string_conversion_standard_library_functions() {
+    let program = include_str!("fixtures/compat/valid/base_integer_string_conversion_functions.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_base_integer_string_conversions_parse_bases_and_write_end_pointers() {
+    let program = r#"
+long int strtol(const char *text, char **end, int base);
+unsigned long int strtoul(const char *text, char **end, int base);
+
+int main(void) {
+    char decimal[] = "  -123tail";
+    char hexadecimal[] = "0x2A!";
+    char octal[] = "0779";
+    char binary[] = "10102";
+    char base36[] = "zZ?";
+    char none[] = "  +x";
+    char *end = 0;
+
+    if (strtol(decimal, &end, 10) != -123 || *end != 't') {
+        return 1;
+    }
+    if (strtoul(hexadecimal, &end, 0) != 42 || *end != '!') {
+        return 2;
+    }
+    if (strtol(octal, &end, 0) != 63 || *end != '9') {
+        return 3;
+    }
+    if (strtoul(binary, &end, 2) != 10 || *end != '2') {
+        return 4;
+    }
+    if (strtol(base36, &end, 36) != 1295 || *end != '?') {
+        return 5;
+    }
+    if (strtol(none, &end, 10) != 0 || end != none) {
+        return 6;
+    }
+    if (strtoul("+17", 0, 10) != 17) {
+        return 7;
+    }
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn base_integer_string_conversion_arguments_evaluate_once_in_source_order() {
+    let program = r#"
+long int strtol(const char *text, char **end, int base);
+int order = 0;
+
+char *mark_text(char *text) {
+    order = order * 10 + 1;
+    return text;
+}
+
+int mark_base(int base) {
+    order = order * 10 + 2;
+    return base;
+}
+
+int main(void) {
+    char text[] = "31x";
+    char *end = 0;
+    long int value = strtol(mark_text(text), &end, mark_base(10));
+    return value == 31 && *end == 'x' && order == 12 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_base_integer_string_conversion_calls_is_non_evaluating() {
+    let program = r#"
+long int strtol(const char *text, char **end, int base);
+unsigned long int strtoul(const char *text, char **end, int base);
+int calls = 0;
+
+char *mark_text(char *text) {
+    calls += 1;
+    return text;
+}
+
+int mark_base(int base) {
+    calls += 1;
+    return base;
+}
+
+int main(void) {
+    char text[] = "17";
+    char *end = 0;
+    int first = sizeof(strtol(mark_text(text), &end, mark_base(10)));
+    int nested = sizeof(strtoul(text, 0, strtol("10", 0, 10)));
+    return first == sizeof(long int)
+        && nested == sizeof(unsigned long int)
+        && calls == 0
+        && end == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn base_integer_string_conversions_require_exact_prototypes_and_preserve_user_definitions() {
+    let missing = interpret("int main(void) { return strtol(\"7\", 0, 10); }\n").unwrap_err();
+    assert_eq!(missing.to_string(), "undefined function 'strtol'");
+
+    let incompatible = interpret(
+        "long int strtol(char *text, char **end, int base);\nint main(void) { char text[] = \"7\"; return strtol(text, 0, 10); }\n",
+    )
+    .unwrap_err();
+    assert_eq!(
+        incompatible.to_string(),
+        "standard library function 'strtol' has an unsupported declaration; expected one pointer-to-const-character parameter, one character-pointer output parameter, one integer base, and an integer return type"
+    );
+
+    let user_definition = r#"
+long int strtol(const char *text, char **end, int base) {
+    return text[0] + base + (end == 0);
+}
+int main(void) {
+    return strtol("A", 0, 3) == 69 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(user_definition).unwrap(), 0);
+}
+
+#[test]
+fn long_long_base_integer_string_conversions_share_bounded_semantics() {
+    let program = r#"
+long long int strtoll(const char *text, char **end, int base);
+unsigned long long int strtoull(const char *text, char **end, int base);
+
+int main(void) {
+    char signed_text[] = "-2ax";
+    char unsigned_text[] = "377!";
+    char *end = 0;
+    if (strtoll(signed_text, &end, 16) != -42 || *end != 'x') {
+        return 1;
+    }
+    if (strtoull(unsigned_text, &end, 8) != 255 || *end != '!') {
+        return 2;
+    }
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn unsigned_base_integer_string_conversion_uses_full_deterministic_width() {
+    let program = r#"
+unsigned long int strtoul(const char *text, char **end, int base);
+
+int main(void) {
+    if (strtoul("9223372036854775808", 0, 10) != (-9223372036854775807 - 1)) {
+        return 1;
+    }
+    if (strtoul("18446744073709551615", 0, 10) != -1) {
+        return 2;
+    }
+    if (strtoul("-18446744073709551615", 0, 10) != 1) {
+        return 3;
+    }
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn base_integer_string_conversions_accept_enum_zero_endptr_constants() {
+    let program = r#"
+long int strtol(const char *text, char **end, int base);
+enum { NIL = 0 };
+int main(void) {
+    return strtol("7", NIL, 10) == 7 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn base_integer_string_conversions_preserve_runtime_safety_boundaries() {
+    let cases = [
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { return strtol(0, 0, 10); }\n",
+            "null character pointer passed as argument 1 to function 'strtol'",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { return strtol(\"7\", 0, 1); }\n",
+            "function 'strtol' requires base 0 or a value from 2 through 36",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { int *end = 0; return strtol(\"7\", &end, 10); }\n",
+            "function 'strtol' parameter 'endptr' requires the address of a mutable char pointer variable",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { int base = 10; return strtol(\"7\", 0, &base); }\n",
+            "pointer value used as scalar",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { return strtol(\"9223372036854775808\", 0, 10); }\n",
+            "integer string conversion overflow in function 'strtol'",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { return strtol(\"-9223372036854775809\", 0, 10); }\n",
+            "integer string conversion overflow in function 'strtol'",
+        ),
+        (
+            "unsigned long int strtoul(const char *text, char **end, int base);\nint main(void) { return strtoul(\"18446744073709551616\", 0, 10); }\n",
+            "integer string conversion overflow in function 'strtoul'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn base_integer_string_conversion_runtime_evaluates_base_before_endptr_shape_error() {
+    let program = r#"
+long int strtol(const char *text, char **end, int base);
+int invalid_base(void) { return 1 / 0; }
+int main(void) {
+    int *end = 0;
+    return strtol("7", &end, invalid_base());
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "division by zero");
+}
+
+#[test]
+fn sizeof_base_integer_string_conversions_validate_argument_shapes() {
+    let cases = [
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { return sizeof(strtol()); }\n",
+            "function 'strtol' expected 3 arguments, got 0",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { int *end = 0; return sizeof(strtol(\"7\", &end, 10)); }\n",
+            "function 'strtol' parameter 'endptr' requires the address of a mutable char pointer variable",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { int base = 10; return sizeof(strtol(\"7\", 0, &base)); }\n",
+            "function 'strtol' requires an integer base",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { return sizeof(strtol((strtol(), \"7\"), 0, 10)); }\n",
+            "function 'strtol' expected 3 arguments, got 0",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn sizeof_base_integer_string_conversions_validate_base_names() {
+    let program = r#"
+long int strtol(const char *text, char **end, int base);
+int main(void) {
+    return sizeof(strtol("7", 0, missing));
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "undefined variable 'missing'");
+}
+
+#[test]
+fn deeply_nested_sizeof_base_integer_string_conversion_validation_is_bounded() {
+    let mut base = "10".to_string();
+    for _ in 0..24 {
+        base = format!("strtol(\"10\", 0, {base})");
+    }
+    let program = format!(
+        "long int strtol(const char *text, char **end, int base);\nint main(void) {{ return sizeof(strtol(\"1\", 0, {base})) == sizeof(long int) ? 0 : 1; }}\n"
+    );
+
+    assert_eq!(interpret(&program).unwrap(), 0);
+}
+
+#[test]
+fn base_integer_string_conversion_input_scans_are_bounded() {
+    let accepted = format!("1x{}", "x".repeat(4094));
+    let accepted_program = format!(
+        "long int strtol(const char *text, char **end, int base);\nint main(void) {{ char input[] = \"{accepted}\"; char *end = 0; return strtol(input, &end, 10) == 1 && end - input == 1 ? 0 : 1; }}\n"
+    );
+    assert_eq!(interpret(&accepted_program).unwrap(), 0);
+
+    let rejected = "x".repeat(4097);
+    let rejected_program = format!(
+        "long int strtol(const char *text, char **end, int base);\nint main(void) {{ return strtol(\"{rejected}\", 0, 10); }}\n"
+    );
+    let err = interpret(&rejected_program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "argument 1 to function 'strtol' exceeded maximum input length of 4096 bytes"
+    );
+
+    let unterminated = "long int strtol(const char *text, char **end, int base);\nint main(void) { const char input[2] = {'1', '2'}; return strtol(input, 0, 10); }\n";
+    let err = interpret(unterminated).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "unterminated character sequence passed as argument 1 to function 'strtol'"
+    );
+}
+
+#[test]
+fn base_integer_string_conversion_endptr_preserves_storage_safety_metadata() {
+    let escaped_local = r#"
+long int strtol(const char *text, char **end, int base);
+long int parse(char **end) {
+    char input[] = "7x";
+    return strtol(input, end, 10);
+}
+int main(void) {
+    char *end = 0;
+    parse(&end);
+    return *end;
+}
+"#;
+    let err = interpret(escaped_local).unwrap_err();
+    assert_eq!(err.to_string(), "pointer to out-of-scope variable 'input'");
+
+    let escaped_compound_literal = r#"
+long int strtol(const char *text, char **end, int base);
+long int parse(char **end) {
+    return strtol((char[3]){'7', 'x', '\0'}, end, 10);
+}
+int main(void) {
+    char *end = 0;
+    parse(&end);
+    return *end;
+}
+"#;
+    let err = interpret(escaped_compound_literal).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "function 'strtol' cannot retain an end pointer into ownerless character storage"
+    );
+
+    let read_only = r#"
+long int strtol(const char *text, char **end, int base);
+int main(void) {
+    char *end = 0;
+    strtol("7x", &end, 10);
+    *end = 'y';
+    return 0;
+}
+"#;
+    let err = interpret(read_only).unwrap_err();
+    assert!(err.to_string().contains("read-only"));
+}
+
+#[test]
 fn supports_bounded_strcmp_standard_library_function() {
     let program = r#"
 int strcmp(const char *left, const char *right);

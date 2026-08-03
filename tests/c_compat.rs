@@ -282,6 +282,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/random_functions.c",
     "tests/fixtures/compat/valid/termination_functions.c",
     "tests/fixtures/compat/valid/integer_string_conversion_functions.c",
+    "tests/fixtures/compat/valid/base_integer_string_conversion_functions.c",
     "tests/fixtures/compat/valid/string_comparison_function.c",
     "tests/fixtures/compat/valid/string_collation_functions.c",
     "tests/fixtures/compat/valid/string_prefix_comparison_function.c",

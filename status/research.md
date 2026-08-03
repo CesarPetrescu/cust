@@ -18,6 +18,15 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-03 — Bounded base-aware integer string conversions
+
+- C11/POSIX-family `strto*` relationships needed by Cust can be implemented without host libc: skip C whitespace, accept one sign, select base 0 or 2..=36, require a valid hexadecimal digit before consuming `0x`, consume the maximal valid digit sequence, and set `endptr` to the original input when no conversion occurs.
+- Cust intentionally maps all supported signed/unsigned/short/long spellings onto deterministic 64-bit scalar/bit-pattern semantics and reports deterministic magnitude overflow instead of exposing host width or `errno`; native fixtures therefore assert only standard parse/end-pointer/unsigned-cast and ABI-independent `sizeof` relationships.
+- A non-null `endptr` can make an input pointer escape. Read-only string-literal storage is persistent, but mutable ownerless array compound-literal storage must be rejected before writing the output slot because it lacks a lexical owner that Cust can later prove live.
+- Non-evaluating intrinsic validation still must resolve base-expression names. Calling `sizeof_expr` from the base helper supplies metadata-only diagnostics; letting that helper own recursive base traversal and limiting the outer special-case walker to the input expression avoids duplicate/exponential validation.
+- A visible enum constant whose value is zero is a safe null `endptr` form in Cust's narrow model. Pair `identifier_resolves_to_enum_constant` with the value lookup so an inner object that shadows an outer enumerator cannot be misclassified.
+- Full implementation/recovery details: `references/cust-base-integer-string-conversion-functions.md`.
+
 ## 2026-08-03 — Safe `char **` output-parameter foundation
 
 - WG14 N1570 §6.5.16.1 and §7.22.1.4 (`https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf`) motivate the bounded slice: a future `strtol`/`strtoul` call must be able to assign either the original input pointer or the first unrecognized character through a non-null `char **endptr`, while a null `endptr` performs no write. Cust retains interpreter-owned pointer identity rather than host addresses.

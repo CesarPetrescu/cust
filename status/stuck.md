@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during the 2026-08-03 safe two-level character-pointer slice. Focused RED/GREEN, three rounds of independent read-only review with all findings resolved, formatting, strict Clippy, all 1,295 local tests, the rebuilt Docker test gate, runtime output `10`, and `git diff --check` pass. No active implementation, Docker, Git, research, or environment blocker exists. The completed `char **endptr` foundation unblocks bounded `strtol`/`strtoul` as the next roadmap package.
+None. Last reviewed during the 2026-08-03 bounded base-aware integer string-conversion package. Focused RED/GREEN, independent review and approved re-review, formatting, strict Clippy, all 1,310 local tests, the rebuilt Docker test gate, runtime output `10`, the compiler-oracle harness, security scan, and `git diff --check` pass. No active implementation, Docker, Git, research, or environment blocker exists. The completed package makes bounded v0.14.0 release preparation the next roadmap item.
 
 ## Blocker template
 
