@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-04 — v0.16.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.15.0`, then passed after Cargo/lock and both image tags moved to `0.16.0`. Executable `cargo test -- --list` accounting is 1,343 tests: 1,209 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the independent sum is also 1,343.
+- Local and remote `v0.16.0` annotated-tag preflight returned no refs. Built CLI, Cargo metadata, and the rebuilt container report `cust 0.16.0`. Independent read-only review returned `APPROVED`; formatting, strict Clippy, all 1,343 local/rebuilt-Docker tests, runtime output `10`, security scan, and `git diff --check` pass. Release status wording remains preparation-only until release-commit-first branch publication, annotated-tag publication, and exact remote peeled-target verification complete.
+- Candidate evaluation selected release closure ahead of adjacent tracked `char **` object reassignment and larger C11 `_Generic` support. Reassignment is promoted as the next concrete bounded language package because it extends existing interpreter-owned slot metadata without requiring host addresses or deeper pointer levels.
+
 ## 2026-08-04 — Safe `char **` expression parity
 
 - Conditional and comma expressions over tracked character-pointer-output objects must propagate outer-slot identity as metadata rather than collapsing to the scalar placeholder stored in ordinary value slots. Runtime selection evaluates only the chosen conditional branch and evaluates discarded comma operands once in source order; non-evaluating classification validates every branch without evaluating any operand.

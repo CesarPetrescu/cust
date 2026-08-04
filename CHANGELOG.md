@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.16.0 — 2026-08-04
+
+### Language subset
+
+- Completed expression parity for narrow tracked unqualified `char **` objects. Conditional and comma expressions preserve the selected outer-slot identity through parameter forwarding, equality, truthiness, and scalar control contexts with one-time source-order evaluation.
+
+### Diagnostics and verification
+
+- Added exact qualified function-parameter slot-address rejection and relational-ordering boundaries. Non-evaluating `sizeof` validates both conditional branches, discarded comma operands, ordinary call constraints, and deeply nested output-valued conditions without evaluating operands or repeating subtree work.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.16.0`.
+- Verified 1,343 executable tests at release preparation time: 1,209 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- System headers, standard-library calls beyond the explicitly prototyped bounded integer/string/character/random/termination families, locale-sensitive behavior outside Cust's fixed ASCII/C-locale model, floating-point and complex runtime values, general multiple-pointer-level objects beyond the narrow tracked unqualified `char **` model, `void *`, function pointers and variadic function calls, variable-length arrays, arrays with more than two dimensions, flexible array members and bit-fields, `goto`, other pragma semantics, and host ABI layout/promotion rules remain unsupported. Tracked `char **` object reassignment, address-taking, compound updates, and arithmetic remain outside the released slice.
+
 ## v0.15.0 — 2026-08-04
 
 ### Language subset

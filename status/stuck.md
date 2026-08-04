@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after safe `char **` expression parity on 2026-08-04. Review-driven focused RED/GREEN and final independent `APPROVED` are complete; formatting, warning-denied Clippy, all 1,343 local/rebuilt-Docker tests, runtime output `10`, and `git diff --check` pass. No active implementation, Docker, Git, research, or environment blocker exists.
+None. Last reviewed after bounded v0.16.0 release preparation on 2026-08-04. Focused version RED/GREEN, exact 1,343-test inventory accounting, local/remote tag preflight, independent `APPROVED`, formatting, warning-denied Clippy, all local/rebuilt-Docker tests, runtime output `10`, local/Cargo/container version `cust 0.16.0`, security scan, and `git diff --check` pass. No active implementation, Docker, Git, research, or environment blocker exists.
 
 ## Blocker template
 
