@@ -18,6 +18,15 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-04 — Tracked `char **` reassignment evaluation boundaries
+
+- Structural validation must never pre-read a tracked target before runtime side effects. For `output = (dangling = &live_slot, dangling)`, validate compatibility first, execute the left comma operand once, then perform liveness validation only when the right value is selected.
+- The same metadata/runtime split applies beneath non-evaluating intrinsics: `sizeof(strtol("7", output = output, 10))` checks `endptr` shape and assignment compatibility but must not inspect an expired target or mutate the object.
+- Broad character-output classification is only a routing hint. Consumers such as indirect assignment under `sizeof` must recursively validate conditional/comma pointer expressions before trusting their type, or an incompatible scalar branch can be hidden by a valid first branch.
+- `_Bool` conversion is a typed boundary distinct from ordinary truthy control flow. Evaluate a character-output assignment result through tracked metadata before generic scalar evaluation, then normalize null/non-null to `0`/`1`; never expose the scalar placeholder as the assignment result.
+- Published `v0.16.0` state was reverified locally and remotely: annotated object `35ddb340e9ffb0bce35a4384f782edd0a6df745b` peels to release commit `8d1537d78bd310ef8c6621d5520cf067241c3f55`.
+- Review also required the native parameter-reassignment fixture to write a previously untouched slot so the redirected write is independently observable rather than accidentally passing through identical prior state. Final review passed without findings; all 1,358 local tests and both canonical Docker commands pass.
+
 ## 2026-08-04 — v0.16.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.15.0`, then passed after Cargo/lock and both image tags moved to `0.16.0`. Executable `cargo test -- --list` accounting is 1,343 tests: 1,209 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the independent sum is also 1,343.

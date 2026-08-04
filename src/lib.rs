@@ -17048,6 +17048,14 @@ impl Interpreter {
     }
 
     fn eval_scalar_conversion(&mut self, ty: CType, expr: &Expr) -> CustResult<i64> {
+        if ty == CType::Bool && self.expr_is_character_pointer_output_value(expr) {
+            let output =
+                self.eval_character_pointer_output_argument("boolean conversion", "value", expr)?;
+            return Ok(i64::from(matches!(
+                output,
+                CharacterPointerOutput::Slot { .. }
+            )));
+        }
         if ty == CType::Bool && self.expr_is_pointer_value(expr) {
             return Ok(i64::from(Self::pointer_truthy(&self.eval_pointer(expr)?)));
         }
@@ -18110,7 +18118,9 @@ impl Interpreter {
             )));
         }
         self.sizeof_integer_string_conversion_call(name, &args[..1])?;
-        self.validate_character_pointer_output_argument(name, "endptr", &args[1])?;
+        self.validate_character_pointer_output_argument_with_liveness(
+            name, "endptr", &args[1], false,
+        )?;
         if self.expr_is_pointer_value(&args[2])
             || self.aggregate_expr_type_name(&args[2]).is_ok()
             || self.expr_is_void_value(&args[2])
@@ -19610,6 +19620,11 @@ impl Interpreter {
                 self.validate_nested_string_intrinsic_calls(index)?;
                 self.validate_nested_string_intrinsic_calls(array_index)?;
             }
+            Expr::Assign { name, value } if self.find_character_pointer_output(name).is_some() => {
+                self.validate_character_pointer_output_object_assignment_with_liveness(
+                    name, value, false,
+                )?;
+            }
             Expr::Assign { value, .. }
             | Expr::StructSet { value, .. }
             | Expr::CompoundAssign { value, .. }
@@ -20060,18 +20075,11 @@ impl Interpreter {
         None
     }
 
-    fn character_pointer_output_expr(&self, expr: &Expr) -> Option<CharacterPointerOutput> {
-        match expr {
-            Expr::Var(name) => self.find_character_pointer_output(name).cloned(),
-            Expr::AddressOf(name) => self.find_character_pointer_slot_address(name),
-            _ => None,
-        }
-    }
-
     fn expr_is_character_pointer_output_value(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Var(name) => self.find_character_pointer_output(name).is_some(),
             Expr::AddressOf(name) => self.find_character_pointer_slot_address(name).is_some(),
+            Expr::Assign { name, .. } => self.find_character_pointer_output(name).is_some(),
             Expr::Conditional {
                 then_expr,
                 else_expr,
@@ -20152,6 +20160,21 @@ impl Interpreter {
         param_name: &str,
         expr: &Expr,
     ) -> CustResult<CharacterPointerOutput> {
+        self.validate_character_pointer_output_argument_with_liveness(
+            function_name,
+            param_name,
+            expr,
+            true,
+        )
+    }
+
+    fn validate_character_pointer_output_argument_with_liveness(
+        &self,
+        function_name: &str,
+        param_name: &str,
+        expr: &Expr,
+        check_liveness: bool,
+    ) -> CustResult<CharacterPointerOutput> {
         match expr {
             Expr::Number(0) => Ok(CharacterPointerOutput::Null),
             Expr::Var(name)
@@ -20166,7 +20189,7 @@ impl Interpreter {
                         "function '{function_name}' parameter '{param_name}' requires a char pointer slot address"
                     ))
                 })?;
-                if matches!(output, CharacterPointerOutput::Slot { .. }) {
+                if check_liveness && matches!(output, CharacterPointerOutput::Slot { .. }) {
                     self.read_character_pointer_output(output)?;
                 }
                 Ok(output.clone())
@@ -20225,27 +20248,41 @@ impl Interpreter {
                 }
                 Err(CustError::new(format!("undefined variable '{name}'")))
             }
+            Expr::Assign { name, value } if self.find_character_pointer_output(name).is_some() => {
+                self.validate_character_pointer_output_object_assignment_with_liveness(
+                    name,
+                    value,
+                    check_liveness,
+                )
+            }
             Expr::Conditional {
                 cond,
                 then_expr,
                 else_expr,
             } => {
                 self.validate_non_evaluating_scalar_condition(cond)?;
-                let then_output = self.validate_character_pointer_output_argument(
+                let then_output = self.validate_character_pointer_output_argument_with_liveness(
                     function_name,
                     param_name,
                     then_expr,
+                    false,
                 )?;
-                self.validate_character_pointer_output_argument(
+                self.validate_character_pointer_output_argument_with_liveness(
                     function_name,
                     param_name,
                     else_expr,
+                    false,
                 )?;
                 Ok(then_output)
             }
             Expr::Comma(left, right) => {
                 self.validate_non_evaluating_discard_expr(left)?;
-                self.validate_character_pointer_output_argument(function_name, param_name, right)
+                self.validate_character_pointer_output_argument_with_liveness(
+                    function_name,
+                    param_name,
+                    right,
+                    check_liveness,
+                )
             }
             _ => Err(CustError::new(format!(
                 "function '{function_name}' parameter '{param_name}' requires a char pointer slot address"
@@ -20255,7 +20292,12 @@ impl Interpreter {
 
     fn validate_non_evaluating_scalar_condition(&self, expr: &Expr) -> CustResult<()> {
         if self.expr_is_character_pointer_output_value(expr) {
-            self.validate_character_pointer_output_argument("scalar condition", "value", expr)?;
+            self.validate_character_pointer_output_argument_with_liveness(
+                "scalar condition",
+                "value",
+                expr,
+                false,
+            )?;
             return Ok(());
         }
         self.reject_void_scalar_operand(expr)?;
@@ -20319,7 +20361,12 @@ impl Interpreter {
         param_name: &str,
         expr: &Expr,
     ) -> CustResult<CharacterPointerOutput> {
-        self.validate_character_pointer_output_argument(function_name, param_name, expr)?;
+        self.validate_character_pointer_output_argument_with_liveness(
+            function_name,
+            param_name,
+            expr,
+            false,
+        )?;
         self.eval_validated_character_pointer_output_argument(function_name, param_name, expr)
     }
 
@@ -20354,6 +20401,9 @@ impl Interpreter {
                     right,
                 )
             }
+            Expr::Assign { name, value } if self.find_character_pointer_output(name).is_some() => {
+                self.assign_character_pointer_output_object(name, value)
+            }
             _ => self.validate_character_pointer_output_argument(function_name, param_name, expr),
         }
     }
@@ -20374,6 +20424,76 @@ impl Interpreter {
             } else {
                 CustError::new(format!(
                     "character pointer object '{name}' initializer requires null, another character pointer output object, or the address of a mutable char pointer variable"
+                ))
+            }
+        })
+    }
+
+    fn assign_character_pointer_output_object(
+        &mut self,
+        name: &str,
+        expr: &Expr,
+    ) -> CustResult<CharacterPointerOutput> {
+        self.validate_character_pointer_output_object_assignment_with_liveness(name, expr, false)?;
+        let output = self.eval_validated_character_pointer_output_argument(
+            "character pointer object assignment",
+            name,
+            expr,
+        )?;
+
+        for scope in self.scopes.iter_mut().rev() {
+            if scope.values.contains_key(name) {
+                let Some(slot) = scope.character_pointer_outputs.get_mut(name) else {
+                    return Err(CustError::new(format!(
+                        "assignment to undeclared character pointer object '{name}'"
+                    )));
+                };
+                *slot = output.clone();
+                if let Some(Value::Scalar { value, .. }) = scope.values.get_mut(name) {
+                    *value = i64::from(matches!(output, CharacterPointerOutput::Slot { .. }));
+                }
+                return Ok(output);
+            }
+            if let Some(id) = scope.static_local_ids.get(name).copied() {
+                let Some(storage) = self.static_locals.get_mut(&id) else {
+                    break;
+                };
+                if storage.character_pointer_output.is_none() {
+                    break;
+                }
+                storage.character_pointer_output = Some(output.clone());
+                if let Value::Scalar { value, .. } = &mut storage.value {
+                    *value = i64::from(matches!(output, CharacterPointerOutput::Slot { .. }));
+                }
+                return Ok(output);
+            }
+            if scope.enum_constants.contains_key(name) {
+                break;
+            }
+        }
+        Err(CustError::new(format!(
+            "assignment to undeclared character pointer object '{name}'"
+        )))
+    }
+
+    fn validate_character_pointer_output_object_assignment_with_liveness(
+        &self,
+        name: &str,
+        expr: &Expr,
+        check_liveness: bool,
+    ) -> CustResult<CharacterPointerOutput> {
+        self.validate_character_pointer_output_argument_with_liveness(
+            "character pointer object assignment",
+            name,
+            expr,
+            check_liveness,
+        )
+        .map_err(|error| {
+            if error.message.starts_with("pointer to out-of-scope variable") {
+                error
+            } else {
+                CustError::new(format!(
+                    "character pointer object '{name}' assignment requires null, another character pointer output object, or the address of a mutable char pointer variable"
                 ))
             }
         })
@@ -20447,9 +20567,11 @@ impl Interpreter {
         output_expr: &Expr,
         value: &Expr,
     ) -> CustResult<PointerValue> {
-        let output = self
-            .character_pointer_output_expr(output_expr)
-            .ok_or_else(|| CustError::new("expected a character pointer output parameter"))?;
+        let output = self.eval_character_pointer_output_argument(
+            "character pointer output assignment",
+            "output",
+            output_expr,
+        )?;
 
         self.ensure_pointer_conversion_preserves_const(false, value)?;
         let pointer = self.eval_pointer(value)?;
@@ -20665,12 +20787,24 @@ impl Interpreter {
 
     fn pointer_expr_pointee_type(&self, expr: &Expr) -> CustResult<Option<PointeeType>> {
         match expr {
-            Expr::Deref(pointer) if self.character_pointer_output_expr(pointer).is_some() => {
+            Expr::Deref(pointer) if self.expr_is_character_pointer_output_value(pointer) => {
+                self.validate_character_pointer_output_argument_with_liveness(
+                    "character pointer output dereference",
+                    "output",
+                    pointer,
+                    false,
+                )?;
                 Ok(Some(PointeeType::Scalar(CType::Char)))
             }
             Expr::DerefSet { pointer, value }
-                if self.character_pointer_output_expr(pointer).is_some() =>
+                if self.expr_is_character_pointer_output_value(pointer) =>
             {
+                self.validate_character_pointer_output_argument_with_liveness(
+                    "character pointer output dereference",
+                    "output",
+                    pointer,
+                    false,
+                )?;
                 self.validate_character_pointer_output_assignment_expr(value)?;
                 Ok(Some(PointeeType::Scalar(CType::Char)))
             }
@@ -25732,14 +25866,16 @@ impl Interpreter {
     fn eval_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
         match expr {
             Expr::Number(0) => Ok(PointerValue::Null),
-            Expr::Deref(output) if self.character_pointer_output_expr(output).is_some() => {
-                let output = self
-                    .character_pointer_output_expr(output)
-                    .expect("guard requires a character pointer output parameter");
+            Expr::Deref(output) if self.expr_is_character_pointer_output_value(output) => {
+                let output = self.eval_character_pointer_output_argument(
+                    "character pointer output dereference",
+                    "output",
+                    output,
+                )?;
                 self.read_character_pointer_output(&output)
             }
             Expr::DerefSet { pointer, value }
-                if self.character_pointer_output_expr(pointer).is_some() =>
+                if self.expr_is_character_pointer_output_value(pointer) =>
             {
                 self.assign_character_pointer_output(pointer, value)
             }
@@ -27380,10 +27516,10 @@ impl Interpreter {
             ),
             Expr::Increment { target, .. } => self.expr_is_pointer_value(target),
             Expr::Deref(pointer) => {
-                self.character_pointer_output_expr(pointer).is_some()
+                self.expr_is_character_pointer_output_value(pointer)
                     || self.array2d_row_pointer_element_type(pointer).is_some()
             }
-            Expr::DerefSet { pointer, .. } => self.character_pointer_output_expr(pointer).is_some(),
+            Expr::DerefSet { pointer, .. } => self.expr_is_character_pointer_output_value(pointer),
             Expr::Call { name, .. } => {
                 self.has_character_search_prototype(name)
                     || self.has_character_set_search_prototype(name)
@@ -28563,6 +28699,12 @@ impl Interpreter {
             | Expr::AddressOfAggregateField { .. }
             | Expr::PointerCast { .. } => Ok(POINTER_SIZE),
             Expr::Deref(pointer) => self.sizeof_deref(pointer),
+            Expr::Assign { name, value } if self.find_character_pointer_output(name).is_some() => {
+                self.validate_character_pointer_output_object_assignment_with_liveness(
+                    name, value, false,
+                )?;
+                Ok(POINTER_SIZE)
+            }
             Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
                 self.sizeof_assignment_result(name)
             }
@@ -28574,8 +28716,14 @@ impl Interpreter {
                 }
             }
             Expr::DerefSet { pointer, value }
-                if self.character_pointer_output_expr(pointer).is_some() =>
+                if self.expr_is_character_pointer_output_value(pointer) =>
             {
+                self.validate_character_pointer_output_argument_with_liveness(
+                    "character pointer output dereference",
+                    "output",
+                    pointer,
+                    false,
+                )?;
                 self.validate_character_pointer_output_assignment_expr(value)?;
                 Ok(POINTER_SIZE)
             }
@@ -29405,7 +29553,13 @@ impl Interpreter {
     }
 
     fn sizeof_deref(&self, pointer: &Expr) -> CustResult<i64> {
-        if self.character_pointer_output_expr(pointer).is_some() {
+        if self.expr_is_character_pointer_output_value(pointer) {
+            self.validate_character_pointer_output_argument_with_liveness(
+                "character pointer output dereference",
+                "output",
+                pointer,
+                false,
+            )?;
             return Ok(POINTER_SIZE);
         }
         if let Some(ty) = self.pointer_expr_pointee_type(pointer)? {
@@ -30450,9 +30604,8 @@ impl Interpreter {
             }
             Stmt::Assign(name, expr) => {
                 if self.find_character_pointer_output(name).is_some() {
-                    return Err(CustError::new(
-                        "character pointer output parameter reassignment is not supported",
-                    ));
+                    self.assign_character_pointer_output_object(name, expr)?;
+                    return Ok(ExecFlow::None);
                 }
                 let existing = self.find_variable(name).cloned();
                 match existing {
@@ -30516,7 +30669,7 @@ impl Interpreter {
                 }
             }
             Stmt::DerefAssign { pointer, value } => {
-                if self.character_pointer_output_expr(pointer).is_some() {
+                if self.expr_is_character_pointer_output_value(pointer) {
                     self.assign_character_pointer_output(pointer, value)?;
                     return Ok(ExecFlow::None);
                 }

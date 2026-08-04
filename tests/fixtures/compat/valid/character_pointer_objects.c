@@ -10,6 +10,11 @@ static void set_output(char **output, char *value) {
     }
 }
 
+static void redirect_output(char **output, char **replacement, char *value) {
+    output = replacement;
+    *output = value;
+}
+
 static int update_static(char *value) {
     static char *local_slot = 0;
     static char **local_output = &local_slot;
@@ -19,7 +24,7 @@ static int update_static(char *value) {
 
 int main(void) {
     char local_text[] = "abcd";
-    char *local_slot = 0, *local_second_slot = 0, *mixed_slot = 0,
+    char *local_slot = 0, *local_second_slot = 0, *mixed_slot = 0, *redirect_slot = 0,
          **mixed_output = &mixed_slot;
     char **local_output = &local_slot, **local_second_output = &local_second_slot;
     char **alias = local_output;
@@ -35,8 +40,17 @@ int main(void) {
     *file_output = global_text + 3;
     set_output(null_output, local_text);
 
-    if (markers != 2 || alias != selected || *local_slot != 'b' ||
-        *local_second_slot != 'c' || *mixed_slot != 'd' ||
+    local_output = 0;
+    if (local_output != 0) {
+        return 5;
+    }
+    local_output = alias;
+    local_output = (markers++, &local_slot);
+    redirect_output(local_output, &redirect_slot, local_text + 3);
+
+    if (markers != 3 || alias != selected || local_output != &local_slot ||
+        *local_slot != 'b' ||
+        *local_second_slot != 'c' || *mixed_slot != 'd' || *redirect_slot != 'd' ||
         *global_slot != 'x' || *global_second_slot != 'y' || *file_slot != 'z') {
         return 1;
     }

@@ -11,10 +11,11 @@ Supported objects:
 - support `*output` reads and null/non-null writes;
 - forward through existing unqualified `char **` parameters;
 - forward conditional/comma object values while preserving the selected outer slot and one-time evaluation;
+- reassign from null, another tracked output object, or `&slot`, with assignment expressions returning the selected output identity;
 - preserve outer-slot and pointee owner, lifetime, type, and read-only metadata;
 - support equality, truthiness, and non-evaluating `sizeof`.
 
-The safe boundary rejects qualified target slots, qualified/deeper/array `char **` declarators, incompatible and const pointees, expired slots or returned pointees, outer-object reassignment/increment/address-taking, and arithmetic.
+The safe boundary rejects qualified target slots, qualified/deeper/array `char **` declarators, incompatible and const pointees, expired slots or returned pointees, compound reassignment/increment/address-taking, and arithmetic.
 
 ## Representation
 
@@ -43,6 +44,16 @@ Ordinary scopes store object metadata in `Scope::character_pointer_outputs`; sta
 5. Check pointee owner liveness before later dereference.
 6. Check character-output metadata before generic scalar evaluation, truthiness, equality, `sizeof`, assignment, compound assignment, increment, address-of, and arithmetic.
 7. Do not permit host-address conversion or general deeper-pointer behavior.
+
+## Reassignment and assignment-expression parity
+
+- Update both scope-owned and static-local `CharacterPointerOutput` metadata plus the scalar truthiness placeholder; parameter reassignment remains local to the callee.
+- Return the newly selected `CharacterPointerOutput` from assignment expressions so forwarding, equality/truthiness, and indirect reads/writes preserve outer-slot identity.
+- Route `_Bool` initialization/conversion through character-output evaluation before generic scalar assignment evaluation so null/non-null assignment results normalize to `0`/`1` without exposing the placeholder.
+- Evaluate the RHS exactly once. Validation must remain metadata-only; the selected runtime branch performs its own liveness check.
+- Type/classification consumers must validate assignment RHS compatibility before trusting `expr_is_character_pointer_output_value()`. This includes nested forms such as `sizeof(**(output = &wrong_slot))`.
+- Under `sizeof`, separate structural compatibility from liveness: a dangling tracked value still has type `char **`, so `sizeof(output = output)` must not observe its expired target.
+- Validate both conditional branches structurally, but check target liveness only for the branch selected at runtime. An expired unselected branch must not reject a valid assignment.
 
 ## Non-evaluating validation pitfall
 
@@ -75,7 +86,10 @@ Focused RED/GREEN regressions covered:
 - conditional/comma forwarding, selected-slot equality/truthiness, and qualified parameter-slot rejection;
 - direct conditional-output `sizeof`, invalid non-null scalar branches, discarded ordinary-call arity, and linear nested validation;
 - third-star and pointer-array declarators;
-- direct, compound, prefix/postfix, and non-evaluating outer-object reassignment attempts.
+- statement/parameter/static reassignment, assignment-result forwarding and indirect access, one-time RHS evaluation, and non-evaluating `sizeof`;
+- incompatible/qualified RHS values across direct and nested `sizeof` routes, plus selected/unselected expired-target behavior;
+- comma-side-effect liveness repair, non-evaluating `strtol` `endptr` assignment, conditional indirect-assignment target validation, and null/non-null `_Bool` normalization;
+- retained compound, prefix/postfix, address-taking, and arithmetic boundaries.
 
 The warning-free native fixture is `tests/fixtures/compat/valid/character_pointer_objects.c` and is registered explicitly in `tests/c_compat.rs`. Run the actual compiler-oracle harness, not a fixture-name filter:
 

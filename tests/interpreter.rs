@@ -11141,6 +11141,44 @@ int main(void) {
 }
 
 #[test]
+fn character_pointer_object_reassignment_preserves_static_and_parameter_slot_semantics() {
+    let program = r#"
+char *global_first = 0;
+char *global_second = 0;
+char **global_output = 0;
+
+void select_output(char **output, char **replacement, char *value) {
+    output = replacement;
+    *output = value;
+}
+
+int update_static(char *value) {
+    static char *first = 0;
+    static char *second = 0;
+    static char **output = 0;
+
+    output = &first;
+    *output = value;
+    output = &second;
+    *output = value + 1;
+    return *first + *second;
+}
+
+int main(void) {
+    char text[] = "abcd";
+    global_output = &global_first;
+    *global_output = text;
+    select_output(global_output, &global_second, text + 2);
+
+    return global_output == &global_first && *global_first == 'a' &&
+           *global_second == 'c' && update_static(text) == 'a' + 'b' ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn character_pointer_objects_preserve_null_truthiness_and_forwarding() {
     let program = r#"
 void set_output(char **output, char *value) {
@@ -11160,6 +11198,245 @@ int main(void) {
 "#;
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_objects_reassign_between_null_slots_and_objects() {
+    let program = r#"
+int main(void) {
+    char text[] = "abcd";
+    char *first_slot = 0;
+    char *second_slot = 0;
+    char **output = 0;
+    char **alias = &first_slot;
+
+    output = &second_slot;
+    *output = text + 1;
+    output = alias;
+    *output = text + 2;
+    output = 0;
+
+    return output == 0 && !output && *first_slot == 'c' && *second_slot == 'b' ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_assignment_expressions_preserve_selected_identity_once() {
+    let program = r#"
+int markers = 0;
+
+int mark(void) {
+    markers = markers + 1;
+    return 0;
+}
+
+void set_output(char **output, char *value) {
+    *output = value;
+}
+
+int main(void) {
+    char text[] = "abcd";
+    char *first_slot = 0;
+    char *second_slot = 0;
+    char **output = 0;
+    char **first = &first_slot;
+    char **selected = (output = (mark(), &second_slot));
+
+    set_output(output = first, text + 2);
+    *selected = text + 1;
+    return markers == 1 && output == first && selected == &second_slot &&
+           *first_slot == 'c' && *second_slot == 'b' ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_assignment_results_support_indirect_reads_and_writes() {
+    let program = r#"
+int main(void) {
+    char text[] = "abcd";
+    char *slot = 0;
+    char **output = 0;
+
+    *(output = &slot) = text + 1;
+    return **(output = &slot) == 'b' ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_assignment_results_normalize_in_bool_initializers() {
+    let program = r#"
+int main(void) {
+    char *slot = 0;
+    char **output = 0;
+
+    _Bool non_null = (output = &slot);
+    _Bool null_value = (output = 0);
+    return non_null == 1 && null_value == 0 && output == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_assignment_sizeof_is_non_evaluating_and_pointer_sized() {
+    let program = r#"
+int markers = 0;
+
+int mark(void) {
+    markers = markers + 1;
+    return 0;
+}
+
+int main(void) {
+    char *first_slot = 0;
+    char *second_slot = 0;
+    char **output = &first_slot;
+    int size = sizeof(output = (mark(), &second_slot));
+
+    return size == sizeof(char *) && markers == 0 && output == &first_slot ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_assignment_sizeof_does_not_observe_expired_targets() {
+    let program = r#"
+char **output = 0;
+
+void capture(void) {
+    char *local_slot = 0;
+    output = &local_slot;
+}
+
+int main(void) {
+    capture();
+    return sizeof(output = output) == sizeof(char *) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_assignment_condition_validation_preserves_runtime_order() {
+    let program = r#"
+char **dangling = 0;
+
+void capture(void) {
+    char *expired_slot = 0;
+    dangling = &expired_slot;
+}
+
+int main(void) {
+    char *live_slot = 0;
+    char *first_slot = 0;
+    char *second_slot = 0;
+    char **output = 0;
+    capture();
+
+    output = ((dangling = &live_slot), dangling) ? &first_slot : &second_slot;
+    return output == &first_slot &&
+           sizeof(output = (dangling ? &first_slot : &second_slot)) == sizeof(char *) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_assignment_comma_rhs_repairs_liveness_before_observation() {
+    let program = r#"
+char **dangling = 0;
+
+void capture(void) {
+    char *expired_slot = 0;
+    dangling = &expired_slot;
+}
+
+int main(void) {
+    char *live_slot = 0;
+    char **output = 0;
+    capture();
+
+    output = (dangling = &live_slot, dangling);
+    return output == &live_slot ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_assignment_in_strtol_sizeof_does_not_observe_liveness() {
+    let program = r#"
+long int strtol(const char *text, char **end, int base);
+char **output = 0;
+
+void capture(void) {
+    char *expired_slot = 0;
+    output = &expired_slot;
+}
+
+int main(void) {
+    capture();
+    return sizeof(strtol("7", output = output, 10)) == sizeof(long int) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_indirect_assignment_sizeof_validates_conditional_pointer() {
+    let program = r#"
+int main(void) {
+    char text[] = "x";
+    char *slot = 0;
+    char *ok = text;
+    char **output = 0;
+    return sizeof(*(1 ? (output = &slot) : 1) = ok);
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "function 'character pointer output dereference' parameter 'output' requires a char pointer slot address"
+    );
+}
+
+#[test]
+fn character_pointer_object_assignment_sizeof_validates_scalar_wrappers() {
+    for expression in [
+        "!(output = wrong)",
+        "(output = wrong) == 0",
+        "(int)(output = wrong)",
+        "1 ? ((output = wrong) == 0) : 0",
+        "(output = wrong, 1)",
+        "(output = wrong) && 1",
+    ] {
+        let program = format!(
+            "int main(void) {{ int value = 0; int *wrong = &value; char *slot = 0; char **output = &slot; return sizeof({expression}); }}\n"
+        );
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "character pointer object 'output' assignment requires null, another character pointer output object, or the address of a mutable char pointer variable",
+            "expression: {expression}"
+        );
+    }
 }
 
 #[test]
@@ -11412,18 +11689,16 @@ fn character_pointer_objects_reject_deeper_and_array_declarators() {
 }
 
 #[test]
-fn character_pointer_object_reassignment_and_increment_are_rejected() {
+fn character_pointer_object_compound_updates_and_increment_are_rejected() {
     for operation in [
-        "output = &other",
         "output += 1",
         "output++",
         "++output",
-        "sizeof(output = &other)",
         "sizeof(output += 1)",
         "sizeof(output++)",
     ] {
         let program = format!(
-            "int main(void) {{ char *slot = 0; char *other = 0; char **output = &slot; {operation}; return 0; }}\n"
+            "int main(void) {{ char *slot = 0; char **output = &slot; {operation}; return 0; }}\n"
         );
         let err = interpret(&program).unwrap_err();
         assert_eq!(
@@ -11431,6 +11706,39 @@ fn character_pointer_object_reassignment_and_increment_are_rejected() {
             "character pointer output parameter reassignment is not supported",
             "operation: {operation}"
         );
+    }
+}
+
+#[test]
+fn character_pointer_object_reassignment_rejects_incompatible_and_qualified_slots() {
+    for (declarations, expression) in [
+        ("int value = 0; int *wrong = &value;", "wrong"),
+        ("int value = 0;", "&value"),
+        ("const char *qualified = 0;", "&qualified"),
+        ("char * const fixed = 0;", "&fixed"),
+        ("volatile char *qualified = 0;", "&qualified"),
+        ("char * volatile qualified = 0;", "&qualified"),
+        ("char * restrict qualified = 0;", "&qualified"),
+        ("_Atomic(char) *qualified = 0;", "&qualified"),
+        ("char * _Atomic qualified = 0;", "&qualified"),
+        ("char *ok = 0;", "1"),
+    ] {
+        for operation in [
+            format!("output = {expression}"),
+            format!("sizeof(output = {expression})"),
+            format!("sizeof(*(output = {expression}))"),
+            format!("sizeof(**(output = {expression}))"),
+        ] {
+            let program = format!(
+                "int main(void) {{ char *slot = 0; char **output = &slot; {declarations} {operation}; return 0; }}\n"
+            );
+            let err = interpret(&program).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "character pointer object 'output' assignment requires null, another character pointer output object, or the address of a mutable char pointer variable",
+                "operation: {operation}"
+            );
+        }
     }
 }
 
@@ -11584,6 +11892,58 @@ int main(void) {
     assert_eq!(
         err.to_string(),
         "static character pointer object initializer requires a char pointer slot with static storage duration"
+    );
+}
+
+#[test]
+fn character_pointer_object_reassignment_rejects_expired_target_slots() {
+    let program = r#"
+char **output = 0;
+
+void capture(void) {
+    char *local_slot = 0;
+    output = &local_slot;
+}
+
+int main(void) {
+    capture();
+    return output != 0;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "pointer to out-of-scope variable 'local_slot'"
+    );
+}
+
+#[test]
+fn character_pointer_object_reassignment_observes_only_selected_conditional_target() {
+    let valid_program = r#"
+char **dangling = 0;
+
+void capture(void) {
+    char *expired_slot = 0;
+    dangling = &expired_slot;
+}
+
+int main(void) {
+    char *live_slot = 0;
+    char **output = 0;
+    capture();
+    output = 0 ? dangling : &live_slot;
+    return output == &live_slot ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(valid_program).unwrap(), 0);
+
+    let invalid_program = valid_program.replace("0 ? dangling", "1 ? dangling");
+    let err = interpret(&invalid_program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "pointer to out-of-scope variable 'expired_slot'"
     );
 }
 
@@ -12141,25 +12501,27 @@ int main(void) {
 }
 
 #[test]
-fn character_pointer_output_parameter_reassignment_is_rejected() {
+fn character_pointer_output_parameter_reassignment_is_local_to_the_callee() {
     let program = r#"
-void clear_local(char **out) {
+int redirect_local(char **out, char **replacement, char *value) {
+    out = replacement;
+    *out = value;
     out = 0;
+    return out == 0;
 }
 
 int main(void) {
-    char *end = 0;
-    clear_local(&end);
-    return 0;
+    char text[] = "abc";
+    char *first = 0;
+    char *second = 0;
+    char **output = &first;
+
+    int redirected = redirect_local(output, &second, text + 1);
+    return redirected && output == &first && first == 0 && *second == 'b' ? 0 : 1;
 }
 "#;
 
-    let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "character pointer output parameter reassignment is not supported"
-    );
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]
