@@ -4,6 +4,28 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.17.0 — 2026-08-04
+
+### Language subset
+
+- Added ordinary reassignment for narrow tracked unqualified `char **` objects. Local, file-global, block-static, and parameter objects may select null, a compatible mutable unqualified `char *` slot address, or a compatible tracked object value while preserving outer-slot and pointee owner/lifetime/read-only identity.
+- Assignment results forward through initializers, equality, truthiness, indirect reads/writes, and `_Bool` conversion with one-time source-order evaluation; parameter-slot reassignment remains local to the callee.
+
+### Diagnostics and verification
+
+- Structural non-evaluating validation accepts compatible assignment forms without mutation or stale-target observation. Exact boundaries remain for incompatible or qualified slots, expired selected owners, deeper pointers, arrays, address-taking, compound updates, increment/decrement, and arithmetic.
+- Review-driven regressions cover comma-side-effect repair before liveness checks, non-evaluating `strtol` `endptr` assignment, conditional indirect-assignment targets, nested scalar wrappers, and null/non-null assignment-result `_Bool` normalization.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.17.0`.
+- Verified an executable inventory of 1,358 tests: 1,224 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- General multiple-pointer-level objects beyond the narrow tracked unqualified `char **` model, qualified/deeper pointer-to-pointer forms, `char **` address-taking/compound updates/arithmetic, `void *`, function pointers and variadic calls, floating-point and complex runtime values, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, other pragma semantics, and host ABI layout/promotion rules remain unsupported.
+
 ## v0.16.0 — 2026-08-04
 
 ### Language subset

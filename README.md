@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.16.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.17.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -67,7 +67,7 @@ Both Compose services use `pull_policy: build`, so `docker compose run --rm test
 
 The `test` service keeps a writable container overlay so Cargo can update `target/`, but it has no host source mount, no network, dropped capabilities, and no privilege escalation.
 
-## Supported v0.16.0 language
+## Supported v0.17.0 language
 
 Cust currently supports this C subset:
 
@@ -105,7 +105,7 @@ Features:
 - fixed two-dimensional `int[R][C]` and `char[R][C]` objects and aggregate fields with nested initialization, typedef aliases, comma-separated declarators, double-index scalar lvalues, deterministic type queries, and C-style parameter adjustment
 - safe pointer-to-row forms for fixed two-dimensional scalar arrays, including `T (*row)[C]` objects/parameters, pointer-to-row typedef aliases and function returns, row-scaled arithmetic/comparison, and double indexing through direct, call, conditional, comma, and supported aggregate-field decay expressions
 - safe one-level typed pointers such as `int *p = &x;`, `struct Point *point = points`, dereference/address-of, pointer-returning functions, bounded arithmetic, same-array difference/ordering, pointer truthiness/equality, and const-preserving scalar/aggregate conversions
-- narrowly typed unqualified `char **` objects at local, file-global, and block-static scope plus standard-library-style output parameters, preserving mutable `char *` slot identity, pointee owner/lifetime/read-only metadata, null/default state, indirect reads/writes, conditional/comma forwarding, equality/truthiness, and branch-compatible non-evaluating type checks without exposing host addresses; qualified slot addresses and relational ordering remain exact boundaries
+- narrowly typed unqualified `char **` objects at local, file-global, and block-static scope plus standard-library-style output parameters, preserving mutable `char *` slot identity, pointee owner/lifetime/read-only metadata, null/default state, ordinary reassignment from null, compatible mutable unqualified `char *` slot addresses, or tracked object values, indirect reads/writes, conditional/comma and assignment-result forwarding, equality/truthiness, `_Bool` normalization, and branch-compatible non-evaluating type checks without exposing host addresses; qualified slot addresses, compound updates, address-taking, arithmetic, and relational ordering remain exact boundaries
 - pointer parameters with scalar/aggregate array and string decay, pointer indexing (`p[i]`), supported field-array decay, and element/field addresses such as `&values[1]`, `&points[1]`, and `&point->x`
 - array parameters such as `char text[4]` and C-style unsized parameter spellings such as `int values[]`, `char text[]`, and `struct Point points[]`, which behave like pointer parameters; string literals are read-only NUL-terminated byte arrays and can be passed to matching array or pointer parameters
 - nested block scopes with inner shadowing
@@ -208,7 +208,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: allow narrow tracked unqualified `char **` objects to be reassigned between null and compatible mutable unqualified `char *` slot addresses while preserving outer-slot and pointee owner/lifetime/qualification metadata; address-taking, compound updates, arithmetic, and deeper pointers remain unsupported.
+- Next milestone: add a bounded first-pass C11 `_Generic` selection slice over Cust's deterministic scalar, one-level pointer, and named aggregate types, with one selected association, non-evaluation of unselected expressions, exact duplicate/default/type diagnostics, and compiler-oracle coverage.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider floating-point values, multiple pointer levels, and broader C conformance fixtures.
 

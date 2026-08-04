@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after tracked `char **` reassignment closure on 2026-08-04. Final independent review passed without findings; formatting, warning-denied Clippy, all 1,358 local tests, the canonical Docker test gate, runtime output `10`, all 45 focused character-pointer-object tests, the compiler-oracle harness, recursion-depth coverage, and `git diff --check` pass. No implementation, Docker, Git, research, or environment blocker exists.
+None. Last reviewed after bounded v0.17.0 release verification on 2026-08-04. Exact CLI and Compose version assertions went RED against `0.16.0` and GREEN at `0.17.0`; local/remote tag preflight is empty; independent re-review returned `APPROVED`; formatting, strict Clippy, all 1,358 local/rebuilt-Docker tests, runtime output `10`, local/Cargo/container version `cust 0.17.0`, and `git diff --check` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

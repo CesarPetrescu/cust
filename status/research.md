@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-04 — v0.17.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.16.0`, then passed after Cargo/lock and both image tags moved to `0.17.0`.
+- Executable target-by-target accounting is 1,358 tests: 1,224 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the independent sum is also 1,358.
+- Local and remote `v0.17.0` annotated-tag preflight returned no refs. Release closure was selected ahead of larger first-pass C11 `_Generic` support and lower-impact parser/fuzz coverage because it was first in both authoritative queues and atomically packages the already reviewed tracked-reassignment vertical slice. `_Generic` is the next concrete language package.
+- Independent read-only review found one low stale-history wording issue in `status/todo.md`; time-scoping those completed candidate evaluations removed their conflict with `_Generic` as the sole current unchecked task, and re-review returned `APPROVED` with no findings.
+- Canonical release verification passed: formatting, warning-denied Clippy, all 1,358 local tests, the rebuilt 1,358-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.17.0`, and `git diff --check`.
+
 ## 2026-08-04 — Tracked `char **` reassignment evaluation boundaries
 
 - Structural validation must never pre-read a tracked target before runtime side effects. For `output = (dangling = &live_slot, dangling)`, validate compatibility first, execute the left comma operand once, then perform liveness validation only when the right value is selected.
