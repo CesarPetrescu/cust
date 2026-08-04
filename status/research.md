@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-04 — Safe `char **` expression parity
+
+- Conditional and comma expressions over tracked character-pointer-output objects must propagate outer-slot identity as metadata rather than collapsing to the scalar placeholder stored in ordinary value slots. Runtime selection evaluates only the chosen conditional branch and evaluates discarded comma operands once in source order; non-evaluating classification validates every branch without evaluating any operand.
+- `sizeof(conditional-output-expression)` needs a dedicated character-pointer-output classification before the ordinary one-level pointer classifier because tracked `char **` variables deliberately use scalar placeholders. Invalid non-null scalar branches receive an exact compatibility diagnostic, while valid output/null branches retain pointer sizing.
+- Constraint checking applies to discarded operands even when they are void-valued. Metadata-only comma validation therefore checks ordinary user-function arity as well as intrinsic call shapes instead of treating the discarded call as automatically valid.
+- Nested output-valued conditional validation must recurse directly through output metadata before whole-subtree scalar/void walkers. Re-entering `sizeof` or rescanning each remaining subtree at every level creates quadratic work; the depth-8/depth-40 regression failed before the linear recursion fix and passed repeatedly afterward.
+
 ## 2026-08-04 — v0.15.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.14.0`, then passed after Cargo/lock and both image tags moved to `0.15.0`. Executable `cargo test -- --list` accounting is 1,333 tests: 1,199 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test.

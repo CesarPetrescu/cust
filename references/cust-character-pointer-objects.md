@@ -10,6 +10,7 @@ Supported objects:
 - default or initialize to null, or initialize from `&slot` where `slot` is a mutable unqualified `char *` object;
 - support `*output` reads and null/non-null writes;
 - forward through existing unqualified `char **` parameters;
+- forward conditional/comma object values while preserving the selected outer slot and one-time evaluation;
 - preserve outer-slot and pointee owner, lifetime, type, and read-only metadata;
 - support equality, truthiness, and non-evaluating `sizeof`.
 
@@ -55,12 +56,24 @@ can incorrectly depend on branch order while evaluating neither branch.
 
 Null literal and visible enum-zero constants remain accepted null pointer constants; object shadowing must prevent an outer enum constant from being used accidentally.
 
+## Conditional/comma expression parity
+
+- Runtime conditional selection evaluates the condition once and only the selected output-valued branch; comma expressions evaluate the discarded left operand once before returning the right output identity.
+- Classify output-valued conditionals before generic pointer inference in `sizeof`, because ordinary `char **` objects deliberately use scalar placeholders in the value table.
+- Validate both conditional branches as output values or null. A non-null scalar branch must report `conditional character pointer output branches require compatible output values or null` even though no branch is evaluated.
+- Discarded comma operands remain constraint-checked. In particular, a void user-function call with the wrong arity must retain its exact call diagnostic beneath `sizeof`.
+- Keep nested validation linear: when a scalar condition is itself output-valued, recurse directly through character-output metadata before whole-subtree void/scalar walkers. The depth-8/depth-40 regression protects this ordering.
+- Equality and truthiness are supported for selected output values; relational ordering remains the exact `character pointer output ordering comparisons are not supported` boundary.
+- A function parameter may receive the selected/comma-produced identity only when every non-null path names a mutable unqualified `char *` slot. Qualified slot addresses remain rejected.
+
 ## TDD and review closure
 
 Focused RED/GREEN regressions covered:
 
 - `volatile`, `restrict`, `_Atomic`, and qualifier-bearing typedef target slots;
 - incompatible conditional assignment branches in both orders beneath `sizeof`;
+- conditional/comma forwarding, selected-slot equality/truthiness, and qualified parameter-slot rejection;
+- direct conditional-output `sizeof`, invalid non-null scalar branches, discarded ordinary-call arity, and linear nested validation;
 - third-star and pointer-array declarators;
 - direct, compound, prefix/postfix, and non-evaluating outer-object reassignment attempts.
 

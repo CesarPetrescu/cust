@@ -24,16 +24,19 @@ int main(void) {
     char **local_output = &local_slot, **local_second_output = &local_second_slot;
     char **alias = local_output;
     char **null_output = 0;
+    int markers = 0;
+    char **selected = (markers++, 1 ? local_output : local_second_output);
 
-    set_output(alias, local_text + 1);
+    set_output(0 ? local_second_output : selected, local_text + 1);
     set_output(global_output, global_text + 1);
     *global_second_output = global_text + 2;
-    *local_second_output = local_text + 2;
+    set_output((markers++, local_second_output), local_text + 2);
     *mixed_output = local_text + 3;
     *file_output = global_text + 3;
     set_output(null_output, local_text);
 
-    if (*local_slot != 'b' || *local_second_slot != 'c' || *mixed_slot != 'd' ||
+    if (markers != 2 || alias != selected || *local_slot != 'b' ||
+        *local_second_slot != 'c' || *mixed_slot != 'd' ||
         *global_slot != 'x' || *global_second_slot != 'y' || *file_slot != 'z') {
         return 1;
     }

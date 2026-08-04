@@ -1089,6 +1089,7 @@ struct Param {
     name: String,
     kind: ParamKind,
     is_const: bool,
+    is_qualified: bool,
     points_to_const: bool,
 }
 
@@ -6870,6 +6871,7 @@ struct Parser {
     type_alias_scopes: Vec<HashMap<String, TypeAlias>>,
     const_type_alias_scopes: Vec<HashSet<String>>,
     qualified_type_alias_scopes: Vec<HashSet<String>>,
+    qualified_pointer_pointee_type_alias_scopes: Vec<HashSet<String>>,
     next_static_local_id: usize,
     next_aggregate_type_id: usize,
     last_decl_had_initializer: bool,
@@ -6889,6 +6891,7 @@ impl Parser {
             type_alias_scopes: vec![HashMap::new()],
             const_type_alias_scopes: vec![HashSet::new()],
             qualified_type_alias_scopes: vec![HashSet::new()],
+            qualified_pointer_pointee_type_alias_scopes: vec![HashSet::new()],
             next_static_local_id: 0,
             next_aggregate_type_id: 0,
             last_decl_had_initializer: false,
@@ -7426,6 +7429,19 @@ impl Parser {
                 aliases
                     .contains_key(name)
                     .then(|| qualified_aliases.contains(name))
+            })
+            .unwrap_or(false)
+    }
+
+    fn type_alias_pointer_pointee_is_qualified(&self, name: &str) -> bool {
+        self.type_alias_scopes
+            .iter()
+            .zip(&self.qualified_pointer_pointee_type_alias_scopes)
+            .rev()
+            .find_map(|(aliases, qualified_pointee_aliases)| {
+                aliases
+                    .contains_key(name)
+                    .then(|| qualified_pointee_aliases.contains(name))
             })
             .unwrap_or(false)
     }
@@ -8130,6 +8146,10 @@ impl Parser {
             Token::Ident(name) => self.type_alias_is_qualified(name),
             _ => false,
         };
+        let inherited_pointer_pointee_qualified = match self.peek() {
+            Token::Ident(name) => self.type_alias_pointer_pointee_is_qualified(name),
+            _ => false,
+        };
         let (base_type, alias_context, anonymous_aggregate, leading_const) = if self
             .starts_typedef_aggregate_definition()
         {
@@ -8173,18 +8193,25 @@ impl Parser {
             });
 
         loop {
-            let (alias_name, alias, alias_is_const, alias_is_qualified) = self
-                .parse_typedef_declarator(
-                    base_type.clone(),
-                    leading_const,
-                    base_is_qualified,
-                    alias_context,
-                )?;
+            let (
+                alias_name,
+                alias,
+                alias_is_const,
+                alias_is_qualified,
+                alias_pointer_pointee_is_qualified,
+            ) = self.parse_typedef_declarator(
+                base_type.clone(),
+                leading_const,
+                base_is_qualified,
+                inherited_pointer_pointee_qualified,
+                alias_context,
+            )?;
             self.register_typedef_alias(
                 alias_name,
                 alias,
                 alias_is_const,
                 alias_is_qualified,
+                alias_pointer_pointee_is_qualified,
                 anonymous_aggregate,
             )?;
             if !self.matches(&Token::Comma) {
@@ -8211,8 +8238,9 @@ impl Parser {
         base_type: DeclType,
         leading_const: bool,
         base_is_qualified: bool,
+        base_pointer_pointee_is_qualified: bool,
         alias_context: &str,
-    ) -> CustResult<(String, TypeAlias, bool, bool)> {
+    ) -> CustResult<(String, TypeAlias, bool, bool, bool)> {
         if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
             if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
                 return Err(Self::error_at(
@@ -8246,6 +8274,7 @@ impl Parser {
                     },
                     post_star_const,
                     post_star_qualified,
+                    base_is_qualified,
                 ));
             }
             return Err(Self::error_at(
@@ -8390,7 +8419,18 @@ impl Parser {
         } else {
             base_is_qualified
         };
-        Ok((alias_name, alias, alias_is_const, alias_is_qualified))
+        let alias_pointer_pointee_is_qualified = if has_explicit_star {
+            base_is_qualified
+        } else {
+            base_pointer_pointee_is_qualified
+        };
+        Ok((
+            alias_name,
+            alias,
+            alias_is_const,
+            alias_is_qualified,
+            alias_pointer_pointee_is_qualified,
+        ))
     }
 
     fn register_typedef_alias(
@@ -8399,6 +8439,7 @@ impl Parser {
         alias: TypeAlias,
         alias_is_const: bool,
         alias_is_qualified: bool,
+        alias_pointer_pointee_is_qualified: bool,
         anonymous_aggregate: bool,
     ) -> CustResult<()> {
         let anonymous_type_name = match (anonymous_aggregate, &alias) {
@@ -8432,7 +8473,14 @@ impl Parser {
                 .qualified_type_alias_scopes
                 .last_mut()
                 .expect("parser always has a qualified typedef scope");
-            qualified_scope.insert(alias_name);
+            qualified_scope.insert(alias_name.clone());
+        }
+        if alias_pointer_pointee_is_qualified {
+            let qualified_pointee_scope = self
+                .qualified_pointer_pointee_type_alias_scopes
+                .last_mut()
+                .expect("parser always has a qualified pointer-pointee typedef scope");
+            qualified_pointee_scope.insert(alias_name);
         }
         Ok(())
     }
@@ -9107,6 +9155,10 @@ impl Parser {
                 Token::Ident(name) => self.type_alias_is_qualified(name),
                 _ => false,
             };
+            let parameter_alias_pointee_is_qualified = match &parameter_type_token.kind {
+                Token::Ident(name) => self.type_alias_pointer_pointee_is_qualified(name),
+                _ => false,
+            };
             let (leading_const, decl_type) =
                 self.parse_const_qualified_decl_type("parameter type")?;
             let parameter_type_qualifier = self.tokens[parameter_type_start..self.pos]
@@ -9118,6 +9170,9 @@ impl Parser {
                     )
                 })
                 .cloned();
+            let parameter_type_is_qualified = parameter_alias_is_qualified
+                || parameter_alias_pointee_is_qualified
+                || parameter_type_qualifier.is_some();
             let mut array_2d_param_type = match &decl_type {
                 DeclType::Array2D(ty, _, columns) => Some((*ty, *columns)),
                 DeclType::Array2DPointer {
@@ -9168,6 +9223,7 @@ impl Parser {
             } else {
                 None
             };
+            let post_star_is_qualified = post_star_qualifier.is_some();
             let post_star_const = has_explicit_star && self.consume_type_qualifiers();
             if matches!(decl_type, DeclType::Pointer { .. }) && has_explicit_star {
                 return Err(Self::error_at(
@@ -9292,6 +9348,7 @@ impl Parser {
                 }
             };
             let mut array_parameter_const = false;
+            let mut array_parameter_is_qualified = false;
             let kind = if is_character_pointer_output {
                 if self.check(&Token::LBracket) {
                     return Err(Self::error_at(
@@ -9319,7 +9376,8 @@ impl Parser {
                 ParamKind::Pointer
             } else if matches!(decl_type, DeclType::Struct(_)) {
                 if self.matches(&Token::LBracket) {
-                    array_parameter_const = self.parse_array_parameter_length_and_qualifiers()?;
+                    (array_parameter_const, array_parameter_is_qualified) =
+                        self.parse_array_parameter_length_and_qualifiers()?;
                     self.expect_closing_bracket_after("array parameter length")?;
                     if self.check(&Token::LBracket) {
                         return Err(Self::error_at(
@@ -9332,7 +9390,8 @@ impl Parser {
                     ParamKind::Struct
                 }
             } else if self.matches(&Token::LBracket) {
-                array_parameter_const = self.parse_array_parameter_length_and_qualifiers()?;
+                (array_parameter_const, array_parameter_is_qualified) =
+                    self.parse_array_parameter_length_and_qualifiers()?;
                 self.expect_closing_bracket_after("array parameter length")?;
                 if self.matches(&Token::LBracket) {
                     let columns = self.expect_array_len()?;
@@ -9387,6 +9446,10 @@ impl Parser {
                 name,
                 kind,
                 is_const,
+                is_qualified: matches!(kind, ParamKind::Pointer)
+                    && (parameter_type_is_qualified
+                        || post_star_is_qualified
+                        || array_parameter_is_qualified),
                 points_to_const,
             });
 
@@ -9492,15 +9555,18 @@ impl Parser {
         None
     }
 
-    fn parse_array_parameter_length_and_qualifiers(&mut self) -> CustResult<bool> {
+    fn parse_array_parameter_length_and_qualifiers(&mut self) -> CustResult<(bool, bool)> {
         let mut pointer_slot_const = false;
+        let mut pointer_slot_is_qualified = false;
         loop {
             if self.matches(&Token::Const) {
                 pointer_slot_const = true;
+                pointer_slot_is_qualified = true;
             } else if matches!(
                 self.peek(),
                 Token::Volatile | Token::Restrict | Token::Atomic | Token::Static
             ) {
+                pointer_slot_is_qualified |= !matches!(self.peek(), Token::Static);
                 self.advance();
             } else {
                 break;
@@ -9512,10 +9578,12 @@ impl Parser {
             loop {
                 if self.matches(&Token::Const) {
                     pointer_slot_const = true;
+                    pointer_slot_is_qualified = true;
                 } else if matches!(
                     self.peek(),
                     Token::Volatile | Token::Restrict | Token::Atomic
                 ) {
+                    pointer_slot_is_qualified = true;
                     self.advance();
                 } else {
                     break;
@@ -9523,7 +9591,7 @@ impl Parser {
             }
         }
 
-        Ok(pointer_slot_const)
+        Ok((pointer_slot_const, pointer_slot_is_qualified))
     }
 
     fn parse_block_after(&mut self, context: &str) -> CustResult<Vec<Stmt>> {
@@ -9531,6 +9599,8 @@ impl Parser {
         self.type_alias_scopes.push(HashMap::new());
         self.const_type_alias_scopes.push(HashSet::new());
         self.qualified_type_alias_scopes.push(HashSet::new());
+        self.qualified_pointer_pointee_type_alias_scopes
+            .push(HashSet::new());
         self.enum_type_scopes.push(HashSet::new());
         self.enum_constant_scopes.push(HashMap::new());
         self.aggregate_type_scopes.push(HashMap::new());
@@ -9552,6 +9622,7 @@ impl Parser {
         self.aggregate_type_scopes.pop();
         self.enum_constant_scopes.pop();
         self.enum_type_scopes.pop();
+        self.qualified_pointer_pointee_type_alias_scopes.pop();
         self.qualified_type_alias_scopes.pop();
         self.const_type_alias_scopes.pop();
         self.type_alias_scopes.pop();
@@ -10076,6 +10147,10 @@ impl Parser {
             Token::Ident(name) => self.type_alias_is_qualified(name),
             _ => false,
         };
+        let declaration_alias_pointee_is_qualified = match &declaration_type_token.kind {
+            Token::Ident(name) => self.type_alias_pointer_pointee_is_qualified(name),
+            _ => false,
+        };
         let declaration_type_start = self.pos;
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("declaration type")?;
@@ -10088,11 +10163,12 @@ impl Parser {
                 )
             })
             .cloned();
-        let declaration_base_qualifier = if declaration_alias_is_qualified {
-            Some(declaration_type_token.clone())
-        } else {
-            declaration_type_qualifier.clone()
-        };
+        let declaration_base_qualifier =
+            if declaration_alias_is_qualified || declaration_alias_pointee_is_qualified {
+                Some(declaration_type_token.clone())
+            } else {
+                declaration_type_qualifier.clone()
+            };
         if self.check(&Token::LParen) && matches!(self.peek_next(), Token::Star) {
             if self.parenthesized_pointer_declarator_is_function_at(self.pos) {
                 return Err(Self::error_at(
@@ -10399,6 +10475,7 @@ impl Parser {
                 is_const,
                 points_to_const,
                 is_qualified: declaration_alias_is_qualified
+                    || declaration_alias_pointee_is_qualified
                     || declaration_type_qualifier.is_some()
                     || post_star_qualifier.is_some(),
             };
@@ -17335,6 +17412,15 @@ impl Interpreter {
             .expect("function call always creates a parameter scope")
             .character_pointer_outputs = character_pointer_outputs;
         for param in &function.params {
+            if param.is_qualified {
+                self.scopes
+                    .last_mut()
+                    .expect("function call always creates a parameter scope")
+                    .qualified_pointer_variables
+                    .insert(param.name.clone());
+            }
+        }
+        for param in &function.params {
             if let (ParamKind::Array2D, ParamType::Array2D(elem_type, columns)) =
                 (&param.kind, &param.ty)
             {
@@ -18024,7 +18110,7 @@ impl Interpreter {
             )));
         }
         self.sizeof_integer_string_conversion_call(name, &args[..1])?;
-        self.eval_character_pointer_output_argument(name, "endptr", &args[1])?;
+        self.validate_character_pointer_output_argument(name, "endptr", &args[1])?;
         if self.expr_is_pointer_value(&args[2])
             || self.aggregate_expr_type_name(&args[2]).is_ok()
             || self.expr_is_void_value(&args[2])
@@ -19287,6 +19373,23 @@ impl Interpreter {
         self.sizeof_string_comparison_call(name, args)
     }
 
+    fn validate_non_evaluating_storage_name(&self, name: &str) -> CustResult<()> {
+        if self.find_variable(name).is_some() {
+            return Ok(());
+        }
+        if self.identifier_resolves_to_enum_constant(name) {
+            return Err(CustError::new(format!(
+                "cannot take the address of enum constant '{name}'"
+            )));
+        }
+        if self.find_character_pointer_output(name).is_some() {
+            return Err(CustError::new(
+                "character pointer output arithmetic is not supported",
+            ));
+        }
+        Err(CustError::new(format!("undefined variable '{name}'")))
+    }
+
     fn validate_nested_string_intrinsic_calls(&self, expr: &Expr) -> CustResult<()> {
         match expr {
             Expr::Call { name, args } => {
@@ -19434,14 +19537,36 @@ impl Interpreter {
                     self.validate_nested_string_intrinsic_calls(arg)?;
                 }
             }
+            Expr::Var(name) => {
+                if !self.identifier_resolves_to_enum_constant(name)
+                    && self.find_variable(name).is_none()
+                {
+                    return Err(CustError::new(format!("undefined variable '{name}'")));
+                }
+            }
+            Expr::AddressOf(name) => {
+                if self.find_character_pointer_output(name).is_some() {
+                    return Err(CustError::new(
+                        "taking the address of a character pointer output parameter is not supported",
+                    ));
+                }
+                if self.identifier_resolves_to_enum_constant(name) {
+                    return Err(CustError::new(format!(
+                        "cannot take the address of enum constant '{name}'"
+                    )));
+                }
+                if self.find_variable(name).is_none() {
+                    return Err(CustError::new(format!("undefined variable '{name}'")));
+                }
+            }
             Expr::Number(_)
             | Expr::StringLiteral(_)
             | Expr::SizeOfType(_)
             | Expr::AlignOfType(_)
-            | Expr::Var(_)
-            | Expr::StructGet { .. }
-            | Expr::AddressOf(_)
-            | Expr::AddressOfStructField { .. } => {}
+            | Expr::StructGet { .. } => {}
+            Expr::AddressOfStructField { name, .. } => {
+                self.validate_non_evaluating_storage_name(name)?;
+            }
             Expr::SizeOfValue(inner)
             | Expr::Deref(inner)
             | Expr::VoidCast(inner)
@@ -19462,15 +19587,28 @@ impl Interpreter {
             | Expr::AddressOfAggregateField {
                 aggregate: inner, ..
             } => self.validate_nested_string_intrinsic_calls(inner)?,
+            Expr::AddressOfArray { name, index }
+            | Expr::AddressOfStructElementField { name, index, .. }
+            | Expr::AddressOfStructArrayField { name, index, .. } => {
+                self.validate_non_evaluating_storage_name(name)?;
+                self.validate_nested_string_intrinsic_calls(index)?;
+            }
             Expr::StructArrayGet { index, .. }
             | Expr::StructFieldArrayElementGet { index, .. }
             | Expr::StructElementGet { index, .. }
             | Expr::ArrayGet { index, .. }
-            | Expr::StringGet { index, .. }
-            | Expr::AddressOfArray { index, .. }
-            | Expr::AddressOfStructElementField { index, .. }
-            | Expr::AddressOfStructArrayField { index, .. } => {
+            | Expr::StringGet { index, .. } => {
                 self.validate_nested_string_intrinsic_calls(index)?;
+            }
+            Expr::AddressOfStructElementArrayField {
+                name,
+                index,
+                array_index,
+                ..
+            } => {
+                self.validate_non_evaluating_storage_name(name)?;
+                self.validate_nested_string_intrinsic_calls(index)?;
+                self.validate_nested_string_intrinsic_calls(array_index)?;
             }
             Expr::Assign { value, .. }
             | Expr::StructSet { value, .. }
@@ -19502,9 +19640,6 @@ impl Interpreter {
                 self.validate_nested_string_intrinsic_calls(value)?;
             }
             Expr::StructElementArrayGet {
-                index, array_index, ..
-            }
-            | Expr::AddressOfStructElementArrayField {
                 index, array_index, ..
             } => {
                 self.validate_nested_string_intrinsic_calls(index)?;
@@ -20011,7 +20146,7 @@ impl Interpreter {
         false
     }
 
-    fn eval_character_pointer_output_argument(
+    fn validate_character_pointer_output_argument(
         &self,
         function_name: &str,
         param_name: &str,
@@ -20090,14 +20225,141 @@ impl Interpreter {
                 }
                 Err(CustError::new(format!("undefined variable '{name}'")))
             }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                self.validate_non_evaluating_scalar_condition(cond)?;
+                let then_output = self.validate_character_pointer_output_argument(
+                    function_name,
+                    param_name,
+                    then_expr,
+                )?;
+                self.validate_character_pointer_output_argument(
+                    function_name,
+                    param_name,
+                    else_expr,
+                )?;
+                Ok(then_output)
+            }
+            Expr::Comma(left, right) => {
+                self.validate_non_evaluating_discard_expr(left)?;
+                self.validate_character_pointer_output_argument(function_name, param_name, right)
+            }
             _ => Err(CustError::new(format!(
                 "function '{function_name}' parameter '{param_name}' requires a char pointer slot address"
             ))),
         }
     }
 
+    fn validate_non_evaluating_scalar_condition(&self, expr: &Expr) -> CustResult<()> {
+        if self.expr_is_character_pointer_output_value(expr) {
+            self.validate_character_pointer_output_argument("scalar condition", "value", expr)?;
+            return Ok(());
+        }
+        self.reject_void_scalar_operand(expr)?;
+        match self.aggregate_expr_type_name(expr) {
+            Ok(_) => {
+                return Err(CustError::new("struct value used as scalar expression"));
+            }
+            Err(error)
+                if error
+                    .to_string()
+                    .contains("conditional branches have mismatched aggregate types") =>
+            {
+                return Err(error);
+            }
+            Err(_) => {}
+        }
+        self.sizeof_expr(expr)?;
+        Ok(())
+    }
+
+    fn validate_non_evaluating_discard_expr(&self, expr: &Expr) -> CustResult<()> {
+        if !self.expr_is_void_value(expr) {
+            self.sizeof_expr(expr)?;
+            return Ok(());
+        }
+
+        match expr {
+            Expr::VoidCast(inner) => self.validate_non_evaluating_discard_expr(inner),
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                self.validate_non_evaluating_scalar_condition(cond)?;
+                self.validate_non_evaluating_discard_expr(then_expr)?;
+                self.validate_non_evaluating_discard_expr(else_expr)
+            }
+            Expr::Comma(left, right) => {
+                self.validate_non_evaluating_discard_expr(left)?;
+                self.validate_non_evaluating_discard_expr(right)
+            }
+            Expr::Call { name, args } => {
+                if let Some(function) = self.functions.get(name)
+                    && function.params.len() != args.len()
+                {
+                    return Err(CustError::new(format!(
+                        "function '{name}' expected {} arguments, got {}",
+                        function.params.len(),
+                        args.len()
+                    )));
+                }
+                self.validate_nested_string_intrinsic_calls(expr)
+            }
+            _ => unreachable!("only calls, casts, conditionals, and comma expressions are void"),
+        }
+    }
+
+    fn eval_character_pointer_output_argument(
+        &mut self,
+        function_name: &str,
+        param_name: &str,
+        expr: &Expr,
+    ) -> CustResult<CharacterPointerOutput> {
+        self.validate_character_pointer_output_argument(function_name, param_name, expr)?;
+        self.eval_validated_character_pointer_output_argument(function_name, param_name, expr)
+    }
+
+    fn eval_validated_character_pointer_output_argument(
+        &mut self,
+        function_name: &str,
+        param_name: &str,
+        expr: &Expr,
+    ) -> CustResult<CharacterPointerOutput> {
+        match expr {
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                let selected = if self.eval_truthy(cond)? {
+                    then_expr
+                } else {
+                    else_expr
+                };
+                self.eval_validated_character_pointer_output_argument(
+                    function_name,
+                    param_name,
+                    selected,
+                )
+            }
+            Expr::Comma(left, right) => {
+                self.eval_discard(left)?;
+                self.eval_validated_character_pointer_output_argument(
+                    function_name,
+                    param_name,
+                    right,
+                )
+            }
+            _ => self.validate_character_pointer_output_argument(function_name, param_name, expr),
+        }
+    }
+
     fn eval_character_pointer_output_initializer(
-        &self,
+        &mut self,
         name: &str,
         expr: &Expr,
     ) -> CustResult<CharacterPointerOutput> {
@@ -26174,6 +26436,13 @@ impl Interpreter {
     }
 
     fn eval_ordering(&mut self, left: &Expr, op: &BinaryOp, right: &Expr) -> CustResult<i64> {
+        if self.expr_is_character_pointer_output_value(left)
+            || self.expr_is_character_pointer_output_value(right)
+        {
+            return Err(CustError::new(
+                "character pointer output ordering comparisons are not supported",
+            ));
+        }
         let left_is_pointer = self.expr_is_pointer_value(left);
         let right_is_pointer = self.expr_is_pointer_value(right);
 
@@ -27514,12 +27783,9 @@ impl Interpreter {
     }
 
     fn eval_truthy(&mut self, expr: &Expr) -> CustResult<bool> {
-        if let Expr::Var(name) = expr
-            && let Some(output) = self.find_character_pointer_output(name)
-        {
-            if matches!(output, CharacterPointerOutput::Slot { .. }) {
-                self.read_character_pointer_output(output)?;
-            }
+        if self.expr_is_character_pointer_output_value(expr) {
+            let output =
+                self.eval_character_pointer_output_argument("scalar condition", "value", expr)?;
             return Ok(matches!(output, CharacterPointerOutput::Slot { .. }));
         }
         if self.expr_is_pointer_value(expr) {
@@ -27715,6 +27981,14 @@ impl Interpreter {
                 }
                 _ => unreachable!("direct calls and void casts are handled above"),
             }
+            return Ok(());
+        }
+        if self.expr_is_character_pointer_output_value(expr) {
+            self.eval_character_pointer_output_argument(
+                "discarded character pointer output expression",
+                "value",
+                expr,
+            )?;
             return Ok(());
         }
         if self.expr_is_pointer_value(expr) {
@@ -28528,6 +28802,17 @@ impl Interpreter {
                     "character pointer output arithmetic is not supported",
                 ))
             }
+            Expr::Binary(
+                left,
+                BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge,
+                right,
+            ) if self.expr_is_character_pointer_output_value(left)
+                || self.expr_is_character_pointer_output_value(right) =>
+            {
+                Err(CustError::new(
+                    "character pointer output ordering comparisons are not supported",
+                ))
+            }
             Expr::Binary(left, _, right) => {
                 self.reject_void_scalar_operand(left)?;
                 self.reject_void_scalar_operand(right)?;
@@ -28575,6 +28860,27 @@ impl Interpreter {
 
     fn sizeof_conditional_expr(&self, expr: &Expr) -> CustResult<i64> {
         self.reject_void_scalar_operand(expr)?;
+        if self.expr_is_character_pointer_output_value(expr) {
+            return self
+                .validate_character_pointer_output_argument(
+                    "conditional character pointer output",
+                    "branch",
+                    expr,
+                )
+                .map(|_| POINTER_SIZE)
+                .map_err(|error| {
+                    if error
+                        .message
+                        .ends_with("requires a char pointer slot address")
+                    {
+                        CustError::new(
+                            "conditional character pointer output branches require compatible output values or null",
+                        )
+                    } else {
+                        error
+                    }
+                });
+        }
         match self.aggregate_expr_type_name(expr) {
             Ok(type_name) => self
                 .struct_types
@@ -29427,20 +29733,29 @@ impl Interpreter {
     }
 
     fn eval_equality(&mut self, left: &Expr, op: &BinaryOp, right: &Expr) -> CustResult<i64> {
-        let left_output = self.character_pointer_output_expr(left);
-        let right_output = self.character_pointer_output_expr(right);
-        if left_output.is_some() || right_output.is_some() {
-            for output in [left_output.as_ref(), right_output.as_ref()]
-                .into_iter()
-                .flatten()
-            {
-                if matches!(output, CharacterPointerOutput::Slot { .. }) {
-                    self.read_character_pointer_output(output)?;
+        let left_is_output = self.expr_is_character_pointer_output_value(left);
+        let right_is_output = self.expr_is_character_pointer_output_value(right);
+        if left_is_output || right_is_output {
+            let equal = match (left_is_output, right_is_output) {
+                (true, true) => {
+                    let left = self.eval_character_pointer_output_argument(
+                        "character pointer output equality",
+                        "left operand",
+                        left,
+                    )?;
+                    let right = self.eval_character_pointer_output_argument(
+                        "character pointer output equality",
+                        "right operand",
+                        right,
+                    )?;
+                    left == right
                 }
-            }
-            let equal = match (left_output, right_output) {
-                (Some(left), Some(right)) => left == right,
-                (Some(output), None) => {
+                (true, false) => {
+                    let output = self.eval_character_pointer_output_argument(
+                        "character pointer output equality",
+                        "left operand",
+                        left,
+                    )?;
                     let value = self.eval(right)?;
                     if value != 0 {
                         return Err(CustError::new(
@@ -29449,8 +29764,13 @@ impl Interpreter {
                     }
                     matches!(output, CharacterPointerOutput::Null)
                 }
-                (None, Some(output)) => {
+                (false, true) => {
                     let value = self.eval(left)?;
+                    let output = self.eval_character_pointer_output_argument(
+                        "character pointer output equality",
+                        "right operand",
+                        right,
+                    )?;
                     if value != 0 {
                         return Err(CustError::new(
                             "cannot compare pointer with nonzero integer",
@@ -29458,7 +29778,7 @@ impl Interpreter {
                     }
                     matches!(output, CharacterPointerOutput::Null)
                 }
-                (None, None) => unreachable!("guard requires a character pointer output"),
+                (false, false) => unreachable!("guard requires a character pointer output"),
             };
             return match op {
                 BinaryOp::Eq => Ok(equal as i64),

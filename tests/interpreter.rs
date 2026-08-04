@@ -11163,6 +11163,107 @@ int main(void) {
 }
 
 #[test]
+fn character_pointer_object_conditionals_forward_the_selected_slot_once() {
+    let program = r#"
+int conditions = 0;
+
+int choose_second(void) {
+    conditions = conditions + 1;
+    return 1;
+}
+
+void set_output(char **output, char *value) {
+    *output = value;
+}
+
+int main(void) {
+    char text[] = "abc";
+    char *first_slot = 0;
+    char *second_slot = 0;
+    char **first = &first_slot;
+    char **second = &second_slot;
+
+    set_output(choose_second() ? second : first, text + 1);
+    return conditions == 1 && first_slot == 0 && *second_slot == 'b' ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_comma_values_forward_after_left_side_effects() {
+    let program = r#"
+int calls = 0;
+
+int mark(void) {
+    calls = calls + 1;
+    return 0;
+}
+
+void set_output(char **output, char *value) {
+    *output = value;
+}
+
+int main(void) {
+    char text[] = "abc";
+    char *slot = 0;
+    char **output = &slot;
+
+    set_output((mark(), output), text + 2);
+    return calls == 1 && *slot == 'c' ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_nested_values_compare_selected_slot_identity() {
+    let program = r#"
+int conditions = 0;
+
+int choose_first(void) {
+    conditions = conditions + 1;
+    return 1;
+}
+
+int main(void) {
+    char *first_slot = 0;
+    char *second_slot = 0;
+    char **first = &first_slot;
+    char **second = &second_slot;
+
+    int equal = (choose_first() ? first : second) == (0 ? first : second);
+    int comma_equal = (conditions++, first) == (conditions++, first);
+    return conditions == 3 && !equal && comma_equal ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_nested_values_work_in_scalar_control_contexts() {
+    let program = r#"
+int main(void) {
+    char text[] = "x";
+    char *first_slot = 0;
+    char *second_slot = 0;
+    char **first = &first_slot;
+    char **second = &second_slot;
+    char **selected = ((void)(0 ? first : second),
+                       ((1 ? first : second) ? second : first));
+
+    *selected = text;
+    return first_slot == 0 && second_slot == text ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn character_pointer_object_sizeof_is_pointer_sized_and_non_evaluating() {
     let program = r#"
 int calls = 0;
@@ -11238,12 +11339,55 @@ int main(void) {
     char text[] = "x";
     char *slot = 0;
     char **output = &slot;
+    int output_size = sizeof(1 ? output : 0);
     int size = sizeof(1 ? (*output = mark(text)) : (*output = mark(text)));
-    return size == sizeof(char *) && calls == 0 && slot == 0 ? 0 : 1;
+    return output_size == sizeof(char *) && size == sizeof(char *)
+        && calls == 0 && slot == 0 ? 0 : 1;
 }
 "#;
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn character_pointer_object_conditional_sizeof_rejects_non_null_scalar_branches() {
+    for expression in ["1 ? output : 1", "1 ? 1 : output"] {
+        let program = format!(
+            "int main(void) {{ char *slot = 0; char **output = &slot; return sizeof({expression}); }}\n"
+        );
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "conditional character pointer output branches require compatible output values or null",
+            "expression: {expression}"
+        );
+    }
+}
+
+#[test]
+fn character_pointer_object_conditional_sizeof_validation_remains_linear() {
+    fn run_nested(depth: usize, iterations: usize) -> std::time::Duration {
+        let nested = (0..depth).fold("output".to_string(), |inner, _| {
+            format!("({inner} ? output : 0)")
+        });
+        let program = format!(
+            "int main(void) {{ char *slot = 0; char **output = &slot; return sizeof({nested}) == sizeof(char *) ? 0 : 1; }}\n"
+        );
+        let started = std::time::Instant::now();
+
+        for _ in 0..iterations {
+            assert_eq!(interpret(&program).unwrap(), 0);
+        }
+        started.elapsed()
+    }
+
+    let shallow = run_nested(8, 100);
+    let deep = run_nested(40, 100);
+    let allowed = (shallow * 4).max(std::time::Duration::from_millis(30));
+    assert!(
+        deep < allowed,
+        "nested character pointer output conditional validation scaled nonlinearly: {shallow:?} at depth 8 and {deep:?} at depth 40"
+    );
 }
 
 #[test]
@@ -11581,6 +11725,30 @@ int main(void) {
 }
 
 #[test]
+fn character_pointer_object_relational_comparisons_are_exact_boundaries() {
+    for expression in [
+        "first < second",
+        "first <= &second_slot",
+        "&first_slot > second",
+        "first >= 0",
+        "sizeof(first < second)",
+        "sizeof(first <= &second_slot)",
+        "sizeof(&first_slot > second)",
+        "sizeof(first >= 0)",
+    ] {
+        let program = format!(
+            "int main(void) {{ char *first_slot = 0; char *second_slot = 0; char **first = &first_slot; char **second = &second_slot; return {expression}; }}\n"
+        );
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "character pointer output ordering comparisons are not supported",
+            "expression: {expression}"
+        );
+    }
+}
+
+#[test]
 fn character_pointer_output_parameters_compare_equal_to_null() {
     let program = r#"
 int output_is_null(char **out) {
@@ -11791,6 +11959,74 @@ fn character_pointer_output_arguments_reject_incompatible_slots() {
             "declaration: {declaration}"
         );
     }
+}
+
+#[test]
+fn character_pointer_output_arguments_reject_qualified_parameter_slots() {
+    for parameter in [
+        "char * volatile slot",
+        "char * restrict slot",
+        "char * _Atomic slot",
+        "volatile char *slot",
+        "char slot[restrict 1]",
+        "char slot[volatile 1]",
+    ] {
+        let program = format!(
+            "void set_end(char **out) {{ *out = 0; }}\nvoid forward({parameter}) {{ set_end(&slot); }}\nint main(void) {{ char *slot = 0; forward(slot); return 0; }}\n"
+        );
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "function 'set_end' parameter 'out' requires the address of a mutable char pointer variable",
+            "parameter: {parameter}"
+        );
+    }
+
+    let program = r#"
+typedef volatile char *VolatileText;
+void set_end(char **out) { *out = 0; }
+void forward(VolatileText slot) { set_end(&slot); }
+int main(void) { char text[1] = {0}; forward(text); return 0; }
+"#;
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'set_end' parameter 'out' requires the address of a mutable char pointer variable"
+    );
+
+    for aliases in [
+        "typedef volatile char *VolatileText; typedef VolatileText ChainedText;",
+        "typedef volatile char *VolatileText, *OtherVolatileText; typedef OtherVolatileText ChainedText;",
+    ] {
+        let program = format!(
+            "{aliases}\nvoid set_end(char **out) {{ *out = 0; }}\nvoid forward(ChainedText slot) {{ set_end(&slot); }}\nint main(void) {{ char text[1] = {{0}}; forward(text); return 0; }}\n"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "function 'set_end' parameter 'out' requires the address of a mutable char pointer variable",
+            "aliases: {aliases}"
+        );
+    }
+}
+
+#[test]
+fn character_pointer_output_qualified_pointer_alias_metadata_shadows_lexically() {
+    let program = r#"
+typedef volatile char *Text;
+
+void set_end(char **out, char *value) { *out = value; }
+
+int main(void) {
+    char value[] = "x";
+    {
+        typedef char *Text;
+        Text slot = 0;
+        set_end(&slot, value);
+        return slot == value ? 0 : 1;
+    }
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]
@@ -17010,12 +17246,78 @@ fn sizeof_base_integer_string_conversions_validate_argument_shapes() {
             "long int strtol(const char *text, char **end, int base);\nint main(void) { return sizeof(strtol((strtol(), \"7\"), 0, 10)); }\n",
             "function 'strtol' expected 3 arguments, got 0",
         ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { char *end = 0; return sizeof(strtol(\"7\", (strtol(), &end), 10)); }\n",
+            "function 'strtol' expected 3 arguments, got 0",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { char *end = 0; return sizeof(strtol(\"7\", strtol() ? &end : 0, 10)); }\n",
+            "function 'strtol' expected 3 arguments, got 0",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { char *end = 0; return sizeof(strtol(\"7\", missing ? &end : 0, 10)); }\n",
+            "undefined variable 'missing'",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { char *end = 0; return sizeof(strtol(\"7\", (missing, &end), 10)); }\n",
+            "undefined variable 'missing'",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { char *end = 0; return sizeof(strtol(\"7\", ((missing, 0), &end), 10)); }\n",
+            "undefined variable 'missing'",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { char *end = 0; return sizeof(strtol(\"7\", (&missing, &end), 10)); }\n",
+            "undefined variable 'missing'",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { char *end = 0; return sizeof(strtol(\"7\", ((&missing) == 0, &end), 10)); }\n",
+            "undefined variable 'missing'",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nvoid marker(void) {}\nint main(void) { char *end = 0; return sizeof(strtol(\"7\", (marker(1), &end), 10)); }\n",
+            "function 'marker' expected 0 arguments, got 1",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nint main(void) { char *end = 0; return sizeof(strtol(\"7\", (&missing[0], &end), 10)); }\n",
+            "undefined variable 'missing'",
+        ),
+        (
+            "long int strtol(const char *text, char **end, int base);\nstruct Box { int value; };\nint main(void) { char *end = 0; return sizeof(strtol(\"7\", (&missing.value, &end), 10)); }\n",
+            "undefined variable 'missing'",
+        ),
     ];
 
     for (program, expected) in cases {
         let err = interpret(program).unwrap_err();
         assert_eq!(err.to_string(), expected);
     }
+}
+
+#[test]
+fn sizeof_base_integer_string_conversion_endptr_validation_remains_linear() {
+    fn run_nested(depth: usize, iterations: usize) -> std::time::Duration {
+        let nested = (0..depth).fold("0".to_string(), |inner, _| {
+            format!("(1 ? strtol(\"7\", ({inner}, &end), 10) : 0)")
+        });
+        let program = format!(
+            "long int strtol(const char *text, char **end, int base);\nint main(void) {{ char *end = 0; return sizeof(strtol(\"7\", ({nested}, &end), 10)) == sizeof(long int) ? 0 : 1; }}\n"
+        );
+        let started = std::time::Instant::now();
+
+        for _ in 0..iterations {
+            assert_eq!(interpret(&program).unwrap(), 0);
+        }
+        started.elapsed()
+    }
+
+    let shallow = run_nested(4, 3);
+    let deep = run_nested(12, 3);
+    let allowed = (shallow * 16).max(std::time::Duration::from_millis(20));
+    assert!(
+        deep < allowed,
+        "nested endptr validation scaled nonlinearly: {shallow:?} at depth 4 and {deep:?} at depth 12"
+    );
 }
 
 #[test]

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.15.0 release preparation on 2026-08-04. Focused version assertions are GREEN after expected RED against v0.14.0, local/remote tag preflight is empty, independent re-review returned `APPROVED`, and all 1,333 local/rebuilt-Docker tests plus both canonical Docker gates pass. No active implementation, Docker, Git, research, or environment blocker exists; the tag remains reserved for publication only after the verified release commit reaches `origin/main`.
+None. Last reviewed after safe `char **` expression parity on 2026-08-04. Review-driven focused RED/GREEN and final independent `APPROVED` are complete; formatting, warning-denied Clippy, all 1,343 local/rebuilt-Docker tests, runtime output `10`, and `git diff --check` pass. No active implementation, Docker, Git, research, or environment blocker exists.
 
 ## Blocker template
 
