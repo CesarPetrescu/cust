@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.19.0 release verification on 2026-08-05. Independent read-only review returned `APPROVED`; focused version RED/GREEN, local/remote tag preflight, all 1,394 local/rebuilt-Docker tests, runtime output `10`, local/Cargo/container version `cust 0.19.0`, and the diff check pass. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after bounded v0.19.0 publication on 2026-08-05. Independent read-only review returned `APPROVED`; focused version RED/GREEN, all 1,394 local/rebuilt-Docker tests, runtime output `10`, and local/Cargo/container version `cust 0.19.0` pass. Release commit `19e8117688d2ee21323bab4705f9de8fd974b1e2` reached `origin/main` before annotated tag publication, and remote `v0.19.0` peels exactly to it. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 
