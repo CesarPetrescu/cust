@@ -26,6 +26,15 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - `for` initializer declaration lookahead needs `Token::Void` alongside other type-start tokens; shared declaration parsing already handles the supported one-level pointer once routed correctly.
 - Native C is used only for the warning-free defined compatibility fixture. Unsupported-operation fixtures remain interpreter-only because native extensions and undefined behavior are not valid semantic oracles. Independent review returned `APPROVED`; see `references/cust-void-pointer-diagnostics.md`.
 
+## 2026-08-05 — v0.19.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.18.0`, then passed after Cargo/lock and both image tags moved to `0.19.0`.
+- Executable target-by-target accounting is 1,394 tests: 1,260 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the independent sum is also 1,394.
+- Local and remote `v0.19.0` annotated-tag preflight returned no refs. Release closure was selected ahead of one-level `void *` function-boundary expansion and lower-impact parser/fuzz coverage because it is first in both authoritative queues and atomically packages the already reviewed safe-object vertical slice.
+- `void *` function return/prototype/call-result support is the next prerequisite for bounded memory intrinsics because standard memory functions return `void *`; current function-return forms remain an exact unsupported boundary rather than being bypassed through host addresses.
+- Release status wording remains preparation-only until release-commit acceptance on `origin/main`, annotated-tag publication, and exact remote peeled-target verification complete.
+- Independent read-only review returned `APPROVED` with no findings and independently confirmed `1,260 + 98 + 32 + 2 + 1 + 1 = 1,394`. Canonical release verification passed formatting, warning-denied Clippy, all 1,394 local tests, the rebuilt 1,394-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.19.0`, and `git diff --check`.
+
 ## 2026-08-05 — v0.18.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.17.0`, then passed after Cargo/lock and both image tags moved to `0.18.0`.

@@ -6,6 +6,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No unreleased changes yet.
 
+## v0.19.0 — 2026-08-05
+
+### Language subset
+
+- Added bounded one-level C11 `void *` objects at local, file-global, block-static, `for`-initializer, and parameter scope. Null/default state, equality, truthiness, ordinary assignment, conditional/comma forwarding, and qualification-preserving compatible conversions to and from supported object pointers retain interpreter-owned owner, lexical-lifetime, and read-only identity without exposing host addresses.
+
+### Diagnostics and verification
+
+- Preserved exact diagnostics for dereference, indexing, arithmetic, relational ordering, qualification discard, incompatible conversion, deeper pointers, pointer arrays, pointer-to-array forms, and function-pointer forms, including structural validation beneath non-evaluating `sizeof`. Focused valid/invalid interpreter fixtures and a registered warning-free compiler-oracle fixture cover the bounded surface.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.19.0`.
+- Verified an executable inventory of 1,394 tests: 1,260 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- `void *` function return/prototype/call-result forms, dereference, indexing, arithmetic, ordering, deeper pointers, pointer arrays, pointer-to-array forms, and memory intrinsics remain unsupported. General pointer levels beyond the narrow tracked unqualified `char **` model, function pointers, floating-point and complex runtime values, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, other pragma semantics, and host ABI layout/promotion rules also remain outside the release.
+
 ## v0.18.0 — 2026-08-05
 
 ### Language subset
