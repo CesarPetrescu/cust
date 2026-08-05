@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-05 — v0.18.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.17.0`, then passed after Cargo/lock and both image tags moved to `0.18.0`.
+- Executable target-by-target accounting is 1,389 tests: 1,255 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the independent sum is also 1,389.
+- Local and remote `v0.18.0` annotated-tag preflight returned no refs. Release closure was selected ahead of a first safe `void *` object/conversion slice and lower-impact parser/fuzz expansion because it was first in both authoritative queues at selection time and atomically packages the already reviewed `_Generic` vertical slice.
+- Release documentation follows the repository release-closure rule: status may claim synchronized preparation and passed evidence before publication, but the annotated tag remains reserved until independent review, the canonical gate, release-commit acceptance on `origin/main`, tag publication, and exact remote peeled-target verification complete.
+- Independent read-only review returned `APPROVED` with no findings. Canonical release verification passed formatting, warning-denied Clippy, all 1,389 local tests, the rebuilt 1,389-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.18.0`, and `git diff --check`.
+
 ## 2026-08-05 — Bounded C11 `_Generic` selection
 
 - C11 generic selection requires the controlling expression to be type-classified without evaluation and only the selected result expression to be evaluated. Cust models this with metadata-only `generic_selection_type` / integer-constant classification and evaluator-specific dispatch for scalar, pointer, aggregate, discard, and `sizeof` contexts.

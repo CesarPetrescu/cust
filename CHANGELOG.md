@@ -4,6 +4,10 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+No unreleased changes yet.
+
+## v0.18.0 — 2026-08-05
+
 ### Language subset
 
 - Added bounded C11 `_Generic` selection over deterministic scalar, one-level pointer, and named aggregate association types. The controlling expression is type-classified without evaluation, exactly one compatible association or optional `default` is selected, and only the selected expression executes while preserving scalar, pointer, aggregate, discard, `sizeof`, and integer-constant-expression behavior.
@@ -11,6 +15,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Diagnostics and verification
 
 - Added exact source-located diagnostics for duplicate compatible associations, duplicate defaults, unsupported `void`/array/function/anonymous-aggregate/deeper-pointer association forms, and no-match selections without a default. Focused interpreter and invalid fixtures plus a registered warning-free compiler-oracle fixture cover the bounded surface.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.18.0`.
+- Verified an executable inventory of 1,389 tests: 1,255 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- `_Generic` associations remain bounded to deterministic scalar, one-level pointer, and named aggregate types; two-dimensional array controlling expressions remain unsupported. General `void *`, function pointers, deeper pointer levels beyond the narrow tracked unqualified `char **` model, floating-point and complex runtime values, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, other pragma semantics, and host ABI layout/promotion rules remain unsupported.
 
 ## v0.17.0 — 2026-08-04
 
