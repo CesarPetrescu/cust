@@ -67,9 +67,9 @@ Both Compose services use `pull_policy: build`, so `docker compose run --rm test
 
 The `test` service keeps a writable container overlay so Cargo can update `target/`, but it has no host source mount, no network, dropped capabilities, and no privilege escalation.
 
-## Supported v0.17.0 language
+## Current language subset
 
-Cust currently supports this C subset:
+The published package is v0.17.0; the current `main` branch also includes the unreleased bounded `_Generic` slice described below. Cust currently supports this C subset:
 
 ```c
 int main() {
@@ -124,6 +124,7 @@ Features:
 - comments: `// line comments` and `/* block comments */`
 - `sizeof` and `_Alignof` for supported type names and expressions, including aggregate, enum, pointer, array, qualified, conditional, comma, and assignment-result forms, with non-evaluating operand semantics and Cust-defined sizes (`int = 8`, `char = 1`, pointer = `8`, no native struct padding)
 - C11 `_Static_assert`, storage-class/function-specifier syntax, supported `const`/`volatile`/`restrict`/`_Atomic` qualification, and per-function read-only `__func__` arrays
+- bounded C11 `_Generic` selections over deterministic scalar, one-level pointer, and named aggregate association types, including optional `default`, selected-expression value/type propagation, non-evaluation of the controlling and unselected expressions, integer-constant-expression use, and exact duplicate/default/type/no-match diagnostics
 
 
 ## CLI
@@ -208,7 +209,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: add a bounded first-pass C11 `_Generic` selection slice over Cust's deterministic scalar, one-level pointer, and named aggregate types, with one selected association, non-evaluation of unselected expressions, exact duplicate/default/type diagnostics, and compiler-oracle coverage.
+- Next milestone: prepare bounded v0.18.0 release metadata for the completed first-pass C11 `_Generic` selection slice, including exact package/CLI/Docker version assertions and synchronized release notes.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider floating-point values, multiple pointer levels, and broader C conformance fixtures.
 

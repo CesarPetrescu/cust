@@ -1,8 +1,14 @@
 # Cust Current State
 
-Last updated: 2026-08-04
+Last updated: 2026-08-05
 
 ## Latest autonomous verification
+
+Bounded first-pass C11 `_Generic` selection is complete over Cust's deterministic scalar, one-level pointer, and named aggregate types. The controlling expression is classified without evaluation; one compatible association or optional `default` supplies the result; only the selected expression executes; and scalar, pointer, aggregate, discard, non-evaluating `sizeof`, and supported integer-constant-expression contexts preserve their existing shape and safety rules. Duplicate compatible types/defaults, unsupported `void`/array/function/anonymous-aggregate/deeper-pointer associations, unsupported two-dimensional controls, and no-match/no-default selections have exact diagnostics.
+
+This run inherited the complete uncommitted implementation and tests, so the original RED evidence is unavailable and is not re-claimed. Focused `_Generic` coverage passed 28 tests, the registered warning-free compiler-oracle harness passed, and an independent read-only review returned `APPROVED` with no blocking findings. The executable inventory is now 1,389 tests: 1,255 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test. Formatting, warning-denied Clippy, all local tests, the rebuilt Docker test gate, runtime output `10`, and `git diff --check` pass. See `references/cust-generic-selection-diagnostics.md`.
+
+Work-package evaluation considered finishing the inherited first-pass `_Generic` implementation, preparing v0.18.0 immediately, and lower-priority parser/fuzz expansion. Finishing the inherited diff was mandatory under the maintenance recovery rules and also completed the sole unchecked language backlog item with the highest roadmap impact. Bounded v0.18.0 release closure is now the next recommended package.
 
 Bounded Cust v0.17.0 is independently approved and canonically verified for atomic publication around ordinary reassignment for narrow tracked unqualified `char **` objects. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README support/limitations/roadmap text, changelog notes, and all five status files are synchronized for `0.17.0`. The executable release inventory is 1,358 tests: 1,224 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.17.0 release verification on 2026-08-04. Exact CLI and Compose version assertions went RED against `0.16.0` and GREEN at `0.17.0`; local/remote tag preflight is empty; independent re-review returned `APPROVED`; formatting, strict Clippy, all 1,358 local/rebuilt-Docker tests, runtime output `10`, local/Cargo/container version `cust 0.17.0`, and `git diff --check` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after bounded first-pass C11 `_Generic` verification on 2026-08-05. Independent read-only review returned `APPROVED`; 28 focused `_Generic` tests, the compiler-oracle harness, formatting, strict Clippy, all 1,389 local/rebuilt-Docker tests, runtime output `10`, and `git diff --check` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-05 — Bounded C11 `_Generic` selection
+
+- C11 generic selection requires the controlling expression to be type-classified without evaluation and only the selected result expression to be evaluated. Cust models this with metadata-only `generic_selection_type` / integer-constant classification and evaluator-specific dispatch for scalar, pointer, aggregate, discard, and `sizeof` contexts.
+- Association compatibility is deliberately bounded to Cust's deterministic scalar lowering, one-level pointers with preserved pointee qualification, and named aggregate identity. Top-level qualifiers do not distinguish association types; duplicate compatible types and duplicate defaults are rejected while parsing.
+- All association expressions still receive structural constraint validation even though unselected expressions are not evaluated. Short-circuited and conditional contexts likewise reject malformed nested generic selections without running side effects.
+- A warning-free GCC/Clang-compatible fixture exercises scalar, pointer, aggregate, string-decay, prototype-return, initializer, call, comma, conditional, field-access, and selected-side-effect routes without host ABI-sensitive assertions. Independent read-only review returned `APPROVED`.
+- This run inherited the completed uncommitted implementation; its original RED evidence is unavailable and is not re-claimed. Focused coverage, the native oracle, all 1,389 local/rebuilt-Docker tests, both Docker commands, strict formatting/Clippy, runtime output `10`, and the diff check pass.
+
 ## 2026-08-04 — v0.17.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.16.0`, then passed after Cargo/lock and both image tags moved to `0.17.0`.

@@ -389,6 +389,12 @@ enum Expr {
     SizeOfType(SizeOfType),
     SizeOfValue(Box<Expr>),
     AlignOfType(SizeOfType),
+    GenericSelection {
+        controlling: Box<Expr>,
+        associations: Vec<(DeclType, Expr)>,
+        default: Option<Box<Expr>>,
+        no_match_error: Box<str>,
+    },
     Var(String),
     StructGet {
         name: String,
@@ -9763,6 +9769,7 @@ impl Parser {
             | Token::Number(_)
             | Token::PreprocessorNumber(_)
             | Token::StringLiteral(_)
+            | Token::Generic
             | Token::Plus
             | Token::Minus
             | Token::PlusPlus
@@ -11258,7 +11265,10 @@ impl Parser {
                 self.peek_located(),
             ));
         }
-        if let Some(label) = self.integer_constant_invalid_start_label() {
+        if let (false, Some(label)) = (
+            self.starts_expr(),
+            self.integer_constant_invalid_start_label(),
+        ) {
             return Err(Self::error_at(
                 format!("expected initializer expression after '=' in {context} before '{label}'"),
                 self.peek_located(),
@@ -13258,6 +13268,10 @@ impl Parser {
         local_constants: &HashMap<String, i64>,
     ) -> CustResult<i64> {
         match expr {
+            Expr::GenericSelection { .. } => self.sizeof_integer_constant_expr(
+                self.select_generic_association_in_integer_constant(expr, local_constants)?,
+                local_constants,
+            ),
             Expr::Number(_) => Ok(INT_SIZE),
             Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
             Expr::SizeOfType(sizeof_type) => sizeof_type.size(&self.struct_types),
@@ -13275,10 +13289,13 @@ impl Parser {
             Expr::UnaryPlus(inner)
             | Expr::UnaryMinus(inner)
             | Expr::BitwiseNot(inner)
-            | Expr::LogicalNot(inner)
-            | Expr::Cast { expr: inner, .. } => {
+            | Expr::LogicalNot(inner) => {
                 self.sizeof_integer_constant_expr(inner, local_constants)?;
                 Ok(INT_SIZE)
+            }
+            Expr::Cast { ty, expr: inner } => {
+                self.sizeof_integer_constant_expr(inner, local_constants)?;
+                Ok(ty.size())
             }
             Expr::Binary(left, _, right) | Expr::Comma(left, right) => {
                 self.sizeof_integer_constant_expr(left, local_constants)?;
@@ -13339,6 +13356,131 @@ impl Parser {
         }
     }
 
+    fn select_generic_association_in_integer_constant<'a>(
+        &self,
+        expr: &'a Expr,
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<&'a Expr> {
+        let Expr::GenericSelection {
+            controlling,
+            associations,
+            default,
+            no_match_error,
+        } = expr
+        else {
+            return Err(CustError::new("expected generic selection expression"));
+        };
+        let controlling_type =
+            self.generic_integer_constant_expr_type(controlling, local_constants)?;
+        if let Some((_, selected)) = associations
+            .iter()
+            .find(|(association_type, _)| association_type == &controlling_type)
+        {
+            return Ok(selected);
+        }
+        default.as_deref().ok_or_else(|| CustError {
+            message: no_match_error.clone(),
+            io_error: false,
+        })
+    }
+
+    fn generic_integer_constant_expr_type(
+        &self,
+        expr: &Expr,
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<DeclType> {
+        let scalar_type = match expr {
+            Expr::GenericSelection { .. } => {
+                return self.generic_integer_constant_expr_type(
+                    self.select_generic_association_in_integer_constant(expr, local_constants)?,
+                    local_constants,
+                );
+            }
+            Expr::Number(_)
+            | Expr::SizeOfType(_)
+            | Expr::SizeOfValue(_)
+            | Expr::AlignOfType(_)
+            | Expr::UnaryPlus(_)
+            | Expr::UnaryMinus(_)
+            | Expr::BitwiseNot(_)
+            | Expr::LogicalNot(_)
+            | Expr::Binary(_, _, _) => CType::Int,
+            Expr::StringGet { .. } => CType::Char,
+            Expr::Cast { ty, .. }
+            | Expr::ScalarLiteral { ty, .. }
+            | Expr::ScalarLiteralSet { ty, .. }
+            | Expr::ScalarLiteralCompoundSet { ty, .. } => *ty,
+            Expr::Var(name)
+                if local_constants.contains_key(name)
+                    || self.lookup_enum_constant(name).is_some() =>
+            {
+                CType::Int
+            }
+            Expr::Comma(_, right) => {
+                return self.generic_integer_constant_expr_type(right, local_constants);
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let then_type =
+                    self.generic_integer_constant_expr_type(then_expr, local_constants)?;
+                let else_type =
+                    self.generic_integer_constant_expr_type(else_expr, local_constants)?;
+                if matches!(
+                    (&then_type, &else_type),
+                    (DeclType::Scalar(_), DeclType::Scalar(_))
+                ) {
+                    return Ok(DeclType::Scalar(CType::Int));
+                }
+                if then_type == else_type {
+                    return Ok(then_type);
+                }
+                return Err(CustError::new(
+                    "generic selection conditional branches have incompatible types",
+                ));
+            }
+            Expr::StringLiteral(_) => {
+                return Ok(DeclType::Pointer {
+                    pointee: PointeeType::Scalar(CType::Char),
+                    // C string literals have array-of-char type and decay to char * in
+                    // generic controlling expressions. Runtime storage remains read-only.
+                    points_to_const: false,
+                });
+            }
+            Expr::ArrayLiteral {
+                elem_type,
+                read_only,
+                ..
+            } => {
+                return Ok(DeclType::Pointer {
+                    pointee: PointeeType::Scalar(*elem_type),
+                    points_to_const: *read_only,
+                });
+            }
+            Expr::AggregateLiteral { type_name, .. } => {
+                return Ok(DeclType::Struct(type_name.clone()));
+            }
+            Expr::AggregateArrayLiteral {
+                type_name,
+                read_only,
+                ..
+            } => {
+                return Ok(DeclType::Pointer {
+                    pointee: PointeeType::Struct(type_name.clone()),
+                    points_to_const: *read_only,
+                });
+            }
+            _ => {
+                return Err(CustError::new(
+                    "unsupported generic controlling expression in integer constant expression",
+                ));
+            }
+        };
+        Ok(DeclType::Scalar(scalar_type))
+    }
+
     fn parse_integer_constant_alignof(&mut self) -> CustResult<(i64, LocatedToken)> {
         let operator = self.previous().clone();
         self.expect_opening_paren_after("_Alignof")?;
@@ -13356,6 +13498,14 @@ impl Parser {
         local_constants: &HashMap<String, i64>,
         context: &str,
     ) -> CustResult<(i64, LocatedToken)> {
+        if self.check(&Token::Generic) {
+            let keyword = self.advance();
+            let generic = self.parse_generic_selection(&keyword)?;
+            let selected =
+                self.select_generic_association_in_integer_constant(&generic, local_constants)?;
+            let value = self.eval_integer_constant_expr_ast(selected, local_constants)?;
+            return Ok((value, keyword));
+        }
         if self.matches(&Token::LParen) {
             let opening = self.previous().clone();
             let context = "expected integer constant in parenthesized integer constant expression";
@@ -13410,6 +13560,160 @@ impl Parser {
         }
     }
 
+    fn validate_integer_constant_expr_ast(
+        &self,
+        expr: &Expr,
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<()> {
+        match expr {
+            Expr::GenericSelection { .. } => self.validate_integer_constant_expr_ast(
+                self.select_generic_association_in_integer_constant(expr, local_constants)?,
+                local_constants,
+            ),
+            Expr::Number(_) => Ok(()),
+            Expr::Var(name)
+                if local_constants.contains_key(name)
+                    || self.lookup_enum_constant(name).is_some() =>
+            {
+                Ok(())
+            }
+            Expr::SizeOfType(sizeof_type) => {
+                sizeof_type.size(&self.struct_types)?;
+                Ok(())
+            }
+            Expr::SizeOfValue(inner) => {
+                self.sizeof_integer_constant_expr(inner, local_constants)?;
+                Ok(())
+            }
+            Expr::AlignOfType(alignof_type) => {
+                alignof_type.alignment(&self.struct_types)?;
+                Ok(())
+            }
+            Expr::UnaryPlus(inner)
+            | Expr::UnaryMinus(inner)
+            | Expr::BitwiseNot(inner)
+            | Expr::LogicalNot(inner)
+            | Expr::Cast { expr: inner, .. } => {
+                self.validate_integer_constant_expr_ast(inner, local_constants)
+            }
+            Expr::Binary(left, _, right) | Expr::Comma(left, right) => {
+                self.validate_integer_constant_expr_ast(left, local_constants)?;
+                self.validate_integer_constant_expr_ast(right, local_constants)
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                self.validate_integer_constant_expr_ast(cond, local_constants)?;
+                self.validate_integer_constant_expr_ast(then_expr, local_constants)?;
+                self.validate_integer_constant_expr_ast(else_expr, local_constants)
+            }
+            _ => Err(CustError::new(
+                "selected generic association is not an integer constant expression",
+            )),
+        }
+    }
+
+    fn eval_integer_constant_expr_ast(
+        &self,
+        expr: &Expr,
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<i64> {
+        match expr {
+            Expr::GenericSelection { .. } => self.eval_integer_constant_expr_ast(
+                self.select_generic_association_in_integer_constant(expr, local_constants)?,
+                local_constants,
+            ),
+            Expr::Number(value) => Ok(*value),
+            Expr::Var(name) => local_constants
+                .get(name)
+                .copied()
+                .or_else(|| self.lookup_enum_constant(name))
+                .ok_or_else(|| {
+                    CustError::new(format!(
+                        "variable '{name}' is not allowed in integer constant expression"
+                    ))
+                }),
+            Expr::SizeOfType(sizeof_type) => sizeof_type.size(&self.struct_types),
+            Expr::SizeOfValue(inner) => self.sizeof_integer_constant_expr(inner, local_constants),
+            Expr::AlignOfType(alignof_type) => alignof_type.alignment(&self.struct_types),
+            Expr::UnaryPlus(inner) => self.eval_integer_constant_expr_ast(inner, local_constants),
+            Expr::Cast { ty, expr: inner } => {
+                Ok(ty.normalize(self.eval_integer_constant_expr_ast(inner, local_constants)?))
+            }
+            Expr::UnaryMinus(inner) => {
+                Ok(-self.eval_integer_constant_expr_ast(inner, local_constants)?)
+            }
+            Expr::BitwiseNot(inner) => {
+                Ok(!self.eval_integer_constant_expr_ast(inner, local_constants)?)
+            }
+            Expr::LogicalNot(inner) => Ok(i64::from(
+                self.eval_integer_constant_expr_ast(inner, local_constants)? == 0,
+            )),
+            Expr::Binary(left, op, right) => {
+                let lhs = self.eval_integer_constant_expr_ast(left, local_constants)?;
+                if *op == BinaryOp::LogicalAnd && lhs == 0 {
+                    self.validate_integer_constant_expr_ast(right, local_constants)?;
+                    return Ok(0);
+                }
+                if *op == BinaryOp::LogicalOr && lhs != 0 {
+                    self.validate_integer_constant_expr_ast(right, local_constants)?;
+                    return Ok(1);
+                }
+                let rhs = self.eval_integer_constant_expr_ast(right, local_constants)?;
+                match op {
+                    BinaryOp::Add => Ok(lhs + rhs),
+                    BinaryOp::Sub => Ok(lhs - rhs),
+                    BinaryOp::Mul => Ok(lhs * rhs),
+                    BinaryOp::Div if rhs == 0 => Err(CustError::new("division by zero")),
+                    BinaryOp::Div => Ok(lhs / rhs),
+                    BinaryOp::Rem if rhs == 0 => Err(CustError::new("division by zero")),
+                    BinaryOp::Rem => Ok(lhs % rhs),
+                    BinaryOp::ShiftLeft if rhs < 0 => {
+                        Err(CustError::new("shift count must be non-negative"))
+                    }
+                    BinaryOp::ShiftLeft => Ok(lhs << rhs),
+                    BinaryOp::ShiftRight if rhs < 0 => {
+                        Err(CustError::new("shift count must be non-negative"))
+                    }
+                    BinaryOp::ShiftRight => Ok(lhs >> rhs),
+                    BinaryOp::Lt => Ok(i64::from(lhs < rhs)),
+                    BinaryOp::Le => Ok(i64::from(lhs <= rhs)),
+                    BinaryOp::Gt => Ok(i64::from(lhs > rhs)),
+                    BinaryOp::Ge => Ok(i64::from(lhs >= rhs)),
+                    BinaryOp::Eq => Ok(i64::from(lhs == rhs)),
+                    BinaryOp::Ne => Ok(i64::from(lhs != rhs)),
+                    BinaryOp::BitAnd => Ok(lhs & rhs),
+                    BinaryOp::BitXor => Ok(lhs ^ rhs),
+                    BinaryOp::BitOr => Ok(lhs | rhs),
+                    BinaryOp::LogicalAnd => Ok(i64::from(lhs != 0 && rhs != 0)),
+                    BinaryOp::LogicalOr => Ok(i64::from(lhs != 0 || rhs != 0)),
+                }
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                let condition = self.eval_integer_constant_expr_ast(cond, local_constants)?;
+                if condition != 0 {
+                    self.validate_integer_constant_expr_ast(else_expr, local_constants)?;
+                    self.eval_integer_constant_expr_ast(then_expr, local_constants)
+                } else {
+                    self.validate_integer_constant_expr_ast(then_expr, local_constants)?;
+                    self.eval_integer_constant_expr_ast(else_expr, local_constants)
+                }
+            }
+            Expr::Comma(_, _) => Err(CustError::new(
+                "comma operator is not allowed in integer constant expression",
+            )),
+            _ => Err(CustError::new(
+                "selected generic association is not an integer constant expression",
+            )),
+        }
+    }
+
     fn parenthesized_integer_constant_invalid_start_label(&self) -> Option<&'static str> {
         match self.peek() {
             Token::RParen => Some(")"),
@@ -13457,7 +13761,6 @@ impl Parser {
             Token::Typedef => Some("typedef"),
             Token::Alignas => Some("_Alignas"),
             Token::StaticAssert => Some("_Static_assert"),
-            Token::Generic => Some("_Generic"),
             Token::Return => Some("return"),
             Token::If => Some("if"),
             Token::Else => Some("else"),
@@ -14494,7 +14797,10 @@ impl Parser {
                 self.peek_located(),
             ));
         }
-        if let Some(label) = self.integer_constant_invalid_start_label() {
+        if let (false, Some(label)) = (
+            self.check(&Token::Generic),
+            self.integer_constant_invalid_start_label(),
+        ) {
             return Err(Self::error_at(
                 format!(
                     "expected expression after assignment operator '{}' before '{label}'",
@@ -14766,7 +15072,10 @@ impl Parser {
                 self.peek_located(),
             ));
         }
-        if let Some(label) = self.integer_constant_invalid_start_label() {
+        if let (false, Some(label)) = (
+            self.starts_expr(),
+            self.integer_constant_invalid_start_label(),
+        ) {
             return Err(Self::error_at(
                 format!(
                     "expected expression after binary operator '{}' before '{label}'",
@@ -15977,6 +16286,7 @@ impl Parser {
                         fields: vec![field],
                     },
                     Expr::AggregateLiteral { .. }
+                    | Expr::GenericSelection { .. }
                     | Expr::Assign { .. }
                     | Expr::ArraySet { .. }
                     | Expr::StructArraySet { .. }
@@ -16139,13 +16449,165 @@ impl Parser {
                 self.expect_closing_paren_after("grouped expression")?;
                 Ok(expr)
             }
-            Token::Generic => Err(Self::error_at(
-                "generic selections are not supported".to_string(),
-                &found,
-            )),
+            Token::Generic => self.parse_generic_selection(&found),
             token => Err(Self::error_at(
                 format!("expected expression, found {token:?}"),
                 &found,
+            )),
+        }
+    }
+
+    fn parse_generic_selection(&mut self, keyword: &LocatedToken) -> CustResult<Expr> {
+        self.expect_opening_paren_after("_Generic")?;
+        if self.check(&Token::Comma) {
+            return Err(Self::error_at(
+                "expected controlling expression before ',' in generic selection".to_string(),
+                self.peek_located(),
+            ));
+        }
+        let controlling = self.parse_assignment_expr()?;
+        let separator = self.advance();
+        if separator.kind != Token::Comma {
+            return Err(Self::error_at(
+                format!(
+                    "expected ',' after generic selection controlling expression, found {:?}",
+                    separator.kind
+                ),
+                &separator,
+            ));
+        }
+
+        let mut associations = Vec::new();
+        let mut default = None;
+        loop {
+            if self.matches(&Token::Default) {
+                let default_token = self.previous().clone();
+                if default.is_some() {
+                    return Err(Self::error_at(
+                        "generic selection has more than one default association".to_string(),
+                        &default_token,
+                    ));
+                }
+                self.expect_colon_after("generic default association")?;
+                default = Some(Box::new(self.parse_assignment_expr()?));
+            } else {
+                let type_token = self.peek_located().clone();
+                let association_type = self.parse_generic_association_type()?;
+                if associations
+                    .iter()
+                    .any(|(existing, _)| existing == &association_type)
+                {
+                    return Err(Self::error_at(
+                        "generic selection has multiple compatible type associations".to_string(),
+                        &type_token,
+                    ));
+                }
+                self.expect_colon_after("generic type association")?;
+                associations.push((association_type, self.parse_assignment_expr()?));
+            }
+
+            if !self.matches(&Token::Comma) {
+                break;
+            }
+            if self.check(&Token::RParen) {
+                return Err(Self::error_at(
+                    "expected generic association after ','".to_string(),
+                    self.peek_located(),
+                ));
+            }
+        }
+        self.expect_closing_paren_after("generic selection")?;
+        if associations.is_empty() && default.is_none() {
+            return Err(Self::error_at(
+                "generic selection requires at least one association".to_string(),
+                keyword,
+            ));
+        }
+        Ok(Expr::GenericSelection {
+            controlling: Box::new(controlling),
+            associations,
+            default,
+            no_match_error: Self::error_at(
+                "generic selection has no compatible association and no default".to_string(),
+                keyword,
+            )
+            .message,
+        })
+    }
+
+    fn parse_generic_association_type(&mut self) -> CustResult<DeclType> {
+        self.reject_leading_restrict_qualifier()?;
+        let mut points_to_const = self.consume_type_qualifiers();
+        let type_token = self.peek_located().clone();
+        if self.check(&Token::Void) {
+            return Err(Self::error_at(
+                "void generic associations are not supported".to_string(),
+                &type_token,
+            ));
+        }
+        if matches!(type_token.kind, Token::Struct | Token::Union)
+            && matches!(self.peek_next(), Token::LBrace)
+        {
+            return Err(Self::error_at(
+                "anonymous aggregate generic associations are not supported".to_string(),
+                &self.tokens[self.pos + 1],
+            ));
+        }
+        let (embedded_const, decl_type) =
+            self.parse_decl_type_with_embedded_qualifiers("generic association type")?;
+        points_to_const |= embedded_const;
+        if self.check(&Token::LBracket) {
+            return Err(Self::error_at(
+                "array generic associations are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
+        self.reject_function_type_suffix("function generic associations")?;
+        if self.matches(&Token::Star) {
+            let pointee = match decl_type {
+                DeclType::Scalar(ty) => PointeeType::Scalar(ty),
+                DeclType::Struct(type_name) => PointeeType::Struct(type_name),
+                DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
+                    return Err(Self::error_at(
+                        "pointer-to-pointer generic associations are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
+                DeclType::Array(_, _) | DeclType::Array2D(_, _, _) => {
+                    return Err(Self::error_at(
+                        "pointer-to-array generic associations are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
+            };
+            self.consume_type_qualifiers();
+            if self.check(&Token::Star) {
+                return Err(Self::error_at(
+                    "pointer-to-pointer generic associations are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
+            return Ok(DeclType::Pointer {
+                pointee,
+                points_to_const,
+            });
+        }
+        match decl_type {
+            DeclType::Scalar(_) | DeclType::Struct(_) => Ok(decl_type),
+            DeclType::Pointer {
+                pointee,
+                points_to_const: alias_points_to_const,
+            } => Ok(DeclType::Pointer {
+                pointee,
+                // Qualifiers written before or after a pointer typedef name qualify the
+                // pointer itself. Top-level qualifiers do not affect C type compatibility.
+                points_to_const: alias_points_to_const,
+            }),
+            DeclType::Array(_, _)
+            | DeclType::Array2D(_, _, _)
+            | DeclType::Array2DPointer { .. } => Err(Self::error_at(
+                "array generic associations are not supported".to_string(),
+                &type_token,
             )),
         }
     }
@@ -16468,6 +16930,7 @@ impl Parser {
                 | Token::Sizeof
                 | Token::Star
                 | Token::Amp
+                | Token::Generic
                 | Token::LParen
         )
     }
@@ -19543,6 +20006,22 @@ impl Interpreter {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
                 }
+                let expected_args = self
+                    .functions
+                    .get(name)
+                    .map(|function| function.params.len())
+                    .or_else(|| {
+                        self.prototypes
+                            .get(name)
+                            .map(|signature| signature.params.len())
+                    })
+                    .ok_or_else(|| CustError::new(format!("undefined function '{name}'")))?;
+                if expected_args != args.len() {
+                    return Err(CustError::new(format!(
+                        "function '{name}' expected {expected_args} arguments, got {}",
+                        args.len()
+                    )));
+                }
                 for arg in args {
                     self.validate_nested_string_intrinsic_calls(arg)?;
                 }
@@ -19577,8 +20056,10 @@ impl Interpreter {
             Expr::AddressOfStructField { name, .. } => {
                 self.validate_non_evaluating_storage_name(name)?;
             }
+            Expr::Deref(inner) => {
+                self.validate_nested_string_intrinsic_calls(inner)?;
+            }
             Expr::SizeOfValue(inner)
-            | Expr::Deref(inner)
             | Expr::VoidCast(inner)
             | Expr::UnaryPlus(inner)
             | Expr::UnaryMinus(inner)
@@ -19603,10 +20084,13 @@ impl Interpreter {
                 self.validate_non_evaluating_storage_name(name)?;
                 self.validate_nested_string_intrinsic_calls(index)?;
             }
+            Expr::ArrayGet { name, index } => {
+                self.validate_non_evaluating_storage_name(name)?;
+                self.validate_nested_string_intrinsic_calls(index)?;
+            }
             Expr::StructArrayGet { index, .. }
             | Expr::StructFieldArrayElementGet { index, .. }
             | Expr::StructElementGet { index, .. }
-            | Expr::ArrayGet { index, .. }
             | Expr::StringGet { index, .. } => {
                 self.validate_nested_string_intrinsic_calls(index)?;
             }
@@ -19625,8 +20109,18 @@ impl Interpreter {
                     name, value, false,
                 )?;
             }
-            Expr::Assign { value, .. }
-            | Expr::StructSet { value, .. }
+            Expr::Assign { name, value } => {
+                if self.find_variable(name).is_none() {
+                    return Err(CustError::new(format!("undefined variable '{name}'")));
+                }
+                if self.is_const_variable(name) {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const variable '{name}'"
+                    )));
+                }
+                self.validate_nested_string_intrinsic_calls(value)?;
+            }
+            Expr::StructSet { value, .. }
             | Expr::CompoundAssign { value, .. }
             | Expr::StructCompoundSet { value, .. } => {
                 self.validate_nested_string_intrinsic_calls(value)?;
@@ -19743,6 +20237,27 @@ impl Interpreter {
             Expr::AggregateArrayLiteral { init, .. } => {
                 self.validate_string_span_struct_array_initializers(init)?;
             }
+            Expr::GenericSelection {
+                controlling,
+                associations,
+                default,
+                ..
+            } => {
+                self.selected_generic_association(expr)?;
+                self.validate_nested_string_intrinsic_calls(controlling)?;
+                for (_, association) in associations {
+                    self.validate_nested_string_intrinsic_calls(association)?;
+                    if !self.expr_is_void_value(association) {
+                        self.generic_selection_type(association)?;
+                    }
+                }
+                if let Some(default) = default {
+                    self.validate_nested_string_intrinsic_calls(default)?;
+                    if !self.expr_is_void_value(default) {
+                        self.generic_selection_type(default)?;
+                    }
+                }
+            }
             Expr::Conditional {
                 cond,
                 then_expr,
@@ -19755,6 +20270,86 @@ impl Interpreter {
             Expr::Binary(left, _, right) | Expr::Comma(left, right) => {
                 self.validate_nested_string_intrinsic_calls(left)?;
                 self.validate_nested_string_intrinsic_calls(right)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_non_evaluating_function_argument_types(
+        &self,
+        name: &str,
+        args: &[Expr],
+    ) -> CustResult<()> {
+        let params = if let Some(function) = self.functions.get(name) {
+            function
+                .params
+                .iter()
+                .map(|param| (param.ty.clone(), param.kind, param.points_to_const))
+                .collect::<Vec<_>>()
+        } else if let Some(signature) = self.prototypes.get(name) {
+            signature
+                .params
+                .iter()
+                .map(|param| (param.ty.clone(), param.kind, param.points_to_const))
+                .collect::<Vec<_>>()
+        } else {
+            return Ok(());
+        };
+
+        for ((expected_type, expected_kind, expected_points_to_const), argument) in
+            params.iter().zip(args)
+        {
+            if matches!(
+                expected_kind,
+                ParamKind::CharacterPointerOutput | ParamKind::Array2D
+            ) {
+                continue;
+            }
+            if self.expr_is_void_value(argument) {
+                return Err(CustError::new("void expression used as scalar"));
+            }
+            let actual_type = self.generic_selection_type(argument)?;
+            match (expected_kind, expected_type, actual_type) {
+                (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Scalar(_))
+                | (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Pointer { .. }) => {
+                }
+                (ParamKind::Scalar, ParamType::Scalar(_), DeclType::Scalar(_)) => {}
+                (ParamKind::Scalar, ParamType::Scalar(_), DeclType::Pointer { .. }) => {
+                    return Err(CustError::new("pointer value used as scalar"));
+                }
+                (ParamKind::Scalar, ParamType::Scalar(_), DeclType::Struct(type_name)) => {
+                    return Err(CustError::new(format!(
+                        "{} value used as scalar",
+                        self.aggregate_kind_label(&type_name)
+                    )));
+                }
+                (
+                    ParamKind::Pointer,
+                    ParamType::Scalar(expected),
+                    DeclType::Pointer {
+                        pointee: PointeeType::Scalar(actual),
+                        points_to_const,
+                    },
+                ) if expected == &actual && (*expected_points_to_const || !points_to_const) => {}
+                (
+                    ParamKind::Pointer,
+                    ParamType::Struct(expected),
+                    DeclType::Pointer {
+                        pointee: PointeeType::Struct(actual),
+                        points_to_const,
+                    },
+                ) if expected == &actual && (*expected_points_to_const || !points_to_const) => {}
+                (ParamKind::Pointer, _, DeclType::Scalar(_))
+                    if self.generic_expr_is_null_pointer_constant(argument) => {}
+                (ParamKind::Pointer, _, _) => {
+                    return Err(CustError::new("expected pointer expression"));
+                }
+                (ParamKind::Struct, ParamType::Struct(expected), DeclType::Struct(actual))
+                    if expected == &actual => {}
+                (ParamKind::Struct, _, _) => {
+                    return Err(CustError::new("incompatible struct argument type"));
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -20077,6 +20672,9 @@ impl Interpreter {
 
     fn expr_is_character_pointer_output_value(&self, expr: &Expr) -> bool {
         match expr {
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .is_ok_and(|selected| self.expr_is_character_pointer_output_value(selected)),
             Expr::Var(name) => self.find_character_pointer_output(name).is_some(),
             Expr::AddressOf(name) => self.find_character_pointer_slot_address(name).is_some(),
             Expr::Assign { name, .. } => self.find_character_pointer_output(name).is_some(),
@@ -20176,6 +20774,13 @@ impl Interpreter {
         check_liveness: bool,
     ) -> CustResult<CharacterPointerOutput> {
         match expr {
+            Expr::GenericSelection { .. } => self
+                .validate_character_pointer_output_argument_with_liveness(
+                    function_name,
+                    param_name,
+                    self.selected_generic_association(expr)?,
+                    check_liveness,
+                ),
             Expr::Number(0) => Ok(CharacterPointerOutput::Null),
             Expr::Var(name)
                 if self.identifier_resolves_to_enum_constant(name)
@@ -20325,6 +20930,9 @@ impl Interpreter {
         }
 
         match expr {
+            Expr::GenericSelection { .. } => {
+                self.validate_non_evaluating_discard_expr(self.selected_generic_association(expr)?)
+            }
             Expr::VoidCast(inner) => self.validate_non_evaluating_discard_expr(inner),
             Expr::Conditional {
                 cond,
@@ -20377,6 +20985,14 @@ impl Interpreter {
         expr: &Expr,
     ) -> CustResult<CharacterPointerOutput> {
         match expr {
+            Expr::GenericSelection { .. } => {
+                let selected = self.selected_generic_association(expr)?.clone();
+                self.eval_validated_character_pointer_output_argument(
+                    function_name,
+                    param_name,
+                    &selected,
+                )
+            }
             Expr::Conditional {
                 cond,
                 then_expr,
@@ -20787,6 +21403,9 @@ impl Interpreter {
 
     fn pointer_expr_pointee_type(&self, expr: &Expr) -> CustResult<Option<PointeeType>> {
         match expr {
+            Expr::GenericSelection { .. } => {
+                self.pointer_expr_pointee_type(self.selected_generic_association(expr)?)
+            }
             Expr::Deref(pointer) if self.expr_is_character_pointer_output_value(pointer) => {
                 self.validate_character_pointer_output_argument_with_liveness(
                     "character pointer output dereference",
@@ -21069,7 +21688,11 @@ impl Interpreter {
                 .functions
                 .get(name)
                 .map(|function| &function.return_type)
-            {
+                .or_else(|| {
+                    self.prototypes
+                        .get(name)
+                        .map(|signature| &signature.return_type)
+                }) {
                 Some(ReturnType::Pointer { ty, .. }) => Ok(Some(ty.clone())),
                 Some(ReturnType::Array2DPointer { elem_type, .. }) => {
                     Ok(Some(PointeeType::Scalar(*elem_type)))
@@ -21347,6 +21970,10 @@ impl Interpreter {
 
     fn pointer_expr_points_to_const(&self, expr: &Expr) -> bool {
         match expr {
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .map(|selected| self.pointer_expr_points_to_const(selected))
+                .unwrap_or(false),
             Expr::Var(name) => self.pointer_variable_points_to_const(name),
             Expr::AddressOf(name) => self.is_const_variable(name),
             Expr::AddressOfStructField { name, fields } => self
@@ -21570,13 +22197,19 @@ impl Interpreter {
             Expr::Call { name, .. } => self
                 .functions
                 .get(name)
-                .and_then(|function| match function.return_type {
+                .map(|function| &function.return_type)
+                .or_else(|| {
+                    self.prototypes
+                        .get(name)
+                        .map(|signature| &signature.return_type)
+                })
+                .and_then(|return_type| match return_type {
                     ReturnType::Pointer {
                         points_to_const, ..
                     }
                     | ReturnType::Array2DPointer {
                         points_to_const, ..
-                    } => Some(points_to_const),
+                    } => Some(*points_to_const),
                     _ => None,
                 })
                 .unwrap_or(false),
@@ -25865,6 +26498,11 @@ impl Interpreter {
 
     fn eval_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
         match expr {
+            Expr::GenericSelection { .. } => {
+                self.validate_nested_string_intrinsic_calls(expr)?;
+                let selected = self.selected_generic_association(expr)?.clone();
+                self.eval_pointer(&selected)
+            }
             Expr::Number(0) => Ok(PointerValue::Null),
             Expr::Deref(output) if self.expr_is_character_pointer_output_value(output) => {
                 let output = self.eval_character_pointer_output_argument(
@@ -27418,6 +28056,10 @@ impl Interpreter {
 
     fn expr_is_pointer_value(&self, expr: &Expr) -> bool {
         match expr {
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .map(|selected| self.expr_is_pointer_value(selected))
+                .unwrap_or(false),
             Expr::Number(_) => false,
             Expr::AddressOf(_)
             | Expr::AddressOfArray { .. }
@@ -27528,7 +28170,12 @@ impl Interpreter {
                     || matches!(
                         self.functions
                             .get(name)
-                            .map(|function| &function.return_type),
+                            .map(|function| &function.return_type)
+                            .or_else(|| {
+                                self.prototypes
+                                    .get(name)
+                                    .map(|signature| &signature.return_type)
+                            }),
                         Some(ReturnType::Pointer { .. } | ReturnType::Array2DPointer { .. })
                     )
             }
@@ -27918,6 +28565,296 @@ impl Interpreter {
         }
     }
 
+    fn generic_selection_type(&self, expr: &Expr) -> CustResult<DeclType> {
+        if let Expr::GenericSelection { .. } = expr {
+            return self.generic_selection_type(self.selected_generic_association(expr)?);
+        }
+
+        if let Expr::Call { name, args } = expr {
+            self.validate_non_evaluating_function_argument_types(name, args)?;
+            let return_type = self
+                .functions
+                .get(name)
+                .map(|function| &function.return_type)
+                .or_else(|| {
+                    self.prototypes
+                        .get(name)
+                        .map(|signature| &signature.return_type)
+                })
+                .ok_or_else(|| CustError::new(format!("undefined function '{name}'")))?;
+            return match return_type {
+                ReturnType::Scalar(ty) => Ok(DeclType::Scalar(*ty)),
+                ReturnType::Pointer {
+                    ty,
+                    points_to_const,
+                } => Ok(DeclType::Pointer {
+                    pointee: ty.clone(),
+                    points_to_const: *points_to_const,
+                }),
+                ReturnType::Struct(type_name) => Ok(DeclType::Struct(type_name.clone())),
+                ReturnType::Array2DPointer { .. } => Err(CustError::new(format!(
+                    "function '{name}' returns an unsupported pointer-to-row generic type"
+                ))),
+                ReturnType::Void => Err(CustError::new(format!(
+                    "void function '{name}' cannot control a generic selection"
+                ))),
+            };
+        }
+
+        if self.array2d_row_pointer_element_type(expr).is_some() {
+            return Err(CustError::new(
+                "two-dimensional array generic controlling expressions are not supported",
+            ));
+        }
+
+        if self.expr_is_pointer_value(expr) {
+            let pointee = self
+                .pointer_expr_pointee_type(expr)?
+                .ok_or_else(|| CustError::new("cannot determine generic selection pointer type"))?;
+            return Ok(DeclType::Pointer {
+                pointee,
+                points_to_const: self.pointer_expr_points_to_const(expr),
+            });
+        }
+
+        if let Ok(type_name) = self.aggregate_expr_type_name(expr) {
+            return Ok(DeclType::Struct(type_name));
+        }
+
+        if let Some(field_type) = self.generic_aggregate_field_expr_type(expr)? {
+            return Ok(field_type);
+        }
+
+        let scalar_type = match expr {
+            Expr::Number(_)
+            | Expr::SizeOfType(_)
+            | Expr::SizeOfValue(_)
+            | Expr::AlignOfType(_)
+            | Expr::UnaryPlus(_)
+            | Expr::UnaryMinus(_)
+            | Expr::BitwiseNot(_)
+            | Expr::LogicalNot(_)
+            | Expr::Binary(_, _, _) => CType::Int,
+            Expr::StringGet { .. } => CType::Char,
+            Expr::Cast { ty, .. }
+            | Expr::ScalarLiteral { ty, .. }
+            | Expr::ScalarLiteralSet { ty, .. }
+            | Expr::ScalarLiteralCompoundSet { ty, .. } => *ty,
+            Expr::Var(name) | Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
+                if self.identifier_resolves_to_enum_constant(name) {
+                    CType::Int
+                } else {
+                    match self.find_variable(name) {
+                        Some(Value::Scalar { ty, .. }) => *ty,
+                        Some(_) => {
+                            return Err(CustError::new(format!(
+                                "cannot use non-scalar variable '{name}' as generic controlling expression"
+                            )));
+                        }
+                        None => {
+                            return Err(CustError::new(format!("undefined variable '{name}'")));
+                        }
+                    }
+                }
+            }
+            Expr::ArrayGet { name, .. } | Expr::Array2DGet { name, .. } => {
+                match self.find_variable(name) {
+                    Some(Value::Array(array)) => array.borrow().elem_type,
+                    Some(Value::Pointer {
+                        ty: PointeeType::Scalar(ty),
+                        ..
+                    }) => *ty,
+                    Some(_) => {
+                        return Err(CustError::new(format!(
+                            "indexed variable '{name}' does not have scalar elements"
+                        )));
+                    }
+                    None => {
+                        return Err(CustError::new(format!("undefined variable '{name}'")));
+                    }
+                }
+            }
+            Expr::Call { .. } => unreachable!("function calls return above"),
+            Expr::Comma(_, right) => return self.generic_selection_type(right),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let then_type = self.generic_selection_type(then_expr)?;
+                let else_type = self.generic_selection_type(else_expr)?;
+                return match (&then_type, &else_type) {
+                    (DeclType::Scalar(_), DeclType::Scalar(_)) => Ok(DeclType::Scalar(CType::Int)),
+                    (
+                        DeclType::Pointer {
+                            pointee: then_pointee,
+                            points_to_const: then_const,
+                        },
+                        DeclType::Pointer {
+                            pointee: else_pointee,
+                            points_to_const: else_const,
+                        },
+                    ) if then_pointee == else_pointee => Ok(DeclType::Pointer {
+                        pointee: then_pointee.clone(),
+                        points_to_const: *then_const || *else_const,
+                    }),
+                    (DeclType::Pointer { .. }, DeclType::Scalar(_))
+                        if self.generic_expr_is_null_pointer_constant(else_expr) =>
+                    {
+                        Ok(then_type)
+                    }
+                    (DeclType::Scalar(_), DeclType::Pointer { .. })
+                        if self.generic_expr_is_null_pointer_constant(then_expr) =>
+                    {
+                        Ok(else_type)
+                    }
+                    _ if then_type == else_type => Ok(then_type),
+                    _ => Err(CustError::new(
+                        "conditional branches have incompatible generic controlling types",
+                    )),
+                };
+            }
+            Expr::Increment { target, .. } => return self.generic_selection_type(target),
+            Expr::Deref(pointer) | Expr::DerefSet { pointer, .. } => {
+                match self.pointer_expr_pointee_type(pointer)? {
+                    Some(PointeeType::Scalar(ty)) => ty,
+                    _ => {
+                        return Err(CustError::new("expected pointer expression"));
+                    }
+                }
+            }
+            _ => match self.pointer_expr_pointee_type(expr)? {
+                Some(PointeeType::Scalar(ty)) => ty,
+                _ => {
+                    return Err(CustError::new(
+                        "generic controlling expression is not a supported scalar, pointer, or aggregate type",
+                    ));
+                }
+            },
+        };
+        Ok(DeclType::Scalar(scalar_type))
+    }
+
+    fn generic_expr_is_null_pointer_constant(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Number(0) => true,
+            Expr::Var(name) => self.find_enum_constant(name) == Some(0),
+            Expr::Cast { expr, .. } | Expr::UnaryPlus(expr) => {
+                self.generic_expr_is_null_pointer_constant(expr)
+            }
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .is_ok_and(|selected| self.generic_expr_is_null_pointer_constant(selected)),
+            _ => false,
+        }
+    }
+
+    fn generic_aggregate_field_expr_type(&self, expr: &Expr) -> CustResult<Option<DeclType>> {
+        let (type_name, fields) = match expr {
+            Expr::StructGet { name, fields } => match self.find_variable(name) {
+                Some(Value::Struct { type_name, .. }) => (type_name.clone(), fields.as_slice()),
+                _ => return Ok(None),
+            },
+            Expr::StructPtrGet { pointer, fields } => {
+                let Some(PointeeType::Struct(type_name)) =
+                    self.pointer_expr_pointee_type(pointer)?
+                else {
+                    return Ok(None);
+                };
+                (type_name, fields.as_slice())
+            }
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                let type_name = self.aggregate_expr_type_name(aggregate)?;
+                (type_name, fields.as_slice())
+            }
+            _ => return Ok(None),
+        };
+        self.generic_aggregate_field_type(&type_name, fields)
+            .map(Some)
+    }
+
+    fn generic_aggregate_field_type(
+        &self,
+        type_name: &str,
+        path: &[String],
+    ) -> CustResult<DeclType> {
+        let mut current_type_name = type_name.to_string();
+        for (index, field_name) in path.iter().enumerate() {
+            let struct_type = self.struct_types.get(&current_type_name).ok_or_else(|| {
+                CustError::new(format!("undefined struct type '{current_type_name}'"))
+            })?;
+            let field = struct_type
+                .fields
+                .iter()
+                .find(|field| field.name == *field_name)
+                .ok_or_else(|| {
+                    CustError::new(format!(
+                        "struct '{current_type_name}' has no field '{field_name}'"
+                    ))
+                })?;
+            let is_last = index + 1 == path.len();
+            match &field.ty {
+                StructFieldType::Struct(nested_type) if !is_last => {
+                    current_type_name = nested_type.clone();
+                }
+                StructFieldType::Scalar(ty) if is_last => {
+                    return Ok(DeclType::Scalar(*ty));
+                }
+                StructFieldType::Struct(nested_type) if is_last => {
+                    return Ok(DeclType::Struct(nested_type.clone()));
+                }
+                StructFieldType::Pointer(pointee) if is_last => {
+                    return Ok(DeclType::Pointer {
+                        pointee: pointee.clone(),
+                        points_to_const: field.points_to_const,
+                    });
+                }
+                StructFieldType::Array(elem_type, _) if is_last => {
+                    return Ok(DeclType::Pointer {
+                        pointee: PointeeType::Scalar(*elem_type),
+                        points_to_const: field.is_const,
+                    });
+                }
+                StructFieldType::StructArray(nested_type, _) if is_last => {
+                    return Ok(DeclType::Pointer {
+                        pointee: PointeeType::Struct(nested_type.clone()),
+                        points_to_const: field.is_const,
+                    });
+                }
+                StructFieldType::Array2D(_, _, _) if is_last => {
+                    return Err(CustError::new(
+                        "two-dimensional array generic controlling expressions are not supported",
+                    ));
+                }
+                _ => return Err(CustError::new("expected supported aggregate field type")),
+            }
+        }
+        Err(CustError::new("generic aggregate field path is empty"))
+    }
+
+    fn selected_generic_association<'a>(&self, expr: &'a Expr) -> CustResult<&'a Expr> {
+        let Expr::GenericSelection {
+            controlling,
+            associations,
+            default,
+            no_match_error,
+        } = expr
+        else {
+            return Err(CustError::new("expected generic selection expression"));
+        };
+        let controlling_type = self.generic_selection_type(controlling)?;
+        if let Some((_, selected)) = associations
+            .iter()
+            .find(|(association_type, _)| association_type == &controlling_type)
+        {
+            return Ok(selected);
+        }
+        default.as_deref().ok_or_else(|| CustError {
+            message: no_match_error.clone(),
+            io_error: false,
+        })
+    }
+
     fn eval_truthy(&mut self, expr: &Expr) -> CustResult<bool> {
         if self.expr_is_character_pointer_output_value(expr) {
             let output =
@@ -28060,6 +28997,7 @@ impl Interpreter {
             | Expr::ScalarLiteralSet { .. }
             | Expr::ScalarLiteralCompoundSet { .. }
             | Expr::Increment { .. }
+            | Expr::GenericSelection { .. }
             | Expr::Conditional { .. }
             | Expr::Binary(_, _, _) => Ok(self.eval(expr)? != 0),
         }
@@ -28068,6 +29006,10 @@ impl Interpreter {
     fn expr_is_void_value(&self, expr: &Expr) -> bool {
         match expr {
             Expr::VoidCast(_) => true,
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .map(|selected| self.expr_is_void_value(selected))
+                .unwrap_or(false),
             Expr::Call { name, .. } => {
                 matches!(
                     self.functions
@@ -28114,6 +29056,11 @@ impl Interpreter {
                 Expr::Comma(left, right) => {
                     self.eval_discard(left)?;
                     self.eval_discard(right)?;
+                }
+                Expr::GenericSelection { .. } => {
+                    self.validate_nested_string_intrinsic_calls(expr)?;
+                    let selected = self.selected_generic_association(expr)?.clone();
+                    self.eval_discard(&selected)?;
                 }
                 _ => unreachable!("direct calls and void casts are handled above"),
             }
@@ -28534,6 +29481,9 @@ impl Interpreter {
     fn sizeof_expr(&self, expr: &Expr) -> CustResult<i64> {
         self.validate_nested_string_intrinsic_calls(expr)?;
         match expr {
+            Expr::GenericSelection { .. } => {
+                self.sizeof_expr(self.selected_generic_association(expr)?)
+            }
             Expr::Number(_) => Ok(INT_SIZE),
             Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
             Expr::ArrayLiteral {
@@ -29055,6 +30005,9 @@ impl Interpreter {
 
     fn aggregate_expr_type_name(&self, expr: &Expr) -> CustResult<String> {
         match expr {
+            Expr::GenericSelection { .. } => {
+                self.aggregate_expr_type_name(self.selected_generic_association(expr)?)
+            }
             Expr::AggregateLiteral { type_name, .. } => Ok(type_name.clone()),
             Expr::AggregateFieldGet { aggregate, fields } => {
                 let type_name = self.aggregate_expr_type_name(aggregate)?;
@@ -29982,6 +30935,11 @@ impl Interpreter {
 
     fn eval_struct_expr(&mut self, expr: &Expr) -> CustResult<ReturnValue> {
         match expr {
+            Expr::GenericSelection { .. } => {
+                self.validate_nested_string_intrinsic_calls(expr)?;
+                let selected = self.selected_generic_association(expr)?.clone();
+                self.eval_struct_expr(&selected)
+            }
             Expr::Conditional {
                 cond,
                 then_expr,
@@ -30947,6 +31905,11 @@ impl Interpreter {
 
     fn eval(&mut self, expr: &Expr) -> CustResult<i64> {
         match expr {
+            Expr::GenericSelection { .. } => {
+                self.validate_nested_string_intrinsic_calls(expr)?;
+                let selected = self.selected_generic_association(expr)?.clone();
+                self.eval(&selected)
+            }
             Expr::Number(value) => Ok(*value),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
             Expr::ArrayLiteral { .. }
@@ -31532,6 +32495,8 @@ impl Interpreter {
                 then_expr,
                 else_expr,
             } => {
+                self.validate_nested_string_intrinsic_calls(then_expr)?;
+                self.validate_nested_string_intrinsic_calls(else_expr)?;
                 if self.eval_truthy(cond)? {
                     self.eval(then_expr)
                 } else {
@@ -31544,6 +32509,7 @@ impl Interpreter {
             }
             Expr::Binary(left, op, right) => match op {
                 BinaryOp::LogicalAnd => {
+                    self.validate_nested_string_intrinsic_calls(right)?;
                     if !self.eval_truthy(left)? {
                         Ok(0)
                     } else {
@@ -31551,6 +32517,7 @@ impl Interpreter {
                     }
                 }
                 BinaryOp::LogicalOr => {
+                    self.validate_nested_string_intrinsic_calls(right)?;
                     if self.eval_truthy(left)? {
                         Ok(1)
                     } else {

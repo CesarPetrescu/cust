@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added bounded C11 `_Generic` selection over deterministic scalar, one-level pointer, and named aggregate association types. The controlling expression is type-classified without evaluation, exactly one compatible association or optional `default` is selected, and only the selected expression executes while preserving scalar, pointer, aggregate, discard, `sizeof`, and integer-constant-expression behavior.
+
+### Diagnostics and verification
+
+- Added exact source-located diagnostics for duplicate compatible associations, duplicate defaults, unsupported `void`/array/function/anonymous-aggregate/deeper-pointer association forms, and no-match selections without a default. Focused interpreter and invalid fixtures plus a registered warning-free compiler-oracle fixture cover the bounded surface.
+
 ## v0.17.0 — 2026-08-04
 
 ### Language subset

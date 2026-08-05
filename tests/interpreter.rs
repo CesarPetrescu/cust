@@ -2862,14 +2862,496 @@ fn rejects_old_style_function_parameter_lists_with_context() {
 }
 
 #[test]
-fn rejects_generic_selections_with_context() {
-    let program = include_str!("fixtures/invalid/generic_selection.c");
+fn supports_generic_selection_over_scalar_pointer_and_aggregate_types() {
+    let program = include_str!("fixtures/valid/generic_selections.c");
+
+    assert_eq!(interpret(program).unwrap(), 214);
+}
+
+#[test]
+fn generic_selection_evaluates_only_the_selected_discarded_expression() {
+    let program = r#"
+        int bump(int *value) {
+            *value += 1;
+            return *value;
+        }
+
+        int main(void) {
+            int calls = 0;
+            _Generic(calls, int: bump(&calls), default: bump(&calls));
+            return calls;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn generic_selection_supports_a_selected_void_expression_in_discard_context() {
+    let program = r#"
+        void bump(int *value) {
+            *value += 1;
+        }
+
+        int main(void) {
+            int calls = 0;
+            (void)_Generic(calls, int: bump(&calls), default: bump(&calls));
+            return calls;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn generic_selection_rejects_no_match_even_in_an_unselected_conditional_branch() {
+    let program = r#"
+        int main(void) {
+            return 1 ? 7 : _Generic((char)1, int: 2);
+        }
+    "#;
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "generic selections are not supported at line 2, column 12"
+        "generic selection has no compatible association and no default at line 3, column 28"
+    );
+}
+
+#[test]
+fn generic_selection_applies_scalar_promotions_in_conditional_controlling_expressions() {
+    let program = r#"
+        int main(void) {
+            return _Generic(1 ? (char)0 : 1, int: 7, default: 9);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn generic_selection_classifies_prototype_pointer_arithmetic_and_null_conditionals() {
+    let program = r#"
+        int *pointer_only(void);
+
+        int main(void) {
+            int arithmetic = _Generic(pointer_only() + 1, int *: 3, default: 50);
+            int conditional = _Generic(1 ? pointer_only() : 0, int *: 4, default: 60);
+            return arithmetic + conditional;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn generic_selection_classifies_string_literals_as_c_character_pointers() {
+    let program = r#"
+        int main(void) {
+            return _Generic("text", char *: 7, default: 9);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn generic_selection_ignores_top_level_const_on_pointer_typedef_associations() {
+    let program = r#"
+        typedef int *IntPointer;
+
+        int main(void) {
+            int value = 0;
+            const int *pointer = &value;
+            return _Generic(pointer, const IntPointer: 50, const int *: 7, default: 9);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn generic_selection_sizeof_in_integer_constant_expressions_uses_selected_cast_type() {
+    let program = r#"
+        int main(void) {
+            int cast_values[sizeof(_Generic(1, int: (char)0, default: 0))];
+            int string_values[sizeof(_Generic("x", char *: (char)0, default: 0))];
+            return sizeof(cast_values) / sizeof(int)
+                + sizeof(string_values) / sizeof(int);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 2);
+}
+
+#[test]
+fn generic_selection_is_an_integer_constant_expression_when_selected_value_is_constant() {
+    let program = r#"
+        int main(void) {
+            int values[_Generic(1, int: 3, default: 9)];
+            return sizeof(values) / sizeof(int);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 3);
+}
+
+#[test]
+fn generic_selection_rejects_no_match_in_short_circuited_and_unselected_associations() {
+    let short_circuit = r#"
+        int main(void) {
+            return 0 && _Generic((char)1, int: 2);
+        }
+    "#;
+    let unselected_association = r#"
+        int main(void) {
+            return _Generic(1, int: 7, default: _Generic((char)1, int: 2));
+        }
+    "#;
+
+    for program in [short_circuit, unselected_association] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string()
+                .starts_with("generic selection has no compatible association and no default")
+        );
+    }
+}
+
+#[test]
+fn generic_selection_integer_constant_expressions_use_enum_controls_and_short_circuit() {
+    let program = r#"
+        enum Choice {
+            FIRST = 1,
+            SELECTED = _Generic(FIRST, int: (1 ? 3 : 1 / 0), default: 9)
+        };
+
+        int main(void) {
+            int values[SELECTED];
+            return sizeof(values) / sizeof(int);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 3);
+}
+
+#[test]
+fn generic_selection_integer_constant_expressions_normalize_selected_bool_casts() {
+    let program = r#"
+        enum Choice {
+            SELECTED = _Generic(1, int: (_Bool)5, default: 0)
+        };
+
+        int main(void) {
+            return SELECTED;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn generic_selection_validates_unselected_function_calls() {
+    let program = r#"
+        int main(void) {
+            return _Generic(1, int: 7, default: missing());
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "undefined function 'missing'"
+    );
+}
+
+#[test]
+fn generic_selection_validates_unselected_const_assignments() {
+    let program = r#"
+        int main(void) {
+            const int fixed = 1;
+            return _Generic(1, int: 7, default: (fixed = 2));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const variable 'fixed'"
+    );
+}
+
+#[test]
+fn generic_selection_rejects_unsupported_two_dimensional_array_controls() {
+    let program = r#"
+        int main(void) {
+            int matrix[2][3];
+            return _Generic(matrix, int *: 1, default: 2);
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "two-dimensional array generic controlling expressions are not supported"
+    );
+}
+
+#[test]
+fn generic_selection_validates_unselected_invalid_index() {
+    let error = interpret("int main(void) { return _Generic(1, int: 7, default: missing[0]); }")
+        .unwrap_err();
+
+    assert_eq!(error.to_string(), "undefined variable 'missing'");
+}
+
+#[test]
+fn generic_selection_validates_unselected_invalid_dereference() {
+    let program = "int main(void) { return _Generic(1, int: 7, default: *3); }";
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "expected pointer expression"
+    );
+}
+
+#[test]
+fn generic_selection_validates_unselected_invalid_field_access() {
+    let program = r#"
+        struct Point { int x; };
+
+        int main(void) {
+            struct Point point = {.x = 3};
+            return _Generic(1, int: 7, default: point.missing);
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "struct 'Point' has no field 'missing'"
+    );
+}
+
+#[test]
+fn generic_selection_validates_unselected_function_argument_types() {
+    let program = r#"
+        int take(int value) { return value; }
+
+        int main(void) {
+            return _Generic(1, int: 7, default: take((int *)0));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer value used as scalar"
+    );
+}
+
+#[test]
+fn generic_selection_rejects_unselected_aggregate_bool_arguments() {
+    let program = r#"
+        struct Point { int x; };
+        int truth(_Bool value) { return value; }
+
+        int main(void) {
+            struct Point point = {.x = 3};
+            return _Generic(1, int: 7, default: truth(point));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "struct value used as scalar"
+    );
+}
+
+#[test]
+fn generic_selection_supports_selected_void_expression_in_comma_discard_context() {
+    let program = r#"
+        long int strtol(const char *text, char **end, int base);
+
+        int main(void) {
+            char *end = 0;
+            return strtol("7", (_Generic(1, int: (void)0), &end), 10);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn generic_selection_uses_prototype_return_types_without_evaluating_calls() {
+    let program = r#"
+        struct Pair {
+            int value;
+        };
+
+        int scalar_only(void);
+        int *pointer_only(void);
+        struct Pair pair_only(void);
+
+        int main(void) {
+            return _Generic(scalar_only(), int: 1, default: 100)
+                + _Generic(pointer_only(), int *: 2, default: 100)
+                + _Generic(pair_only(), struct Pair: 4, default: 100);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn generic_selection_classifies_indexed_and_aggregate_field_controlling_expressions() {
+    let program = r#"
+        struct Inner {
+            int value;
+        };
+
+        struct Outer {
+            struct Inner inner;
+        };
+
+        int main(void) {
+            int values[2] = {1, 2};
+            struct Outer outer = {{3}};
+            struct Outer *pointer = &outer;
+
+            return _Generic(values[0], int: 1, default: 100)
+                + _Generic(pointer->inner, struct Inner: 2, default: 100)
+                + _Generic(pointer->inner.value, int: 4, default: 100);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn generic_selection_preserves_postfix_pointee_const_qualifiers() {
+    let program = r#"
+        int main(void) {
+            int value = 1;
+            const int *pointer = &value;
+            return _Generic(pointer, int const *: 7, default: 9);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn generic_selection_sizeof_uses_selected_types_without_evaluating_operands() {
+    let program = r#"
+        struct Pair {
+            int value;
+        };
+
+        int bump(int *value) {
+            *value += 1;
+            return *value;
+        }
+
+        int main(void) {
+            int calls = 0;
+            int value = 1;
+            int *pointer = &value;
+            int scalar_ok = sizeof(_Generic(bump(&calls), int: (char)1, default: bump(&calls))) == sizeof(char);
+            int pointer_ok = sizeof(_Generic(value, int: pointer, default: pointer)) == sizeof(int *);
+            int aggregate_ok = sizeof(_Generic(value, int: (struct Pair){1}, default: (struct Pair){2})) == sizeof(struct Pair);
+
+            return calls * 100 + scalar_ok + 2 * pointer_ok + 4 * aggregate_ok;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn generic_selection_sizeof_is_supported_in_integer_constant_expressions() {
+    let program = r#"
+        int main(void) {
+            int values[sizeof(_Generic(1, int: (char)0, default: 0))] = {7};
+            return values[0];
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn rejects_duplicate_compatible_generic_association_types() {
+    let program = include_str!("fixtures/invalid/generic_selection_duplicate_types.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "generic selection has multiple compatible type associations at line 2, column 32"
+    );
+}
+
+#[test]
+fn rejects_duplicate_compatible_qualified_pointer_generic_associations() {
+    let program =
+        include_str!("fixtures/invalid/generic_selection_duplicate_qualified_pointer_types.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert!(
+        err.to_string()
+            .starts_with("generic selection has multiple compatible type associations at line 2")
+    );
+}
+
+#[test]
+fn rejects_duplicate_generic_default_associations() {
+    let program = include_str!("fixtures/invalid/generic_selection_duplicate_default.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "generic selection has more than one default association at line 2, column 36"
+    );
+}
+
+#[test]
+fn rejects_unsupported_generic_association_type_forms() {
+    let cases = [
+        (
+            include_str!("fixtures/invalid/generic_selection_void_association.c"),
+            "void generic associations are not supported at line 2, column 24",
+        ),
+        (
+            include_str!("fixtures/invalid/generic_selection_pointer_to_pointer_association.c"),
+            "pointer-to-pointer generic associations are not supported at line 2, column 29",
+        ),
+        (
+            include_str!("fixtures/invalid/generic_selection_array_association.c"),
+            "array generic associations are not supported at line 2, column 27",
+        ),
+        (
+            include_str!("fixtures/invalid/generic_selection_function_association.c"),
+            "function generic associations are not supported at line 2, column 27",
+        ),
+        (
+            include_str!("fixtures/invalid/generic_selection_anonymous_aggregate_association.c"),
+            "anonymous aggregate generic associations are not supported at line 2, column 31",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn rejects_generic_selection_without_a_match_or_default() {
+    let program = include_str!("fixtures/invalid/generic_selection_no_match.c");
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "generic selection has no compatible association and no default at line 3, column 12"
     );
 }
 
