@@ -1,19 +1,32 @@
-# Unsupported `void *` diagnostics
+# Bounded first safe `void *` object/conversion slice
 
-Date: 2026-07-01
+Date: 2026-08-05
 
-Cust's pointer model explicitly excludes `void *` from the supported safe one-level pointer subset. Keep the rejection narrow and source-located at the `*` token so users can distinguish an unsupported void pointer from a malformed ordinary `void` function or `(void)expr` cast.
+Cust now supports a deliberately bounded one-level `void *` object model. The implementation stores only interpreter-owned `PointerValue` identities; it never exposes or relies on host addresses.
 
-Covered forms:
+## Supported forms
 
-- Return types: `void *make(void)` reports `void pointers are not supported` at `*` before generic function-name parsing.
-- Parameters: `int f(void *slot)` reports the same diagnostic at `*` before the special empty-`void` parameter-list rule.
-- Block declarations: `void *slot;` inside a block reports the same diagnostic before local function-prototype routing consumes `void`.
-- Casts: `(void *)0` reports the same diagnostic before ordinary `(void)expr` cast parsing expects `)`.
-- Type queries: `sizeof(void *)` and `_Alignof(void *)` report the same diagnostic at `*` before the older `sizeof(void)` / `_Alignof(void)` diagnostic at `void`.
+- Local, file-global, block-static, `for`-initializer, and function-parameter `void *` / `const void *` objects.
+- Null initialization/assignment, equality/inequality, truthiness, ordinary assignment, assignment results, conditional values, comma values, and forwarding through compatible functions.
+- Implicit conversion from supported object pointers to `void *`, and from `void *` back to compatible object pointers when qualification is preserved.
+- Explicit one-level `(void *)` casts, `sizeof(void *)`, `_Alignof(void *)`, and non-evaluating `sizeof` classification of valid assignment/conditional/comma forms.
+- Existing owner, lexical lifetime, hidden-storage lifetime, and read-only metadata are retained across conversions.
 
-Implementation notes:
+## Intentional boundaries
 
-- Use a token helper that recognizes `Token::Void` followed by `Token::Star` at the current parser position and returns the star token for location-preserving errors.
-- Check it at top-level/function-return routing, local-statement routing, parameter-list `void` handling, cast parsing, and shared `sizeof`/`_Alignof` type-name parsing.
-- Preserve valid `void` surfaces: `void f(void)`, empty `void` parameter lists, and scalar `(void)expr` casts.
+- Dereference and indexing report `cannot dereference pointer to void` / `cannot index pointer to void`.
+- Addition, subtraction, increment/decrement, compound arithmetic, unary arithmetic, and relational ordering report the corresponding `pointer to void ... is not supported` diagnostics, including beneath `sizeof`.
+- Pointer difference, incompatible scalar/aggregate conversion, qualification discard, deeper pointers, pointer-to-array forms, and function-pointer forms remain unsupported with exact diagnostics.
+- Equality and truthiness are supported; relational ordering is not.
+
+## Implementation notes
+
+- `PointeeType::Void` is a zero-sized type marker for compatibility classification only; `PointeeType::size()` rejects it. Pointer objects still have deterministic pointer size.
+- `pointer_type_compatible()` models only the bounded object-pointer conversion rules and keeps qualification checking separate from pointee-type compatibility.
+- `pointer_expr_pointee_type()` and the normal pointer evaluator preserve metadata without evaluating expressions in `sizeof` paths.
+- `for` declaration lookahead must include `Token::Void`; otherwise a legal `for (void *p = ...; ...)` declaration falls into expression parsing.
+- Native `cc` is used only as a warning-free compatibility oracle for defined valid behavior. Invalid dereference/arithmetic fixtures are interpreter-only because native extensions or undefined behavior are unsuitable oracles.
+
+## TDD/review closure
+
+Focused RED/GREEN regressions covered the missing `for`-initializer declaration route and invalid `void *` arithmetic/order/increment/compound/unary forms beneath non-evaluating `sizeof`. The complete slice is covered by focused interpreter tests, registered compiler-oracle coverage, invalid fixture tests, recursion-depth coverage, independent review, and the canonical local/Docker verification gate.

@@ -2455,7 +2455,7 @@ fn rejects_missing_atomic_type_arguments_with_context() {
 }
 
 #[test]
-fn rejects_void_pointer_forms_with_context() {
+fn rejects_void_pointer_return_with_context() {
     let program = include_str!("fixtures/invalid/void_pointer_return.c");
 
     let err = interpret(program).unwrap_err();
@@ -2463,46 +2463,200 @@ fn rejects_void_pointer_forms_with_context() {
         err.to_string(),
         "void pointers are not supported at line 1, column 6"
     );
+}
 
-    let program = include_str!("fixtures/invalid/void_pointer_parameter.c");
+#[test]
+fn void_pointer_objects_support_storage_conversion_and_forwarding() {
+    let program = include_str!("fixtures/compat/valid/void_pointer_objects.c");
 
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn void_pointer_objects_work_in_for_initializers() {
+    let program = r#"
+        int main(void) {
+            int value = 7;
+            for (void *pointer = &value; pointer; pointer = 0) {
+                int *roundtrip = pointer;
+                return *roundtrip;
+            }
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn void_pointer_objects_preserve_lifetime_and_read_only_metadata() {
+    let program = r#"
+        void *escaped;
+
+        void capture(void *pointer) {
+            escaped = pointer;
+        }
+
+        int main(void) {
+            {
+                int value = 3;
+                capture(&value);
+            }
+            return *(int *)escaped;
+        }
+    "#;
+    let err = interpret(program).unwrap_err();
+    assert_eq!(err.to_string(), "pointer to out-of-scope variable 'value'");
+
+    let program = r#"
+        int main(void) {
+            void *pointer = (void *)"abc";
+            char *characters = pointer;
+            *characters = 'z';
+            return 0;
+        }
+    "#;
     let err = interpret(program).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "void pointers are not supported at line 1, column 18"
+        "cannot modify read-only array through pointer"
     );
+}
 
-    let program = include_str!("fixtures/invalid/void_pointer_local_declaration.c");
+#[test]
+fn void_pointer_object_boundaries_are_exact() {
+    let cases = [
+        (
+            include_str!("fixtures/invalid/void_pointer_qualifier_discard.c"),
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            include_str!("fixtures/invalid/void_pointer_dereference.c"),
+            "cannot dereference pointer to void",
+        ),
+        (
+            include_str!("fixtures/invalid/void_pointer_indexing.c"),
+            "cannot index pointer to void",
+        ),
+        (
+            include_str!("fixtures/invalid/void_pointer_arithmetic.c"),
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            include_str!("fixtures/invalid/void_pointer_difference.c"),
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            include_str!("fixtures/invalid/void_pointer_ordering.c"),
+            "pointer to void ordering comparisons are not supported",
+        ),
+        (
+            include_str!("fixtures/invalid/void_pointer_deeper.c"),
+            "pointer-to-pointer declarations are not supported at line 2, column 11",
+        ),
+        (
+            include_str!("fixtures/invalid/void_pointer_array.c"),
+            "pointer array declarations are not supported at line 2, column 19",
+        ),
+        (
+            include_str!("fixtures/invalid/void_pointer_function.c"),
+            "function pointer declarations are not supported at line 2, column 10",
+        ),
+        (
+            include_str!("fixtures/invalid/void_pointer_incompatible_conversion.c"),
+            "cannot convert pointer to int to pointer to char",
+        ),
+    ];
 
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
+
+    let non_evaluating_cases = [
+        "int main(void) { int value; void *pointer = &value; return sizeof(*pointer); }",
+        "int main(void) { int values[1]; void *pointer = values; return sizeof(pointer[0]); }",
+    ];
+    for program in non_evaluating_cases {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            matches!(
+                err.to_string().as_str(),
+                "cannot dereference pointer to void" | "cannot index pointer to void"
+            ),
+            "unexpected error for {program}: {err}"
+        );
+    }
+
+    let program =
+        "int main(void) { int values[1]; void *pointer = values; return sizeof(pointer + 1); }";
     let err = interpret(program).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "void pointers are not supported at line 2, column 10"
+        "pointer to void arithmetic is not supported"
     );
 
-    let program = include_str!("fixtures/invalid/void_pointer_cast.c");
-
+    let program = "int main(void) { int values[1]; void *pointer = values; return sizeof(pointer < pointer); }";
     let err = interpret(program).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "void pointers are not supported at line 2, column 18"
+        "pointer to void ordering comparisons are not supported"
     );
+}
 
-    let program = include_str!("fixtures/invalid/void_pointer_sizeof.c");
+#[test]
+fn void_pointer_object_boundaries_cover_mutating_and_reverse_routes() {
+    let cases = [
+        (
+            "int main(void) { int values[2]; void *pointer = values; pointer += 1; return 0; }",
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            "int main(void) { int values[2]; void *pointer = values; pointer++; return 0; }",
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            "int main(void) { int values[2]; void *pointer = values; ++pointer; return 0; }",
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            "int main(void) { int value; void *pointer = &value; return +pointer; }",
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            "int main(void) { int value; void *pointer = &value; return sizeof(+pointer); }",
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            "int main(void) { int values[2]; void *pointer = values; return sizeof(pointer++); }",
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            "int main(void) { int values[2]; void *pointer = values; return sizeof(pointer += 1); }",
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            "int main(void) { int values[2]; void *pointer = values; return 0[pointer]; }",
+            "cannot index pointer to void",
+        ),
+        (
+            "int main(void) { int values[2]; void *pointer = values; return sizeof(0[pointer]); }",
+            "cannot index pointer to void",
+        ),
+        (
+            "int main(void) { int value; void *pointer = &value; *pointer = 1; return 0; }",
+            "cannot dereference pointer to void",
+        ),
+        (
+            "int main(void) { int value; void *pointer = &value; (*pointer)++; return 0; }",
+            "cannot dereference pointer to void",
+        ),
+    ];
 
-    let err = interpret(program).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "void pointers are not supported at line 2, column 24"
-    );
-
-    let program = include_str!("fixtures/invalid/void_pointer_alignof.c");
-
-    let err = interpret(program).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "void pointers are not supported at line 2, column 26"
-    );
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected, "program: {program}");
+    }
 }
 
 #[test]

@@ -147,6 +147,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/char_return_functions.c",
     "tests/fixtures/compat/valid/character_pointer_output_parameters.c",
     "tests/fixtures/compat/valid/character_pointer_objects.c",
+    "tests/fixtures/compat/valid/void_pointer_objects.c",
     "tests/fixtures/compat/valid/comma_operator.c",
     "tests/fixtures/compat/valid/const_qualifiers.c",
     "tests/fixtures/compat/valid/const_array_typedef_compound_literals.c",

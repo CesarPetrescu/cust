@@ -754,6 +754,7 @@ enum TypeAlias {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DeclType {
+    Void,
     Scalar(CType),
     Struct(String),
     Pointer {
@@ -1016,6 +1017,7 @@ impl CType {
 impl PointeeType {
     fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
         match self {
+            PointeeType::Void => Err(CustError::new("void has no object size")),
             PointeeType::Scalar(ty) => Ok(ty.size()),
             PointeeType::Struct(type_name) => struct_types
                 .get(type_name)
@@ -1027,6 +1029,7 @@ impl PointeeType {
 
     fn alignment(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
         match self {
+            PointeeType::Void => Err(CustError::new("void has no object alignment")),
             PointeeType::Scalar(ty) => Ok(ty.alignment()),
             PointeeType::Struct(type_name) => struct_types
                 .get(type_name)
@@ -1101,6 +1104,7 @@ struct Param {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ParamType {
+    Void,
     Scalar(CType),
     Struct(String),
     Array2D(CType, usize),
@@ -1108,6 +1112,7 @@ enum ParamType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PointeeType {
+    Void,
     Scalar(CType),
     Struct(String),
 }
@@ -7015,13 +7020,11 @@ impl Parser {
                     token,
                 ));
             }
-            if let Some(token) = self.void_pointer_star_token_at_current() {
-                return Err(Self::error_at(
-                    "void pointers are not supported".to_string(),
-                    token,
-                ));
-            }
-            if self.check(&Token::Void) && !self.starts_function_definition() {
+            if self.check(&Token::Void)
+                && self.void_pointer_star_token_at_current().is_none()
+                && !matches!(self.peek_next(), Token::LParen)
+                && !self.starts_function_definition()
+            {
                 return Err(Self::error_at(
                     "void object declarations are not supported".to_string(),
                     self.peek_located(),
@@ -7031,7 +7034,6 @@ impl Parser {
                 || self.starts_struct_function_declaration()
                 || self.starts_alias_function_declaration()
                 || self.starts_malformed_function_definition()
-                || self.check(&Token::Void)
             {
                 let (name, top_level_function, inline_return_enum_decl, explicit_void_parameters) =
                     self.parse_function_declaration()?;
@@ -7107,6 +7109,7 @@ impl Parser {
                     | Token::Volatile
                     | Token::Restrict
                     | Token::Atomic
+                    | Token::Void
             ) || self.current_alias().is_some()
             {
                 let global = self.parse_var_decl()?;
@@ -7532,6 +7535,10 @@ impl Parser {
         self.reject_complex_type_specifier(&found)?;
         let mut saw_const = false;
         match found.kind.clone() {
+            Token::Void => {
+                saw_const |= self.consume_type_qualifiers();
+                Ok((saw_const, DeclType::Void))
+            }
             Token::Int
             | Token::Char
             | Token::Bool
@@ -7643,6 +7650,7 @@ impl Parser {
                 }
                 if self.matches(&Token::Star) {
                     let pointee = match decl_type {
+                        DeclType::Void => PointeeType::Void,
                         DeclType::Scalar(ty) => PointeeType::Scalar(ty),
                         DeclType::Struct(type_name) => PointeeType::Struct(type_name),
                         DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
@@ -8076,6 +8084,7 @@ impl Parser {
 
     fn decl_type_to_return_type(decl_type: DeclType) -> ReturnType {
         match decl_type {
+            DeclType::Void => ReturnType::Void,
             DeclType::Scalar(ty) => ReturnType::Scalar(ty),
             DeclType::Struct(type_name) => ReturnType::Struct(type_name),
             DeclType::Pointer {
@@ -8102,13 +8111,16 @@ impl Parser {
 
     fn decl_type_to_param_type(decl_type: &DeclType) -> ParamType {
         match decl_type {
+            DeclType::Void => ParamType::Void,
             DeclType::Scalar(ty) => ParamType::Scalar(*ty),
             DeclType::Struct(type_name) => ParamType::Struct(type_name.clone()),
             DeclType::Pointer { pointee, .. } => match pointee {
+                PointeeType::Void => ParamType::Void,
                 PointeeType::Scalar(ty) => ParamType::Scalar(*ty),
                 PointeeType::Struct(type_name) => ParamType::Struct(type_name.clone()),
             },
             DeclType::Array(pointee, _) => match pointee {
+                PointeeType::Void => unreachable!("void arrays are rejected while parsing"),
                 PointeeType::Scalar(ty) => ParamType::Scalar(*ty),
                 PointeeType::Struct(type_name) => ParamType::Struct(type_name.clone()),
             },
@@ -8121,6 +8133,7 @@ impl Parser {
 
     fn decl_type_to_pointee_type(decl_type: &DeclType) -> PointeeType {
         match decl_type {
+            DeclType::Void => PointeeType::Void,
             DeclType::Scalar(ty) => PointeeType::Scalar(*ty),
             DeclType::Struct(type_name) => PointeeType::Struct(type_name.clone()),
             DeclType::Pointer { pointee, .. } => pointee.clone(),
@@ -8197,6 +8210,12 @@ impl Parser {
                     Token::Const | Token::Volatile | Token::Restrict | Token::Atomic
                 )
             });
+        if matches!(base_type, DeclType::Void) {
+            return Err(Self::error_at(
+                "void typedef aliases are not supported".to_string(),
+                &self.tokens[base_start],
+            ));
+        }
 
         loop {
             let (
@@ -8316,6 +8335,7 @@ impl Parser {
         let alias_name = self.parse_declarator_name(alias_context)?;
         let mut alias = if has_explicit_star {
             match base_type {
+                DeclType::Void => unreachable!("void typedef aliases are rejected"),
                 DeclType::Scalar(ty) => TypeAlias::Pointer {
                     pointee: PointeeType::Scalar(ty),
                     points_to_const: leading_const,
@@ -8338,6 +8358,7 @@ impl Parser {
             }
         } else {
             match base_type {
+                DeclType::Void => unreachable!("void typedef aliases are rejected"),
                 DeclType::Scalar(ty) => TypeAlias::Scalar(ty),
                 DeclType::Struct(type_name) => TypeAlias::Struct(type_name),
                 DeclType::Pointer {
@@ -9087,13 +9108,7 @@ impl Parser {
         if self.check(&Token::RParen) {
             return Ok(params);
         }
-        if self.check(&Token::Void) {
-            if let Some(token) = self.void_pointer_star_token_at_current() {
-                return Err(Self::error_at(
-                    "void pointers are not supported".to_string(),
-                    token,
-                ));
-            }
+        if self.check(&Token::Void) && !matches!(self.peek_next(), Token::Star) {
             let void_token = self.advance();
             if self.check(&Token::RParen) {
                 return Ok(params);
@@ -9231,6 +9246,12 @@ impl Parser {
             };
             let post_star_is_qualified = post_star_qualifier.is_some();
             let post_star_const = has_explicit_star && self.consume_type_qualifiers();
+            if matches!(decl_type, DeclType::Void) && !has_explicit_star {
+                return Err(Self::error_at(
+                    "void parameter lists must be empty".to_string(),
+                    &parameter_type_token,
+                ));
+            }
             if matches!(decl_type, DeclType::Pointer { .. }) && has_explicit_star {
                 return Err(Self::error_at(
                     "pointer-to-pointer parameters are not supported".to_string(),
@@ -9313,6 +9334,9 @@ impl Parser {
                 format!("__cust_prototype_param_{}", params.len())
             } else if has_explicit_star {
                 match &decl_type {
+                    DeclType::Void => {
+                        self.parse_declarator_name("void pointer parameter name after '*'")?
+                    }
                     DeclType::Scalar(_) => {
                         self.parse_declarator_name("parameter name after '*'")?
                     }
@@ -9334,6 +9358,7 @@ impl Parser {
                 }
             } else {
                 match &decl_type {
+                    DeclType::Void => unreachable!("void parameters require an explicit star"),
                     DeclType::Scalar(_) => {
                         self.parse_declarator_name("parameter name after type")?
                     }
@@ -9650,13 +9675,11 @@ impl Parser {
                 token,
             ));
         }
-        if let Some(token) = self.void_pointer_star_token_at_current() {
-            return Err(Self::error_at(
-                "void pointers are not supported".to_string(),
-                token,
-            ));
-        }
-        if self.check(&Token::Void) && !self.starts_function_definition() {
+        if self.check(&Token::Void)
+            && self.void_pointer_star_token_at_current().is_none()
+            && !matches!(self.peek_next(), Token::LParen)
+            && !self.starts_function_definition()
+        {
             return Err(Self::error_at(
                 "void object declarations are not supported".to_string(),
                 self.peek_located(),
@@ -9689,7 +9712,8 @@ impl Parser {
             | Token::Const
             | Token::Volatile
             | Token::Restrict
-            | Token::Atomic => self.parse_var_decl(),
+            | Token::Atomic
+            | Token::Void => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Typedef => match self.parse_typedef_decl()? {
                 Some(stmt) => Ok(stmt),
@@ -9813,7 +9837,6 @@ impl Parser {
         self.starts_function_definition()
             || self.starts_struct_function_declaration()
             || self.starts_alias_function_declaration()
-            || self.check(&Token::Void)
     }
 
     fn parse_local_function_prototype_decl(&mut self) -> CustResult<Stmt> {
@@ -9914,7 +9937,8 @@ impl Parser {
             | Token::Volatile
             | Token::Restrict
             | Token::Atomic
-            | Token::Enum => self.parse_var_decl()?,
+            | Token::Enum
+            | Token::Void => self.parse_var_decl()?,
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
             Token::Struct | Token::Union => self.parse_aggregate_var_decl()?,
             token => {
@@ -9981,7 +10005,8 @@ impl Parser {
             | Token::Volatile
             | Token::Restrict
             | Token::Atomic
-            | Token::Enum => self.parse_var_decl(),
+            | Token::Enum
+            | Token::Void => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -10008,7 +10033,8 @@ impl Parser {
             | Token::Const
             | Token::Volatile
             | Token::Restrict
-            | Token::Atomic => self.parse_var_decl()?,
+            | Token::Atomic
+            | Token::Void => self.parse_var_decl()?,
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl()?,
             Token::Enum => self.parse_var_decl()?,
             Token::Struct | Token::Union => self.parse_aggregate_var_decl()?,
@@ -10051,7 +10077,8 @@ impl Parser {
             | Token::Volatile
             | Token::Restrict
             | Token::Atomic
-            | Token::Enum => self.parse_var_decl(),
+            | Token::Enum
+            | Token::Void => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -10136,7 +10163,8 @@ impl Parser {
             | Token::Volatile
             | Token::Restrict
             | Token::Atomic
-            | Token::Enum => self.parse_var_decl(),
+            | Token::Enum
+            | Token::Void => self.parse_var_decl(),
             Token::Ident(_) if self.current_alias().is_some() => self.parse_var_decl(),
             Token::Struct | Token::Union => self.parse_aggregate_var_decl(),
             token => Err(Self::error_at(
@@ -10270,6 +10298,12 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        if matches!(decl_type, DeclType::Void) && !has_explicit_star {
+            return Err(Self::error_at(
+                "void object declarations are not supported".to_string(),
+                &declaration_type_token,
+            ));
+        }
         let is_pointer = has_explicit_star
             || matches!(
                 decl_type,
@@ -10277,6 +10311,7 @@ impl Parser {
             );
         let name = if has_explicit_star {
             match &decl_type {
+                DeclType::Void => self.parse_declarator_name("void pointer name after '*'")?,
                 DeclType::Scalar(_) => self.parse_declarator_name("pointer name after '*'")?,
                 DeclType::Struct(_) => {
                     self.parse_declarator_name("struct pointer name after '*'")?
@@ -10296,6 +10331,7 @@ impl Parser {
             }
         } else {
             match &decl_type {
+                DeclType::Void => unreachable!("void objects are rejected above"),
                 DeclType::Scalar(_) => self.parse_declarator_name("variable name after type")?,
                 DeclType::Struct(_) => self.parse_declarator_name("struct variable name")?,
                 DeclType::Pointer { .. } => {
@@ -10382,6 +10418,7 @@ impl Parser {
                 ));
             }
             match pointee {
+                PointeeType::Void => unreachable!("void arrays are rejected while parsing"),
                 PointeeType::Scalar(ty) => {
                     let init = if self.matches(&Token::Assign) {
                         self.last_decl_had_initializer = true;
@@ -10456,6 +10493,11 @@ impl Parser {
                 Expr::Number(0)
             } else {
                 let context = match &decl_type {
+                    DeclType::Void => "void pointer declaration",
+                    DeclType::Pointer {
+                        pointee: PointeeType::Void,
+                        ..
+                    } => "void pointer declaration",
                     DeclType::Scalar(_)
                     | DeclType::Pointer {
                         pointee: PointeeType::Scalar(_),
@@ -10496,6 +10538,11 @@ impl Parser {
             }
             if require_semi {
                 let context = match &decl_type {
+                    DeclType::Void => "void pointer declaration",
+                    DeclType::Pointer {
+                        pointee: PointeeType::Void,
+                        ..
+                    } => "void pointer declaration",
                     DeclType::Scalar(_)
                     | DeclType::Pointer {
                         pointee: PointeeType::Scalar(_),
@@ -10610,7 +10657,7 @@ impl Parser {
             }
         }
         let DeclType::Scalar(ty) = decl_type else {
-            unreachable!("struct declarations return above")
+            unreachable!("void and struct declarations return above")
         };
         if self.matches(&Token::LBracket) {
             let (len, init) = if self.matches(&Token::RBracket) {
@@ -10907,6 +10954,12 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        if matches!(base_type, DeclType::Void) && !has_explicit_star {
+            return Err(Self::error_at(
+                "void object declarations are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
         let is_pointer = has_explicit_star
             || matches!(
                 base_type,
@@ -10914,6 +10967,7 @@ impl Parser {
             );
         let name = if has_explicit_star {
             match &base_type {
+                DeclType::Void => self.parse_declarator_name("void pointer name after '*'")?,
                 DeclType::Scalar(_) => self.parse_declarator_name("pointer name after '*'")?,
                 DeclType::Struct(_) => {
                     self.parse_declarator_name("struct pointer name after '*'")?
@@ -10937,6 +10991,7 @@ impl Parser {
             }
         } else {
             match &base_type {
+                DeclType::Void => unreachable!("void objects are rejected above"),
                 DeclType::Scalar(_) => self.parse_declarator_name("variable name after ','")?,
                 DeclType::Struct(_) => {
                     self.parse_declarator_name("struct variable name after ','")?
@@ -10979,6 +11034,7 @@ impl Parser {
                 ));
             }
             return match pointee {
+                PointeeType::Void => unreachable!("void arrays are rejected while parsing"),
                 PointeeType::Scalar(ty) => {
                     let init = if self.matches(&Token::Assign) {
                         self.last_decl_had_initializer = true;
@@ -11055,6 +11111,11 @@ impl Parser {
                 Expr::Number(0)
             } else {
                 let context = match &base_type {
+                    DeclType::Void => "void pointer declaration",
+                    DeclType::Pointer {
+                        pointee: PointeeType::Void,
+                        ..
+                    } => "void pointer declaration",
                     DeclType::Scalar(_)
                     | DeclType::Pointer {
                         pointee: PointeeType::Scalar(_),
@@ -11087,6 +11148,7 @@ impl Parser {
         }
 
         match base_type {
+            DeclType::Void => unreachable!("void objects are rejected above"),
             DeclType::Scalar(ty) => {
                 if self.matches(&Token::LBracket) {
                     let (len, init) = if self.matches(&Token::RBracket) {
@@ -12330,6 +12392,12 @@ impl Parser {
                     (leading_const, false)
                 };
                 let ty = match decl_type.clone() {
+                    DeclType::Void => {
+                        return Err(Self::error_at(
+                            "void object declarations are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
                     DeclType::Scalar(ty) if has_explicit_star => {
                         StructFieldType::Pointer(PointeeType::Scalar(ty))
                     }
@@ -12343,6 +12411,9 @@ impl Parser {
                         ));
                     }
                     DeclType::Pointer { pointee, .. } => StructFieldType::Pointer(pointee),
+                    DeclType::Array(PointeeType::Void, _) => {
+                        return Err(CustError::new("void arrays are not supported"));
+                    }
                     DeclType::Array(PointeeType::Scalar(ty), len) => {
                         StructFieldType::Array(ty, len)
                     }
@@ -13116,7 +13187,8 @@ impl Parser {
                     &type_token,
                 ));
             }
-            DeclType::Pointer { .. }
+            DeclType::Void
+            | DeclType::Pointer { .. }
             | DeclType::Array(_, _)
             | DeclType::Array2D(_, _, _)
             | DeclType::Array2DPointer { .. } => {
@@ -14188,6 +14260,7 @@ impl Parser {
                 | Token::Restrict
                 | Token::Atomic
                 | Token::Enum
+                | Token::Void
                 | Token::Alignas
         ) || self.current_alias().is_some()
         {
@@ -15349,11 +15422,28 @@ impl Parser {
             });
         }
         if self.matches(&Token::Void) {
-            if self.check(&Token::Star) {
-                return Err(Self::error_at(
-                    "void pointers are not supported".to_string(),
-                    self.peek_located(),
-                ));
+            if self.matches(&Token::Star) {
+                self.consume_type_qualifiers();
+                if self.check(&Token::Star) {
+                    return Err(Self::error_at(
+                        "pointer-to-pointer casts are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "pointer array casts are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                self.reject_function_type_suffix("function casts")?;
+                self.expect_closing_paren_after("cast type")?;
+                self.reject_missing_cast_operand()?;
+                return Ok(Expr::PointerCast {
+                    pointee: PointeeType::Void,
+                    points_to_const: leading_const,
+                    expr: Box::new(self.parse_unary()?),
+                });
             }
             self.reject_function_type_suffix("function casts")?;
             if self.check(&Token::LBracket) {
@@ -15381,6 +15471,7 @@ impl Parser {
         }
         if self.matches(&Token::Star) {
             let pointee = match decl_type {
+                DeclType::Void => PointeeType::Void,
                 DeclType::Scalar(ty) => PointeeType::Scalar(ty),
                 DeclType::Struct(type_name) => PointeeType::Struct(type_name),
                 DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
@@ -15419,6 +15510,7 @@ impl Parser {
             });
         }
         let ty = match decl_type {
+            DeclType::Void => unreachable!("void casts return above"),
             DeclType::Scalar(ty) => ty,
             DeclType::Struct(_) => {
                 let DeclType::Struct(type_name) = decl_type else {
@@ -15486,6 +15578,7 @@ impl Parser {
                     ));
                 }
                 return match pointee {
+                    PointeeType::Void => unreachable!("void arrays are rejected while parsing"),
                     PointeeType::Scalar(elem_type) => Ok(Expr::ArrayLiteral {
                         elem_type,
                         len: Some(len),
@@ -15886,13 +15979,24 @@ impl Parser {
             _ => {}
         }
         if self.check(&Token::Void) {
-            if let Some(token) = self.void_pointer_star_token_at_current() {
-                return Err(Self::error_at(
-                    "void pointers are not supported".to_string(),
-                    token,
-                ));
-            }
             self.advance();
+            if self.matches(&Token::Star) {
+                self.consume_type_qualifiers();
+                if self.check(&Token::Star) {
+                    return Err(Self::error_at(
+                        format!("pointer-to-pointer {operator} types are not supported"),
+                        self.peek_located(),
+                    ));
+                }
+                if self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        format!("pointer array {operator} types are not supported"),
+                        self.peek_located(),
+                    ));
+                }
+                self.reject_function_type_suffix(&format!("function {operator} types"))?;
+                return Ok(SizeOfType::Pointer);
+            }
             self.reject_function_type_suffix(&format!("function {operator} types"))?;
             if self.check(&Token::LBracket) {
                 return Err(Self::error_at(
@@ -15976,6 +16080,7 @@ impl Parser {
         }
 
         match decl_type {
+            DeclType::Void => unreachable!("void sizeof types return above"),
             DeclType::Scalar(ty) => {
                 if self.matches(&Token::Star) {
                     self.consume_type_qualifiers();
@@ -16539,12 +16644,6 @@ impl Parser {
         self.reject_leading_restrict_qualifier()?;
         let mut points_to_const = self.consume_type_qualifiers();
         let type_token = self.peek_located().clone();
-        if self.check(&Token::Void) {
-            return Err(Self::error_at(
-                "void generic associations are not supported".to_string(),
-                &type_token,
-            ));
-        }
         if matches!(type_token.kind, Token::Struct | Token::Union)
             && matches!(self.peek_next(), Token::LBrace)
         {
@@ -16565,6 +16664,7 @@ impl Parser {
         self.reject_function_type_suffix("function generic associations")?;
         if self.matches(&Token::Star) {
             let pointee = match decl_type {
+                DeclType::Void => PointeeType::Void,
                 DeclType::Scalar(ty) => PointeeType::Scalar(ty),
                 DeclType::Struct(type_name) => PointeeType::Struct(type_name),
                 DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
@@ -16593,6 +16693,10 @@ impl Parser {
             });
         }
         match decl_type {
+            DeclType::Void => Err(Self::error_at(
+                "void generic associations are not supported".to_string(),
+                &type_token,
+            )),
             DeclType::Scalar(_) | DeclType::Struct(_) => Ok(decl_type),
             DeclType::Pointer {
                 pointee,
@@ -17756,6 +17860,7 @@ impl Interpreter {
                 }
                 ParamKind::Pointer => {
                     let ty = match &param.ty {
+                        ParamType::Void => PointeeType::Void,
                         ParamType::Scalar(ty) => PointeeType::Scalar(*ty),
                         ParamType::Struct(type_name) => PointeeType::Struct(type_name.clone()),
                         ParamType::Array2D(_, _) => {
@@ -22319,6 +22424,7 @@ impl Interpreter {
 
     fn pointee_label(&self, ty: &PointeeType) -> String {
         match ty {
+            PointeeType::Void => "void".to_string(),
             PointeeType::Scalar(CType::Int) => "int".to_string(),
             PointeeType::Scalar(CType::Char) => "char".to_string(),
             PointeeType::Scalar(CType::Bool) => "_Bool".to_string(),
@@ -22597,7 +22703,7 @@ impl Interpreter {
         let Some(actual) = self.pointer_value_type(pointer)? else {
             return Ok(());
         };
-        if &actual != expected {
+        if !matches!(expected, PointeeType::Void) && &actual != expected {
             return Err(CustError::new(format!(
                 "cannot convert pointer to {} to pointer to {}",
                 self.pointee_label(&actual),
@@ -22665,6 +22771,12 @@ impl Interpreter {
     }
 
     fn ensure_pointer_expr_pointee_mutable(&self, expr: &Expr) -> CustResult<()> {
+        if matches!(
+            self.pointer_expr_pointee_type(expr)?,
+            Some(PointeeType::Void)
+        ) {
+            return Err(Self::void_pointer_dereference_error(expr));
+        }
         if self.pointer_expr_points_to_const(expr) {
             if let Some(field_label) = self.const_aggregate_field_label_in_pointer_expr(expr) {
                 return Err(CustError::new(format!(
@@ -22674,6 +22786,14 @@ impl Interpreter {
             Err(CustError::new("cannot assign through pointer to const"))
         } else {
             Ok(())
+        }
+    }
+
+    fn void_pointer_dereference_error(pointer: &Expr) -> CustError {
+        if matches!(pointer, Expr::Binary(_, BinaryOp::Add, _)) {
+            CustError::new("cannot index pointer to void")
+        } else {
+            CustError::new("cannot dereference pointer to void")
         }
     }
 
@@ -27071,6 +27191,14 @@ impl Interpreter {
             }
             Expr::CompoundAssign { name, op, value } => {
                 let pointer = match self.find_variable(name).cloned() {
+                    Some(Value::Pointer {
+                        ty: PointeeType::Void,
+                        ..
+                    }) => {
+                        return Err(CustError::new(
+                            "pointer to void arithmetic is not supported",
+                        ));
+                    }
                     Some(Value::Pointer { pointer, .. }) => pointer,
                     Some(Value::Scalar { .. }) => {
                         return Err(CustError::new(format!(
@@ -27172,6 +27300,14 @@ impl Interpreter {
                 }
                 Expr::Var(name) => {
                     let pointer = match self.find_variable(name).cloned() {
+                        Some(Value::Pointer {
+                            ty: PointeeType::Void,
+                            ..
+                        }) => {
+                            return Err(CustError::new(
+                                "pointer to void arithmetic is not supported",
+                            ));
+                        }
                         Some(Value::Pointer { pointer, .. }) => pointer,
                         Some(Value::Scalar { .. }) => {
                             return Err(CustError::new(format!(
@@ -27219,6 +27355,21 @@ impl Interpreter {
         }
         let left_is_pointer = self.expr_is_pointer_value(left);
         let right_is_pointer = self.expr_is_pointer_value(right);
+        if (left_is_pointer
+            && matches!(
+                self.pointer_expr_pointee_type(left)?,
+                Some(PointeeType::Void)
+            ))
+            || (right_is_pointer
+                && matches!(
+                    self.pointer_expr_pointee_type(right)?,
+                    Some(PointeeType::Void)
+                ))
+        {
+            return Err(CustError::new(
+                "pointer to void ordering comparisons are not supported",
+            ));
+        }
 
         match (left_is_pointer, right_is_pointer) {
             (false, false) => {
@@ -27252,6 +27403,21 @@ impl Interpreter {
     ) -> CustResult<PointerValue> {
         let left_is_pointer = self.expr_is_pointer_value(left);
         let right_is_pointer = self.expr_is_pointer_value(right);
+        if (left_is_pointer
+            && matches!(
+                self.pointer_expr_pointee_type(left)?,
+                Some(PointeeType::Void)
+            ))
+            || (right_is_pointer
+                && matches!(
+                    self.pointer_expr_pointee_type(right)?,
+                    Some(PointeeType::Void)
+                ))
+        {
+            return Err(CustError::new(
+                "pointer to void arithmetic is not supported",
+            ));
+        }
 
         match (left_is_pointer, right_is_pointer) {
             (true, false) => {
@@ -27629,6 +27795,15 @@ impl Interpreter {
         name: &str,
         index: &Expr,
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, Option<String>, usize)> {
+        if matches!(
+            self.find_variable(name),
+            Some(Value::Pointer {
+                ty: PointeeType::Void,
+                ..
+            })
+        ) {
+            return Err(CustError::new("cannot index pointer to void"));
+        }
         let index_value = self.eval(index)?;
         let pointer = match self.find_variable(name) {
             Some(Value::Pointer { pointer, .. }) => pointer.clone(),
@@ -27699,6 +27874,12 @@ impl Interpreter {
             return Err(CustError::new(
                 "subscript requires one pointer operand and one scalar operand",
             ));
+        }
+        if matches!(
+            self.pointer_expr_pointee_type(pointer_expr)?,
+            Some(PointeeType::Void)
+        ) {
+            return Err(CustError::new("cannot index pointer to void"));
         }
 
         if let Expr::Var(pointer_name) = pointer_expr {
@@ -29420,6 +29601,7 @@ impl Interpreter {
         fields: &[String],
     ) -> CustResult<i64> {
         match pointee {
+            PointeeType::Void => Err(CustError::new("cannot index pointer to void")),
             PointeeType::Struct(type_name) => self.sizeof_aggregate_field_type(&type_name, fields),
             PointeeType::Scalar(_) => Err(CustError::new(
                 "subscript pointer does not reference a struct",
@@ -29589,6 +29771,7 @@ impl Interpreter {
                     fields: fields.clone(),
                 })?;
                 match pointee {
+                    Some(PointeeType::Void) => Err(CustError::new("cannot index pointer to void")),
                     Some(PointeeType::Scalar(ty)) => Ok(ty.size()),
                     Some(PointeeType::Struct(type_name)) => self
                         .struct_types
@@ -29656,6 +29839,19 @@ impl Interpreter {
                 Ok(POINTER_SIZE)
             }
             Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
+                if matches!(expr, Expr::CompoundAssign { .. })
+                    && matches!(
+                        self.find_variable(name),
+                        Some(Value::Pointer {
+                            ty: PointeeType::Void,
+                            ..
+                        })
+                    )
+                {
+                    return Err(CustError::new(
+                        "pointer to void arithmetic is not supported",
+                    ));
+                }
                 self.sizeof_assignment_result(name)
             }
             Expr::ArraySet { name, index, .. } | Expr::ArrayCompoundSet { name, index, .. } => {
@@ -29729,6 +29925,14 @@ impl Interpreter {
                 {
                     return Err(CustError::new(
                         "character pointer output parameter reassignment is not supported",
+                    ));
+                }
+                if matches!(
+                    self.pointer_expr_pointee_type(target)?,
+                    Some(PointeeType::Void)
+                ) {
+                    return Err(CustError::new(
+                        "pointer to void arithmetic is not supported",
                     ));
                 }
                 self.sizeof_expr(target)
@@ -29873,10 +30077,19 @@ impl Interpreter {
                     "character pointer output arithmetic is not supported",
                 ))
             }
-            Expr::UnaryPlus(inner)
-            | Expr::UnaryMinus(inner)
-            | Expr::BitwiseNot(inner)
-            | Expr::LogicalNot(inner) => {
+            Expr::UnaryPlus(inner) => {
+                if matches!(
+                    self.pointer_expr_pointee_type(inner)?,
+                    Some(PointeeType::Void)
+                ) {
+                    return Err(CustError::new(
+                        "pointer to void arithmetic is not supported",
+                    ));
+                }
+                self.reject_void_scalar_operand(inner)?;
+                Ok(INT_SIZE)
+            }
+            Expr::UnaryMinus(inner) | Expr::BitwiseNot(inner) | Expr::LogicalNot(inner) => {
                 self.reject_void_scalar_operand(inner)?;
                 Ok(INT_SIZE)
             }
@@ -29910,6 +30123,42 @@ impl Interpreter {
                 Err(CustError::new(
                     "character pointer output ordering comparisons are not supported",
                 ))
+            }
+            Expr::Binary(left, BinaryOp::Add | BinaryOp::Sub, right) => {
+                if matches!(
+                    self.pointer_expr_pointee_type(left)?,
+                    Some(PointeeType::Void)
+                ) || matches!(
+                    self.pointer_expr_pointee_type(right)?,
+                    Some(PointeeType::Void)
+                ) {
+                    return Err(CustError::new(
+                        "pointer to void arithmetic is not supported",
+                    ));
+                }
+                self.reject_void_scalar_operand(left)?;
+                self.reject_void_scalar_operand(right)?;
+                Ok(INT_SIZE)
+            }
+            Expr::Binary(
+                left,
+                BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge,
+                right,
+            ) => {
+                if matches!(
+                    self.pointer_expr_pointee_type(left)?,
+                    Some(PointeeType::Void)
+                ) || matches!(
+                    self.pointer_expr_pointee_type(right)?,
+                    Some(PointeeType::Void)
+                ) {
+                    return Err(CustError::new(
+                        "pointer to void ordering comparisons are not supported",
+                    ));
+                }
+                self.reject_void_scalar_operand(left)?;
+                self.reject_void_scalar_operand(right)?;
+                Ok(INT_SIZE)
             }
             Expr::Binary(left, _, right) => {
                 self.reject_void_scalar_operand(left)?;
@@ -30488,6 +30737,10 @@ impl Interpreter {
     fn sizeof_indexed_value(&self, name: &str) -> CustResult<i64> {
         match self.find_variable(name) {
             Some(Value::Array(array)) => Ok(array.borrow().elem_type.size()),
+            Some(Value::Pointer {
+                ty: PointeeType::Void,
+                ..
+            }) => Err(CustError::new("cannot index pointer to void")),
             Some(Value::Pointer { ty, .. }) => Ok(ty.size(&self.struct_types)?),
             Some(Value::StructArray { type_name, .. }) => self
                 .struct_types
@@ -30516,7 +30769,10 @@ impl Interpreter {
             return Ok(POINTER_SIZE);
         }
         if let Some(ty) = self.pointer_expr_pointee_type(pointer)? {
-            return ty.size(&self.struct_types);
+            return match ty {
+                PointeeType::Void => Err(Self::void_pointer_dereference_error(pointer)),
+                ty => ty.size(&self.struct_types),
+            };
         }
         match pointer {
             Expr::Var(name) => match self.find_variable(name) {
@@ -31104,6 +31360,12 @@ impl Interpreter {
                 })
             }
             Expr::Deref(pointer) => {
+                if matches!(
+                    self.pointer_expr_pointee_type(pointer)?,
+                    Some(PointeeType::Void)
+                ) {
+                    return Err(Self::void_pointer_dereference_error(pointer));
+                }
                 let pointer = self.eval_pointer(pointer)?;
                 let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
                 Ok(ReturnValue::Struct {
@@ -32265,6 +32527,9 @@ impl Interpreter {
                         return Err(CustError::new("cannot assign through pointer to const"));
                     }
                     let value = match pointee_type {
+                        PointeeType::Void => {
+                            return Err(CustError::new("cannot index pointer to void"));
+                        }
                         PointeeType::Scalar(ty) => self.eval_scalar_conversion(ty, value)?,
                         PointeeType::Struct(_) => self.eval(value)?,
                     };
@@ -32394,6 +32659,12 @@ impl Interpreter {
                 value,
             } => self.eval_struct_ptr_compound_set(pointer, fields, *op, value),
             Expr::Deref(pointer) => {
+                if matches!(
+                    self.pointer_expr_pointee_type(pointer)?,
+                    Some(PointeeType::Void)
+                ) {
+                    return Err(Self::void_pointer_dereference_error(pointer));
+                }
                 let pointer = self.eval_pointer(pointer)?;
                 self.deref_pointer(&pointer)
             }
@@ -32486,7 +32757,17 @@ impl Interpreter {
                     "character pointer output arithmetic is not supported",
                 ))
             }
-            Expr::UnaryPlus(inner) => self.eval(inner),
+            Expr::UnaryPlus(inner) => {
+                if matches!(
+                    self.pointer_expr_pointee_type(inner)?,
+                    Some(PointeeType::Void)
+                ) {
+                    return Err(CustError::new(
+                        "pointer to void arithmetic is not supported",
+                    ));
+                }
+                self.eval(inner)
+            }
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
             Expr::BitwiseNot(inner) => Ok(!self.eval(inner)?),
             Expr::LogicalNot(inner) => Ok((!self.eval_truthy(inner)?) as i64),
@@ -32544,6 +32825,17 @@ impl Interpreter {
                 }
                 BinaryOp::Add | BinaryOp::Sub => {
                     if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
+                        if matches!(
+                            self.pointer_expr_pointee_type(left)?,
+                            Some(PointeeType::Void)
+                        ) || matches!(
+                            self.pointer_expr_pointee_type(right)?,
+                            Some(PointeeType::Void)
+                        ) {
+                            return Err(CustError::new(
+                                "pointer to void arithmetic is not supported",
+                            ));
+                        }
                         match (self.eval_pointer(left), self.eval_pointer(right)) {
                             (Ok(left_pointer), Ok(right_pointer)) if *op == BinaryOp::Sub => {
                                 return self.pointer_difference(&left_pointer, &right_pointer);

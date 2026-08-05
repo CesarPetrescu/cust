@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.18.0 release verification on 2026-08-05. Independent read-only review returned `APPROVED`; formatting, strict Clippy, all 1,389 local/rebuilt-Docker tests, runtime output `10`, local/Cargo/container version `cust 0.18.0`, tag preflight, and `git diff --check` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after the bounded first safe `void *` slice on 2026-08-05. Independent read-only review returned `APPROVED`; focused coverage and the registered compiler oracle pass, and the canonical local/rebuilt-Docker gate verifies all 1,394 tests plus runtime output `10`. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

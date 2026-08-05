@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-05 — Bounded first safe C11 `void *` objects
+
+- The C object-pointer compatibility surface can be modeled without host addresses by retaining Cust's existing interpreter-owned `PointerValue` identity and adding `PointeeType::Void` only as a compatibility/type-query marker. `void` itself remains unsized; a `void *` object has deterministic pointer size.
+- Qualification is independent of pointee-type compatibility: object pointers may promote to `const void *`, and a `void *` may convert back to a compatible object pointer only without discarding read-only pointee metadata. Owner and lexical-lifetime metadata must survive every conversion and forwarding route.
+- Invalid `void *` arithmetic/order/dereference/index operations remain constraints even beneath non-evaluating `sizeof`; classification must inspect metadata rather than evaluate side effects. Review-driven RED/GREEN covered additive/order, increment, compound assignment, and unary-plus forms.
+- `for` initializer declaration lookahead needs `Token::Void` alongside other type-start tokens; shared declaration parsing already handles the supported one-level pointer once routed correctly.
+- Native C is used only for the warning-free defined compatibility fixture. Unsupported-operation fixtures remain interpreter-only because native extensions and undefined behavior are not valid semantic oracles. Independent review returned `APPROVED`; see `references/cust-void-pointer-diagnostics.md`.
+
 ## 2026-08-05 — v0.18.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.17.0`, then passed after Cargo/lock and both image tags moved to `0.18.0`.
