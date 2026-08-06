@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.21.0 release preparation on 2026-08-06. Final independent read-only review returned `APPROVED`; local/remote tag preflight is empty; focused version RED/GREEN, formatting, warning-denied Clippy, all 1,437 local tests, the rebuilt 1,437-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.21.0`, secret scan, and `git diff --check` pass. Release-commit-first push/tag publication and remote peeled-target verification remain workflow closure steps, not blockers. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after bounded v0.21.0 publication on 2026-08-06. Final independent read-only review returned `APPROVED`; focused version RED/GREEN, formatting, warning-denied Clippy, all 1,437 local tests, the rebuilt 1,437-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.21.0`, secret scan, and `git diff --check` pass. Release commit `a2594b91e4356e339faac0da06a8ef09587f9574` reached `origin/main` before annotated tag object `329e943ce94dd716e476dba562e6efb80a6d8c67`, which peels exactly to that commit. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 
