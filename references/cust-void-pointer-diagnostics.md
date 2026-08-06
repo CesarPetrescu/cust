@@ -1,6 +1,6 @@
-# Bounded first safe `void *` object/conversion slice
+# Bounded safe one-level `void *` objects and function boundaries
 
-Date: 2026-08-05
+Date: 2026-08-06
 
 Cust now supports a deliberately bounded one-level `void *` object model. The implementation stores only interpreter-owned `PointerValue` identities; it never exposes or relies on host addresses.
 
@@ -11,6 +11,8 @@ Cust now supports a deliberately bounded one-level `void *` object model. The im
 - Implicit conversion from supported object pointers to `void *`, and from `void *` back to compatible object pointers when qualification is preserved.
 - Explicit one-level `(void *)` casts, `sizeof(void *)`, `_Alignof(void *)`, and non-evaluating `sizeof` classification of valid assignment/conditional/comma forms.
 - Existing owner, lexical lifetime, hidden-storage lifetime, and read-only metadata are retained across conversions.
+- Explicit function prototypes and definitions may return one-level `void *` / `const void *`; call results preserve declared void-pointee metadata through assignment, casts, equality/truthiness, conditional/comma forwarding, `_Generic`, and further returns.
+- Prototype-only and defined calls beneath `sizeof` are classified and argument-checked without requiring evaluation.
 
 ## Intentional boundaries
 
@@ -22,11 +24,13 @@ Cust now supports a deliberately bounded one-level `void *` object model. The im
 ## Implementation notes
 
 - `PointeeType::Void` is a zero-sized type marker for compatibility classification only; `PointeeType::size()` rejects it. Pointer objects still have deterministic pointer size.
-- `pointer_type_compatible()` models only the bounded object-pointer conversion rules and keeps qualification checking separate from pointee-type compatibility.
+- `ensure_pointer_type_matches()` treats a void destination as the bounded erasure route while retaining the concrete interpreter storage referent for safe conversion back to a compatible object pointer; qualification checking remains separate.
 - `pointer_expr_pointee_type()` and the normal pointer evaluator preserve metadata without evaluating expressions in `sizeof` paths.
+- `parse_function_return_type()` accepts only one pointer star after `void`; a second star retains the contextual pointer-to-pointer diagnostic.
+- `validate_non_evaluating_function_argument_types()` must run for both prototype-only and defined calls in `sizeof_expr()`. Its two-dimensional-row-to-void route must preserve const-discard checks.
 - `for` declaration lookahead must include `Token::Void`; otherwise a legal `for (void *p = ...; ...)` declaration falls into expression parsing.
 - Native `cc` is used only as a warning-free compatibility oracle for defined valid behavior. Invalid dereference/arithmetic fixtures are interpreter-only because native extensions or undefined behavior are unsuitable oracles.
 
 ## TDD/review closure
 
-Focused RED/GREEN regressions covered the missing `for`-initializer declaration route and invalid `void *` arithmetic/order/increment/compound/unary forms beneath non-evaluating `sizeof`. The complete slice is covered by focused interpreter tests, registered compiler-oracle coverage, invalid fixture tests, recursion-depth coverage, independent review, and the canonical local/Docker verification gate.
+Focused RED/GREEN regressions covered the missing `for`-initializer declaration route; invalid `void *` arithmetic/order/increment/compound/unary forms beneath non-evaluating `sizeof`; const-qualified two-dimensional rows passed to `void *` beneath `sizeof`; and defined-function argument validation beneath `sizeof`. The complete slice is covered by focused interpreter tests, registered compiler-oracle coverage, invalid fixture tests, recursion-depth coverage, independent review, and the canonical local/Docker verification gate.

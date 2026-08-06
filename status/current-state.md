@@ -1,8 +1,14 @@
 # Cust Current State
 
-Last updated: 2026-08-05
+Last updated: 2026-08-06
 
 ## Latest autonomous verification
+
+The bounded one-level C11 `void *` function-boundary slice is complete. Explicit prototypes and definitions may return `void *`, `const void *`, or equivalent postfix-qualified forms; evaluated call results preserve the declared void pointee type plus interpreter-owned storage/owner/lifetime/read-only identity through assignment, casts, conditionals, comma expressions, equality, truthiness, `_Generic`, and return chains. Prototype-only calls beneath `sizeof` are classified and constraint-checked without requiring a definition or evaluating arguments. Pointer-to-pointer returns and all existing void-pointer dereference/index/arithmetic/order boundaries remain exact.
+
+This run resumed inherited uncommitted work as required. Candidate evaluation compared finishing that roadmap package, starting bounded memory intrinsics, and lower-priority parser/fuzz coverage; completing the existing first unchecked language slice was mandatory and had the highest impact. Focused RED/GREEN review closure added const-qualified two-dimensional-array argument validation beneath `sizeof` and validation of defined-function call arguments beneath `sizeof`. A compiler-oracle fixture is registered, the focused void-return and `c_compat` suites pass, and the executable inventory is now 1,400 tests: 1,266 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test. An initial review suggestion to widen erased `void *` storage from an underlying `char` object directly to `int *` was classified as non-blocking because it contradicts Cust's documented safe compatible-referent boundary and the existing exact invalid-conversion fixture; a policy-aware final independent re-review returned `APPROVED`. Formatting, warning-denied Clippy, all local tests, the rebuilt Docker test gate, runtime output `10`, and `git diff --check` pass.
+
+The next recommended package is bounded v0.20.0 release closure for this completed function-boundary feature, followed by a separately designed first memory-intrinsic slice; raw-byte object-representation semantics must not be improvised inside the release run.
 
 Bounded Cust v0.19.0 is published around the completed first safe C11 `void *` object/conversion slice. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README central support/limitations/roadmap text, changelog notes, and all five status files are synchronized for `0.19.0`. The independently derived executable inventory is 1,394 tests: 1,260 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test. Remote annotated tag object `7394660be0cc79b771747ca7643b904eb42301ce` peels exactly to verified release commit `19e8117688d2ee21323bab4705f9de8fd974b1e2`.
 

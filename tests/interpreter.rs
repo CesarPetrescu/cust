@@ -2051,6 +2051,14 @@ fn rejects_restrict_on_non_pointer_declarations_with_context() {
         err.to_string(),
         "restrict qualifiers are only supported on pointer declarators at line 2, column 5"
     );
+
+    let program = "void restrict *make(void) { return 0; }\nint main(void) { return 0; }\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "restrict qualifiers are only supported on pointer declarators at line 1, column 6"
+    );
 }
 
 #[test]
@@ -2455,13 +2463,145 @@ fn rejects_missing_atomic_type_arguments_with_context() {
 }
 
 #[test]
-fn rejects_void_pointer_return_with_context() {
-    let program = include_str!("fixtures/invalid/void_pointer_return.c");
+fn void_pointer_return_functions_support_prototypes_and_call_results() {
+    let program = include_str!("fixtures/compat/valid/void_pointer_return_functions.c");
 
-    let err = interpret(program).unwrap_err();
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn void_pointer_return_functions_preserve_lifetime_and_qualification() {
+    let program = r#"
+        void *escaped(void) {
+            int local = 3;
+            return &local;
+        }
+
+        int main(void) {
+            return *(int *)escaped();
+        }
+    "#;
     assert_eq!(
-        err.to_string(),
-        "void pointers are not supported at line 1, column 6"
+        interpret(program).unwrap_err().to_string(),
+        "pointer to out-of-scope variable 'local'"
+    );
+
+    let program = r#"
+        void *discard_const(const int *value) {
+            return value;
+        }
+
+        int main(void) {
+            const int value = 3;
+            return discard_const(&value) != 0;
+        }
+    "#;
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn void_pointer_return_call_boundaries_are_exact_and_non_evaluating() {
+    let cases = [
+        (
+            "void *make(int *value) { return value; } int main(void) { int value; return sizeof((1 ? &value : make(&value)) + 1); }",
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            "void *make(int *value) { return value; } int main(void) { int value; return sizeof(*make(&value)); }",
+            "cannot dereference pointer to void",
+        ),
+        (
+            "void *make(int *value) { return value; } int main(void) { int value; return sizeof(make(&value) + 1); }",
+            "pointer to void arithmetic is not supported",
+        ),
+        (
+            "void *make(int *value) { return value; } int main(void) { int value; return sizeof(make(&value) < make(&value)); }",
+            "pointer to void ordering comparisons are not supported",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            expected,
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn void_pointer_return_calls_preserve_types_in_generic_selections() {
+    let program = r#"
+        void *choose(void *value) {
+            return value;
+        }
+
+        int main(void) {
+            int value = 3;
+            return _Generic(1 ? &value : choose(&value), void *: 0, default: 1);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_accepts_prototype_only_void_pointer_return_calls_without_evaluation() {
+    let programs = [
+        r#"
+            void *make(void);
+            int main(void) {
+                return sizeof(make()) == sizeof(void *) ? 0 : 1;
+            }
+        "#,
+        r#"
+            void *identity(void *value);
+            int main(void) {
+                int matrix[2][3];
+                return sizeof(identity(matrix)) == sizeof(void *) ? 0 : 1;
+            }
+        "#,
+    ];
+
+    for program in programs {
+        assert_eq!(interpret(program).unwrap(), 0);
+    }
+}
+
+#[test]
+fn sizeof_void_pointer_calls_reject_const_two_dimensional_array_discard() {
+    let program = r#"
+        void *identity(void *value);
+        int main(void) {
+            const int matrix[2][3] = {{1, 2, 3}, {4, 5, 6}};
+            return sizeof(identity(matrix));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn sizeof_defined_void_pointer_return_calls_validate_arguments() {
+    let program = r#"
+        void *identity(void *value) {
+            return value;
+        }
+
+        int main(void) {
+            return sizeof(identity(1));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "expected pointer expression"
     );
 }
 
@@ -10029,14 +10169,25 @@ fn reports_missing_parameter_types_before_parameter_names() {
 
 #[test]
 fn rejects_pointer_return_types_with_context() {
-    let program = "int **identity(int *x) { return &x; }\nint main() { return 0; }\n";
+    let cases = [
+        (
+            "int **identity(int *x) { return &x; }\nint main() { return 0; }\n",
+            "pointer-to-pointer return types are not supported at line 1, column 6",
+        ),
+        (
+            include_str!("fixtures/invalid/void_pointer_return.c"),
+            "pointer-to-pointer return types are not supported at line 1, column 7",
+        ),
+        (
+            "void * const *make(void) { return 0; }\nint main(void) { return 0; }\n",
+            "pointer-to-pointer return types are not supported at line 1, column 14",
+        ),
+    ];
 
-    let err = interpret(program).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "pointer-to-pointer return types are not supported at line 1, column 6"
-    );
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
 }
 
 #[test]

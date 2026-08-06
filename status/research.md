@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-06 — One-level `void *` function boundaries
+
+- A function return declaration must carry `PointeeType::Void` as declared type metadata even though the evaluated `PointerValue` keeps the concrete interpreter-owned storage identity. Call-result classifiers use the declared return type; runtime values continue to carry owner/lifetime/read-only metadata.
+- Prototype-only calls in `sizeof(call)` need ordinary arity and parameter-shape validation without a function body or argument evaluation. Defined calls need the same metadata-only validation; otherwise `sizeof(defined_pointer_function(1))` can bypass runtime call checks.
+- Two-dimensional row pointers require an explicit metadata route when converted to `void *` beneath `sizeof`, but that route must still reject const discard. The focused regression first returned pointer size and now reports `cannot discard const qualifier from pointer target`.
+- Cust deliberately permits conversion from `void *` back only when the retained concrete interpreter storage referent is compatible. An initial review suggestion to allow erased `char` storage to become `int *` matches broader C conversion syntax but contradicts Cust's documented safe model and existing `void_pointer_incompatible_conversion.c` diagnostic; no widening was made, and policy-aware final independent re-review returned `APPROVED`.
+- The registered native fixture uses only warning-free defined object-pointer round trips and ABI-independent pointer-size relationships. The completed function-boundary package is the prerequisite for future memory intrinsics, but raw-byte object-representation semantics require a separate bounded design.
+
 ## 2026-08-05 — Bounded first safe C11 `void *` objects
 
 - The C object-pointer compatibility surface can be modeled without host addresses by retaining Cust's existing interpreter-owned `PointerValue` identity and adding `PointeeType::Void` only as a compatibility/type-query marker. `void` itself remains unsized; a `void *` object has deterministic pointer size.

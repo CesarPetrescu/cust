@@ -4,7 +4,13 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
-No unreleased changes yet.
+### Language subset
+
+- Added bounded one-level `void *` function return types, prototypes, definitions, and call results. Declared void-pointee qualification and interpreter-owned owner/lifetime/read-only identity survive evaluated return chains, assignments, casts, conditionals, comma expressions, equality/truthiness, and `_Generic` selection.
+
+### Diagnostics and verification
+
+- Preserved exact pointer-to-pointer return and unsafe void-pointer operation diagnostics, and made prototype-only plus defined calls beneath `sizeof` constraint-aware without argument evaluation. Review-driven regressions cover const-qualified two-dimensional row conversion and defined-function argument validation. The registered warning-free compiler-oracle fixture and 1,400-test executable inventory cover the completed slice.
 
 ## v0.19.0 — 2026-08-05
 

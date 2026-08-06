@@ -9000,13 +9000,25 @@ impl Parser {
 
     fn parse_function_return_type(&mut self) -> CustResult<(ReturnType, bool)> {
         if self.check(&Token::Void) {
-            if let Some(token) = self.void_pointer_star_token_at_current() {
-                return Err(Self::error_at(
-                    "void pointers are not supported".to_string(),
-                    token,
+            self.advance();
+            self.reject_leading_restrict_qualifier()?;
+            let points_to_const = self.consume_type_qualifiers();
+            if self.matches(&Token::Star) {
+                self.consume_type_qualifiers();
+                if self.check(&Token::Star) {
+                    return Err(Self::error_at(
+                        "pointer-to-pointer return types are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
+                return Ok((
+                    ReturnType::Pointer {
+                        ty: PointeeType::Void,
+                        points_to_const,
+                    },
+                    false,
                 ));
             }
-            self.advance();
             return Ok((ReturnType::Void, false));
         }
         let (leading_const, decl_type) =
@@ -20413,6 +20425,17 @@ impl Interpreter {
             if self.expr_is_void_value(argument) {
                 return Err(CustError::new("void expression used as scalar"));
             }
+            if matches!(expected_kind, ParamKind::Pointer)
+                && matches!(expected_type, ParamType::Void)
+                && self.array2d_row_pointer_element_type(argument).is_some()
+            {
+                if self.pointer_expr_points_to_const(argument) && !*expected_points_to_const {
+                    return Err(CustError::new(
+                        "cannot discard const qualifier from pointer target",
+                    ));
+                }
+                continue;
+            }
             let actual_type = self.generic_selection_type(argument)?;
             match (expected_kind, expected_type, actual_type) {
                 (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Scalar(_))
@@ -20444,6 +20467,21 @@ impl Interpreter {
                         points_to_const,
                     },
                 ) if expected == &actual && (*expected_points_to_const || !points_to_const) => {}
+                (
+                    ParamKind::Pointer,
+                    ParamType::Void,
+                    DeclType::Pointer {
+                        points_to_const, ..
+                    },
+                ) if *expected_points_to_const || !points_to_const => {}
+                (
+                    ParamKind::Pointer,
+                    _,
+                    DeclType::Pointer {
+                        pointee: PointeeType::Void,
+                        points_to_const,
+                    },
+                ) if *expected_points_to_const || !points_to_const => {}
                 (ParamKind::Pointer, _, DeclType::Scalar(_))
                     if self.generic_expr_is_null_pointer_constant(argument) => {}
                 (ParamKind::Pointer, _, _) => {
@@ -21811,7 +21849,12 @@ impl Interpreter {
             } => {
                 let then_type = self.pointer_expr_pointee_type(then_expr)?;
                 let else_type = self.pointer_expr_pointee_type(else_expr)?;
-                Ok(then_type.or(else_type))
+                match (&then_type, &else_type) {
+                    (Some(PointeeType::Void), Some(_)) | (Some(_), Some(PointeeType::Void)) => {
+                        Ok(Some(PointeeType::Void))
+                    }
+                    _ => Ok(then_type.or(else_type)),
+                }
             }
             Expr::Comma(_, right) => self.pointer_expr_pointee_type(right),
             Expr::Binary(left, BinaryOp::Add, right) => {
@@ -28875,6 +28918,23 @@ impl Interpreter {
                             pointee: else_pointee,
                             points_to_const: else_const,
                         },
+                    ) if matches!(then_pointee, PointeeType::Void)
+                        || matches!(else_pointee, PointeeType::Void) =>
+                    {
+                        Ok(DeclType::Pointer {
+                            pointee: PointeeType::Void,
+                            points_to_const: *then_const || *else_const,
+                        })
+                    }
+                    (
+                        DeclType::Pointer {
+                            pointee: then_pointee,
+                            points_to_const: then_const,
+                        },
+                        DeclType::Pointer {
+                            pointee: else_pointee,
+                            points_to_const: else_const,
+                        },
                     ) if then_pointee == else_pointee => Ok(DeclType::Pointer {
                         pointee: then_pointee.clone(),
                         points_to_const: *then_const || *else_const,
@@ -29962,12 +30022,17 @@ impl Interpreter {
                 self.sizeof_aggregate_field_type(&type_name, fields)
             }
             Expr::Call { name, args } => match self.functions.get(name) {
-                Some(function) => function
-                    .return_type
-                    .size(&self.struct_types)
-                    .ok_or_else(|| {
-                        CustError::new(format!("void function '{name}' used as scalar expression"))
-                    }),
+                Some(function) => {
+                    self.validate_non_evaluating_function_argument_types(name, args)?;
+                    function
+                        .return_type
+                        .size(&self.struct_types)
+                        .ok_or_else(|| {
+                            CustError::new(format!(
+                                "void function '{name}' used as scalar expression"
+                            ))
+                        })
+                }
                 None if self.has_character_classification_prototype(name) => {
                     // The entry validation above already checked this intrinsic and
                     // its argument tree, so validating it again would duplicate work.
@@ -30067,6 +30132,17 @@ impl Interpreter {
                     Err(CustError::new(format!(
                         "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type"
                     )))
+                }
+                None if self.prototypes.contains_key(name) => {
+                    self.validate_non_evaluating_function_argument_types(name, args)?;
+                    self.prototypes[name]
+                        .return_type
+                        .size(&self.struct_types)
+                        .ok_or_else(|| {
+                            CustError::new(format!(
+                                "void function '{name}' used as scalar expression"
+                            ))
+                        })
                 }
                 None => Err(CustError::new(format!("undefined function '{name}'"))),
             },
