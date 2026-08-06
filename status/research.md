@@ -18,6 +18,16 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-06 — v0.21.0 release consistency and next `memchr` slice
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.20.0`, then passed after Cargo/lock and both image tags moved to `0.21.0`. Built CLI and Cargo metadata both report `cust 0.21.0`.
+- Executable target-by-target accounting is 1,437 tests: 1,303 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the category sum equals the complete `cargo test -- --list` count.
+- Local and remote `v0.21.0` annotated-tag preflight returned no refs. Release closure was selected ahead of broad integer/aggregate object representations, bounded `memchr`, and lower-impact parser/fuzz coverage because it is first in both authoritative queues and atomically packages the reviewed four-intrinsic raw-memory family over standalone character scalars and one-dimensional character arrays; aggregate-backed and multidimensional character storage remains outside this release.
+- Local `man 3 memchr` (Linux man-pages 6.18, standards listed as C11 and POSIX.1-2008) specifies scanning the initial `n` bytes for the first instance of `c`, interpreting both the memory bytes and `c` as `unsigned char`, and returning the matching pointer or null. This is the next bounded vertical slice because it reuses Cust's character-storage range and pointer-identity model without inventing integer/aggregate or host ABI object representations.
+- The annotated `v0.21.0` tag remains reserved for the exact independently approved, canonically verified release commit after `origin/main` acceptance; preparation text must not claim publication or peeled-target verification.
+- Independent review correctly distinguished standalone character scalar/one-dimensional-array roots from rejected aggregate-backed fields and multidimensional character arrays. After that wording correction and replacement of a premature “released” adjective, final read-only re-review returned `APPROVED`.
+- Canonical preparation verification passed focused version tests, formatting, warning-denied Clippy, all 1,437 local tests, the rebuilt 1,437-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.21.0`, secret scan, `git diff --check`, and repeated empty local/remote tag preflight.
+
 ## 2026-08-06 — Bounded character-storage `memcmp`
 
 - Local `man 3 memcmp` (Linux man-pages 6.18, standards listed as C11 and POSIX.1-2008) specifies comparing the first `n` bytes as `unsigned char`, returning a value whose sign follows the first differing pair, and returning zero when `n` is zero.

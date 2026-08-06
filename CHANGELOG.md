@@ -4,13 +4,25 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.21.0 — 2026-08-06
+
 ### Standard library subset
 
-- Added exactly prototyped bounded `memcpy`, overlap-safe `memmove`, unsigned-byte lexical `memcmp`, and `unsigned char`-normalized `memset` over interpreter-owned character storage. Copy operations snapshot exact Cust character-cell values before mutation and preserve destination identity/provenance; comparison reads up to 4,096 cells without mutation and returns the sign of the first differing byte; fill writes the low eight bits of its scalar value and preserves destination identity. None exposes host addresses or invokes host libc.
+- Added exactly prototyped bounded `memcpy`, overlap-safe `memmove`, unsigned-byte lexical `memcmp`, and `unsigned char`-normalized `memset` over interpreter-owned standalone character scalars and one-dimensional character arrays. Copy operations snapshot exact Cust character-cell values before mutation and preserve destination identity/provenance; comparison reads up to 4,096 cells without mutation and returns the sign of the first differing byte; fill writes the low eight bits of its scalar value and preserves destination identity. None exposes host addresses or invokes host libc.
 
 ### Diagnostics and verification
 
 - Added exact prototype, arity, pointer/value/count-shape, const, lifetime, source/destination/input-capacity, non-character-storage, and non-evaluating `sizeof` validation. `memcpy` rejects overlapping nonzero ranges, `memmove` implements temporary-array semantics for forward/backward/self overlap, `memcmp` permits overlap because it only reads, and `memset` retains the shared 4,096-cell bound. Registered warning-free native fixtures cover defined behavior.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.21.0`.
+- Reconciled an executable inventory of 1,437 tests: 1,303 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Raw-memory intrinsics accept only interpreter-owned standalone `char` scalars and one-dimensional `char` arrays; integer and aggregate object representations, aggregate-backed character fields, multidimensional character arrays, host ABI layout, and host addresses remain unsupported. General pointer levels beyond the narrow tracked unqualified `char **` model, floating-point and complex runtime values, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
 
 ## v0.20.0 — 2026-08-06
 
