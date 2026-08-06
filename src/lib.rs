@@ -17763,6 +17763,9 @@ impl Interpreter {
             if self.has_memory_copy_prototype(name) {
                 return self.call_memory_copy_function(name, arg_exprs);
             }
+            if self.has_memory_fill_prototype(name) {
+                return self.call_memory_fill_function(name, arg_exprs);
+            }
             if self.has_memory_comparison_prototype(name) {
                 return self.call_memory_comparison_function(name, arg_exprs);
             }
@@ -17831,6 +17834,9 @@ impl Interpreter {
             }
             if matches!(name, "memcpy" | "memmove") && self.prototypes.contains_key(name) {
                 return Err(Self::unsupported_memory_copy_declaration_error(name));
+            }
+            if name == "memset" && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_memory_fill_declaration_error());
             }
             if name == "memcmp" && self.prototypes.contains_key(name) {
                 return Err(Self::unsupported_memory_comparison_declaration_error());
@@ -19652,6 +19658,111 @@ impl Interpreter {
         self.prototypes.get(name) == Some(&expected)
     }
 
+    fn has_memory_fill_prototype(&self, name: &str) -> bool {
+        if name != "memset" {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Pointer {
+                ty: PointeeType::Void,
+                points_to_const: false,
+            },
+            params: vec![
+                ParamSignature {
+                    ty: ParamType::Void,
+                    kind: ParamKind::Pointer,
+                    points_to_const: false,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                },
+            ],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_memory_fill_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let destination = self.eval_pointer(&arg_exprs[0])?;
+        let value_expr = &arg_exprs[1];
+        let value = if self.expr_is_pointer_value(value_expr) {
+            self.eval_pointer(value_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer fill value"
+            )));
+        } else if self.aggregate_expr_type_name(value_expr).is_ok() {
+            self.eval_struct_expr(value_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer fill value"
+            )));
+        } else if self.expr_is_void_value(value_expr) {
+            self.eval_discard(value_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer fill value"
+            )));
+        } else {
+            self.eval_scalar_conversion(CType::Int, value_expr)?
+        };
+        let count_expr = &arg_exprs[2];
+        if self.expr_is_pointer_value(count_expr) {
+            self.eval_pointer(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        if self.aggregate_expr_type_name(count_expr).is_ok() {
+            self.eval_struct_expr(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        if self.expr_is_void_value(count_expr) {
+            self.eval_discard(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        let count = self.eval_scalar_conversion(CType::Int, count_expr)?;
+        let count = Self::validate_memory_operation_count(name, count, "fill")?;
+
+        self.ensure_pointer_conversion_preserves_const(false, &arg_exprs[0])?;
+        self.validate_memory_copy_character_pointer_argument(name, 1, &destination)?;
+        let current = self.deref_pointer(&destination)?;
+        self.assign_deref_pointer(&destination, current)?;
+        self.ensure_string_copy_destination_capacity(name, &destination, count)?;
+        let value = value.rem_euclid(256);
+        for offset in 0..count {
+            if offset == 0 {
+                self.assign_deref_pointer(&destination, value)?;
+            } else {
+                self.assign_pointer_index(&destination, offset as i64, value)?;
+            }
+        }
+
+        Ok(Some(ReturnValue::Pointer {
+            pointer: destination,
+            ty: PointeeType::Void,
+            points_to_const: false,
+        }))
+    }
+
     fn call_memory_copy_function(
         &mut self,
         name: &str,
@@ -19811,6 +19922,12 @@ impl Interpreter {
         ))
     }
 
+    fn unsupported_memory_fill_declaration_error() -> CustError {
+        CustError::new(
+            "standard library function 'memset' has an unsupported declaration; expected one pointer-to-void destination parameter, one integer fill value, one integer count, and a pointer-to-void return type",
+        )
+    }
+
     fn has_memory_comparison_prototype(&self, name: &str) -> bool {
         if name != "memcmp" {
             return false;
@@ -19946,6 +20063,49 @@ impl Interpreter {
                 "cannot discard const qualifier from pointer target",
             ));
         }
+        if self.expr_is_pointer_value(&args[2])
+            || self.aggregate_expr_type_name(&args[2]).is_ok()
+            || self.expr_is_void_value(&args[2])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        self.sizeof_expr(&args[2])?;
+        Ok(POINTER_SIZE)
+    }
+
+    fn sizeof_memory_fill_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        if !self.expr_is_pointer_value(&args[0])
+            && !self.generic_expr_is_null_pointer_constant(&args[0])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires a pointer destination argument"
+            )));
+        }
+        self.sizeof_expr(&args[0])?;
+        if !self.generic_expr_is_null_pointer_constant(&args[0])
+            && self.pointer_expr_points_to_const(&args[0])
+        {
+            return Err(CustError::new(
+                "cannot discard const qualifier from pointer target",
+            ));
+        }
+        if self.expr_is_pointer_value(&args[1])
+            || self.aggregate_expr_type_name(&args[1]).is_ok()
+            || self.expr_is_void_value(&args[1])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer fill value"
+            )));
+        }
+        self.sizeof_expr(&args[1])?;
         if self.expr_is_pointer_value(&args[2])
             || self.aggregate_expr_type_name(&args[2]).is_ok()
             || self.expr_is_void_value(&args[2])
@@ -20466,6 +20626,16 @@ impl Interpreter {
                         return Ok(());
                     } else if self.prototypes.contains_key(name) {
                         return Err(Self::unsupported_memory_copy_declaration_error(name));
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                }
+                if name == "memset" && !self.functions.contains_key(name) {
+                    if self.has_memory_fill_prototype(name) {
+                        self.sizeof_memory_fill_call(name, args)?;
+                        return Ok(());
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(Self::unsupported_memory_fill_declaration_error());
                     } else {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
@@ -30451,6 +30621,7 @@ impl Interpreter {
                 None if self.has_string_copy_prototype(name) => {
                     self.sizeof_string_copy_call(name, args)
                 }
+                None if self.has_memory_fill_prototype(name) => Ok(POINTER_SIZE),
                 None if self.has_memory_comparison_prototype(name) => Ok(INT_SIZE),
                 None if self.has_string_span_prototype(name) => {
                     self.sizeof_string_span_call(name, args)
@@ -30496,6 +30667,9 @@ impl Interpreter {
                     && self.prototypes.contains_key(name) =>
                 {
                     Err(Self::unsupported_string_copy_declaration_error(name))
+                }
+                None if name == "memset" && self.prototypes.contains_key(name) => {
+                    Err(Self::unsupported_memory_fill_declaration_error())
                 }
                 None if name == "memcmp" && self.prototypes.contains_key(name) => {
                     Err(Self::unsupported_memory_comparison_declaration_error())

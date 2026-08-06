@@ -2620,6 +2620,169 @@ fn supports_bounded_memcpy_on_character_storage() {
 }
 
 #[test]
+fn supports_bounded_memset_on_character_storage() {
+    let program = include_str!("fixtures/compat/valid/bounded_memory_fill_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn memset_evaluates_arguments_once_in_source_order() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        int marker = 0;
+        char bytes[2] = {0, 0};
+        void *destination(void) { marker = marker * 10 + 1; return bytes; }
+        int value(void) { marker = marker * 10 + 2; return 0x123; }
+        int count(void) { marker = marker * 10 + 3; return 2; }
+        int main(void) {
+            void *result = memset(destination(), value(), count());
+            return result != bytes || marker != 123 ||
+                   bytes[0] != '#' || bytes[1] != '#';
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn memset_preserves_character_storage_safety_diagnostics() {
+    let cases = [
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { const char destination[2] = {0}; return memset(destination, 'x', 1) != destination; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { char destination[1] = {0}; return memset(destination, 'x', 2) != destination; }",
+            "destination argument 1 to function 'memset' requires 2 bytes, but only 1 bytes are available",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { int destination = 0; return memset(&destination, 0, 1) != &destination; }",
+            "function 'memset' currently supports only character storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { char destination[1] = {0}; int value = 1; return memset(destination, &value, 1) != destination; }",
+            "function 'memset' requires an integer fill value",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { char destination[1] = {0}; return memset(destination, 0, -1) != destination; }",
+            "function 'memset' requires a nonnegative count, got -1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { char destination[1] = {0}; return memset(destination, 0, 4097) != destination; }",
+            "function 'memset' count 4097 exceeds maximum fill length of 4096 bytes",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { char destination[1] = {0}; int count = 1; return memset(destination, 0, &count) != destination; }",
+            "function 'memset' requires an integer count",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); void *escaped; int main(void) { { char local[1] = {0}; escaped = local; } return memset(escaped, 0, 1) != escaped; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn memset_requires_its_exact_explicit_prototype_at_runtime_and_in_sizeof() {
+    let programs = [
+        "char *memset(char *, int, int); int main(void) { char bytes[1] = {0}; return memset(bytes, 0, 1) != bytes; }",
+        "int memset(char *, int, int); int main(void) { char bytes[1] = {0}; return sizeof(memset(bytes, 0, 1)); }",
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "standard library function 'memset' has an unsupported declaration; expected one pointer-to-void destination parameter, one integer fill value, one integer count, and a pointer-to-void return type"
+        );
+    }
+}
+
+#[test]
+fn sizeof_memset_is_nested_non_evaluating_and_preserves_pointer_size() {
+    let mut expression = "destination()".to_string();
+    for _ in 0..30 {
+        expression = format!("memset({expression}, value(), count())");
+    }
+    let program = format!(
+        r#"
+        void *memset(void *, int, unsigned long int);
+        int marker = 0;
+        void *destination(void) {{ static char bytes[1] = {{0}}; marker += 1; return bytes; }}
+        int value(void) {{ marker += 2; return 'x'; }}
+        int count(void) {{ marker += 4; return 0; }}
+        int main(void) {{ return sizeof({expression}) != sizeof(void *) || marker; }}
+        "#
+    );
+
+    assert_eq!(interpret(&program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_memset_accepts_null_pointer_constants_without_evaluation() {
+    let program = "void *memset(void *, int, unsigned long int); int main(void) { return sizeof(memset(0, 0, 0)) == sizeof(void *) ? 0 : 1; }";
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_memset_validates_argument_shapes_and_missing_declarations() {
+    let cases = [
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; int value = 1; return sizeof(memset(bytes, &value, 1)); }",
+            "function 'memset' requires an integer fill value",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; int count = 1; return sizeof(memset(bytes, 0, &count)); }",
+            "function 'memset' requires an integer count",
+        ),
+        (
+            "int main(void) { return sizeof(memset(0, 0, 0)); }",
+            "undefined function 'memset'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn memset_rejects_aggregate_backed_character_storage() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Byte { char value; } byte = {'x'};
+        int main(void) { return memset(&byte.value, 0, 1) != &byte.value; }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memset' does not yet support aggregate-backed character storage for argument 1"
+    );
+}
+
+#[test]
+fn user_defined_memset_takes_precedence_over_the_intrinsic() {
+    let program = r#"
+        void *memset(void *destination, int value, unsigned long int count) {
+            char *bytes = destination;
+            bytes[0] = count ? value + 1 : value;
+            return destination;
+        }
+        int main(void) {
+            char destination[1] = {0};
+            return memset(destination, 'a', 1) != destination || destination[0] != 'b';
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn supports_bounded_memcmp_on_character_storage() {
     let program = include_str!("fixtures/compat/valid/bounded_memory_comparison_function.c");
 

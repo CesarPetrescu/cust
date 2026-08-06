@@ -6,11 +6,11 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ### Standard library subset
 
-- Added exactly prototyped bounded `memcpy`, overlap-safe `memmove`, and unsigned-byte lexical `memcmp` over interpreter-owned character storage. Copy operations snapshot exact Cust character-cell values before mutation and preserve destination identity/provenance; comparison reads up to 4,096 cells without mutation and returns the sign of the first differing byte. None exposes host addresses or invokes host libc.
+- Added exactly prototyped bounded `memcpy`, overlap-safe `memmove`, unsigned-byte lexical `memcmp`, and `unsigned char`-normalized `memset` over interpreter-owned character storage. Copy operations snapshot exact Cust character-cell values before mutation and preserve destination identity/provenance; comparison reads up to 4,096 cells without mutation and returns the sign of the first differing byte; fill writes the low eight bits of its scalar value and preserves destination identity. None exposes host addresses or invokes host libc.
 
 ### Diagnostics and verification
 
-- Added exact prototype, arity, pointer/count-shape, const, lifetime, source/destination/input-capacity, non-character-storage, and non-evaluating `sizeof` validation. `memcpy` rejects overlapping nonzero ranges, `memmove` implements temporary-array semantics for forward/backward/self overlap, and `memcmp` permits overlap because it only reads. Registered warning-free native fixtures cover defined behavior.
+- Added exact prototype, arity, pointer/value/count-shape, const, lifetime, source/destination/input-capacity, non-character-storage, and non-evaluating `sizeof` validation. `memcpy` rejects overlapping nonzero ranges, `memmove` implements temporary-array semantics for forward/backward/self overlap, `memcmp` permits overlap because it only reads, and `memset` retains the shared 4,096-cell bound. Registered warning-free native fixtures cover defined behavior.
 
 ## v0.20.0 — 2026-08-06
 

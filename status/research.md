@@ -25,6 +25,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Runtime and direct/nested non-evaluating dispatch require the exact normalized `int memcmp(const void *, const void *, size_t)` signature, preserve user definitions, and retain owner/lifetime/non-character/count diagnostics. See `references/cust-bounded-memory-comparison-function.md`.
 - A Docker-only failure showed that the existing depth-8/depth-40 linearity test's 4x allowance was mathematically below the expected 5x linear scaling. An 8x detector remains below quadratic 25x scaling and matches the repository's adjacent linearity-test pattern; it passed 20 focused repetitions, independent re-review, and the rebuilt Docker gate.
 
+## 2026-08-06 — Bounded character-storage `memset`
+
+- Local `man 3 memset` (Linux man-pages 6.18, standards listed as C11 and POSIX.1-2008) specifies filling the first `n` bytes with the constant byte `c` converted to `unsigned char` and returning the original destination pointer.
+- Cust evaluates destination, fill value, and count once in source order, converts the deterministic scalar fill with modulo 256, writes at most 4,096 interpreter-owned character cells, and returns the original `PointerValue` as declared `void *`. It retains destination owner/lifetime/read-only/capacity checks and rejects integer/aggregate-backed object representations rather than exposing host layout.
+- Runtime and direct/nested non-evaluating dispatch require the exact normalized `void *memset(void *, int, size_t)` signature, preserve user definitions, and validate pointer/value/count shapes without executing arguments beneath `sizeof`. See `references/cust-bounded-memory-fill-function.md`.
+
 ## 2026-08-06 — Overlap-safe bounded `memmove`
 
 - Local `man 3 memmove` (Linux man-pages 6.18, standards listed as C11 and POSIX.1-2008) specifies that source and destination may overlap and copying behaves as though source bytes are first copied into a temporary non-overlapping array; the function returns the original destination pointer.
