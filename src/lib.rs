@@ -17763,6 +17763,9 @@ impl Interpreter {
             if self.has_memory_copy_prototype(name) {
                 return self.call_memory_copy_function(name, arg_exprs);
             }
+            if self.has_memory_comparison_prototype(name) {
+                return self.call_memory_comparison_function(name, arg_exprs);
+            }
             if self.has_string_span_prototype(name) {
                 return self.call_string_span_function(name, arg_exprs);
             }
@@ -17828,6 +17831,9 @@ impl Interpreter {
             }
             if matches!(name, "memcpy" | "memmove") && self.prototypes.contains_key(name) {
                 return Err(Self::unsupported_memory_copy_declaration_error(name));
+            }
+            if name == "memcmp" && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_memory_comparison_declaration_error());
             }
             if matches!(name, "strspn" | "strcspn") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
@@ -19680,12 +19686,12 @@ impl Interpreter {
             )));
         }
         let count = self.eval_scalar_conversion(CType::Int, count_expr)?;
-        let count = Self::validate_memory_copy_count(name, count)?;
+        let count = Self::validate_memory_operation_count(name, count, "copy")?;
 
         self.ensure_pointer_conversion_preserves_const(false, &arg_exprs[0])?;
         self.validate_memory_copy_character_pointer_argument(name, 1, &destination)?;
         self.validate_memory_copy_character_pointer_argument(name, 2, &source)?;
-        let values = self.read_character_memory_values(name, 2, &source, count)?;
+        let values = self.read_character_memory_values(name, "source", 2, &source, count)?;
         let current = self.deref_pointer(&destination)?;
         self.assign_deref_pointer(&destination, current)?;
         self.ensure_string_copy_destination_capacity(name, &destination, count)?;
@@ -19713,7 +19719,11 @@ impl Interpreter {
         }))
     }
 
-    fn validate_memory_copy_count(name: &str, count: i64) -> CustResult<usize> {
+    fn validate_memory_operation_count(
+        name: &str,
+        count: i64,
+        operation: &str,
+    ) -> CustResult<usize> {
         if count < 0 {
             return Err(CustError::new(format!(
                 "function '{name}' requires a nonnegative count, got {count}"
@@ -19721,12 +19731,12 @@ impl Interpreter {
         }
         let count = usize::try_from(count).map_err(|_| {
             CustError::new(format!(
-                "function '{name}' count exceeds maximum copy length of {MAX_INTEGER_STRING_BYTES} bytes"
+                "function '{name}' count exceeds maximum {operation} length of {MAX_INTEGER_STRING_BYTES} bytes"
             ))
         })?;
         if count > MAX_INTEGER_STRING_BYTES {
             return Err(CustError::new(format!(
-                "function '{name}' count {count} exceeds maximum copy length of {MAX_INTEGER_STRING_BYTES} bytes"
+                "function '{name}' count {count} exceeds maximum {operation} length of {MAX_INTEGER_STRING_BYTES} bytes"
             )));
         }
         Ok(count)
@@ -19761,6 +19771,7 @@ impl Interpreter {
     fn read_character_memory_values(
         &self,
         name: &str,
+        role: &str,
         argument: usize,
         pointer: &PointerValue,
         count: usize,
@@ -19775,7 +19786,7 @@ impl Interpreter {
         };
         if count > available {
             return Err(CustError::new(format!(
-                "source argument {argument} to function '{name}' requires {count} bytes, but only {available} bytes are available"
+                "{role} argument {argument} to function '{name}' requires {count} bytes, but only {available} bytes are available"
             )));
         }
 
@@ -19798,6 +19809,117 @@ impl Interpreter {
         CustError::new(format!(
             "standard library function '{name}' has an unsupported declaration; expected one pointer-to-void destination parameter, one pointer-to-const-void source parameter, one integer count, and a pointer-to-void return type"
         ))
+    }
+
+    fn has_memory_comparison_prototype(&self, name: &str) -> bool {
+        if name != "memcmp" {
+            return false;
+        }
+        let input = ParamSignature {
+            ty: ParamType::Void,
+            kind: ParamKind::Pointer,
+            points_to_const: true,
+        };
+        let expected = FunctionSignature {
+            return_type: ReturnType::Scalar(CType::Int),
+            params: vec![
+                input.clone(),
+                input,
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                },
+            ],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_memory_comparison_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let left = self.eval_pointer(&arg_exprs[0])?;
+        let right = self.eval_pointer(&arg_exprs[1])?;
+        let count_expr = &arg_exprs[2];
+        if self.expr_is_pointer_value(count_expr) {
+            self.eval_pointer(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        if self.aggregate_expr_type_name(count_expr).is_ok() {
+            self.eval_struct_expr(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        if self.expr_is_void_value(count_expr) {
+            self.eval_discard(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        let count = self.eval_scalar_conversion(CType::Int, count_expr)?;
+        let count = Self::validate_memory_operation_count(name, count, "comparison")?;
+
+        self.validate_memory_copy_character_pointer_argument(name, 1, &left)?;
+        self.validate_memory_copy_character_pointer_argument(name, 2, &right)?;
+        let left = self.read_character_memory_values(name, "input", 1, &left, count)?;
+        let right = self.read_character_memory_values(name, "input", 2, &right, count)?;
+        let result = left
+            .into_iter()
+            .map(|value| value.rem_euclid(256) as u8)
+            .cmp(right.into_iter().map(|value| value.rem_euclid(256) as u8));
+        let result = match result {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        };
+        Ok(Some(ReturnValue::Scalar(result)))
+    }
+
+    fn unsupported_memory_comparison_declaration_error() -> CustError {
+        CustError::new(
+            "standard library function 'memcmp' has an unsupported declaration; expected two pointer-to-const-void parameters, one integer count, and an integer return type",
+        )
+    }
+
+    fn sizeof_memory_comparison_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        for argument in &args[..2] {
+            if !self.expr_is_pointer_value(argument)
+                && !self.generic_expr_is_null_pointer_constant(argument)
+            {
+                return Err(CustError::new(format!(
+                    "function '{name}' requires pointer input arguments"
+                )));
+            }
+            self.sizeof_expr(argument)?;
+        }
+        if self.expr_is_pointer_value(&args[2])
+            || self.aggregate_expr_type_name(&args[2]).is_ok()
+            || self.expr_is_void_value(&args[2])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        self.sizeof_expr(&args[2])?;
+        Ok(INT_SIZE)
     }
 
     fn sizeof_memory_copy_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
@@ -20344,6 +20466,16 @@ impl Interpreter {
                         return Ok(());
                     } else if self.prototypes.contains_key(name) {
                         return Err(Self::unsupported_memory_copy_declaration_error(name));
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                }
+                if name == "memcmp" && !self.functions.contains_key(name) {
+                    if self.has_memory_comparison_prototype(name) {
+                        self.sizeof_memory_comparison_call(name, args)?;
+                        return Ok(());
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(Self::unsupported_memory_comparison_declaration_error());
                     } else {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
@@ -30319,6 +30451,7 @@ impl Interpreter {
                 None if self.has_string_copy_prototype(name) => {
                     self.sizeof_string_copy_call(name, args)
                 }
+                None if self.has_memory_comparison_prototype(name) => Ok(INT_SIZE),
                 None if self.has_string_span_prototype(name) => {
                     self.sizeof_string_span_call(name, args)
                 }
@@ -30363,6 +30496,9 @@ impl Interpreter {
                     && self.prototypes.contains_key(name) =>
                 {
                     Err(Self::unsupported_string_copy_declaration_error(name))
+                }
+                None if name == "memcmp" && self.prototypes.contains_key(name) => {
+                    Err(Self::unsupported_memory_comparison_declaration_error())
                 }
                 None if matches!(name.as_str(), "strspn" | "strcspn")
                     && self.prototypes.contains_key(name) =>

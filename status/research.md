@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-06 — Bounded character-storage `memcmp`
+
+- Local `man 3 memcmp` (Linux man-pages 6.18, standards listed as C11 and POSIX.1-2008) specifies comparing the first `n` bytes as `unsigned char`, returning a value whose sign follows the first differing pair, and returning zero when `n` is zero.
+- Cust evaluates both pointer inputs and the count once, validates each interpreter-owned character-storage range independently under the shared 4,096-cell cap, normalizes each exact stored character value with modulo 256 only for comparison, and returns `-1`, `0`, or `1`. Reads never mutate storage, so overlap is permitted without a special path.
+- Runtime and direct/nested non-evaluating dispatch require the exact normalized `int memcmp(const void *, const void *, size_t)` signature, preserve user definitions, and retain owner/lifetime/non-character/count diagnostics. See `references/cust-bounded-memory-comparison-function.md`.
+- A Docker-only failure showed that the existing depth-8/depth-40 linearity test's 4x allowance was mathematically below the expected 5x linear scaling. An 8x detector remains below quadratic 25x scaling and matches the repository's adjacent linearity-test pattern; it passed 20 focused repetitions, independent re-review, and the rebuilt Docker gate.
+
 ## 2026-08-06 — Overlap-safe bounded `memmove`
 
 - Local `man 3 memmove` (Linux man-pages 6.18, standards listed as C11 and POSIX.1-2008) specifies that source and destination may overlap and copying behaves as though source bytes are first copied into a temporary non-overlapping array; the function returns the original destination pointer.

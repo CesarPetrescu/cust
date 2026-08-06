@@ -2620,6 +2620,143 @@ fn supports_bounded_memcpy_on_character_storage() {
 }
 
 #[test]
+fn supports_bounded_memcmp_on_character_storage() {
+    let program = include_str!("fixtures/compat/valid/bounded_memory_comparison_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn memcmp_reports_exact_input_capacity() {
+    let cases = [
+        (
+            "int memcmp(const void *, const void *, unsigned long int); int main(void) { char left[1] = {0}; char right[2] = {0}; return memcmp(left, right, 2); }",
+            "input argument 1 to function 'memcmp' requires 2 bytes, but only 1 bytes are available",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int); int main(void) { char left[2] = {0}; char right[1] = {0}; return memcmp(left, right, 2); }",
+            "input argument 2 to function 'memcmp' requires 2 bytes, but only 1 bytes are available",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn memcmp_reports_exact_bounded_count_diagnostic() {
+    let program = "int memcmp(const void *, const void *, unsigned long int); int main(void) { char left[1] = {0}; char right[1] = {0}; return memcmp(left, right, 4097); }";
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memcmp' count 4097 exceeds maximum comparison length of 4096 bytes"
+    );
+}
+
+#[test]
+fn memcmp_evaluates_arguments_once_in_source_order_and_accepts_zero_count() {
+    let program = r#"
+        int memcmp(const void *, const void *, unsigned long int);
+        int marker = 0;
+        char left_bytes[1] = {'a'};
+        char right_bytes[1] = {'b'};
+        const void *left(void) { marker = marker * 10 + 1; return left_bytes; }
+        const void *right(void) { marker = marker * 10 + 2; return right_bytes; }
+        int count(void) { marker = marker * 10 + 3; return 1; }
+        int main(void) {
+            if (memcmp(left(), right(), count()) >= 0 || marker != 123) {
+                return 1;
+            }
+            return memcmp(left_bytes, right_bytes, 0);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn memcmp_requires_its_exact_explicit_prototype_at_runtime_and_in_sizeof() {
+    let programs = [
+        "int memcmp(const char *, const char *, int); int main(void) { char bytes[1] = {0}; return memcmp(bytes, bytes, 0); }",
+        "int memcmp(const char *, const char *, int); int main(void) { char bytes[1] = {0}; return sizeof(memcmp(bytes, bytes, 0)); }",
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "standard library function 'memcmp' has an unsupported declaration; expected two pointer-to-const-void parameters, one integer count, and an integer return type"
+        );
+    }
+}
+
+#[test]
+fn memcmp_preserves_character_storage_safety_diagnostics() {
+    let cases = [
+        (
+            "int memcmp(const void *, const void *, unsigned long int); int main(void) { int left = 0; char right[1] = {0}; return memcmp(&left, right, 1); }",
+            "function 'memcmp' currently supports only character storage for argument 1",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int); int main(void) { char left[1] = {0}; int right = 0; return memcmp(left, &right, 1); }",
+            "function 'memcmp' currently supports only character storage for argument 2",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int); int main(void) { char left[1] = {0}; char right[1] = {0}; return memcmp(left, right, -1); }",
+            "function 'memcmp' requires a nonnegative count, got -1",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int); int main(void) { char left[1] = {0}; char right[1] = {0}; int count = 1; return memcmp(left, right, &count); }",
+            "function 'memcmp' requires an integer count",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int); const void *escaped; int main(void) { { char local[1] = {0}; escaped = local; } char right[1] = {0}; return memcmp(escaped, right, 1); }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn sizeof_memcmp_is_nested_non_evaluating_and_preserves_integer_size() {
+    let mut expression = "memcmp(left(), right(), count())".to_string();
+    for _ in 0..30 {
+        expression = format!("+({expression})");
+    }
+    let program = format!(
+        r#"
+        int memcmp(const void *, const void *, unsigned long int);
+        int marker = 0;
+        const void *left(void) {{ static char bytes[1] = {{0}}; marker += 1; return bytes; }}
+        const void *right(void) {{ static char bytes[1] = {{0}}; marker += 2; return bytes; }}
+        int count(void) {{ marker += 4; return 1; }}
+        int main(void) {{ return sizeof({expression}) != sizeof(int) || marker; }}
+        "#
+    );
+
+    assert_eq!(interpret(&program).unwrap(), 0);
+}
+
+#[test]
+fn user_defined_memcmp_takes_precedence_over_the_intrinsic() {
+    let program = r#"
+        int memcmp(const void *left, const void *right, unsigned long int count) {
+            return left == right ? 7 : count + 8;
+        }
+        int main(void) {
+            char left[1] = {0};
+            char right[1] = {0};
+            return memcmp(left, right, 1) != 9;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn supports_overlap_safe_bounded_memmove_on_character_storage() {
     let program = include_str!("fixtures/compat/valid/bounded_memory_move_function.c");
 
@@ -12803,7 +12940,7 @@ fn character_pointer_object_conditional_sizeof_validation_remains_linear() {
 
     let shallow = run_nested(8, 100);
     let deep = run_nested(40, 100);
-    let allowed = (shallow * 4).max(std::time::Duration::from_millis(30));
+    let allowed = (shallow * 8).max(std::time::Duration::from_millis(30));
     assert!(
         deep < allowed,
         "nested character pointer output conditional validation scaled nonlinearly: {shallow:?} at depth 8 and {deep:?} at depth 40"
