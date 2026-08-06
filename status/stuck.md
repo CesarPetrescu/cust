@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.21.0 publication on 2026-08-06. Final independent read-only review returned `APPROVED`; focused version RED/GREEN, formatting, warning-denied Clippy, all 1,437 local tests, the rebuilt 1,437-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.21.0`, secret scan, and `git diff --check` pass. Release commit `a2594b91e4356e339faac0da06a8ef09587f9574` reached `origin/main` before annotated tag object `329e943ce94dd716e476dba562e6efb80a6d8c67`, which peels exactly to that commit. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after bounded `memchr` completion on 2026-08-07. Review-driven RED/GREEN fixed malformed-arity panic and user-definition const-provenance defects; final independent read-only re-review returned `APPROVED`. Focused `memchr`, compiler-oracle parity, formatting, warning-denied Clippy, all 1,447 local tests, the rebuilt 1,447-test Docker gate, runtime output `10`, and `git diff --check` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

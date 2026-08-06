@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Standard library subset
+
+- Added exactly prototyped bounded `memchr` over interpreter-owned standalone character scalars and one-dimensional character arrays. Source, search value, and count evaluate once in source order; stored cells and the search value compare as `unsigned char`; the first matching interior pointer preserves source owner/lifetime/read-only identity; and no match returns null.
+
+### Diagnostics and verification
+
+- Added exact prototype, arity, pointer/value/count-shape, lifetime, capacity, non-character-storage, const-result, and direct/nested non-evaluating `sizeof` validation. User-defined `memchr` bodies retain precedence, including after a matching prototype; focused review-driven regressions cover malformed arity, source-order evaluation, escaped returned pointers, and intrinsic-vs-user const provenance, while a warning-free native fixture covers defined behavior.
+
 ## v0.21.0 — 2026-08-06
 
 ### Standard library subset

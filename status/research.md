@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-07 — Bounded character-storage `memchr`
+
+- The prior local `man 3 memchr` finding drives the implementation: compare both the searched cells and scalar value as `unsigned char`, return the first matching pointer or null, and inspect at most `count` bytes. Cust applies this only to standalone character storage under its existing 4,096-cell bound; it does not serialize host ABI object representations.
+- Exact normalized dispatch is `void *memchr(const void *, int, size_t)`. Runtime evaluates source/value/count once in source order, retains pointer owner/lifetime/read-only identity for matches, and validates direct/nested `sizeof` without evaluating arguments. Native C argument evaluation order is unspecified, so the compiler-oracle fixture uses independent counters while the interpreter-only regression asserts Cust's deterministic source order.
+- Independent review found that pointer-result const classification must require exact arity before indexing the source argument and must be disabled when an interpreted function body exists. Review-driven RED/GREEN now preserves the arity diagnostic and lets an exactly declared/defined user function return unrelated mutable storage. See `references/cust-bounded-memory-character-search-function.md`.
+- Final verification reconciles 1,447 tests: 1,313 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Formatting, warning-denied Clippy, local and rebuilt-Docker suites, runtime output `10`, and `git diff --check` pass.
+
 ## 2026-08-06 — v0.21.0 release consistency and next `memchr` slice
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.20.0`, then passed after Cargo/lock and both image tags moved to `0.21.0`. Built CLI and Cargo metadata both report `cust 0.21.0`.

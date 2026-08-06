@@ -2620,6 +2620,197 @@ fn supports_bounded_memcpy_on_character_storage() {
 }
 
 #[test]
+fn supports_bounded_memchr_on_character_storage() {
+    let program = include_str!("fixtures/compat/valid/bounded_memory_character_search_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn memchr_preserves_character_storage_safety_diagnostics() {
+    let cases = [
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; return memchr(bytes, 0, 2) != 0; }",
+            "input argument 1 to function 'memchr' requires 2 bytes, but only 1 bytes are available",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { int value = 0; return memchr(&value, 0, 1) != 0; }",
+            "function 'memchr' currently supports only character storage for argument 1",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); struct Byte { char value; } byte = {0}; int main(void) { return memchr(&byte.value, 0, 1) != 0; }",
+            "function 'memchr' does not yet support aggregate-backed character storage for argument 1",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; return memchr(bytes, 0, -1) != 0; }",
+            "function 'memchr' requires a nonnegative count, got -1",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; return memchr(bytes, 0, 4097) != 0; }",
+            "function 'memchr' count 4097 exceeds maximum search length of 4096 bytes",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; int value = 0; return memchr(bytes, &value, 1) != 0; }",
+            "function 'memchr' requires an integer search value",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; int count = 1; return memchr(bytes, 0, &count) != 0; }",
+            "function 'memchr' requires an integer count",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); const void *escaped; int main(void) { { char local[1] = {0}; escaped = local; } return memchr(escaped, 0, 1) != 0; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn memchr_requires_its_exact_explicit_prototype_at_runtime_and_in_sizeof() {
+    let programs = [
+        "char *memchr(const char *, int, int); int main(void) { char bytes[1] = {0}; return memchr(bytes, 0, 1) != bytes; }",
+        "char *memchr(const char *, int, int); int main(void) { char bytes[1] = {0}; return sizeof(memchr(bytes, 0, 1)); }",
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "standard library function 'memchr' has an unsupported declaration; expected one pointer-to-const-void input parameter, one integer search value, one integer count, and a pointer-to-void return type"
+        );
+    }
+}
+
+#[test]
+fn sizeof_memchr_is_nested_non_evaluating_and_preserves_pointer_size() {
+    let mut expression = "source()".to_string();
+    for _ in 0..30 {
+        expression = format!("memchr({expression}, value(), count())");
+    }
+    let program = format!(
+        r#"
+        void *memchr(const void *, int, unsigned long int);
+        int marker = 0;
+        const void *source(void) {{ static const char bytes[1] = {{0}}; marker += 1; return bytes; }}
+        int value(void) {{ marker += 2; return 0; }}
+        int count(void) {{ marker += 4; return 0; }}
+        int main(void) {{ return sizeof({expression}) != sizeof(void *) || marker; }}
+        "#
+    );
+
+    assert_eq!(interpret(&program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_memchr_validates_shapes_and_missing_declarations() {
+    let cases = [
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; int value = 0; return sizeof(memchr(bytes, &value, 1)); }",
+            "function 'memchr' requires an integer search value",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; int count = 1; return sizeof(memchr(bytes, 0, &count)); }",
+            "function 'memchr' requires an integer count",
+        ),
+        (
+            "int main(void) { return sizeof(memchr(0, 0, 0)); }",
+            "undefined function 'memchr'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn memchr_preserves_const_source_qualification() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            const char bytes[2] = {'x', 0};
+            char *match = memchr(bytes, 'x', 1);
+            return match != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn memchr_reports_arity_before_pointer_result_const_classification() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            char *match = memchr();
+            return match != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memchr' expected 3 arguments, got 0"
+    );
+}
+
+#[test]
+fn memchr_evaluates_arguments_once_in_source_order() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int marker = 0;
+        char bytes[1] = {'x'};
+        const void *source(void) { marker = marker * 10 + 1; return bytes; }
+        int value(void) { marker = marker * 10 + 2; return 'x'; }
+        int count(void) { marker = marker * 10 + 3; return 1; }
+        int main(void) {
+            return memchr(source(), value(), count()) != bytes || marker != 123;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn memchr_result_preserves_source_lifetime() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        void *escaped(void) {
+            char local[2] = {'x', 0};
+            return memchr(local, 'x', 1);
+        }
+        int main(void) { return *(char *)escaped(); }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to out-of-scope variable 'local'"
+    );
+}
+
+#[test]
+fn user_defined_memchr_takes_precedence_over_the_intrinsic() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        void *memchr(const void *source, int value, unsigned long int count) {
+            static char result;
+            return source && value && count ? &result : 0;
+        }
+        int main(void) {
+            const char source[1] = {7};
+            char *result = memchr(source, 1, 1);
+            return result == 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn supports_bounded_memset_on_character_storage() {
     let program = include_str!("fixtures/compat/valid/bounded_memory_fill_function.c");
 

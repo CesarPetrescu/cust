@@ -150,6 +150,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/void_pointer_objects.c",
     "tests/fixtures/compat/valid/void_pointer_return_functions.c",
     "tests/fixtures/compat/valid/bounded_memory_copy_function.c",
+    "tests/fixtures/compat/valid/bounded_memory_character_search_function.c",
     "tests/fixtures/compat/valid/bounded_memory_comparison_function.c",
     "tests/fixtures/compat/valid/bounded_memory_fill_function.c",
     "tests/fixtures/compat/valid/bounded_memory_move_function.c",

@@ -1,8 +1,16 @@
 # Cust Current State
 
-Last updated: 2026-08-06
+Last updated: 2026-08-07
 
 ## Latest autonomous verification
+
+Exactly prototyped bounded `void *memchr(const void *, int, size_t)` now searches up to 4,096 interpreter-owned standalone character cells. Source, search value, and count evaluate once in source order; the search value and each stored cell compare modulo 256 as `unsigned char`; the first matching source/interior pointer preserves owner/lifetime/read-only identity; no match returns null; and zero count reads no cells. Exact arity, pointer/value/count shape, capacity, lifetime, non-character/aggregate-backed storage, incompatible/absent declaration, user-definition precedence, and direct/nested non-evaluating `sizeof` boundaries are covered without host addresses or host-libc execution.
+
+Focused RED first proved missing intrinsic dispatch. Independent review then found two metadata-path correctness defects: malformed zero-argument pointer initializers indexed `args[0]`, and a user-defined `memchr` following an exact prototype inherited intrinsic source constness. Dedicated RED regressions reproduced both; exact-arity and no-function-body guards fixed them. Ten focused interpreter tests now cover unsigned-byte first match/null, embedded NULs, offsets, zero count, one-time source-order evaluation, escaped result lifetime, source constness, exact declarations, malformed arity, nested `sizeof`, safety diagnostics, and user-definition precedence. The registered warning-free native fixture covers defined compiler-oracle behavior with independent argument counters because C argument order is unspecified. Final independent re-review returned `APPROVED` with no blockers.
+
+Formatting, warning-denied Clippy, all 1,447 local tests (1,313 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test), the rebuilt 1,447-test Docker gate, runtime output `10`, focused `memchr`, the compiler oracle, and `git diff --check` pass.
+
+Work-package evaluation considered exactly prototyped character-storage `memchr`, broad integer/aggregate raw object representations, immediate parser/fuzz expansion, and a later release closure. `memchr` was selected because it was first in both authoritative queues, completed the five-function C11 raw-memory family over the already reviewed bounded byte model, and avoided inventing host ABI layout. Bounded v0.22.0 release closure is next; broader object representations remain separate design work.
 
 Bounded Cust v0.21.0 release preparation packages the completed character-storage raw-memory family: exactly prototyped `memcpy`, `memmove`, `memcmp`, and `memset` over interpreter-owned standalone `char` scalars and one-dimensional `char` arrays. Aggregate-backed character fields and multidimensional character arrays remain exact unsupported boundaries. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README central support/limitations/roadmap text, changelog notes, and all status ledgers are synchronized for `0.21.0`. The executable inventory is independently reconciled at 1,437 tests: 1,303 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 

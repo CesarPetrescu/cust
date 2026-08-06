@@ -17766,6 +17766,9 @@ impl Interpreter {
             if self.has_memory_fill_prototype(name) {
                 return self.call_memory_fill_function(name, arg_exprs);
             }
+            if self.has_memory_character_search_prototype(name) {
+                return self.call_memory_character_search_function(name, arg_exprs);
+            }
             if self.has_memory_comparison_prototype(name) {
                 return self.call_memory_comparison_function(name, arg_exprs);
             }
@@ -17837,6 +17840,9 @@ impl Interpreter {
             }
             if name == "memset" && self.prototypes.contains_key(name) {
                 return Err(Self::unsupported_memory_fill_declaration_error());
+            }
+            if name == "memchr" && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_memory_character_search_declaration_error());
             }
             if name == "memcmp" && self.prototypes.contains_key(name) {
                 return Err(Self::unsupported_memory_comparison_declaration_error());
@@ -19928,6 +19934,114 @@ impl Interpreter {
         )
     }
 
+    fn has_memory_character_search_prototype(&self, name: &str) -> bool {
+        if name != "memchr" {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Pointer {
+                ty: PointeeType::Void,
+                points_to_const: false,
+            },
+            params: vec![
+                ParamSignature {
+                    ty: ParamType::Void,
+                    kind: ParamKind::Pointer,
+                    points_to_const: true,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                },
+            ],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_memory_character_search_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let source = self.eval_pointer(&arg_exprs[0])?;
+        let search_expr = &arg_exprs[1];
+        let search = if self.expr_is_pointer_value(search_expr) {
+            self.eval_pointer(search_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer search value"
+            )));
+        } else if self.aggregate_expr_type_name(search_expr).is_ok() {
+            self.eval_struct_expr(search_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer search value"
+            )));
+        } else if self.expr_is_void_value(search_expr) {
+            self.eval_discard(search_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer search value"
+            )));
+        } else {
+            self.eval_scalar_conversion(CType::Int, search_expr)?
+                .rem_euclid(256) as u8
+        };
+        let count_expr = &arg_exprs[2];
+        if self.expr_is_pointer_value(count_expr) {
+            self.eval_pointer(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        if self.aggregate_expr_type_name(count_expr).is_ok() {
+            self.eval_struct_expr(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        if self.expr_is_void_value(count_expr) {
+            self.eval_discard(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        let count = self.eval_scalar_conversion(CType::Int, count_expr)?;
+        let count = Self::validate_memory_operation_count(name, count, "search")?;
+
+        self.validate_memory_copy_character_pointer_argument(name, 1, &source)?;
+        let values = self.read_character_memory_values(name, "input", 1, &source, count)?;
+        let matched_offset = values
+            .into_iter()
+            .position(|value| value.rem_euclid(256) as u8 == search);
+        let pointer = match matched_offset {
+            Some(0) => source,
+            Some(offset) => self.offset_array_pointer(&source, offset as i64)?,
+            None => PointerValue::Null,
+        };
+        Ok(Some(ReturnValue::Pointer {
+            pointer,
+            ty: PointeeType::Void,
+            points_to_const: self.pointer_expr_points_to_const(&arg_exprs[0]),
+        }))
+    }
+
+    fn unsupported_memory_character_search_declaration_error() -> CustError {
+        CustError::new(
+            "standard library function 'memchr' has an unsupported declaration; expected one pointer-to-const-void input parameter, one integer search value, one integer count, and a pointer-to-void return type",
+        )
+    }
+
     fn has_memory_comparison_prototype(&self, name: &str) -> bool {
         if name != "memcmp" {
             return false;
@@ -20037,6 +20151,42 @@ impl Interpreter {
         }
         self.sizeof_expr(&args[2])?;
         Ok(INT_SIZE)
+    }
+
+    fn sizeof_memory_character_search_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        if !self.expr_is_pointer_value(&args[0])
+            && !self.generic_expr_is_null_pointer_constant(&args[0])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires a pointer input argument"
+            )));
+        }
+        self.sizeof_expr(&args[0])?;
+        if self.expr_is_pointer_value(&args[1])
+            || self.aggregate_expr_type_name(&args[1]).is_ok()
+            || self.expr_is_void_value(&args[1])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer search value"
+            )));
+        }
+        self.sizeof_expr(&args[1])?;
+        if self.expr_is_pointer_value(&args[2])
+            || self.aggregate_expr_type_name(&args[2]).is_ok()
+            || self.expr_is_void_value(&args[2])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        self.sizeof_expr(&args[2])?;
+        Ok(POINTER_SIZE)
     }
 
     fn sizeof_memory_copy_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
@@ -20636,6 +20786,16 @@ impl Interpreter {
                         return Ok(());
                     } else if self.prototypes.contains_key(name) {
                         return Err(Self::unsupported_memory_fill_declaration_error());
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                }
+                if name == "memchr" && !self.functions.contains_key(name) {
+                    if self.has_memory_character_search_prototype(name) {
+                        self.sizeof_memory_character_search_call(name, args)?;
+                        return Ok(());
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(Self::unsupported_memory_character_search_declaration_error());
                     } else {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
@@ -22881,6 +23041,14 @@ impl Interpreter {
             Expr::Assign { name, value } => {
                 self.pointer_variable_points_to_const(name)
                     || self.pointer_expr_points_to_const(value)
+            }
+            Expr::Call { name, args }
+                if name == "memchr"
+                    && args.len() == 3
+                    && !self.functions.contains_key(name)
+                    && self.has_memory_character_search_prototype(name) =>
+            {
+                self.pointer_expr_points_to_const(&args[0])
             }
             Expr::Call { name, .. } => self
                 .functions
@@ -30622,6 +30790,7 @@ impl Interpreter {
                     self.sizeof_string_copy_call(name, args)
                 }
                 None if self.has_memory_fill_prototype(name) => Ok(POINTER_SIZE),
+                None if self.has_memory_character_search_prototype(name) => Ok(POINTER_SIZE),
                 None if self.has_memory_comparison_prototype(name) => Ok(INT_SIZE),
                 None if self.has_string_span_prototype(name) => {
                     self.sizeof_string_span_call(name, args)
@@ -30670,6 +30839,9 @@ impl Interpreter {
                 }
                 None if name == "memset" && self.prototypes.contains_key(name) => {
                     Err(Self::unsupported_memory_fill_declaration_error())
+                }
+                None if name == "memchr" && self.prototypes.contains_key(name) => {
+                    Err(Self::unsupported_memory_character_search_declaration_error())
                 }
                 None if name == "memcmp" && self.prototypes.contains_key(name) => {
                     Err(Self::unsupported_memory_comparison_declaration_error())
