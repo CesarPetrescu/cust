@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-06 — First bounded raw-memory intrinsic (`memcpy`)
+
+- Local `man 3 memcpy` (Linux man-pages 6.18, standards listed as C11 and POSIX.1-2008) specifies copying exactly `n` bytes from source to destination, requires non-overlapping areas, and returns the original destination pointer; overlapping programs belong to `memmove` instead.
+- Cust's first byte-object representation is deliberately narrower than all C object representations: one interpreter-owned `char` scalar/array element counts as one byte for range and capacity checks, while copying preserves the exact deterministic stored value. This is necessary because Cust lowers plain, signed, and unsigned character spellings to one scalar model; reducing to `u8` would corrupt negative `signed char` values. Integer and aggregate storage are rejected contextually rather than serialized according to a host or invented ABI.
+- The runtime evaluates each argument once, snapshots all source character-cell values before destination writes, caps counts at 4,096, preserves pointer owner/lifetime/read-only metadata, rejects nonzero overlap, and returns the destination `PointerValue` with declared `void` pointee metadata. No host address or libc call enters execution.
+- `sizeof(memcpy(...))` validates the exact prototype, arity, pointer/count shapes, nested calls, and destination qualification without evaluating arguments. User-defined `memcpy` definitions retain precedence over the intrinsic. See `references/cust-bounded-memory-copy-function.md`.
+
 ## 2026-08-06 — One-level `void *` function boundaries
 
 - A function return declaration must carry `PointeeType::Void` as declared type metadata even though the evaluated `PointerValue` keeps the concrete interpreter-owned storage identity. Call-result classifiers use the declared return type; runtime values continue to carry owner/lifetime/read-only metadata.

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.20.0 publication on 2026-08-06. Independent review approved the release diff; all 1,400 local/rebuilt-Docker tests, runtime output `10`, strict formatting/Clippy, version and secret checks, release-commit-first push, and exact remote peeled-tag verification pass. Remote `v0.20.0` peels to `8fec9ef9e0f251808cc16b7f43d560686e88d9a1`. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after the first bounded raw-memory intrinsic run on 2026-08-06. Independent review identified and a focused RED/GREEN regression fixed negative `signed char` snapshot corruption; final independent review returned `APPROVED`. All 1,414 local/rebuilt-Docker tests, runtime output `10`, strict formatting/Clippy, focused `memcpy` tests, the warning-free native compiler oracle, and `git diff --check` pass. Web search was unavailable because Firecrawl is not configured, so local `man 3 memcpy` supplied the required behavior reference without blocking implementation. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

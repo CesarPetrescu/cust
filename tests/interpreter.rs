@@ -2613,6 +2613,237 @@ fn void_pointer_objects_support_storage_conversion_and_forwarding() {
 }
 
 #[test]
+fn supports_bounded_memcpy_on_character_storage() {
+    let program = include_str!("fixtures/compat/valid/bounded_memory_copy_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn memcpy_rejects_overlapping_character_ranges() {
+    let program = r#"
+        void *memcpy(void * restrict destination,
+                     const void * restrict source,
+                     unsigned long int count);
+        int main(void) {
+            char bytes[5] = {'a', 'b', 'c', 'd', 0};
+            memcpy(bytes + 1, bytes, 3);
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "overlapping source and destination ranges passed to function 'memcpy'"
+    );
+}
+
+#[test]
+fn sizeof_memcpy_is_non_evaluating_and_preserves_pointer_size() {
+    let program = r#"
+        void *memcpy(void * restrict destination,
+                     const void * restrict source,
+                     unsigned long int count);
+        int marker = 0;
+        void *destination(void) {
+            static char bytes[2] = {0};
+            marker += 1;
+            return bytes;
+        }
+        const void *source(void) {
+            static const char bytes[2] = {'x', 0};
+            marker += 2;
+            return bytes;
+        }
+        int count(void) {
+            marker += 4;
+            return 1;
+        }
+        int main(void) {
+            return sizeof(memcpy(destination(), source(), count())) != sizeof(void *) || marker;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn memcpy_requires_its_exact_explicit_prototype() {
+    let program = r#"
+        char *memcpy(char *destination, const char *source, int count);
+        int main(void) {
+            char destination[2] = {0};
+            return memcpy(destination, "x", 1) != destination;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "standard library function 'memcpy' has an unsupported declaration; expected one pointer-to-void destination parameter, one pointer-to-const-void source parameter, one integer count, and a pointer-to-void return type"
+    );
+}
+
+#[test]
+fn memcpy_reports_exact_source_capacity() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long int count);
+        int main(void) {
+            char destination[3] = {0};
+            char source[2] = {'a', 'b'};
+            memcpy(destination, source, 3);
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "source argument 2 to function 'memcpy' requires 3 bytes, but only 2 bytes are available"
+    );
+}
+
+#[test]
+fn memcpy_zero_count_allows_identical_character_pointer() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long int count);
+        int main(void) {
+            char bytes[1] = {'d'};
+            void *result = memcpy(bytes, bytes, 0);
+            return result != bytes || bytes[0] != 'd';
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_memcpy_rejects_incompatible_prototypes() {
+    let program = r#"
+        char *memcpy(char *destination, const char *source, int count);
+        int main(void) {
+            char destination[2] = {0};
+            return sizeof(memcpy(destination, "x", 1));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "standard library function 'memcpy' has an unsupported declaration; expected one pointer-to-void destination parameter, one pointer-to-const-void source parameter, one integer count, and a pointer-to-void return type"
+    );
+}
+
+#[test]
+fn deeply_nested_sizeof_memcpy_validation_is_bounded() {
+    let mut expression = "destination".to_string();
+    for _ in 0..30 {
+        expression = format!("memcpy({expression}, source, 0)");
+    }
+    let program = format!(
+        "void *memcpy(void *, const void *, unsigned long int); int main(void) {{ char destination_bytes[1] = {{0}}; char source_bytes[1] = {{0}}; void *destination = destination_bytes; const void *source = source_bytes; return sizeof({expression}) == sizeof(void *) ? 0 : 1; }}"
+    );
+
+    assert_eq!(interpret(&program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_memcpy_accepts_null_pointer_constants_without_evaluation() {
+    let program = "void *memcpy(void *, const void *, unsigned long int); int main(void) { return sizeof(memcpy(0, 0, 0)) == sizeof(void *) ? 0 : 1; }";
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_memcpy_without_a_declaration_remains_undefined() {
+    let program = "int main(void) { return sizeof(memcpy(0, 0, 0)); }";
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "undefined function 'memcpy'"
+    );
+}
+
+#[test]
+fn memcpy_rejects_aggregate_backed_character_storage() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        union Byte { char first; char second; } value = {.first = 'x'};
+        int main(void) {
+            memcpy(&value.first, &value.second, 1);
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memcpy' does not yet support aggregate-backed character storage for argument 1"
+    );
+}
+
+#[test]
+fn memcpy_rejects_noncharacter_storage_with_context() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long int count);
+        int main(void) {
+            char destination[1] = {0};
+            int source = 7;
+            memcpy(destination, &source, 1);
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memcpy' currently supports only character storage for argument 2"
+    );
+}
+
+#[test]
+fn memcpy_preserves_count_const_capacity_and_lifetime_diagnostics() {
+    let cases = [
+        (
+            "void *memcpy(void *, const void *, unsigned long int); int main(void) { const char destination[2] = {0}; return memcpy(destination, \"x\", 1) != destination; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); int main(void) { char destination[1] = {0}; return memcpy(destination, \"xy\", 2) != destination; }",
+            "destination argument 1 to function 'memcpy' requires 2 bytes, but only 1 bytes are available",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); int main(void) { char destination[1] = {0}; return memcpy(destination, \"x\", -1) != destination; }",
+            "function 'memcpy' requires a nonnegative count, got -1",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); int main(void) { char destination[1] = {0}; int count = 1; return memcpy(destination, \"x\", &count) != destination; }",
+            "function 'memcpy' requires an integer count",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); void *escaped; int main(void) { { char local[1] = {'x'}; escaped = local; } char destination[1] = {0}; return memcpy(destination, escaped, 1) != destination; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn user_defined_memcpy_takes_precedence_over_the_intrinsic() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long int count) {
+            char *bytes = destination;
+            bytes[0] = count ? 'u' : *(const char *)source;
+            return destination;
+        }
+        int main(void) {
+            char destination[2] = {0};
+            return memcpy(destination, "x", 1) != destination || destination[0] != 'u';
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn void_pointer_objects_work_in_for_initializers() {
     let program = r#"
         int main(void) {

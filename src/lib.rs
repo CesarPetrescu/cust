@@ -17760,6 +17760,9 @@ impl Interpreter {
             if self.has_string_copy_prototype(name) {
                 return self.call_string_copy_function(name, arg_exprs);
             }
+            if self.has_memory_copy_prototype(name) {
+                return self.call_memory_copy_function(name, arg_exprs);
+            }
             if self.has_string_span_prototype(name) {
                 return self.call_string_span_function(name, arg_exprs);
             }
@@ -17822,6 +17825,9 @@ impl Interpreter {
                 && self.prototypes.contains_key(name)
             {
                 return Err(Self::unsupported_string_copy_declaration_error(name));
+            }
+            if name == "memcpy" && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_memory_copy_declaration_error());
             }
             if matches!(name, "strspn" | "strcspn") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
@@ -19610,6 +19616,218 @@ impl Interpreter {
         self.prototypes.get(name) == Some(&expected)
     }
 
+    fn has_memory_copy_prototype(&self, name: &str) -> bool {
+        if name != "memcpy" {
+            return false;
+        }
+        let expected = FunctionSignature {
+            return_type: ReturnType::Pointer {
+                ty: PointeeType::Void,
+                points_to_const: false,
+            },
+            params: vec![
+                ParamSignature {
+                    ty: ParamType::Void,
+                    kind: ParamKind::Pointer,
+                    points_to_const: false,
+                },
+                ParamSignature {
+                    ty: ParamType::Void,
+                    kind: ParamKind::Pointer,
+                    points_to_const: true,
+                },
+                ParamSignature {
+                    ty: ParamType::Scalar(CType::Int),
+                    kind: ParamKind::Scalar,
+                    points_to_const: false,
+                },
+            ],
+        };
+        self.prototypes.get(name) == Some(&expected)
+    }
+
+    fn call_memory_copy_function(
+        &mut self,
+        name: &str,
+        arg_exprs: &[Expr],
+    ) -> CustResult<Option<ReturnValue>> {
+        if arg_exprs.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                arg_exprs.len()
+            )));
+        }
+
+        let destination = self.eval_pointer(&arg_exprs[0])?;
+        let source = self.eval_pointer(&arg_exprs[1])?;
+        let count_expr = &arg_exprs[2];
+        if self.expr_is_pointer_value(count_expr) {
+            self.eval_pointer(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        if self.aggregate_expr_type_name(count_expr).is_ok() {
+            self.eval_struct_expr(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        if self.expr_is_void_value(count_expr) {
+            self.eval_discard(count_expr)?;
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        let count = self.eval_scalar_conversion(CType::Int, count_expr)?;
+        let count = Self::validate_memory_copy_count(name, count)?;
+
+        self.ensure_pointer_conversion_preserves_const(false, &arg_exprs[0])?;
+        self.validate_memory_copy_character_pointer_argument(name, 1, &destination)?;
+        self.validate_memory_copy_character_pointer_argument(name, 2, &source)?;
+        let values = self.read_character_memory_values(name, 2, &source, count)?;
+        let current = self.deref_pointer(&destination)?;
+        self.assign_deref_pointer(&destination, current)?;
+        self.ensure_string_copy_destination_capacity(name, &destination, count)?;
+        self.ensure_string_copy_ranges_do_not_overlap(name, &destination, count, &source, count)?;
+        for (offset, value) in values.into_iter().enumerate() {
+            if offset == 0 {
+                self.assign_deref_pointer(&destination, value)?;
+            } else {
+                self.assign_pointer_index(&destination, offset as i64, value)?;
+            }
+        }
+
+        Ok(Some(ReturnValue::Pointer {
+            pointer: destination,
+            ty: PointeeType::Void,
+            points_to_const: false,
+        }))
+    }
+
+    fn validate_memory_copy_count(name: &str, count: i64) -> CustResult<usize> {
+        if count < 0 {
+            return Err(CustError::new(format!(
+                "function '{name}' requires a nonnegative count, got {count}"
+            )));
+        }
+        let count = usize::try_from(count).map_err(|_| {
+            CustError::new(format!(
+                "function '{name}' count exceeds maximum copy length of {MAX_INTEGER_STRING_BYTES} bytes"
+            ))
+        })?;
+        if count > MAX_INTEGER_STRING_BYTES {
+            return Err(CustError::new(format!(
+                "function '{name}' count {count} exceeds maximum copy length of {MAX_INTEGER_STRING_BYTES} bytes"
+            )));
+        }
+        Ok(count)
+    }
+
+    fn validate_memory_copy_character_pointer_argument(
+        &self,
+        name: &str,
+        argument: usize,
+        pointer: &PointerValue,
+    ) -> CustResult<()> {
+        if matches!(
+            pointer,
+            PointerValue::StructField { .. } | PointerValue::StructFieldElementField { .. }
+        ) {
+            return Err(CustError::new(format!(
+                "function '{name}' does not yet support aggregate-backed character storage for argument {argument}"
+            )));
+        }
+        self.validate_character_pointer_argument(name, argument, pointer)
+            .map_err(|error| {
+                if error.message.starts_with("cannot convert pointer") {
+                    CustError::new(format!(
+                        "function '{name}' currently supports only character storage for argument {argument}"
+                    ))
+                } else {
+                    error
+                }
+            })
+    }
+
+    fn read_character_memory_values(
+        &self,
+        name: &str,
+        argument: usize,
+        pointer: &PointerValue,
+        count: usize,
+    ) -> CustResult<Vec<i64>> {
+        let available = match pointer {
+            PointerValue::ArrayBase { array, .. } => array.borrow().elements.len(),
+            PointerValue::ArrayElement { array, index, .. } => {
+                array.borrow().elements.len().saturating_sub(*index)
+            }
+            PointerValue::Scalar { .. } => 1,
+            _ => 0,
+        };
+        if count > available {
+            return Err(CustError::new(format!(
+                "source argument {argument} to function '{name}' requires {count} bytes, but only {available} bytes are available"
+            )));
+        }
+
+        let mut values = Vec::with_capacity(count);
+        for offset in 0..count {
+            let value = match pointer {
+                PointerValue::ArrayBase { array, .. } => array.borrow().elements[offset],
+                PointerValue::ArrayElement { array, index, .. } => {
+                    array.borrow().elements[index.saturating_add(offset)]
+                }
+                PointerValue::Scalar { .. } => self.deref_pointer(pointer)?,
+                _ => unreachable!("validated character storage has a readable byte representation"),
+            };
+            values.push(value);
+        }
+        Ok(values)
+    }
+
+    fn unsupported_memory_copy_declaration_error() -> CustError {
+        CustError::new(
+            "standard library function 'memcpy' has an unsupported declaration; expected one pointer-to-void destination parameter, one pointer-to-const-void source parameter, one integer count, and a pointer-to-void return type",
+        )
+    }
+
+    fn sizeof_memory_copy_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
+        if args.len() != 3 {
+            return Err(CustError::new(format!(
+                "function '{name}' expected 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        for argument in &args[..2] {
+            if !self.expr_is_pointer_value(argument)
+                && !self.generic_expr_is_null_pointer_constant(argument)
+            {
+                return Err(CustError::new(format!(
+                    "function '{name}' requires pointer destination and source arguments"
+                )));
+            }
+            self.sizeof_expr(argument)?;
+        }
+        if !self.generic_expr_is_null_pointer_constant(&args[0])
+            && self.pointer_expr_points_to_const(&args[0])
+        {
+            return Err(CustError::new(
+                "cannot discard const qualifier from pointer target",
+            ));
+        }
+        if self.expr_is_pointer_value(&args[2])
+            || self.aggregate_expr_type_name(&args[2]).is_ok()
+            || self.expr_is_void_value(&args[2])
+        {
+            return Err(CustError::new(format!(
+                "function '{name}' requires an integer count"
+            )));
+        }
+        self.sizeof_expr(&args[2])?;
+        Ok(POINTER_SIZE)
+    }
+
     fn unsupported_string_copy_declaration_error(name: &str) -> CustError {
         let count = if matches!(name, "strncat" | "strncpy") {
             ", one integer count"
@@ -20106,6 +20324,16 @@ impl Interpreter {
                         self.sizeof_string_copy_call(name, args)?;
                     } else if self.prototypes.contains_key(name) {
                         return Err(Self::unsupported_string_copy_declaration_error(name));
+                    } else {
+                        return Err(CustError::new(format!("undefined function '{name}'")));
+                    }
+                }
+                if name == "memcpy" && !self.functions.contains_key(name) {
+                    if self.has_memory_copy_prototype(name) {
+                        self.sizeof_memory_copy_call(name, args)?;
+                        return Ok(());
+                    } else if self.prototypes.contains_key(name) {
+                        return Err(Self::unsupported_memory_copy_declaration_error());
                     } else {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
