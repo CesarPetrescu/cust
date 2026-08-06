@@ -17826,8 +17826,8 @@ impl Interpreter {
             {
                 return Err(Self::unsupported_string_copy_declaration_error(name));
             }
-            if name == "memcpy" && self.prototypes.contains_key(name) {
-                return Err(Self::unsupported_memory_copy_declaration_error());
+            if matches!(name, "memcpy" | "memmove") && self.prototypes.contains_key(name) {
+                return Err(Self::unsupported_memory_copy_declaration_error(name));
             }
             if matches!(name, "strspn" | "strcspn") && self.prototypes.contains_key(name) {
                 return Err(CustError::new(format!(
@@ -19617,7 +19617,7 @@ impl Interpreter {
     }
 
     fn has_memory_copy_prototype(&self, name: &str) -> bool {
-        if name != "memcpy" {
+        if !matches!(name, "memcpy" | "memmove") {
             return false;
         }
         let expected = FunctionSignature {
@@ -19689,7 +19689,15 @@ impl Interpreter {
         let current = self.deref_pointer(&destination)?;
         self.assign_deref_pointer(&destination, current)?;
         self.ensure_string_copy_destination_capacity(name, &destination, count)?;
-        self.ensure_string_copy_ranges_do_not_overlap(name, &destination, count, &source, count)?;
+        if name == "memcpy" {
+            self.ensure_string_copy_ranges_do_not_overlap(
+                name,
+                &destination,
+                count,
+                &source,
+                count,
+            )?;
+        }
         for (offset, value) in values.into_iter().enumerate() {
             if offset == 0 {
                 self.assign_deref_pointer(&destination, value)?;
@@ -19786,10 +19794,10 @@ impl Interpreter {
         Ok(values)
     }
 
-    fn unsupported_memory_copy_declaration_error() -> CustError {
-        CustError::new(
-            "standard library function 'memcpy' has an unsupported declaration; expected one pointer-to-void destination parameter, one pointer-to-const-void source parameter, one integer count, and a pointer-to-void return type",
-        )
+    fn unsupported_memory_copy_declaration_error(name: &str) -> CustError {
+        CustError::new(format!(
+            "standard library function '{name}' has an unsupported declaration; expected one pointer-to-void destination parameter, one pointer-to-const-void source parameter, one integer count, and a pointer-to-void return type"
+        ))
     }
 
     fn sizeof_memory_copy_call(&self, name: &str, args: &[Expr]) -> CustResult<i64> {
@@ -20328,12 +20336,14 @@ impl Interpreter {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
                 }
-                if name == "memcpy" && !self.functions.contains_key(name) {
+                if matches!(name.as_str(), "memcpy" | "memmove")
+                    && !self.functions.contains_key(name)
+                {
                     if self.has_memory_copy_prototype(name) {
                         self.sizeof_memory_copy_call(name, args)?;
                         return Ok(());
                     } else if self.prototypes.contains_key(name) {
-                        return Err(Self::unsupported_memory_copy_declaration_error());
+                        return Err(Self::unsupported_memory_copy_declaration_error(name));
                     } else {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }

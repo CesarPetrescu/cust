@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after the first bounded raw-memory intrinsic run on 2026-08-06. Independent review identified and a focused RED/GREEN regression fixed negative `signed char` snapshot corruption; final independent review returned `APPROVED`. All 1,414 local/rebuilt-Docker tests, runtime output `10`, strict formatting/Clippy, focused `memcpy` tests, the warning-free native compiler oracle, and `git diff --check` pass. Web search was unavailable because Firecrawl is not configured, so local `man 3 memcpy` supplied the required behavior reference without blocking implementation. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after the overlap-safe bounded `memmove` run on 2026-08-06. Independent review returned `APPROVED` with no blocking or material findings. All 1,420 local/rebuilt-Docker tests, runtime output `10`, strict formatting/Clippy, focused `memmove` and `memcpy` regressions, the registered warning-free native compiler oracle, and `git diff --check` pass. Local `man 3 memmove` supplied the required C11 temporary-array semantics without blocking implementation. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

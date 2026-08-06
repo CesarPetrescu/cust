@@ -2620,6 +2620,131 @@ fn supports_bounded_memcpy_on_character_storage() {
 }
 
 #[test]
+fn supports_overlap_safe_bounded_memmove_on_character_storage() {
+    let program = include_str!("fixtures/compat/valid/bounded_memory_move_function.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_memmove_is_nested_non_evaluating_and_preserves_pointer_size() {
+    let mut expression = "destination()".to_string();
+    for _ in 0..30 {
+        expression = format!("memmove({expression}, source(), count())");
+    }
+    let program = format!(
+        r#"
+        void *memmove(void *, const void *, unsigned long int);
+        int marker = 0;
+        void *destination(void) {{
+            static char bytes[1] = {{0}};
+            marker += 1;
+            return bytes;
+        }}
+        const void *source(void) {{
+            static const char bytes[1] = {{0}};
+            marker += 2;
+            return bytes;
+        }}
+        int count(void) {{
+            marker += 4;
+            return 0;
+        }}
+        int main(void) {{
+            return sizeof({expression}) != sizeof(void *) || marker;
+        }}
+        "#
+    );
+
+    assert_eq!(interpret(&program).unwrap(), 0);
+}
+
+#[test]
+fn memmove_requires_its_exact_explicit_prototype_at_runtime_and_in_sizeof() {
+    let programs = [
+        "char *memmove(char *, const char *, int); int main(void) { char bytes[1] = {0}; return memmove(bytes, bytes, 0) != bytes; }",
+        "char *memmove(char *, const char *, int); int main(void) { char bytes[1] = {0}; return sizeof(memmove(bytes, bytes, 0)); }",
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "standard library function 'memmove' has an unsupported declaration; expected one pointer-to-void destination parameter, one pointer-to-const-void source parameter, one integer count, and a pointer-to-void return type"
+        );
+    }
+}
+
+#[test]
+fn memmove_preserves_character_storage_safety_diagnostics() {
+    let cases = [
+        (
+            "void *memmove(void *, const void *, unsigned long int); int main(void) { const char destination[2] = {0}; return memmove(destination, \"x\", 1) != destination; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memmove(void *, const void *, unsigned long int); int main(void) { char destination[1] = {0}; return memmove(destination, \"xy\", 2) != destination; }",
+            "destination argument 1 to function 'memmove' requires 2 bytes, but only 1 bytes are available",
+        ),
+        (
+            "void *memmove(void *, const void *, unsigned long int); int main(void) { char destination[3] = {0}; char source[2] = {'a', 'b'}; return memmove(destination, source, 3) != destination; }",
+            "source argument 2 to function 'memmove' requires 3 bytes, but only 2 bytes are available",
+        ),
+        (
+            "void *memmove(void *, const void *, unsigned long int); int main(void) { char destination[1] = {0}; return memmove(destination, \"x\", -1) != destination; }",
+            "function 'memmove' requires a nonnegative count, got -1",
+        ),
+        (
+            "void *memmove(void *, const void *, unsigned long int); int main(void) { char destination[1] = {0}; int count = 1; return memmove(destination, \"x\", &count) != destination; }",
+            "function 'memmove' requires an integer count",
+        ),
+        (
+            "void *memmove(void *, const void *, unsigned long int); int main(void) { char destination[1] = {0}; int source = 7; return memmove(destination, &source, 1) != destination; }",
+            "function 'memmove' currently supports only character storage for argument 2",
+        ),
+        (
+            "void *memmove(void *, const void *, unsigned long int); void *escaped; int main(void) { { char local[1] = {'x'}; escaped = local; } char destination[1] = {0}; return memmove(destination, escaped, 1) != destination; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn memmove_zero_count_accepts_const_source_and_preserves_destination_identity() {
+    let program = r#"
+        void *memmove(void *, const void *, unsigned long int);
+        int main(void) {
+            char destination[1] = {'d'};
+            const char source[1] = {'s'};
+            void *result = memmove(destination, source, 0);
+            return result != destination || destination[0] != 'd';
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn user_defined_memmove_takes_precedence_over_the_intrinsic() {
+    let program = r#"
+        void *memmove(void *destination, const void *source, unsigned long int count) {
+            char *bytes = destination;
+            bytes[0] = count ? 'u' : *(const char *)source;
+            return destination;
+        }
+        int main(void) {
+            char destination[2] = {0};
+            return memmove(destination, "x", 1) != destination || destination[0] != 'u';
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn memcpy_rejects_overlapping_character_ranges() {
     let program = r#"
         void *memcpy(void * restrict destination,

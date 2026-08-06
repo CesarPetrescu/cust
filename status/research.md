@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-06 — Overlap-safe bounded `memmove`
+
+- Local `man 3 memmove` (Linux man-pages 6.18, standards listed as C11 and POSIX.1-2008) specifies that source and destination may overlap and copying behaves as though source bytes are first copied into a temporary non-overlapping array; the function returns the original destination pointer.
+- Cust reuses `memcpy`'s bounded character-storage representation and evaluates destination, source, and count once before validation. The shared read path snapshots every exact stored `i64` character value before any destination write, so forward, backward, and self overlap are safe without direction-dependent mutation or `u8` corruption.
+- Runtime and direct/nested non-evaluating dispatch require the exact normalized `void *memmove(void *, const void *, size_t)` signature, preserve user definitions, and retain const/lifetime/capacity/count/non-character diagnostics. See `references/cust-bounded-memory-move-function.md`.
+
 ## 2026-08-06 — First bounded raw-memory intrinsic (`memcpy`)
 
 - Local `man 3 memcpy` (Linux man-pages 6.18, standards listed as C11 and POSIX.1-2008) specifies copying exactly `n` bytes from source to destination, requires non-overlapping areas, and returns the original destination pointer; overlapping programs belong to `memmove` instead.

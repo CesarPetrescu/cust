@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Standard library subset
+
+- Added exactly prototyped bounded `memcpy` and overlap-safe `memmove` over interpreter-owned character storage. Both snapshot exact Cust character-cell values before mutation, preserve destination pointer identity and pointer provenance, cap copy counts at 4,096 bytes, and never expose host addresses or invoke host libc.
+
+### Diagnostics and verification
+
+- Added exact prototype, arity, pointer/count-shape, const, lifetime, source/destination-capacity, non-character-storage, and non-evaluating `sizeof` validation. `memcpy` rejects overlapping nonzero ranges while `memmove` implements temporary-array semantics for forward, backward, and self overlap. Registered warning-free native fixtures cover defined behavior.
+
 ## v0.20.0 — 2026-08-06
 
 ### Language subset
