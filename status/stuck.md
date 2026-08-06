@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during bounded v0.20.0 release preparation on 2026-08-06. Exact CLI and Compose version assertions went RED at `0.19.0` and GREEN at `0.20.0`; local and remote tag preflight found no `v0.20.0`, and the independently reconciled inventory remains 1,400 tests. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after bounded v0.20.0 publication on 2026-08-06. Independent review approved the release diff; all 1,400 local/rebuilt-Docker tests, runtime output `10`, strict formatting/Clippy, version and secret checks, release-commit-first push, and exact remote peeled-tag verification pass. Remote `v0.20.0` peels to `8fec9ef9e0f251808cc16b7f43d560686e88d9a1`. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

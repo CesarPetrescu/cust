@@ -30,8 +30,10 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.19.0`, then passed after Cargo/lock and both image tags moved to `0.20.0`.
 - Executable target-by-target accounting is 1,400 tests: 1,266 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the independent sum is also 1,400.
-- Local and remote `v0.20.0` annotated-tag preflight returned no refs. Release closure was selected ahead of a first bounded raw-memory intrinsic and lower-impact parser/fuzz coverage because it is first in both authoritative queues and atomically packages the reviewed function-boundary vertical slice.
-- The annotated tag is reserved for the exact independently approved, canonically verified release commit after `origin/main` acceptance. A later status-only publication-evidence commit must not move or recreate the tag.
+- Local and remote `v0.20.0` annotated-tag preflight returned no refs. Release closure was selected ahead of a first bounded raw-memory intrinsic and lower-impact parser/fuzz coverage because it was first in both authoritative queues at selection time and atomically packages the reviewed function-boundary vertical slice.
+- The annotated tag was reserved for the exact independently approved, canonically verified release commit after `origin/main` acceptance. A later status-only publication-evidence commit must not move or recreate the tag.
+- Independent read-only review returned `APPROVED`. Canonical verification passed formatting, warning-denied Clippy, all 1,400 local tests, the rebuilt 1,400-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.20.0`, secret scan, and `git diff --check`.
+- Release commit `8fec9ef9e0f251808cc16b7f43d560686e88d9a1` was accepted on `origin/main` before annotated tag publication. Remote tag object `b47cb12f0cff7562f424a7de441226d1fd06fa1c` peels exactly to that commit; this later status-only evidence commit does not move or recreate the release tag.
 
 ## 2026-08-05 — Bounded first safe C11 `void *` objects
 
