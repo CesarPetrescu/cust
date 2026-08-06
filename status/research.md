@@ -26,6 +26,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Cust deliberately permits conversion from `void *` back only when the retained concrete interpreter storage referent is compatible. An initial review suggestion to allow erased `char` storage to become `int *` matches broader C conversion syntax but contradicts Cust's documented safe model and existing `void_pointer_incompatible_conversion.c` diagnostic; no widening was made, and policy-aware final independent re-review returned `APPROVED`.
 - The registered native fixture uses only warning-free defined object-pointer round trips and ABI-independent pointer-size relationships. The completed function-boundary package is the prerequisite for future memory intrinsics, but raw-byte object-representation semantics require a separate bounded design.
 
+## 2026-08-06 — v0.20.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.19.0`, then passed after Cargo/lock and both image tags moved to `0.20.0`.
+- Executable target-by-target accounting is 1,400 tests: 1,266 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the independent sum is also 1,400.
+- Local and remote `v0.20.0` annotated-tag preflight returned no refs. Release closure was selected ahead of a first bounded raw-memory intrinsic and lower-impact parser/fuzz coverage because it is first in both authoritative queues and atomically packages the reviewed function-boundary vertical slice.
+- The annotated tag is reserved for the exact independently approved, canonically verified release commit after `origin/main` acceptance. A later status-only publication-evidence commit must not move or recreate the tag.
+
 ## 2026-08-05 — Bounded first safe C11 `void *` objects
 
 - The C object-pointer compatibility surface can be modeled without host addresses by retaining Cust's existing interpreter-owned `PointerValue` identity and adding `PointeeType::Void` only as a compatibility/type-query marker. `void` itself remains unsized; a `void *` object has deterministic pointer size.

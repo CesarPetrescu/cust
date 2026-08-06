@@ -4,6 +4,8 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.20.0 — 2026-08-06
+
 ### Language subset
 
 - Added bounded one-level `void *` function return types, prototypes, definitions, and call results. Declared void-pointee qualification and interpreter-owned owner/lifetime/read-only identity survive evaluated return chains, assignments, casts, conditionals, comma expressions, equality/truthiness, and `_Generic` selection.
@@ -11,6 +13,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Diagnostics and verification
 
 - Preserved exact pointer-to-pointer return and unsafe void-pointer operation diagnostics, and made prototype-only plus defined calls beneath `sizeof` constraint-aware without argument evaluation. Review-driven regressions cover const-qualified two-dimensional row conversion and defined-function argument validation. The registered warning-free compiler-oracle fixture and 1,400-test executable inventory cover the completed slice.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.20.0`.
+- Verified an executable inventory of 1,400 tests: 1,266 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- `void *` dereference, indexing, arithmetic, ordering, deeper pointers, pointer arrays, pointer-to-array forms, function pointers, and raw-memory intrinsics remain unsupported. General pointer levels beyond the narrow tracked unqualified `char **` model, floating-point and complex runtime values, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, other pragma semantics, and host ABI layout/promotion rules also remain outside the release.
 
 ## v0.19.0 — 2026-08-05
 

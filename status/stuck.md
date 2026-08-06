@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after completion of one-level `void *` function return/prototype/call-result support on 2026-08-06. Review-driven focused RED/GREEN, all 1,400 local/rebuilt-Docker tests, runtime output `10`, strict formatting/Clippy, and `git diff --check` pass. The initial widening suggestion for incompatible erased storage was rejected against Cust's existing documented safe compatible-referent boundary; policy-aware final independent re-review returned `APPROVED`. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed during bounded v0.20.0 release preparation on 2026-08-06. Exact CLI and Compose version assertions went RED at `0.19.0` and GREEN at `0.20.0`; local and remote tag preflight found no `v0.20.0`, and the independently reconciled inventory remains 1,400 tests. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

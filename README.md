@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.19.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.20.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -69,7 +69,7 @@ The `test` service keeps a writable container overlay so Cargo can update `targe
 
 ## Current language subset
 
-The v0.19.0 package includes the bounded first safe `void *` object/conversion feature, and current `main` additionally supports the completed one-level `void *` function-boundary slice described below. The release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
+The v0.20.0 package includes the bounded first safe `void *` object/conversion feature and the completed one-level `void *` function-boundary slice described below. The release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
 
 ```c
 int main() {
@@ -210,7 +210,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: publish bounded v0.20.0 around the completed one-level `void *` function-boundary package, then design the first bounded memory intrinsic with explicit raw-byte object-representation and storage-safety rules before implementation.
+- Next milestone: design and implement the first bounded memory intrinsic with explicit raw-byte object-representation and storage-safety rules, without exposing host addresses or bypassing interpreter-owned provenance.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider floating-point values, multiple pointer levels, and broader C conformance fixtures.
 
