@@ -2620,6 +2620,320 @@ fn supports_bounded_memcpy_on_character_storage() {
 }
 
 #[test]
+fn supports_bounded_memory_intrinsics_on_aggregate_character_array_fields() {
+    let program =
+        include_str!("fixtures/compat/valid/bounded_memory_aggregate_character_array_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn aggregate_character_array_fields_preserve_bounded_memory_safety() {
+    let cases = [
+        (
+            "int memcmp(const void *, const void *, unsigned long int); struct Buffers { char left[3]; char right[3]; } value = {{1, 2, 3}, {1, 2, 3}}; int main(void) { return memcmp(value.left + 1, value.right, 3); }",
+            "input argument 1 to function 'memcmp' requires 3 bytes, but only 2 bytes are available",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); struct Buffer { char bytes[4]; } value = {{1, 2, 3, 4}}; int main(void) { memcpy(value.bytes + 1, value.bytes, 3); return 0; }",
+            "overlapping source and destination ranges passed to function 'memcpy'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Buffer { char bytes[2]; }; int main(void) { const struct Buffer value = {{1, 2}}; return memset(value.bytes, 0, 1) != value.bytes; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); struct Buffer { char bytes[2]; }; const void *escaped; int main(void) { { struct Buffer local = {{1, 2}}; escaped = local.bytes; } return memchr(escaped, 1, 1) != 0; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Buffer { int values[2]; } value = {{1, 2}}; int main(void) { return memset(value.values, 0, 1) != value.values; }",
+            "function 'memset' currently supports only character storage for argument 1",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int); struct Bytes { char left; char right; } value = {'a', 'a'}; int main(void) { return memcmp(&value.left, &value.right, 2); }",
+            "input argument 1 to function 'memcmp' requires 2 bytes, but only 1 bytes are available",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Byte { char value; }; int main(void) { const struct Byte value = {'x'}; return memset(&value.value, 0, 1) != &value.value; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); const void *escaped; int main(void) { { struct Byte { char value; } local = {'x'}; escaped = &local.value; } return memchr(escaped, 'x', 1) != 0; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Byte { char first; char second; } value = {.first = 'x'}; int main(void) { return memset(&value.second, 'y', 1) != &value.second; }",
+            "function 'memset' does not yet support union-backed character storage for argument 1",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); union Byte { char first; char second; } value = {.first = 'x'}; int main(void) { return memcpy(&value.first, &value.second, 1) != &value.first; }",
+            "function 'memcpy' does not yet support union-backed character storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Byte { char first; char second; }; struct Bytes { union Byte items[1]; } value = {{{.first = 'x'}}}; int main(void) { return memset(&value.items[0].second, 'y', 1) != &value.items[0].second; }",
+            "function 'memset' does not yet support union-backed character storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Bytes { char first[2]; char second[2]; } value = {{'x', 'y'}}; int main(void) { return memset(value.second, '#', 1) != value.second; }",
+            "function 'memset' does not yet support union-backed character storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Byte { char value; }; union Bytes { struct Byte first; struct Byte second; } value = {.first = {'x'}}; int main(void) { return memset(&value.second.value, '#', 1) != &value.second.value; }",
+            "function 'memset' does not yet support union-backed character storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Bytes { char values[2]; }; union Storage { struct Bytes first; struct Bytes second; } value = {.first = {{'x', 'y'}}}; int main(void) { return memset(value.second.values, '#', 1) != value.second.values; }",
+            "function 'memset' does not yet support union-backed character storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Values { int first; int second; } value = {.first = 1}; int main(void) { return memset(&value.second, 0, 1) != &value.second; }",
+            "function 'memset' currently supports only character storage for argument 1",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let zero_count = "void *memcpy(void *, const void *, unsigned long int); struct Buffers { char left[1]; char right[1]; } value = {{1}, {2}}; int main(void) { return memcpy(value.left, value.right, 0) != value.left || value.left[0] != 1; }";
+    assert_eq!(interpret(zero_count).unwrap(), 0);
+
+    let non_evaluating = "void *memset(void *, int, unsigned long int); struct Buffer { char bytes[2]; } value = {{1, 2}}; int marker; int count(void) { marker += 1; return 2; } int main(void) { return sizeof(memset(value.bytes, 0, count())) != sizeof(void *) || marker; }";
+    assert_eq!(interpret(non_evaluating).unwrap(), 0);
+}
+
+#[test]
+fn aggregate_character_array_memory_rejects_union_compound_literals() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        union Bytes { char first[2]; char second[2]; };
+        int main(void) {
+            return memset(((union Bytes){{'x', 'y'}}).second, '#', 1) != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memset' does not yet support union-backed character storage for argument 1"
+    );
+}
+
+#[test]
+fn aggregate_character_arrays_copied_from_unions_become_independent_struct_storage() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Bytes { char values[2]; };
+        union Storage { struct Bytes bytes; int marker; };
+        int main(void) {
+            union Storage storage = {.bytes = {{'a', 'b'}}};
+            struct Bytes copy = storage.bytes;
+            memset(copy.values, '#', 1);
+            return copy.values[0] != '#' || copy.values[1] != 'b' ||
+                storage.bytes.values[0] != 'a';
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn aggregate_character_array_pointers_retain_storage_through_aggregate_assignment() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Bytes { char values[2]; };
+        struct Bytes value = {{'a', 'b'}};
+        struct Bytes replacement = {{'c', 'd'}};
+        int main(void) {
+            char *selected = value.values;
+            value = replacement;
+            memset(selected, '#', 1);
+            return value.values[0] != '#' || value.values[1] != 'd';
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn aggregate_character_array_pointers_retain_storage_through_element_assignments() {
+    let programs = [
+        r#"
+            void *memset(void *, int, unsigned long int);
+            struct Bytes { char values[2]; };
+            struct Bytes items[1] = {{{'a', 'b'}}};
+            struct Bytes replacement = {{'c', 'd'}};
+            int main(void) {
+                char *selected = items[0].values;
+                items[0] = replacement;
+                memset(selected, '#', 1);
+                return items[0].values[0] != '#' || items[0].values[1] != 'd';
+            }
+        "#,
+        r#"
+            void *memset(void *, int, unsigned long int);
+            struct Bytes { char values[2]; };
+            struct Box { struct Bytes items[1]; } box = {{{{'a', 'b'}}}};
+            struct Bytes replacement = {{'c', 'd'}};
+            int main(void) {
+                char *selected = box.items[0].values;
+                box.items[0] = replacement;
+                memset(selected, '#', 1);
+                return box.items[0].values[0] != '#' || box.items[0].values[1] != 'd';
+            }
+        "#,
+        r#"
+            void *memset(void *, int, unsigned long int);
+            struct Bytes { char values[2]; };
+            struct Bytes item = {{'a', 'b'}};
+            struct Bytes replacement = {{'c', 'd'}};
+            int main(void) {
+                struct Bytes *slot = &item;
+                char *selected = slot->values;
+                *slot = replacement;
+                memset(selected, '#', 1);
+                return item.values[0] != '#' || item.values[1] != 'd';
+            }
+        "#,
+        r#"
+            void *memset(void *, int, unsigned long int);
+            struct Bytes { char values[2]; };
+            struct Bytes items[1] = {{{'a', 'b'}}};
+            struct Bytes replacement = {{'c', 'd'}};
+            int main(void) {
+                struct Bytes *slot = items;
+                char *selected = slot[0].values;
+                slot[0] = replacement;
+                memset(selected, '#', 1);
+                return items[0].values[0] != '#' || items[0].values[1] != 'd';
+            }
+        "#,
+    ];
+
+    for program in programs {
+        assert_eq!(interpret(program).unwrap(), 0);
+    }
+}
+
+#[test]
+fn aggregate_character_array_storage_remains_isolated_for_by_value_parameters() {
+    let program = r#"
+        struct Bytes { char values[2]; };
+        int replace(struct Bytes value) {
+            struct Bytes replacement = {{'x', 'y'}};
+            value = replacement;
+            return value.values[0];
+        }
+        int main(void) {
+            struct Bytes original = {{'a', 'b'}};
+            return replace(original) != 'x' || original.values[0] != 'a';
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn aggregate_character_array_memory_preserves_const_roots_through_pointer_casts() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Bytes { char values[2]; };
+        int main(void) {
+            const struct Bytes value = {{'a', 'b'}};
+            memset((void *)value.values, '#', 1);
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn aggregate_character_memory_rejects_dereferenced_two_dimensional_rows() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Matrix { char values[2][2]; } value = {{{'a', 'b'}, {'c', 'd'}}};
+        int main(void) {
+            char (*row)[2] = value.values;
+            memset(*row, '#', 1);
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memset' requires character storage for argument 1"
+    );
+}
+
+#[test]
+fn aggregate_character_compound_literal_memory_results_expire_with_their_scope() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        struct Bytes { char values[2]; };
+        void *saved;
+        int main(void) {
+            {
+                saved = memset(((struct Bytes){{'a', 'b'}}).values, '#', 1);
+            }
+            return memchr(saved, '#', 1) != 0;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string().contains("pointer to out-of-scope variable"),
+        "{err}"
+    );
+}
+
+#[test]
+fn aggregate_character_scalar_fields_support_one_byte_memory_operations() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memmove(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        struct Bytes { char left; char right; } value = {'a', 'b'};
+        int main(void) {
+            if (memcpy(&value.left, &value.right, 1) != &value.left || value.left != 'b') return 1;
+            if (memcmp(&value.left, &value.right, 1) != 0) return 2;
+            if (memset(&value.right, '#', 1) != &value.right || value.right != '#') return 3;
+            if (memchr(&value.right, '#', 1) != &value.right) return 4;
+            if (memmove(&value.left, &value.right, 1) != &value.left || value.left != '#') return 5;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn embedded_aggregate_array_character_fields_support_memory_operations() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        struct Byte { char value; };
+        struct Bytes { struct Byte items[2]; } value = {{{'a'}, {'b'}}};
+        int main(void) {
+            if (memcpy(&value.items[0].value, &value.items[1].value, 1) !=
+                &value.items[0].value) return 1;
+            if (memcmp(&value.items[0].value, &value.items[1].value, 1) != 0) return 2;
+            if (memset(&value.items[1].value, '#', 1) != &value.items[1].value) return 3;
+            return value.items[0].value != 'b' || value.items[1].value != '#';
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn supports_bounded_memchr_on_character_storage() {
     let program = include_str!("fixtures/compat/valid/bounded_memory_character_search_function.c");
 
@@ -2636,10 +2950,6 @@ fn memchr_preserves_character_storage_safety_diagnostics() {
         (
             "void *memchr(const void *, int, unsigned long int); int main(void) { int value = 0; return memchr(&value, 0, 1) != 0; }",
             "function 'memchr' currently supports only character storage for argument 1",
-        ),
-        (
-            "void *memchr(const void *, int, unsigned long int); struct Byte { char value; } byte = {0}; int main(void) { return memchr(&byte.value, 0, 1) != 0; }",
-            "function 'memchr' does not yet support aggregate-backed character storage for argument 1",
         ),
         (
             "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; return memchr(bytes, 0, -1) != 0; }",
@@ -2943,17 +3253,14 @@ fn sizeof_memset_validates_argument_shapes_and_missing_declarations() {
 }
 
 #[test]
-fn memset_rejects_aggregate_backed_character_storage() {
+fn memset_supports_aggregate_backed_character_scalar_storage() {
     let program = r#"
         void *memset(void *, int, unsigned long int);
         struct Byte { char value; } byte = {'x'};
         int main(void) { return memset(&byte.value, 0, 1) != &byte.value; }
     "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "function 'memset' does not yet support aggregate-backed character storage for argument 1"
-    );
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]
@@ -3378,20 +3685,17 @@ fn sizeof_memcpy_without_a_declaration_remains_undefined() {
 }
 
 #[test]
-fn memcpy_rejects_aggregate_backed_character_storage() {
+fn memcpy_supports_aggregate_backed_character_scalar_storage() {
     let program = r#"
         void *memcpy(void *, const void *, unsigned long int);
-        union Byte { char first; char second; } value = {.first = 'x'};
+        struct Bytes { char first; char second; } value = {'x', 'y'};
         int main(void) {
             memcpy(&value.first, &value.second, 1);
-            return 0;
+            return value.first != 'y';
         }
     "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "function 'memcpy' does not yet support aggregate-backed character storage for argument 1"
-    );
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]

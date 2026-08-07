@@ -17491,6 +17491,79 @@ impl StructFieldValue {
             .map(|(name, value)| (name.clone(), value.deep_clone()))
             .collect()
     }
+
+    fn copy_assign_from(&mut self, source: &StructFieldValue) -> CustResult<()> {
+        match (self, source) {
+            (
+                StructFieldValue::Scalar { value, .. },
+                StructFieldValue::Scalar {
+                    value: source_value,
+                    ..
+                },
+            ) => *value = *source_value,
+            (
+                StructFieldValue::Array { value, .. },
+                StructFieldValue::Array {
+                    value: source_value,
+                    ..
+                },
+            ) => {
+                value
+                    .borrow_mut()
+                    .elements
+                    .clone_from(&source_value.borrow().elements);
+            }
+            (
+                StructFieldValue::Struct { fields, .. },
+                StructFieldValue::Struct {
+                    fields: source_fields,
+                    ..
+                },
+            ) => Self::copy_assign_fields(fields, source_fields)?,
+            (
+                StructFieldValue::StructArray { elements, .. },
+                StructFieldValue::StructArray {
+                    elements: source_elements,
+                    ..
+                },
+            ) if elements.len() == source_elements.len() => {
+                for (fields, source_fields) in elements.iter_mut().zip(source_elements) {
+                    Self::copy_assign_fields(fields, source_fields)?;
+                }
+            }
+            (
+                StructFieldValue::Pointer { pointer, .. },
+                StructFieldValue::Pointer {
+                    pointer: source_pointer,
+                    ..
+                },
+            ) => *pointer = source_pointer.clone(),
+            _ => {
+                return Err(CustError::new(
+                    "internal aggregate assignment field layout mismatch",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn copy_assign_fields(
+        fields: &mut HashMap<String, StructFieldValue>,
+        source_fields: &HashMap<String, StructFieldValue>,
+    ) -> CustResult<()> {
+        if fields.len() != source_fields.len() {
+            return Err(CustError::new(
+                "internal aggregate assignment field layout mismatch",
+            ));
+        }
+        for (name, field) in fields {
+            let source = source_fields.get(name).ok_or_else(|| {
+                CustError::new("internal aggregate assignment field layout mismatch")
+            })?;
+            field.copy_assign_from(source)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19867,10 +19940,10 @@ impl Interpreter {
     ) -> CustResult<()> {
         if matches!(
             pointer,
-            PointerValue::StructField { .. } | PointerValue::StructFieldElementField { .. }
+            PointerValue::ArrayElement { array, .. } if array.borrow().dimensions.is_some()
         ) {
             return Err(CustError::new(format!(
-                "function '{name}' does not yet support aggregate-backed character storage for argument {argument}"
+                "function '{name}' requires character storage for argument {argument}"
             )));
         }
         self.validate_character_pointer_argument(name, argument, pointer)
@@ -19882,7 +19955,135 @@ impl Interpreter {
                 } else {
                     error
                 }
+            })?;
+        if self.memory_pointer_targets_union_field(pointer)? {
+            return Err(CustError::new(format!(
+                "function '{name}' does not yet support union-backed character storage for argument {argument}"
+            )));
+        }
+        Ok(())
+    }
+
+    fn memory_pointer_targets_union_field(&self, pointer: &PointerValue) -> CustResult<bool> {
+        match pointer {
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => {
+                self.struct_field_path_has_union_container(*scope_id, name, *element_index, fields)
+            }
+            PointerValue::StructFieldElementField {
+                scope_id,
+                name,
+                element_index,
+                array_fields,
+                index,
+                fields,
+            } => {
+                if self.struct_field_path_has_union_container(
+                    *scope_id,
+                    name,
+                    *element_index,
+                    array_fields,
+                )? {
+                    return Ok(true);
+                }
+                let (element_type, element_fields) = self.struct_field_array_element_fields(
+                    *scope_id,
+                    name,
+                    *element_index,
+                    array_fields,
+                    *index,
+                )?;
+                self.aggregate_field_path_has_union_container(&element_type, element_fields, fields)
+            }
+            PointerValue::ArrayBase { array, .. } | PointerValue::ArrayElement { array, .. } => {
+                Ok(self.array_pointer_targets_union_field(array))
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn aggregate_fields_contain_array_with_union_ancestor(
+        &self,
+        type_name: &str,
+        fields: &HashMap<String, StructFieldValue>,
+        target: &Rc<RefCell<ArrayValue>>,
+        union_ancestor: bool,
+    ) -> Option<bool> {
+        let union_ancestor = union_ancestor
+            || self
+                .struct_types
+                .get(type_name)
+                .is_some_and(|definition| definition.kind == AggregateKind::Union);
+        fields.values().find_map(|field| match field {
+            StructFieldValue::Array { value, .. } if Rc::ptr_eq(value, target) => {
+                Some(union_ancestor)
+            }
+            StructFieldValue::Struct {
+                type_name, fields, ..
+            } => self.aggregate_fields_contain_array_with_union_ancestor(
+                type_name,
+                fields,
+                target,
+                union_ancestor,
+            ),
+            StructFieldValue::StructArray {
+                type_name,
+                elements,
+                ..
+            } => elements.iter().find_map(|fields| {
+                self.aggregate_fields_contain_array_with_union_ancestor(
+                    type_name,
+                    fields,
+                    target,
+                    union_ancestor,
+                )
+            }),
+            StructFieldValue::Scalar { .. }
+            | StructFieldValue::Array { .. }
+            | StructFieldValue::Pointer { .. } => None,
+        })
+    }
+
+    fn value_contains_array_with_union_ancestor(
+        &self,
+        value: &Value,
+        target: &Rc<RefCell<ArrayValue>>,
+    ) -> Option<bool> {
+        match value {
+            Value::Array(array) if Rc::ptr_eq(array, target) => Some(false),
+            Value::Struct { type_name, fields } => self
+                .aggregate_fields_contain_array_with_union_ancestor(
+                    type_name, fields, target, false,
+                ),
+            Value::StructArray {
+                type_name,
+                elements,
+                ..
+            } => elements.iter().find_map(|fields| {
+                self.aggregate_fields_contain_array_with_union_ancestor(
+                    type_name, fields, target, false,
+                )
+            }),
+            Value::Scalar { .. } | Value::Array(_) | Value::Pointer { .. } => None,
+        }
+    }
+
+    fn array_pointer_targets_union_field(&self, array: &Rc<RefCell<ArrayValue>>) -> bool {
+        self.scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.values.values())
+            .find_map(|value| self.value_contains_array_with_union_ancestor(value, array))
+            .or_else(|| {
+                self.static_locals.values().find_map(|storage| {
+                    self.value_contains_array_with_union_ancestor(&storage.value, array)
+                })
             })
+            .unwrap_or(false)
     }
 
     fn read_character_memory_values(
@@ -19898,7 +20099,9 @@ impl Interpreter {
             PointerValue::ArrayElement { array, index, .. } => {
                 array.borrow().elements.len().saturating_sub(*index)
             }
-            PointerValue::Scalar { .. } => 1,
+            PointerValue::Scalar { .. }
+            | PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. } => 1,
             _ => 0,
         };
         if count > available {
@@ -19914,7 +20117,9 @@ impl Interpreter {
                 PointerValue::ArrayElement { array, index, .. } => {
                     array.borrow().elements[index.saturating_add(offset)]
                 }
-                PointerValue::Scalar { .. } => self.deref_pointer(pointer)?,
+                PointerValue::Scalar { .. }
+                | PointerValue::StructField { .. }
+                | PointerValue::StructFieldElementField { .. } => self.deref_pointer(pointer)?,
                 _ => unreachable!("validated character storage has a readable byte representation"),
             };
             values.push(value);
@@ -21398,8 +21603,11 @@ impl Interpreter {
         arg_expr: &Expr,
     ) -> CustResult<Value> {
         let struct_value = match arg_expr {
-            Expr::Var(arg_name) => match self.find_variable(arg_name).cloned() {
-                Some(Value::Struct { type_name, fields }) => Some((type_name, fields)),
+            Expr::Var(arg_name) => match self.find_variable(arg_name) {
+                Some(Value::Struct { type_name, fields }) => Some((
+                    type_name.clone(),
+                    StructFieldValue::deep_clone_fields(fields),
+                )),
                 Some(_) => None,
                 None => return Err(CustError::new(format!("undefined variable '{arg_name}'"))),
             },
@@ -26003,13 +26211,44 @@ impl Interpreter {
         }
     }
 
-    fn struct_field_by_scope(
+    fn aggregate_field_path_has_union_container(
+        &self,
+        type_name: &str,
+        fields: &HashMap<String, StructFieldValue>,
+        path: &[String],
+    ) -> CustResult<bool> {
+        if self
+            .struct_types
+            .get(type_name)
+            .is_some_and(|definition| definition.kind == AggregateKind::Union)
+        {
+            return Ok(true);
+        }
+        let Some((field_name, rest)) = path.split_first() else {
+            return Ok(false);
+        };
+        if rest.is_empty() {
+            return Ok(false);
+        }
+        match fields.get(field_name) {
+            Some(StructFieldValue::Struct {
+                type_name, fields, ..
+            }) => self.aggregate_field_path_has_union_container(type_name, fields, rest),
+            Some(_) => Ok(false),
+            None => Err(CustError::new(format!(
+                "undefined field '{}'",
+                Self::field_path_label(path)
+            ))),
+        }
+    }
+
+    fn struct_field_path_has_union_container(
         &self,
         scope_id: usize,
         name: &str,
         element_index: Option<usize>,
         path: &[String],
-    ) -> CustResult<&StructFieldValue> {
+    ) -> CustResult<bool> {
         if !self.live_scope_ids.contains(&scope_id) {
             return Err(CustError::new(format!(
                 "pointer to out-of-scope variable '{name}'"
@@ -26023,7 +26262,7 @@ impl Interpreter {
             .or_else(|| self.static_value_by_scope(scope_id, name));
         match (value, element_index) {
             (Some(Value::Struct { type_name, fields }), None) => {
-                Self::nested_field_value(type_name, fields, path).map(|(_, field)| field)
+                self.aggregate_field_path_has_union_container(type_name, fields, path)
             }
             (
                 Some(Value::StructArray {
@@ -26032,13 +26271,58 @@ impl Interpreter {
                     ..
                 }),
                 Some(index),
-            ) => {
-                Self::nested_field_value(type_name, &elements[index], path).map(|(_, field)| field)
-            }
+            ) => self.aggregate_field_path_has_union_container(type_name, &elements[index], path),
             _ => Err(CustError::new(format!(
                 "pointer to out-of-scope variable '{name}'"
             ))),
         }
+    }
+
+    fn struct_field_with_container_type_by_scope<'a>(
+        &'a self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        path: &[String],
+    ) -> CustResult<(&'a str, &'a StructFieldValue)> {
+        if !self.live_scope_ids.contains(&scope_id) {
+            return Err(CustError::new(format!(
+                "pointer to out-of-scope variable '{name}'"
+            )));
+        }
+        let value = self
+            .scopes
+            .iter()
+            .find(|scope| scope.id == scope_id)
+            .and_then(|scope| scope.values.get(name))
+            .or_else(|| self.static_value_by_scope(scope_id, name));
+        match (value, element_index) {
+            (Some(Value::Struct { type_name, fields }), None) => {
+                Self::nested_field_value(type_name, fields, path)
+            }
+            (
+                Some(Value::StructArray {
+                    type_name,
+                    elements,
+                    ..
+                }),
+                Some(index),
+            ) => Self::nested_field_value(type_name, &elements[index], path),
+            _ => Err(CustError::new(format!(
+                "pointer to out-of-scope variable '{name}'"
+            ))),
+        }
+    }
+
+    fn struct_field_by_scope(
+        &self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+        path: &[String],
+    ) -> CustResult<&StructFieldValue> {
+        self.struct_field_with_container_type_by_scope(scope_id, name, element_index, path)
+            .map(|(_, field)| field)
     }
 
     fn struct_field_by_scope_mut(
@@ -26952,7 +27236,7 @@ impl Interpreter {
                         "cannot assign to struct '{type_name}' with const fields"
                     )));
                 }
-                *fields = StructFieldValue::deep_clone_fields(&rhs_fields);
+                StructFieldValue::copy_assign_fields(fields, &rhs_fields)?;
                 Ok(ReturnValue::Struct {
                     type_name: rhs_type,
                     fields: rhs_fields,
@@ -26994,7 +27278,7 @@ impl Interpreter {
                         "cannot assign to struct '{type_name}' with const fields"
                     )));
                 }
-                *fields = StructFieldValue::deep_clone_fields(&rhs_fields);
+                StructFieldValue::copy_assign_fields(fields, &rhs_fields)?;
                 Ok(ReturnValue::Struct {
                     type_name: rhs_type,
                     fields: rhs_fields,
@@ -27112,7 +27396,7 @@ impl Interpreter {
                     "cannot assign to struct '{target_type}' with const fields"
                 )));
             }
-            *target_fields = StructFieldValue::deep_clone_fields(&rhs_fields);
+            StructFieldValue::copy_assign_fields(target_fields, &rhs_fields)?;
             return Ok(ReturnValue::Struct {
                 type_name: rhs_type,
                 fields: rhs_fields,
@@ -27138,7 +27422,7 @@ impl Interpreter {
                         "cannot assign to struct '{type_name}' with const fields"
                     )));
                 }
-                elements[index] = StructFieldValue::deep_clone_fields(&rhs_fields);
+                StructFieldValue::copy_assign_fields(&mut elements[index], &rhs_fields)?;
                 Ok(ReturnValue::Struct {
                     type_name: rhs_type,
                     fields: rhs_fields,
@@ -27206,7 +27490,7 @@ impl Interpreter {
                 "cannot assign to struct '{target_type}' with const fields"
             )));
         }
-        *target_fields = StructFieldValue::deep_clone_fields(&rhs_fields);
+        StructFieldValue::copy_assign_fields(target_fields, &rhs_fields)?;
         Ok(ReturnValue::Struct {
             type_name: rhs_type,
             fields: rhs_fields,
@@ -27247,7 +27531,7 @@ impl Interpreter {
                 "cannot assign to struct '{target_type}' with const fields"
             )));
         }
-        *target_fields = StructFieldValue::deep_clone_fields(&rhs_fields);
+        StructFieldValue::copy_assign_fields(target_fields, &rhs_fields)?;
         Ok(ReturnValue::Struct {
             type_name: rhs_type,
             fields: rhs_fields,
@@ -30222,18 +30506,35 @@ impl Interpreter {
                     StructFieldValue::Pointer { pointer, .. } => Ok(pointer.clone()),
                     StructFieldValue::Array { value, .. } => {
                         let array = Rc::clone(value);
-                        if array.borrow().dimensions.is_some() {
+                        let is_two_dimensional = array.borrow().dimensions.is_some();
+                        let scope_id = self
+                            .scopes
+                            .last()
+                            .expect("aggregate field evaluation requires a current scope")
+                            .id;
+                        let name = format!(
+                            "__cust_compound_aggregate_field#{}",
+                            self.next_compound_literal_id
+                        );
+                        self.next_compound_literal_id += 1;
+                        self.current_scope_mut()
+                            .insert(name.clone(), Value::Struct { type_name, fields });
+                        let owner = Some(ArrayPointerOwner {
+                            scope_id,
+                            name: name.clone(),
+                        });
+                        if is_two_dimensional {
                             Ok(PointerValue::Array2DRow {
                                 array,
-                                source_name: None,
+                                source_name: Some(name),
                                 row: 0,
-                                owner: None,
+                                owner,
                             })
                         } else {
                             Ok(PointerValue::ArrayBase {
                                 array,
-                                source_name: None,
-                                owner: None,
+                                source_name: Some(name),
+                                owner,
                             })
                         }
                     }

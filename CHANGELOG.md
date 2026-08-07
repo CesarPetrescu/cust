@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Standard library subset
+
+- Extended exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` to character scalars and one-dimensional character arrays embedded in named, anonymous, and nested struct fields. Direct and arrow paths, interior offsets, returned pointer identity, overlap-safe snapshots, unsigned-byte comparison/search, and byte-normalized fills reuse interpreter-owned storage without host addresses or invented aggregate padding.
+
+### Diagnostics and verification
+
+- Preserved field-local capacity, overlap, const, lifetime, zero-count, and non-evaluating validation. Whole aggregate values and non-character fields remain rejected; union-backed character storage now has a dedicated exact boundary because Cust does not yet model raw-memory aliasing between union members. Focused regressions cover direct and embedded-aggregate-array scalar fields, nested array fields, exact unsafe diagnostics, and a registered GCC/Clang-warning-free compiler oracle.
+
 ## v0.22.0 — 2026-08-07
 
 ### Standard library subset

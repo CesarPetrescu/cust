@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after ordinary named aggregate-array pointer-field model coverage on 2026-08-07. The focused 384-program property matrix, exact diagnostic probes, registered compiler oracle, direct GCC/Clang warnings-as-errors fixture checks, final independent `APPROVED` review, all 1,448 local/rebuilt-Docker tests, and runtime image output `10` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after the struct-backed bounded character-memory extension on 2026-08-07. Focused aggregate-memory and preserved two-dimensional string-row regressions, the registered compiler oracle, direct GCC/Clang warnings-as-errors fixture checks, a fresh independent `APPROVED` complete-diff review, all 1,460 local/rebuilt-Docker tests, and runtime image output `10` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 
