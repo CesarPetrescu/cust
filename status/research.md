@@ -27,6 +27,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Release commit `86b5a5be1ea73e5cf1ba8eef0c77d9b0cf3f66e9` was pushed and observed exactly at `refs/heads/main` before annotated tag creation. Local and remote tag object `68fbdd70f8cb7edf1b4212272ba1900ac968f7df` peels exactly to the release commit. GitHub's public releases API returned no repository releases, so the repository's established annotated-tag publication boundary remains unchanged.
 - The next concrete package is fixed-seed model-based property coverage for pointer fields selected through ordinary aggregate-array elements, including nested holder and union-containing-array paths; broader integer/aggregate byte representations remain separate design work because Cust must not improvise host ABI layout.
 
+## 2026-08-07 — Ordinary aggregate-array pointer-field model coverage
+
+- Fixed-seed generation is insufficient evidence when consecutive low bits select binary dimensions: the LCG used by the fuzz suite correlated owner, index, and direct/reverse routes. Structural five-bit tuple enumeration plus an exact 32-cell counter closes that gap while the fixed seed still supplies replacement values.
+- Conditional selection can similarly correlate with route parity. The selected mutable and const forwarding routes are now counted independently across all 24 owner/path/index/direction models and both branch outcomes; both 48-cell matrices have no missing cell.
+- Clang rejects assignment/increment expressions under `sizeof` with `-Wunevaluated-expression` when `-Wall -Wextra -Werror` is active. The interpreter property retains side-effect markers to prove non-evaluation, while the native fixture uses side-effect-free ABI-independent `sizeof` relationships and passes both GCC and Clang. See `references/cust-ordinary-named-aggregate-array-pointer-field-modeling.md`.
+- The executable inventory is now 1,448 tests: 1,313 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Formatting, warning-denied Clippy, the complete local and rebuilt-Docker suites, and runtime output `10` pass.
+- The next bounded package is aggregate-backed one-dimensional character-array storage for `memcpy`/`memmove`/`memcmp`/`memset`/`memchr`; it should reuse existing aggregate owner/path metadata and must not infer host padding or expose aggregate values as raw byte representations.
+
 ## 2026-08-07 — Bounded character-storage `memchr`
 
 - The prior local `man 3 memchr` finding drives the implementation: compare both the searched cells and scalar value as `unsigned char`, return the first matching pointer or null, and inspect at most `count` bytes. Cust applies this only to standalone character storage under its existing 4,096-cell bound; it does not serialize host ABI object representations.

@@ -27440,3 +27440,750 @@ fn generated_two_dimensional_field_row_pointer_updates_match_model_without_panic
     assert_eq!(operation_counts, [12, 12, 12, 12]);
     assert_eq!(wrapper_counts, [16, 16, 16]);
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NamedArrayPointerPath {
+    Nested,
+    Anonymous,
+    Union,
+}
+
+impl NamedArrayPointerPath {
+    const ALL: [Self; 3] = [Self::Nested, Self::Anonymous, Self::Union];
+
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Nested => "nested",
+            Self::Anonymous => "anonymous",
+            Self::Union => "union",
+        }
+    }
+
+    fn offset(self) -> i64 {
+        match self {
+            Self::Nested => 0,
+            Self::Anonymous => 20,
+            Self::Union => 40,
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Self::Nested => 0,
+            Self::Anonymous => 1,
+            Self::Union => 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct NamedArrayPointerModel {
+    kind: FieldBackedPointeeKind,
+    path: NamedArrayPointerPath,
+    holder_owner: FieldBackedOwner,
+    holder_index: i64,
+    target_owner: FieldBackedOwner,
+    target_index: i64,
+    points_to_const: bool,
+    reverse_outer: bool,
+}
+
+impl NamedArrayPointerModel {
+    fn initial(
+        kind: FieldBackedPointeeKind,
+        path: NamedArrayPointerPath,
+        owner: FieldBackedOwner,
+        holder_index: i64,
+        points_to_const: bool,
+        reverse_outer: bool,
+    ) -> Self {
+        Self {
+            kind,
+            path,
+            holder_owner: owner,
+            holder_index,
+            target_owner: owner,
+            target_index: holder_index,
+            points_to_const,
+            reverse_outer,
+        }
+    }
+
+    fn array_name(self) -> String {
+        format!("{}_{}", self.path.prefix(), self.holder_owner.name())
+    }
+
+    fn storage_name(self) -> String {
+        format!(
+            "{}_{}_storage",
+            self.path.prefix(),
+            self.target_owner.name()
+        )
+    }
+
+    fn holder(self) -> String {
+        let array = self.array_name();
+        if self.reverse_outer {
+            format!("{}[{array}]", self.holder_index)
+        } else {
+            format!("{array}[{}]", self.holder_index)
+        }
+    }
+
+    fn pointer(self) -> String {
+        format!(
+            "{}.nested.{}",
+            self.holder(),
+            if self.points_to_const {
+                "reader"
+            } else {
+                "cursor"
+            }
+        )
+    }
+
+    fn element(self, offset: i64, reverse: bool) -> String {
+        let pointer = self.pointer();
+        if reverse {
+            format!("{offset}[{pointer}]")
+        } else {
+            format!("{pointer}[{offset}]")
+        }
+    }
+
+    fn value(self, offset: i64) -> i64 {
+        self.kind.base_value()
+            + self.path.offset()
+            + self.target_owner.offset()
+            + self.target_index
+            + offset
+    }
+
+    fn forwarding_route_index(self) -> usize {
+        self.path.index()
+            + usize::from(self.holder_owner == FieldBackedOwner::Right) * 3
+            + self.holder_index as usize * 6
+            + usize::from(self.reverse_outer) * 12
+    }
+}
+
+#[test]
+fn generated_named_aggregate_array_element_pointer_fields_match_model_without_panics() {
+    let mut state = 0xC057_AA22_F13D_u64;
+    let mut path_counts = [0; 3];
+    let mut owner_counts = [0; 2];
+    let mut direct_outer_cases = 0;
+    let mut reverse_outer_cases = 0;
+    let mut direct_inner_cases = 0;
+    let mut reverse_inner_cases = 0;
+    let mut model_tuple_counts = [0; 32];
+    let mut mutable_forwarding_route_counts = [0; 24];
+    let mut const_forwarding_route_counts = [0; 24];
+    let mut mutable_forwarding_route_branch_counts = [0; 48];
+    let mut const_forwarding_route_branch_counts = [0; 48];
+
+    for kind in FieldBackedPointeeKind::ALL {
+        for (path_index, path) in NamedArrayPointerPath::ALL.into_iter().enumerate() {
+            for case_index in 0..32 {
+                path_counts[path_index] += 1;
+                let owner = if case_index & 1 == 0 {
+                    owner_counts[0] += 1;
+                    FieldBackedOwner::Left
+                } else {
+                    owner_counts[1] += 1;
+                    FieldBackedOwner::Right
+                };
+                let holder_index = ((case_index >> 1) & 1) as i64;
+                let reverse_outer = case_index & 4 != 0;
+                let reverse_inner = case_index & 8 != 0;
+                direct_outer_cases += usize::from(!reverse_outer);
+                reverse_outer_cases += usize::from(reverse_outer);
+                direct_inner_cases += usize::from(!reverse_inner);
+                reverse_inner_cases += usize::from(reverse_inner);
+                let model = NamedArrayPointerModel::initial(
+                    kind,
+                    path,
+                    owner,
+                    holder_index,
+                    false,
+                    reverse_outer,
+                );
+                let element_offset = ((case_index >> 4) & 1) as i64;
+                let owner_index = usize::from(owner == FieldBackedOwner::Right);
+                let model_tuple_index = owner_index
+                    + holder_index as usize * 2
+                    + usize::from(reverse_outer) * 4
+                    + usize::from(reverse_inner) * 8
+                    + element_offset as usize * 16;
+                model_tuple_counts[model_tuple_index] += 1;
+                let replacement = 90 + (next_u64(&mut state) % 12) as i64;
+                let delta = 1 + (next_u64(&mut state) % 4) as i64;
+                let mutable_choices = ordinary_named_array_forward_choices(
+                    kind,
+                    false,
+                    case_index,
+                    (case_index + path_index) & 1 == 0,
+                );
+                let const_choices = ordinary_named_array_forward_choices(
+                    kind,
+                    true,
+                    case_index + 12,
+                    (case_index + path_index + 1) & 1 == 0,
+                );
+                let mutable_selected = if mutable_choices.2 {
+                    mutable_choices.0
+                } else {
+                    mutable_choices.1
+                };
+                let const_selected = if const_choices.2 {
+                    const_choices.0
+                } else {
+                    const_choices.1
+                };
+                mutable_forwarding_route_counts[mutable_selected.forwarding_route_index()] += 1;
+                const_forwarding_route_counts[const_selected.forwarding_route_index()] += 1;
+                mutable_forwarding_route_branch_counts[mutable_selected
+                    .forwarding_route_index()
+                    * 2
+                    + usize::from(mutable_choices.2)] += 1;
+                const_forwarding_route_branch_counts
+                    [const_selected.forwarding_route_index() * 2 + usize::from(const_choices.2)] +=
+                    1;
+                let expected = ordinary_named_array_program_expected(
+                    model,
+                    element_offset,
+                    replacement,
+                    delta,
+                    mutable_choices,
+                    const_choices,
+                );
+                let source = ordinary_named_array_program(
+                    model,
+                    element_offset,
+                    reverse_inner,
+                    replacement,
+                    delta,
+                    mutable_choices,
+                    const_choices,
+                );
+
+                assert_interpretation(
+                    &source,
+                    ExpectedInterpretation::Value(expected),
+                    &format!(
+                        "named aggregate-array pointer field case {case_index}, kind {kind:?}, path {path:?}, model {model:?}, mutable choices {mutable_choices:?}, const choices {const_choices:?}"
+                    ),
+                );
+            }
+
+            assert_interpretation(
+                &ordinary_named_array_outer_bounds_program(kind, path),
+                ExpectedInterpretation::OwnedError(format!(
+                    "struct array '{}_left' index 2 out of bounds for length 2",
+                    path.prefix()
+                )),
+                &format!("named aggregate-array outer bounds, kind {kind:?}, path {path:?}"),
+            );
+            assert_interpretation(
+                &ordinary_named_array_inner_bounds_program(kind, path),
+                ExpectedInterpretation::OwnedError(format!(
+                    "{} pointer index 6 out of bounds for length 6",
+                    ordinary_named_array_bounds_prefix(kind)
+                )),
+                &format!("named aggregate-array inner bounds, kind {kind:?}, path {path:?}"),
+            );
+            assert_interpretation(
+                &ordinary_named_array_const_discard_program(kind, path),
+                ExpectedInterpretation::Error("cannot discard const qualifier from pointer target"),
+                &format!("named aggregate-array const discard, kind {kind:?}, path {path:?}"),
+            );
+            assert_interpretation(
+                &ordinary_named_array_read_only_program(kind, path),
+                ExpectedInterpretation::Error("cannot assign through pointer to const"),
+                &format!("named aggregate-array read-only write, kind {kind:?}, path {path:?}"),
+            );
+            assert_interpretation(
+                &ordinary_named_array_const_slot_program(kind, path),
+                ExpectedInterpretation::Error("cannot assign to const struct field 'locked'"),
+                &format!("named aggregate-array const slot, kind {kind:?}, path {path:?}"),
+            );
+            assert_interpretation(
+                &ordinary_named_array_type_mismatch_program(kind, path),
+                ExpectedInterpretation::OwnedError(format!(
+                    "cannot convert pointer to {} to pointer to {}",
+                    kind.pointee_label(),
+                    kind.other().pointee_label()
+                )),
+                &format!("named aggregate-array pointer type, kind {kind:?}, path {path:?}"),
+            );
+            assert_interpretation(
+                &ordinary_named_array_cross_root_program(kind, path),
+                ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+                &format!("named aggregate-array cross-root, kind {kind:?}, path {path:?}"),
+            );
+        }
+
+        assert_interpretation(
+            &ordinary_named_array_cross_path_program(kind),
+            ExpectedInterpretation::Error("cannot subtract pointers to different arrays"),
+            &format!("named aggregate-array cross-path, kind {kind:?}"),
+        );
+    }
+
+    assert_eq!(path_counts, [128, 128, 128]);
+    assert_eq!(owner_counts, [192, 192]);
+    assert_eq!(direct_outer_cases, 192);
+    assert_eq!(reverse_outer_cases, 192);
+    assert_eq!(direct_inner_cases, 192);
+    assert_eq!(reverse_inner_cases, 192);
+    assert!(model_tuple_counts.into_iter().all(|count| count == 12));
+    assert_eq!(mutable_forwarding_route_counts.iter().sum::<usize>(), 384);
+    assert_eq!(const_forwarding_route_counts.iter().sum::<usize>(), 384);
+    assert!(
+        mutable_forwarding_route_counts
+            .into_iter()
+            .all(|count| count >= 12)
+    );
+    assert!(
+        const_forwarding_route_counts
+            .into_iter()
+            .all(|count| count >= 12)
+    );
+    assert!(
+        mutable_forwarding_route_branch_counts
+            .into_iter()
+            .all(|count| count >= 4)
+    );
+    assert!(
+        const_forwarding_route_branch_counts
+            .into_iter()
+            .all(|count| count >= 4)
+    );
+}
+
+fn ordinary_named_array_forward_choices(
+    kind: FieldBackedPointeeKind,
+    points_to_const: bool,
+    salt: usize,
+    select_first: bool,
+) -> (NamedArrayPointerModel, NamedArrayPointerModel, bool) {
+    let selected = ordinary_named_array_forward_model(kind, points_to_const, salt % 24);
+    let alternate = ordinary_named_array_forward_model(kind, points_to_const, (salt + 7) % 24);
+    if select_first {
+        (selected, alternate, true)
+    } else {
+        (alternate, selected, false)
+    }
+}
+
+fn ordinary_named_array_forward_model(
+    kind: FieldBackedPointeeKind,
+    points_to_const: bool,
+    route: usize,
+) -> NamedArrayPointerModel {
+    let path = NamedArrayPointerPath::ALL[route % 3];
+    let owner = if (route / 3) & 1 == 0 {
+        FieldBackedOwner::Left
+    } else {
+        FieldBackedOwner::Right
+    };
+    NamedArrayPointerModel::initial(
+        kind,
+        path,
+        owner,
+        ((route / 6) & 1) as i64,
+        points_to_const,
+        (route / 12) & 1 != 0,
+    )
+}
+
+fn ordinary_named_array_program_expected(
+    model: NamedArrayPointerModel,
+    element_offset: i64,
+    replacement: i64,
+    delta: i64,
+    mutable_choices: (NamedArrayPointerModel, NamedArrayPointerModel, bool),
+    const_choices: (NamedArrayPointerModel, NamedArrayPointerModel, bool),
+) -> i64 {
+    let selected = |choices: (NamedArrayPointerModel, NamedArrayPointerModel, bool)| {
+        if choices.2 { choices.0 } else { choices.1 }
+    };
+    let original = model.value(element_offset);
+    selected(mutable_choices).value(0)
+        + selected(const_choices).value(0)
+        + original
+        + replacement
+        + (replacement + delta)
+        + (replacement + delta)
+        + (replacement + delta + 2)
+        + 16
+}
+
+fn ordinary_named_array_program(
+    model: NamedArrayPointerModel,
+    element_offset: i64,
+    reverse_inner: bool,
+    replacement: i64,
+    delta: i64,
+    mutable_choices: (NamedArrayPointerModel, NamedArrayPointerModel, bool),
+    const_choices: (NamedArrayPointerModel, NamedArrayPointerModel, bool),
+) -> String {
+    let kind = model.kind;
+    let mutable_type = kind.mutable_pointer_type();
+    let const_type = kind.const_pointer_type();
+    let element = model.element(element_offset, reverse_inner);
+    let element_pointer = format!("&({element})");
+    let original = kind.read("element_slot");
+    let assigned = ordinary_named_array_scalar_update(kind, "element_slot", "replacement", "=");
+    let compound = ordinary_named_array_scalar_update(kind, "element_slot", "delta", "+=");
+    let post = ordinary_named_array_increment(kind, "element_slot", false);
+    let pre = ordinary_named_array_increment(kind, "element_slot", true);
+    let mutable_selected = ordinary_named_array_conditional(mutable_choices);
+    let const_selected = ordinary_named_array_conditional(const_choices);
+    let mutable_expected = if mutable_choices.2 {
+        mutable_choices.0
+    } else {
+        mutable_choices.1
+    };
+    let const_expected = if const_choices.2 {
+        const_choices.0
+    } else {
+        const_choices.1
+    };
+    let replacement_owner = model.target_owner.other();
+    let replacement_storage = format!(
+        "{}_{}_storage",
+        model.path.prefix(),
+        replacement_owner.name()
+    );
+    let pointer = model.pointer();
+    let marked_pointer = ordinary_named_array_marked_pointer(model);
+    let marked_element = ordinary_named_array_marked_element(model);
+
+    format!(
+        "{prelude}\n\
+         int main(void) {{\n\
+             int marker = 0; int replacement = {replacement}; int delta = {delta};\n\
+             {mutable_type}mutable_forwarded = forward_mut_{suffix}(\n\
+                 (marker += 1, {mutable_selected}));\n\
+             {const_type}const_forwarded = forward_const_{suffix}(\n\
+                 (marker += 1, {const_selected}));\n\
+             int mutable_observed = {mutable_read};\n\
+             int const_observed = {const_read};\n\
+             {mutable_type}element_slot = {element_pointer};\n\
+             int original = {original};\n\
+             int assigned = {assigned};\n\
+             int compound = {compound};\n\
+             int post = {post};\n\
+             int pre = {pre};\n\
+             {mutable_type}replaced = ({pointer} = {replacement_storage} + 1);\n\
+             {mutable_type}compounded = ({pointer} += 1);\n\
+             {mutable_type}old_pointer = {pointer}++;\n\
+             {mutable_type}incremented = ++{pointer};\n\
+             int outer_marker = 0; int rhs_marker = 0; int size_checks = 0;\n\
+             size_checks += sizeof({marked_element}) == sizeof({field_type});\n\
+             size_checks += sizeof({marked_pointer} =\n\
+                                   (rhs_marker++, {replacement_storage})) == sizeof({field_type} *);\n\
+             size_checks += sizeof({marked_pointer} += (rhs_marker++, 1)) == sizeof({field_type} *);\n\
+             size_checks += sizeof({marked_pointer}++) == sizeof({field_type} *);\n\
+             return mutable_observed + const_observed + original + assigned + compound + post + pre\n\
+                 + (mutable_forwarded == {mutable_expected_storage} + {mutable_expected_index})\n\
+                 + (const_forwarded == {const_expected_storage} + {const_expected_index})\n\
+                 + (element_slot == {element_storage} + {element_index})\n\
+                 + (replaced == {replacement_storage} + 1)\n\
+                 + (compounded == {replacement_storage} + 2)\n\
+                 + (old_pointer == {replacement_storage} + 2)\n\
+                 + (incremented == {replacement_storage} + 4)\n\
+                 + ({pointer} == {replacement_storage} + 4)\n\
+                 + marker + size_checks + (outer_marker == 0) + (rhs_marker == 0);\n\
+         }}\n",
+        prelude = ordinary_named_array_prelude(kind),
+        suffix = kind.suffix(),
+        mutable_read = kind.read("mutable_forwarded"),
+        const_read = kind.read("const_forwarded"),
+        field_type = kind.field_type(),
+        mutable_expected_storage = mutable_expected.storage_name(),
+        mutable_expected_index = mutable_expected.target_index,
+        const_expected_storage = const_expected.storage_name(),
+        const_expected_index = const_expected.target_index,
+        element_storage = model.storage_name(),
+        element_index = model.target_index + element_offset,
+    )
+}
+
+fn ordinary_named_array_conditional(
+    choices: (NamedArrayPointerModel, NamedArrayPointerModel, bool),
+) -> String {
+    format!(
+        "({} ? {} : {})",
+        i64::from(choices.2),
+        choices.0.pointer(),
+        choices.1.pointer()
+    )
+}
+
+fn ordinary_named_array_scalar_update(
+    kind: FieldBackedPointeeKind,
+    pointer: &str,
+    value: &str,
+    operation: &str,
+) -> String {
+    match kind {
+        FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => {
+            format!("(*{pointer} {operation} {value})")
+        }
+        FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => {
+            format!("({pointer}->value {operation} {value})")
+        }
+    }
+}
+
+fn ordinary_named_array_increment(
+    kind: FieldBackedPointeeKind,
+    pointer: &str,
+    prefix: bool,
+) -> String {
+    let target = match kind {
+        FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => format!("*{pointer}"),
+        FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => {
+            format!("{pointer}->value")
+        }
+    };
+    if prefix {
+        format!("++{target}")
+    } else {
+        format!("({target})++")
+    }
+}
+
+fn ordinary_named_array_marked_pointer(model: NamedArrayPointerModel) -> String {
+    let array = model.array_name();
+    let holder = if model.reverse_outer {
+        format!("(outer_marker++, {})[{array}]", model.holder_index)
+    } else {
+        format!("{array}[(outer_marker++, {})]", model.holder_index)
+    };
+    format!("{holder}.nested.cursor")
+}
+
+fn ordinary_named_array_marked_element(model: NamedArrayPointerModel) -> String {
+    let pointer = ordinary_named_array_marked_pointer(model);
+    format!("{pointer}[(rhs_marker++, 0)]")
+}
+
+fn ordinary_named_array_prelude(kind: FieldBackedPointeeKind) -> String {
+    let field_type = kind.field_type();
+    let suffix = kind.suffix();
+    let mut declarations = Vec::new();
+    for path in NamedArrayPointerPath::ALL {
+        for owner in FieldBackedOwner::ALL {
+            let storage = format!("{}_{}_storage", path.prefix(), owner.name());
+            declarations.push(format!(
+                "{field_type} {storage}[6] = {};",
+                ordinary_named_array_storage_initializer(kind, path, owner)
+            ));
+            let holder_type = ordinary_named_array_holder_type(path, kind);
+            let array = format!("{}_{}", path.prefix(), owner.name());
+            declarations.push(format!(
+                "{holder_type} {array}[2] = {{\n\
+                     {{.nested = {{{storage}, {storage}, {storage}}}}},\n\
+                     {{.nested = {{{storage} + 1, {storage} + 1, {storage} + 1}}}}\n\
+                 }};"
+            ));
+        }
+    }
+
+    format!(
+        "struct Point {{ int value; }};\n\
+         union Number {{ int value; char tag; }};\n\
+         struct OrdinaryFields{suffix} {{\n\
+             {field_type} *cursor; const {field_type} *reader; {field_type} * const locked;\n\
+         }};\n\
+         struct NestedHolder{suffix} {{ struct OrdinaryFields{suffix} nested; }};\n\
+         struct AnonymousHolder{suffix} {{\n\
+             struct {{ {field_type} *cursor; const {field_type} *reader;\n\
+                       {field_type} * const locked; }} nested;\n\
+         }};\n\
+         union UnionHolder{suffix} {{ struct OrdinaryFields{suffix} nested; int marker; }};\n\
+         {declarations}\n\
+         {field_type} *forward_mut_{suffix}({field_type} *value) {{ return value; }}\n\
+         const {field_type} *forward_const_{suffix}(const {field_type} *value) {{ return value; }}",
+        declarations = declarations.join("\n"),
+    )
+}
+
+fn ordinary_named_array_holder_type(
+    path: NamedArrayPointerPath,
+    kind: FieldBackedPointeeKind,
+) -> String {
+    let suffix = kind.suffix();
+    match path {
+        NamedArrayPointerPath::Nested => format!("struct NestedHolder{suffix}"),
+        NamedArrayPointerPath::Anonymous => format!("struct AnonymousHolder{suffix}"),
+        NamedArrayPointerPath::Union => format!("union UnionHolder{suffix}"),
+    }
+}
+
+fn ordinary_named_array_storage_initializer(
+    kind: FieldBackedPointeeKind,
+    path: NamedArrayPointerPath,
+    owner: FieldBackedOwner,
+) -> String {
+    let base = kind.base_value() + path.offset() + owner.offset();
+    let elements = (0..6)
+        .map(|index| {
+            let value = base + index;
+            match kind {
+                FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => value.to_string(),
+                FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => {
+                    format!("{{{value}}}")
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{{{elements}}}")
+}
+
+fn ordinary_named_array_diagnostic_program(
+    kind: FieldBackedPointeeKind,
+    operation: &str,
+) -> String {
+    format!(
+        "{}\nint main(void) {{ {operation} }}\n",
+        ordinary_named_array_prelude(kind)
+    )
+}
+
+fn ordinary_named_array_outer_bounds_program(
+    kind: FieldBackedPointeeKind,
+    path: NamedArrayPointerPath,
+) -> String {
+    let model =
+        NamedArrayPointerModel::initial(kind, path, FieldBackedOwner::Left, 2, false, false);
+    ordinary_named_array_diagnostic_program(
+        kind,
+        &format!("return {};", kind.read(&model.pointer())),
+    )
+}
+
+fn ordinary_named_array_inner_bounds_program(
+    kind: FieldBackedPointeeKind,
+    path: NamedArrayPointerPath,
+) -> String {
+    let model = NamedArrayPointerModel::initial(kind, path, FieldBackedOwner::Left, 0, false, true);
+    let element = model.element(6, true);
+    let read = match kind {
+        FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => element,
+        FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => {
+            format!("{element}.value")
+        }
+    };
+    ordinary_named_array_diagnostic_program(kind, &format!("return {read};"))
+}
+
+fn ordinary_named_array_const_discard_program(
+    kind: FieldBackedPointeeKind,
+    path: NamedArrayPointerPath,
+) -> String {
+    let model = NamedArrayPointerModel::initial(kind, path, FieldBackedOwner::Right, 1, true, true);
+    ordinary_named_array_diagnostic_program(
+        kind,
+        &format!(
+            "{}bad = {}; return bad == 0;",
+            kind.mutable_pointer_type(),
+            model.pointer()
+        ),
+    )
+}
+
+fn ordinary_named_array_read_only_program(
+    kind: FieldBackedPointeeKind,
+    path: NamedArrayPointerPath,
+) -> String {
+    let model = NamedArrayPointerModel::initial(kind, path, FieldBackedOwner::Left, 0, true, false);
+    ordinary_named_array_diagnostic_program(
+        kind,
+        &format!(
+            "{}slot = {}; {} return 0;",
+            kind.const_pointer_type(),
+            model.pointer(),
+            kind.write("slot", "1")
+        ),
+    )
+}
+
+fn ordinary_named_array_const_slot_program(
+    kind: FieldBackedPointeeKind,
+    path: NamedArrayPointerPath,
+) -> String {
+    let model =
+        NamedArrayPointerModel::initial(kind, path, FieldBackedOwner::Right, 0, false, true);
+    ordinary_named_array_diagnostic_program(
+        kind,
+        &format!(
+            "{}.nested.locked = {} + 1; return 0;",
+            model.holder(),
+            model.storage_name()
+        ),
+    )
+}
+
+fn ordinary_named_array_type_mismatch_program(
+    kind: FieldBackedPointeeKind,
+    path: NamedArrayPointerPath,
+) -> String {
+    let model =
+        NamedArrayPointerModel::initial(kind, path, FieldBackedOwner::Left, 1, false, false);
+    ordinary_named_array_diagnostic_program(
+        kind,
+        &format!(
+            "{}bad = {}; return bad == 0;",
+            kind.other().mutable_pointer_type(),
+            model.pointer()
+        ),
+    )
+}
+
+fn ordinary_named_array_cross_root_program(
+    kind: FieldBackedPointeeKind,
+    path: NamedArrayPointerPath,
+) -> String {
+    let left = NamedArrayPointerModel::initial(kind, path, FieldBackedOwner::Left, 0, false, false);
+    let right =
+        NamedArrayPointerModel::initial(kind, path, FieldBackedOwner::Right, 0, false, true);
+    ordinary_named_array_diagnostic_program(
+        kind,
+        &format!("return {} - {};", left.pointer(), right.pointer()),
+    )
+}
+
+fn ordinary_named_array_cross_path_program(kind: FieldBackedPointeeKind) -> String {
+    let nested = NamedArrayPointerModel::initial(
+        kind,
+        NamedArrayPointerPath::Nested,
+        FieldBackedOwner::Left,
+        0,
+        false,
+        false,
+    );
+    let anonymous = NamedArrayPointerModel::initial(
+        kind,
+        NamedArrayPointerPath::Anonymous,
+        FieldBackedOwner::Left,
+        0,
+        false,
+        true,
+    );
+    ordinary_named_array_diagnostic_program(
+        kind,
+        &format!("return {} - {};", nested.pointer(), anonymous.pointer()),
+    )
+}
+
+fn ordinary_named_array_bounds_prefix(kind: FieldBackedPointeeKind) -> &'static str {
+    match kind {
+        FieldBackedPointeeKind::Int | FieldBackedPointeeKind::Char => "array",
+        FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => "struct array",
+    }
+}

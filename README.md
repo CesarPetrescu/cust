@@ -210,7 +210,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: extend deterministic model-based property coverage to pointer fields selected through ordinary named aggregate-array elements, including nested named/anonymous holder paths and union-containing arrays, with independent owner/path/index/type/const expectations and exact safety diagnostics.
+- Next milestone: extend the bounded five-function raw-memory family to one-dimensional character arrays embedded in aggregate fields while preserving owner/path/lifetime/const identity and exact capacity/overlap rules without inventing host aggregate layout.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider floating-point values, multiple pointer levels, and broader C conformance fixtures.
 

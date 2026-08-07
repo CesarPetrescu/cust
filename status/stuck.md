@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.22.0 publication on 2026-08-07. Exact CLI and Compose assertions went RED against `0.21.0` and GREEN at `0.22.0`; local/rebuilt-Docker version output agrees, the 1,447-test inventory is reconciled, independent re-review returned `APPROVED`, and the canonical local/rebuilt-Docker gate passes. Release commit `86b5a5be1ea73e5cf1ba8eef0c77d9b0cf3f66e9` reached `origin/main` before remote annotated tag object `68fbdd70f8cb7edf1b4212272ba1900ac968f7df`, which peels exactly to that commit. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after ordinary named aggregate-array pointer-field model coverage on 2026-08-07. The focused 384-program property matrix, exact diagnostic probes, registered compiler oracle, direct GCC/Clang warnings-as-errors fixture checks, final independent `APPROVED` review, all 1,448 local/rebuilt-Docker tests, and runtime image output `10` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 
