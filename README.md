@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.21.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.22.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -69,7 +69,7 @@ The `test` service keeps a writable container overlay so Cargo can update `targe
 
 ## Current language subset
 
-The v0.21.0 package includes the bounded character-storage raw-memory package built on Cust's safe one-level `void *` foundation. The release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
+The v0.22.0 package completes the bounded five-function C11 character-storage raw-memory family built on Cust's safe one-level `void *` foundation. The release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
 
 ```c
 int main() {
@@ -210,7 +210,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: add exactly prototyped bounded `memchr` over the completed character-storage byte model, with unsigned-byte matching and pointer owner/lifetime/read-only preservation.
+- Next milestone: extend deterministic model-based property coverage to pointer fields selected through ordinary named aggregate-array elements, including nested named/anonymous holder paths and union-containing arrays, with independent owner/path/index/type/const expectations and exact safety diagnostics.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider floating-point values, multiple pointer levels, and broader C conformance fixtures.
 

@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-07 — v0.22.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.21.0`, then passed after Cargo/lock and both image tags moved to `0.22.0`. Built CLI and Cargo metadata both report `cust 0.22.0`.
+- Executable target-by-target accounting is 1,447 tests: 1,313 interpreter, 98 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the category sum equals the complete baseline run.
+- Local and remote `v0.22.0` annotated-tag preflight returned no refs. Release closure was selected ahead of broad integer/aggregate raw object representations, deterministic model-based pointer-field coverage, and further parser diagnostics because it is first in both authoritative queues and atomically packages the reviewed five-function raw-memory family without widening object-representation semantics.
+- Independent read-only review found one queue-truth blocker: stale v0.21.0/`memchr` evaluation text still said `Current`. Scoping those records historically removed the ambiguity; complete-diff re-review reported no findings and returned `APPROVED`. The canonical gate then passed formatting, warning-denied Clippy, all 1,447 local tests, rebuilt Docker tests, runtime output `10`, rebuilt image version `cust 0.22.0`, and `git diff --check`.
+- The next concrete package is fixed-seed model-based property coverage for pointer fields selected through ordinary aggregate-array elements, including nested holder and union-containing-array paths; broader integer/aggregate byte representations remain separate design work because Cust must not improvise host ABI layout.
+
 ## 2026-08-07 — Bounded character-storage `memchr`
 
 - The prior local `man 3 memchr` finding drives the implementation: compare both the searched cells and scalar value as `unsigned char`, return the first matching pointer or null, and inspect at most `count` bytes. Cust applies this only to standalone character storage under its existing 4,096-cell bound; it does not serialize host ABI object representations.

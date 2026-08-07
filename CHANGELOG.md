@@ -4,6 +4,8 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.22.0 — 2026-08-07
+
 ### Standard library subset
 
 - Added exactly prototyped bounded `memchr` over interpreter-owned standalone character scalars and one-dimensional character arrays. Source, search value, and count evaluate once in source order; stored cells and the search value compare as `unsigned char`; the first matching interior pointer preserves source owner/lifetime/read-only identity; and no match returns null.
@@ -11,6 +13,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Diagnostics and verification
 
 - Added exact prototype, arity, pointer/value/count-shape, lifetime, capacity, non-character-storage, const-result, and direct/nested non-evaluating `sizeof` validation. User-defined `memchr` bodies retain precedence, including after a matching prototype; focused review-driven regressions cover malformed arity, source-order evaluation, escaped returned pointers, and intrinsic-vs-user const provenance, while a warning-free native fixture covers defined behavior.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.22.0`.
+- Reconciled an executable inventory of 1,447 tests: 1,313 interpreter tests, 98 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Raw-memory intrinsics accept only interpreter-owned standalone `char` scalars and one-dimensional `char` arrays; integer and aggregate object representations, aggregate-backed character fields, multidimensional character arrays, host ABI layout, and host addresses remain unsupported. General pointer levels beyond the narrow tracked unqualified `char **` model, floating-point and complex runtime values, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
 
 ## v0.21.0 — 2026-08-06
 
