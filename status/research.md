@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-08 — Two-dimensional character rows in bounded raw-memory calls
+
+- Existing `PointerValue::Array2DRow` metadata already preserves row width, owner, lifetime, and const qualification. Selecting/dereferencing one row yields scalar `ArrayElement` storage with retained dimensions, so the five raw-memory intrinsics can operate without flattening object semantics or inferring host padding.
+- Range validation must use the selected row end, not the backing flattened array end. `character_sequence_array_end()` derives the current row boundary from `index % columns`; source reads and destination preflight now share it, so every accepted operation remains within one row.
+- Single-index row expressions such as `matrix[i]` require metadata/runtime parity: classify the base as a row pointer, evaluate the index once, use checked row-offset arithmetic, and lower the selected row start to a scalar element pointer. Huge offsets now report an exact diagnostic instead of panicking in host Rust.
+- Independent review found that const propagation after an embedded aggregate-array element must walk every nested aggregate field, not only the root object and final array field. The reviewed fix rejects raw-memory writes through const intermediate aggregate fields. GCC and Clang both accept and execute the registered C11 fixture under `-Wall -Wextra -Werror`. See `references/cust-bounded-memory-two-dimensional-character-rows.md`.
+- The executable inventory is 1,463 tests: 1,328 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Formatting, warning-denied Clippy, local and rebuilt-Docker suites, runtime output `10`, and `git diff --check` pass. Bounded v0.24.0 release closure is next.
+
 ## 2026-08-08 — v0.23.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.22.0`, then passed after Cargo/lock and both image tags moved to `0.23.0`. Built CLI and Cargo metadata both report `cust 0.23.0`.

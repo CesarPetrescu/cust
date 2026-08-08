@@ -19938,14 +19938,6 @@ impl Interpreter {
         argument: usize,
         pointer: &PointerValue,
     ) -> CustResult<()> {
-        if matches!(
-            pointer,
-            PointerValue::ArrayElement { array, .. } if array.borrow().dimensions.is_some()
-        ) {
-            return Err(CustError::new(format!(
-                "function '{name}' requires character storage for argument {argument}"
-            )));
-        }
         self.validate_character_pointer_argument(name, argument, pointer)
             .map_err(|error| {
                 if error.message.starts_with("cannot convert pointer") {
@@ -20097,7 +20089,8 @@ impl Interpreter {
         let available = match pointer {
             PointerValue::ArrayBase { array, .. } => array.borrow().elements.len(),
             PointerValue::ArrayElement { array, index, .. } => {
-                array.borrow().elements.len().saturating_sub(*index)
+                let array = array.borrow();
+                Self::character_sequence_array_end(&array, *index).saturating_sub(*index)
             }
             PointerValue::Scalar { .. }
             | PointerValue::StructField { .. }
@@ -22457,6 +22450,16 @@ impl Interpreter {
             Expr::GenericSelection { .. } => {
                 self.pointer_expr_pointee_type(self.selected_generic_association(expr)?)
             }
+            Expr::ArrayGet { .. }
+            | Expr::StructArrayGet { .. }
+            | Expr::StructElementArrayGet { .. }
+            | Expr::StructPtrArrayGet { .. }
+                if self.array2d_indexed_row_element_type(expr).is_some() =>
+            {
+                Ok(self
+                    .array2d_indexed_row_element_type(expr)
+                    .map(PointeeType::Scalar))
+            }
             Expr::Deref(pointer) if self.expr_is_character_pointer_output_value(pointer) => {
                 self.validate_character_pointer_output_argument_with_liveness(
                     "character pointer output dereference",
@@ -22921,6 +22924,86 @@ impl Interpreter {
         }
     }
 
+    fn array2d_indexed_row_base(expr: &Expr) -> Option<(Expr, &Expr)> {
+        match expr {
+            Expr::ArrayGet { name, index } => Some((Expr::Var(name.clone()), index)),
+            Expr::StructArrayGet {
+                name,
+                fields,
+                index,
+            } => Some((
+                Expr::StructGet {
+                    name: name.clone(),
+                    fields: fields.clone(),
+                },
+                index,
+            )),
+            Expr::StructElementArrayGet {
+                name,
+                index,
+                fields,
+                array_index,
+            } => Some((
+                Expr::StructElementGet {
+                    name: name.clone(),
+                    index: index.clone(),
+                    fields: fields.clone(),
+                },
+                array_index,
+            )),
+            Expr::StructPtrArrayGet {
+                pointer,
+                fields,
+                index,
+            } => Some((
+                Expr::StructPtrGet {
+                    pointer: pointer.clone(),
+                    fields: fields.clone(),
+                },
+                index,
+            )),
+            _ => None,
+        }
+    }
+
+    fn array2d_indexed_row_element_type(&self, expr: &Expr) -> Option<CType> {
+        let (base, _) = Self::array2d_indexed_row_base(expr)?;
+        self.array2d_row_pointer_element_type(&base)
+    }
+
+    fn eval_array2d_indexed_row_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
+        let (base, index) = Self::array2d_indexed_row_base(expr)
+            .ok_or_else(|| CustError::new("expression does not select a two-dimensional row"))?;
+        let row = self.eval(index)?;
+        let pointer = self.eval_pointer(&base)?;
+        let pointer = self.offset_array_pointer(&pointer, row)?;
+        let PointerValue::Array2DRow {
+            array,
+            source_name,
+            row,
+            owner,
+        } = pointer
+        else {
+            return Err(CustError::new(
+                "pointer does not reference a two-dimensional array row",
+            ));
+        };
+        self.ensure_array_pointer_owner_live(owner.as_ref())?;
+        let columns = array
+            .borrow()
+            .dimensions
+            .map(|(_, columns)| columns)
+            .ok_or_else(|| {
+                CustError::new("pointer does not reference a two-dimensional array row")
+            })?;
+        Ok(PointerValue::ArrayElement {
+            array,
+            source_name,
+            index: row * columns,
+            owner,
+        })
+    }
+
     fn struct_pointer_expr_field_metadata(
         &self,
         pointer: &Expr,
@@ -23024,12 +23107,69 @@ impl Interpreter {
         self.aggregate_type_field_metadata(element_type, fields)
     }
 
+    fn aggregate_type_field_path_is_const(&self, type_name: &str, path: &[String]) -> bool {
+        let Some((field_name, rest)) = path.split_first() else {
+            return false;
+        };
+        let Some(field) = self.struct_types.get(type_name).and_then(|definition| {
+            definition
+                .fields
+                .iter()
+                .find(|field| field.name == *field_name)
+        }) else {
+            return false;
+        };
+        if field.is_const {
+            return true;
+        }
+        match (&field.ty, rest.is_empty()) {
+            (_, true) => false,
+            (StructFieldType::Struct(nested_type), false) => {
+                self.aggregate_type_field_path_is_const(nested_type, rest)
+            }
+            _ => false,
+        }
+    }
+
+    fn struct_field_array_element_path_points_to_const(
+        &self,
+        name: &str,
+        array_fields: &[String],
+        fields: &[String],
+    ) -> bool {
+        if self.direct_struct_array_field_points_to_const(name, array_fields) {
+            return true;
+        }
+        let Some(Value::Struct {
+            type_name,
+            fields: field_map,
+        }) = self.find_variable(name)
+        else {
+            return false;
+        };
+        let Ok((_, StructFieldValue::StructArray { type_name, .. })) =
+            Self::nested_field_value(type_name, field_map, array_fields)
+        else {
+            return false;
+        };
+        self.aggregate_type_field_path_is_const(type_name, fields)
+    }
+
     fn pointer_expr_points_to_const(&self, expr: &Expr) -> bool {
         match expr {
             Expr::GenericSelection { .. } => self
                 .selected_generic_association(expr)
                 .map(|selected| self.pointer_expr_points_to_const(selected))
                 .unwrap_or(false),
+            Expr::ArrayGet { .. }
+            | Expr::StructArrayGet { .. }
+            | Expr::StructElementArrayGet { .. }
+            | Expr::StructPtrArrayGet { .. }
+                if self.array2d_indexed_row_element_type(expr).is_some() =>
+            {
+                Self::array2d_indexed_row_base(expr)
+                    .is_some_and(|(base, _)| self.pointer_expr_points_to_const(&base))
+            }
             Expr::Var(name) => self.pointer_variable_points_to_const(name),
             Expr::AddressOf(name) => self.is_const_variable(name),
             Expr::AddressOfStructField { name, fields } => self
@@ -23318,8 +23458,18 @@ impl Interpreter {
                 .struct_field_array_element_field_metadata(name, array_fields, index, fields)
                 .ok()
                 .flatten()
-                .is_some_and(|(field_type, _, points_to_const)| {
-                    matches!(field_type, StructFieldType::Pointer(_)) && points_to_const
+                .is_some_and(|(field_type, is_const, points_to_const)| match field_type {
+                    StructFieldType::Pointer(_) => points_to_const,
+                    StructFieldType::Array(_, _)
+                    | StructFieldType::Array2D(_, _, _)
+                    | StructFieldType::StructArray(_, _) => {
+                        self.struct_field_array_element_path_points_to_const(
+                            name,
+                            array_fields,
+                            fields,
+                        ) || is_const
+                    }
+                    StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
                 }),
             Expr::StructFieldArrayElementSet {
                 name,
@@ -27658,6 +27808,14 @@ impl Interpreter {
                 let selected = self.selected_generic_association(expr)?.clone();
                 self.eval_pointer(&selected)
             }
+            Expr::ArrayGet { .. }
+            | Expr::StructArrayGet { .. }
+            | Expr::StructElementArrayGet { .. }
+            | Expr::StructPtrArrayGet { .. }
+                if self.array2d_indexed_row_element_type(expr).is_some() =>
+            {
+                self.eval_array2d_indexed_row_pointer(expr)
+            }
             Expr::Number(0) => Ok(PointerValue::Null),
             Expr::Deref(output) if self.expr_is_character_pointer_output_value(output) => {
                 let output = self.eval_character_pointer_output_argument(
@@ -28543,12 +28701,19 @@ impl Interpreter {
                 source_name,
                 row,
                 owner,
-            } => self.two_dimensional_array_row_pointer_at(
-                array,
-                source_name.clone(),
-                owner.clone(),
-                *row as i64 + offset,
-            ),
+            } => {
+                let row = (*row as i64).checked_add(offset).ok_or_else(|| {
+                    CustError::new(
+                        "two-dimensional array row pointer index overflow during pointer arithmetic",
+                    )
+                })?;
+                self.two_dimensional_array_row_pointer_at(
+                    array,
+                    source_name.clone(),
+                    owner.clone(),
+                    row,
+                )
+            }
         }
     }
 
@@ -29276,6 +29441,14 @@ impl Interpreter {
                 .selected_generic_association(expr)
                 .map(|selected| self.expr_is_pointer_value(selected))
                 .unwrap_or(false),
+            Expr::ArrayGet { .. }
+            | Expr::StructArrayGet { .. }
+            | Expr::StructElementArrayGet { .. }
+            | Expr::StructPtrArrayGet { .. }
+                if self.array2d_indexed_row_element_type(expr).is_some() =>
+            {
+                true
+            }
             Expr::Number(_) => false,
             Expr::AddressOf(_)
             | Expr::AddressOfArray { .. }

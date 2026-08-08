@@ -2852,20 +2852,94 @@ fn aggregate_character_array_memory_preserves_const_roots_through_pointer_casts(
 }
 
 #[test]
-fn aggregate_character_memory_rejects_dereferenced_two_dimensional_rows() {
+fn bounded_memory_fill_supports_dereferenced_two_dimensional_character_rows() {
     let program = r#"
         void *memset(void *, int, unsigned long int);
         struct Matrix { char values[2][2]; } value = {{{'a', 'b'}, {'c', 'd'}}};
         int main(void) {
             char (*row)[2] = value.values;
-            memset(*row, '#', 1);
-            return 0;
+            if (memset(*row, '#', 2) != *row) return 1;
+            return value.values[0][0] != '#' || value.values[0][1] != '#' ||
+                value.values[1][0] != 'c' || value.values[1][1] != 'd';
         }
     "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "function 'memset' requires character storage for argument 1"
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_intrinsics_support_two_dimensional_character_row_views() {
+    let program =
+        include_str!("fixtures/compat/valid/bounded_memory_two_dimensional_character_rows.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_two_dimensional_character_rows_preserve_safety_diagnostics() {
+    let cases = [
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { char rows[2][3] = {{0}}; memset(rows[0] + 2, 1, 2); return 0; }",
+            "destination argument 1 to function 'memset' requires 2 bytes, but only 1 bytes are available",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int); int main(void) { char rows[2][3] = {{0}}; return memcmp(rows[0] + 2, rows[1], 2); }",
+            "input argument 1 to function 'memcmp' requires 2 bytes, but only 1 bytes are available",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); int main(void) { char rows[1][3] = {{1, 2, 3}}; memcpy(rows[0] + 1, rows[0], 2); return 0; }",
+            "overlapping source and destination ranges passed to function 'memcpy'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { const char rows[1][2] = {{0}}; memset(rows[0], 1, 1); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Leaf { char rows[1][2]; }; struct Outer { struct Leaf leaves[1]; }; int main(void) { const struct Outer outer = {{{{{'a', 'b'}}}}}; memset(outer.leaves[0].rows[0], '#', 1); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Nested { char rows[1][2]; }; struct Leaf { const struct Nested nested; }; struct Outer { struct Leaf leaves[1]; }; int main(void) { struct Outer outer = {{{{{{'a', 'b'}}}}}}; memset(outer.leaves[0].nested.rows[0], '#', 1); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { char rows[2][2] = {{0}}; char (*row)[2] = rows + 1; memset(row[9223372036854775807], 0, 1); return 0; }",
+            "two-dimensional array row pointer index overflow during pointer arithmetic",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn bounded_memory_two_dimensional_character_rows_preserve_lifetime_and_sizeof_rules() {
+    let sizeof_program = r#"
+        void *memset(void *, int, unsigned long int);
+        int main(void) {
+            char rows[2][2] = {{'a', 'b'}, {'c', 'd'}};
+            int marker = 0;
+            if (sizeof(memset(rows[marker++], '#', 2)) != sizeof(void *)) return 1;
+            if (marker != 0 || rows[0][0] != 'a') return 2;
+            if (memset(rows[marker++], '#', 0) != rows[0]) return 3;
+            return marker != 1 || rows[0][0] != 'a';
+        }
+    "#;
+    assert_eq!(interpret(sizeof_program).unwrap(), 0);
+
+    let expired_program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        char *expired(void) {
+            char rows[2][2] = {{'a', 0}, {'b', 0}};
+            return rows[1];
+        }
+        int main(void) { return memchr(expired(), 'b', 1) != 0; }
+    "#;
+    let error = interpret(expired_program).unwrap_err().to_string();
+    assert!(
+        error.contains("pointer to out-of-scope variable"),
+        "{error}"
     );
 }
 

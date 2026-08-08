@@ -4,7 +4,13 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
-No unreleased changes yet.
+### Standard library subset
+
+- Extended exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` to scalar character-pointer views of supported two-dimensional `char` arrays. Direct rows, adjusted parameters, explicit pointer-to-row expressions, and aggregate-field rows preserve interpreter-owned owner/lifetime/const metadata and returned pointer identity without exposing host addresses or flattening into adjacent rows.
+
+### Diagnostics and verification
+
+- Added row-local source/destination capacity and overlap enforcement, interior offsets, zero-count and nested non-evaluating coverage, exact escaped-lifetime and const diagnostics, checked huge-row arithmetic, and const-ancestor propagation after embedded aggregate-array elements. Focused regressions and a registered GCC/Clang-warning-free compiler oracle pass; the executable inventory is 1,463 tests.
 
 ## v0.23.0 — 2026-08-08
 
