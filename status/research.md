@@ -22,10 +22,11 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.22.0`, then passed after Cargo/lock and both image tags moved to `0.23.0`. Built CLI and Cargo metadata both report `cust 0.23.0`.
 - Executable target-by-target accounting is 1,460 tests: 1,325 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the independent category sum is 1,460 and the grouped non-interpreter/non-fuzz remainder is 36.
-- Local and remote `v0.23.0` annotated-tag preflight returned no refs. Release closure was selected ahead of two-dimensional character-row raw-memory access, broad integer/aggregate object representations, and parser diagnostics because it is first in both authoritative queues and atomically packages the reviewed struct-backed extension without widening object-representation semantics.
+- Local and remote `v0.23.0` annotated-tag preflight returned no refs. Release closure was selected ahead of two-dimensional character-row raw-memory access, broad integer/aggregate object representations, and parser diagnostics because it was first in both authoritative queues and atomically packaged the reviewed struct-backed extension without widening object-representation semantics.
 - The next concrete package is row-local raw-memory access through Cust's existing two-dimensional character-row views. It must retain row width/owner/lifetime/const metadata and reject crossing row boundaries rather than flattening storage or inferring host layout.
 - Independent read-only review found one stale v0.22.0 “is next” claim in historical queue prose. Historical scoping resolved it; complete-diff re-review returned `APPROVED` with no remaining findings.
 - Canonical preparation verification passed formatting, warning-denied Clippy, all 1,460 local tests, the rebuilt 1,460-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.23.0`, and `git diff --check`.
+- Release commit `184699131756878a5c675dc179f2817eac06634e` reached `origin/main` before annotated tag creation. Remote tag object `a69bd951ce7d1359a06214d10aac25e43573b564` peels exactly to the release commit; this later status-only evidence commit must not move or recreate the tag.
 
 ## 2026-08-07 — Struct-backed bounded character storage
 
