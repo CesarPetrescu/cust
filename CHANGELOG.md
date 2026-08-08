@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Standard library subset
+
+- Extended exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` to deterministic `int`/`_Bool` scalar and one-dimensional-array fields in supported named, anonymous, nested, direct/arrow, and embedded-aggregate-array-element struct paths. The implementation reuses the selected field's interpreter-owned storage rather than synthesizing aggregate padding or host addresses.
+
+### Diagnostics and verification
+
+- Preserved field-local byte capacity and overlap, recursive const and lexical-lifetime checks, aligned/interior `memchr` identity, canonical typed-pointer coercion, `_Bool` normalization, and non-evaluating call validation. Whole aggregates, union-backed storage, and two-dimensional non-character rows retain exact unsupported diagnostics. Five focused interpreter tests and a registered warning-free ABI-independent compiler-oracle fixture bring the executable inventory to 1,475 tests.
+
 ## v0.25.0 — 2026-08-08
 
 ### Standard library subset

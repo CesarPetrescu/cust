@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.25.0 publication on 2026-08-08. Exact version tests went RED against `0.24.0` and GREEN at `0.25.0`; package/lock, CLI, Docker, README/changelog/status, and the 1,470-test inventory are synchronized; fresh complete-diff re-review returned `APPROVED`; formatting, warning-denied Clippy, all local/rebuilt-Docker tests, runtime/version output, safety and diff checks pass. Release commit `e0d097ed4e6fe676a05a2871ed5c2d4fda31cd53` reached `origin/main` before annotated tag object `9f8dd68109c9b00d7f11a41dd3e2b7bb439080c7`, which peels exactly to the release commit. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after the non-character scalar struct-field object-byte extension on 2026-08-09. Independent complete-diff review returned `APPROVED`; formatting, warning-denied Clippy, all 1,475 local/rebuilt-Docker tests, compiler-oracle comparisons, runtime output `10`, and safety/diff/security checks pass. Whole aggregates, union-backed storage, and two-dimensional non-character rows retain exact boundaries. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

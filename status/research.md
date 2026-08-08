@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-09 — Struct-field scalar object bytes
+
+- Existing scalar-field pointers (`StructField` and `StructFieldElementField`) already carry field path, owner, lifetime, and recursive const metadata; scalar-array fields already retain exact `Rc<ArrayValue>` identity. Extending non-character object bytes therefore requires removing only the obsolete standalone-only admission guard, not synthesizing aggregate layout.
+- Capacity remains the selected scalar cell or remaining cells of the selected one-dimensional field array multiplied by Cust's deterministic scalar width. Adjacent struct fields are never considered contiguous bytes, so operations cannot cross field boundaries or infer padding.
+- Existing live-container union ancestry checks must remain before admission because Cust stores union members separately. Whole aggregates and two-dimensional non-character rows likewise stay unsupported. The native fixture uses only ABI-independent full-object relationships. See `references/cust-bounded-memory-aggregate-scalar-object-bytes.md`.
+
 ## 2026-08-08 — v0.25.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.24.0`, then passed after Cargo/lock and both image tags moved to `0.25.0`. Built CLI and Cargo metadata both report `cust 0.25.0`.

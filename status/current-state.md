@@ -1,8 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 ## Latest autonomous verification
+
+All five exactly prototyped bounded raw-memory intrinsics now extend Cust's deterministic `int`/`_Bool` object bytes from standalone storage into supported struct fields. Direct and arrow field addresses, named/anonymous/nested fields, one-dimensional scalar-array fields, and scalar fields reached through embedded aggregate-array elements reuse existing field storage and provenance. Field-local byte bounds/overlap, recursive const and lexical lifetime, canonical aligned/interior `memchr` results, typed-pointer coercion, `_Bool` normalization, zero-count behavior, and non-evaluating calls remain exact; whole aggregates, union-backed roots, and two-dimensional non-character rows remain unsupported.
+
+Work-package candidates were the queued non-character scalar struct-field extension, two-dimensional non-character rows, whole-aggregate deterministic layout, and further parser diagnostics. The struct-field package was selected because it was first in both authoritative queues, reused the reviewed scalar representation without inventing aggregate padding, and completed a coherent five-intrinsic vertical slice. Initial RED failed with the explicit standalone-only diagnostic; removing that obsolete admission guard made direct fields GREEN, while broader direct/arrow/nested/anonymous/embedded routes, safety boundaries, identity, and non-evaluation coverage passed through the shared storage model. Five interpreter tests and a registered ABI-independent compiler-oracle fixture bring the executable inventory to 1,475 tests. Independent complete-diff review returned `APPROVED`; formatting, warning-denied Clippy, all 1,475 local and rebuilt-Docker tests, the runtime fixture output `10`, security/diff checks, and compiler-oracle comparisons pass. Bounded v0.26.0 release closure is next.
 
 Bounded Cust v0.25.0 release metadata is prepared around the completed standalone scalar object-byte raw-memory slice. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README central inventory/limitations/roadmap text, changelog notes, and all status ledgers are synchronized for `0.25.0`. The independently listed executable inventory is 1,470 tests: 1,335 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test; the grouped non-interpreter/non-fuzz remainder is 36.
 

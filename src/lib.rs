@@ -19948,7 +19948,7 @@ impl Interpreter {
                 "function '{name}' currently supports only scalar object storage for argument {argument}"
             )));
         }
-        let Some(PointeeType::Scalar(ty)) = self.pointer_value_type(base)? else {
+        let Some(PointeeType::Scalar(_)) = self.pointer_value_type(base)? else {
             return Err(CustError::new(format!(
                 "function '{name}' currently supports only scalar object storage for argument {argument}"
             )));
@@ -19956,11 +19956,6 @@ impl Interpreter {
         if self.memory_pointer_targets_union_field(pointer)? {
             return Err(CustError::new(format!(
                 "function '{name}' does not yet support union-backed scalar object storage for argument {argument}"
-            )));
-        }
-        if ty != CType::Char && self.memory_pointer_targets_aggregate_field(pointer) {
-            return Err(CustError::new(format!(
-                "function '{name}' currently supports only standalone non-character scalar object storage for argument {argument}"
             )));
         }
         Ok(())
@@ -20259,16 +20254,6 @@ impl Interpreter {
         }
     }
 
-    fn memory_pointer_targets_aggregate_field(&self, pointer: &PointerValue) -> bool {
-        match Self::object_byte_base(pointer) {
-            PointerValue::StructField { .. } | PointerValue::StructFieldElementField { .. } => true,
-            PointerValue::ArrayBase { array, .. } | PointerValue::ArrayElement { array, .. } => {
-                self.array_pointer_targets_aggregate_field(array)
-            }
-            _ => false,
-        }
-    }
-
     fn aggregate_fields_contain_array_with_union_ancestor(
         &self,
         type_name: &str,
@@ -20347,24 +20332,6 @@ impl Interpreter {
                 })
             })
             .unwrap_or(false)
-    }
-
-    fn array_pointer_targets_aggregate_field(&self, array: &Rc<RefCell<ArrayValue>>) -> bool {
-        let contains = |value: &Value| match value {
-            Value::Struct { .. } | Value::StructArray { .. } => self
-                .value_contains_array_with_union_ancestor(value, array)
-                .is_some(),
-            Value::Scalar { .. } | Value::Array(_) | Value::Pointer { .. } => false,
-        };
-        self.scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.values.values())
-            .any(contains)
-            || self
-                .static_locals
-                .values()
-                .any(|storage| contains(&storage.value))
     }
 
     fn unsupported_memory_copy_declaration_error(name: &str) -> CustError {
