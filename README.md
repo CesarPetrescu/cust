@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.23.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.24.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -69,7 +69,7 @@ The `test` service keeps a writable container overlay so Cargo can update `targe
 
 ## Current language subset
 
-The v0.23.0 package extends the bounded five-function C11 character-storage raw-memory family from standalone storage into character scalars and one-dimensional character arrays embedded in named, anonymous, and nested struct fields. The release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
+The v0.24.0 package extends the bounded five-function C11 character-storage raw-memory family to scalar character-pointer views of supported two-dimensional `char` arrays while preserving row-local bounds and interpreter-owned provenance. The release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
 
 ```c
 int main() {
@@ -210,7 +210,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: prepare and publish bounded v0.24.0 for the completed two-dimensional character-row raw-memory extension with synchronized package, CLI, Docker, changelog, and test-inventory metadata.
+- Next milestone: define and implement the first deterministic standalone `int` object-representation slice for bounded raw-memory intrinsics, with explicit byte order, exact partial-write semantics, provenance/capacity checks, and native-oracle coverage limited to ABI-independent relationships.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider floating-point values, multiple pointer levels, and broader C conformance fixtures.
 

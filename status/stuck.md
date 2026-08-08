@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after the two-dimensional character-row raw-memory extension on 2026-08-08. Focused RED/GREEN and review-driven overflow/const regressions, formatting, warning-denied Clippy, all 1,463 local/rebuilt-Docker tests, direct GCC/Clang checks, runtime image output `10`, and `git diff --check` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed during bounded v0.24.0 release preparation on 2026-08-08. Focused version RED/GREEN, empty local/remote tag preflight, synchronized release metadata/docs/status, independent `APPROVED` review, formatting, warning-denied Clippy, all 1,463 local/rebuilt-Docker tests, runtime output `10`, exact local/Cargo/container version checks, the static security scan, and `git diff --check` pass. No implementation, Docker, Git, research, tag, or environment blocker is currently known; publication is intentionally waiting for release-commit acceptance on `origin/main`.
 
 ## Blocker template
 
