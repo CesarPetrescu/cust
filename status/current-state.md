@@ -1,8 +1,16 @@
 # Cust Current State
 
-Last updated: 2026-08-07
+Last updated: 2026-08-08
 
 ## Latest autonomous verification
+
+Bounded Cust v0.23.0 release preparation packages the completed struct-backed character-storage raw-memory extension. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README central inventory/limitations/roadmap text, changelog notes, and all status ledgers are synchronized for `0.23.0`. The independently listed executable inventory is 1,460 tests: 1,325 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+Release TDD changed only the exact CLI and Compose expectations first: both failed against package/image version `0.22.0`, then passed after Cargo/lock and both image tags moved to `0.23.0`. Local/Cargo output reports `cust 0.23.0`, and local/remote annotated-tag preflight found no `v0.23.0`. The tag remains reserved for the exact independently approved, canonically verified release commit after `origin/main` accepts it.
+
+Independent read-only release review found one stale historical v0.22.0 “is next” claim; after historical scoping, complete-diff re-review returned `APPROVED` with no remaining findings. Formatting, warning-denied Clippy, all 1,460 local tests, the rebuilt 1,460-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.23.0`, and `git diff --check` pass. Release preparation is complete for release-commit-first publication; no tag publication is claimed in this release commit.
+
+Work-package evaluation considered bounded v0.23.0 release closure, two-dimensional character-row raw-memory access, broad integer/aggregate object-representation serialization, and further parser diagnostics. Release closure was selected because it is first in both authoritative queues, packages the independently reviewed struct-backed five-intrinsic slice, and has bounded consistency risk with executable version assertions. The next concrete package is row-local raw-memory access through Cust's existing two-dimensional character-row views; broader object representations remain separate design work because Cust must not improvise host ABI layout.
 
 The bounded five-function raw-memory family now accepts interpreter-owned character scalars and one-dimensional character arrays embedded in named, anonymous, and nested struct fields. Direct and arrow decay, interior offsets, field-local capacity/overlap, selected-root return identity, const/lifetime checks, zero-count calls, and non-evaluating `sizeof` reuse existing checked pointer storage. Scalar fields reached directly or through embedded aggregate-array elements have one-byte capacity and use checked dereference/write paths. Whole aggregates and non-character fields remain rejected.
 
@@ -10,7 +18,7 @@ The initial aggregate-array fixture passed immediately because existing array-fi
 
 Formatting, warning-denied Clippy, all 1,460 local tests (1,325 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test), the rebuilt 1,460-test Docker gate, runtime image output `10`, direct GCC/Clang C11 warnings-as-errors fixture checks, and `git diff --check` pass.
 
-Work-package evaluation considered the queued aggregate-backed character-storage extension, broad integer/aggregate object-representation serialization, multidimensional character raw-memory access, and further parser diagnostics. The character-field package was selected because it was first in both authoritative queues, reuses reviewed interpreter-owned storage without inventing host layout, and completes a coherent five-intrinsic vertical slice. Bounded v0.23.0 release closure is next; broader object representations and multidimensional character storage remain separate design work.
+Historical work-package evaluation considered the queued aggregate-backed character-storage extension, broad integer/aggregate object-representation serialization, multidimensional character raw-memory access, and further parser diagnostics. The character-field package was selected because it was first in both authoritative queues, reused reviewed interpreter-owned storage without inventing host layout, and completed a coherent five-intrinsic vertical slice. That completion promoted the bounded v0.23.0 release closure selected above.
 
 Deterministic model-based property coverage now includes pointer fields selected through ordinary named aggregate-array elements. A fixed-seed 384-program matrix crosses `int`, `char`, named-struct, and named-union pointees with nested named-holder, anonymous-holder, and union-containing-array paths; independently enumerated owner, outer index, outer/inner direct-or-reverse subscripts, and pointee offsets; element addresses; replacement/compound/prefix/postfix updates; conditional/comma forwarding; const promotion; and non-evaluating `sizeof`. Exact bounds, const-discard, read-only string, type-mismatch, and cross-root subtraction diagnostics run under `catch_unwind` against the independent owner/path/index/pointee/qualification model.
 

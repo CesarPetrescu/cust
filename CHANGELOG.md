@@ -4,6 +4,10 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+No unreleased changes yet.
+
+## v0.23.0 — 2026-08-08
+
 ### Standard library subset
 
 - Extended exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` to character scalars and one-dimensional character arrays embedded in named, anonymous, and nested struct fields. Direct and arrow paths, interior offsets, returned pointer identity, overlap-safe snapshots, unsigned-byte comparison/search, and byte-normalized fills reuse interpreter-owned storage without host addresses or invented aggregate padding.
@@ -11,6 +15,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Diagnostics and verification
 
 - Preserved field-local capacity, overlap, const, lifetime, zero-count, and non-evaluating validation. Whole aggregate values and non-character fields remain rejected; union-backed character storage now has a dedicated exact boundary because Cust does not yet model raw-memory aliasing between union members. Focused regressions cover direct and embedded-aggregate-array scalar fields, nested array fields, exact unsafe diagnostics, and a registered GCC/Clang-warning-free compiler oracle.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.23.0`.
+- Reconciled an executable inventory of 1,460 tests: 1,325 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Raw-memory intrinsics accept only interpreter-owned standalone character storage and character scalars or one-dimensional character arrays embedded in struct fields. Integer and whole-aggregate object representations, union-backed character fields, multidimensional character arrays, host ABI layout, and host addresses remain unsupported. General pointer levels beyond the narrow tracked unqualified `char **` model, floating-point and complex runtime values, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
 
 ## v0.22.0 — 2026-08-07
 

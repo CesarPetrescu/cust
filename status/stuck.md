@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after the struct-backed bounded character-memory extension on 2026-08-07. Focused aggregate-memory and preserved two-dimensional string-row regressions, the registered compiler oracle, direct GCC/Clang warnings-as-errors fixture checks, a fresh independent `APPROVED` complete-diff review, all 1,460 local/rebuilt-Docker tests, and runtime image output `10` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed during bounded v0.23.0 release preparation on 2026-08-08. Focused version RED/GREEN, exact metadata and executable-inventory reconciliation, final independent `APPROVED` review, formatting, warning-denied Clippy, all 1,460 local/rebuilt-Docker tests, runtime image output `10`, container version `cust 0.23.0`, and `git diff --check` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

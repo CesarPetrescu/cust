@@ -18,6 +18,15 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-08 — v0.23.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.22.0`, then passed after Cargo/lock and both image tags moved to `0.23.0`. Built CLI and Cargo metadata both report `cust 0.23.0`.
+- Executable target-by-target accounting is 1,460 tests: 1,325 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test; the independent category sum is 1,460 and the grouped non-interpreter/non-fuzz remainder is 36.
+- Local and remote `v0.23.0` annotated-tag preflight returned no refs. Release closure was selected ahead of two-dimensional character-row raw-memory access, broad integer/aggregate object representations, and parser diagnostics because it is first in both authoritative queues and atomically packages the reviewed struct-backed extension without widening object-representation semantics.
+- The next concrete package is row-local raw-memory access through Cust's existing two-dimensional character-row views. It must retain row width/owner/lifetime/const metadata and reject crossing row boundaries rather than flattening storage or inferring host layout.
+- Independent read-only review found one stale v0.22.0 “is next” claim in historical queue prose. Historical scoping resolved it; complete-diff re-review returned `APPROVED` with no remaining findings.
+- Canonical preparation verification passed formatting, warning-denied Clippy, all 1,460 local tests, the rebuilt 1,460-test Docker gate, runtime output `10`, local/Cargo/container version `cust 0.23.0`, and `git diff --check`.
+
 ## 2026-08-07 — Struct-backed bounded character storage
 
 - The existing aggregate-array fixture passed immediately: struct field decay already reuses the exact `Rc<ArrayValue>`, so capacity, offsets, overlap, snapshots, and returned identity need no host layout. The missing runtime path was one-byte character fields represented by `PointerValue::StructField` and `StructFieldElementField`.
@@ -25,7 +34,7 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - `Rc<ArrayValue>` pointers do not directly retain the containing aggregate type. Metadata-only traversal of live/static aggregate storage locates the exact array identity and every ancestor aggregate kind without expression evaluation; standalone and hidden literal arrays remain unaffected. Independent review proved that storing union provenance on clonable `ArrayValue` instead is wrong because a struct copied from a union member then retains a stale rejection flag.
 - Shared character-pointer validation must continue accepting dereferenced two-dimensional rows for the established bounded string family. Raw-memory operations reject that representation in their narrower validator, preserving all five existing `strcpy`/`strcat`/`strncat`/`strncpy`/`strxfrm` row-boundary regressions while keeping `memset(*row, ...)` outside the raw-memory slice.
 - GCC and Clang both accept the registered nested/direct/arrow/anonymous struct fixture under C11 warnings-as-errors. Invalid union aliasing and safety diagnostics remain interpreter-only. See `references/cust-bounded-memory-aggregate-character-fields.md`.
-- Bounded v0.23.0 release closure is next; broad integer/aggregate object representations and multidimensional character raw-memory access remain separate because neither should infer host ABI padding.
+- Completion of the struct-backed slice promoted bounded v0.23.0 release closure as the next package at that point; broad integer/aggregate object representations and multidimensional character raw-memory access remained separate because neither should infer host ABI padding.
 
 ## 2026-08-07 — v0.22.0 release consistency
 
