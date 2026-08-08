@@ -4,6 +4,8 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.25.0 — 2026-08-08
+
 ### Standard library subset
 
 - Extended exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` to standalone `int`/`_Bool` scalars and one-dimensional arrays under Cust's fixed little-endian eight-byte integer representation. Partial/full reads and writes, overlap-safe snapshots, unsigned-byte comparison/search, canonical interior pointers, and pointer differences remain interpreter-owned without host addresses or host ABI inference.
@@ -11,6 +13,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Diagnostics and verification
 
 - Added exact scalar-object capacity, const, lifetime, overlap, aggregate, and union boundaries; deterministic partial-write reconstruction; review-driven aligned `memchr` byte-view/coercion regressions; seven interpreter tests; and a warning-free compiler-oracle fixture limited to ABI-independent relationships.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.25.0`.
+- Reconciled an executable inventory of 1,470 tests: 1,335 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Raw-memory intrinsics accept interpreter-owned standalone character storage, character scalars or one-dimensional character arrays embedded in struct fields, one selected row of supported two-dimensional character storage, and standalone scalar/one-dimensional-array `int` and `_Bool` storage. A range cannot cross a row boundary. Non-character aggregate fields, two-dimensional non-character rows, whole aggregate object representations, union-backed storage, host ABI layout, and host addresses remain unsupported. General pointer levels beyond the narrow tracked unqualified `char **` model, floating-point and complex runtime values, variable-length arrays, arrays with more than two dimensions, aggregate-valued multidimensional elements, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
 
 ## v0.24.0 — 2026-08-08
 

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after the standalone scalar object-byte raw-memory slice on 2026-08-08. Focused RED/GREEN, synchronized implementation/tests/fixture/docs/status, independent `APPROVED` review, formatting, warning-denied Clippy, all 1,470 local/rebuilt-Docker tests, compiler-oracle comparisons, runtime output `10`, and `git diff --check` pass. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after bounded v0.25.0 release preparation on 2026-08-08. Exact version tests went RED against `0.24.0` and GREEN at `0.25.0`; package/lock, CLI, Docker, README/changelog/status, and the 1,470-test inventory are synchronized; fresh complete-diff re-review returned `APPROVED`; formatting, warning-denied Clippy, all local/rebuilt-Docker tests, runtime/version output, safety and diff checks, and local/remote tag preflight pass. Release-commit-first publication remains pending by design, not blocked. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 

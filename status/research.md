@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-08 — v0.25.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.24.0`, then passed after Cargo/lock and both image tags moved to `0.25.0`. Built CLI and Cargo metadata both report `cust 0.25.0`.
+- Executable target-by-target accounting is 1,470 tests: 1,335 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. The independent category sum is 1,470 and the grouped non-interpreter/non-fuzz remainder is 36.
+- Local and remote `v0.25.0` annotated-tag preflight returned no refs. Release closure was selected ahead of non-character scalar aggregate-field object bytes, two-dimensional non-character row bytes, and whole-aggregate/union layout because it is first in both authoritative queues and atomically packages the reviewed standalone scalar extension without widening storage semantics.
+- The next concrete package is non-character scalar field object bytes in supported struct storage. It must remain field-local, trace recursive const/lifetime/owner metadata, preserve aligned/interior pointer identity, and retain exact whole-aggregate, union, and two-dimensional non-character boundaries.
+- Independent review first found that the README diff lacked an explicit 1,470-test inventory and v0.25.0 limitation delta. Adding both made fresh complete-diff re-review return `APPROVED` with no findings. Canonical preparation verification then passed formatting, warning-denied Clippy, all 1,470 local tests, the rebuilt 1,470-test Docker gate, compiler-oracle comparisons, runtime output `10`, local/Cargo/container version `cust 0.25.0`, the static release-surface safety scan, local/remote tag preflight, and `git diff --check`. The `v0.25.0` tag remains reserved for the verified release commit only after `origin/main` accepts it.
+
 ## 2026-08-08 — Deterministic standalone scalar object bytes
 
 - Cust defines its own object representation rather than mirroring the host: `int` is exactly eight bytes, serialized with Rust `i64::to_le_bytes` and reconstructed with `i64::from_le_bytes`; `_Bool` has one canonical zero/one byte. This makes endian-sensitive partial-write tests deterministic while native fixtures stay ABI-independent.
