@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-08 — Deterministic standalone scalar object bytes
+
+- Cust defines its own object representation rather than mirroring the host: `int` is exactly eight bytes, serialized with Rust `i64::to_le_bytes` and reconstructed with `i64::from_le_bytes`; `_Bool` has one canonical zero/one byte. This makes endian-sensitive partial-write tests deterministic while native fixtures stay ABI-independent.
+- Byte-range capacity is the selected scalar cell or remaining one-dimensional array cells multiplied by the Cust scalar width. `memcpy` overlap uses interpreter storage identity plus byte-scaled starts; `memmove` snapshots source bytes before mutation.
+- `memchr` interior results need a tracked byte-offset pointer. Aligned non-character matches must keep that byte view for valid `char *` conversion and byte-scaled arithmetic, then unwrap only when a declaration, statement/expression assignment, parameter, return, or aggregate pointer-field destination expects the exact underlying scalar pointee type. Focused RED/GREEN covers both views without exposing host addresses.
+- Whole aggregates, non-character scalar/array fields, and union-backed members remain unsupported. Cust has no native padding model and stores union members independently, so admitting those roots would claim containing-object layout/aliasing semantics the interpreter does not provide. Character aggregate fields remain supported through their separate established representation. See `references/cust-bounded-memory-scalar-object-bytes.md`.
+- Candidate evaluation selected this queue-leading slice over union/aggregate raw layout and parser diagnostics because it completes a coherent five-intrinsic scalar feature without host ABI shortcuts. Bounded v0.25.0 release closure is next.
+
 ## 2026-08-08 — v0.24.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.23.0`, then passed after Cargo/lock and both image tags moved to `0.24.0`. Built CLI and Cargo metadata both report `cust 0.24.0`.

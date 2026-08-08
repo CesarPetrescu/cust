@@ -2647,10 +2647,6 @@ fn aggregate_character_array_fields_preserve_bounded_memory_safety() {
             "pointer to out-of-scope variable 'local'",
         ),
         (
-            "void *memset(void *, int, unsigned long int); struct Buffer { int values[2]; } value = {{1, 2}}; int main(void) { return memset(value.values, 0, 1) != value.values; }",
-            "function 'memset' currently supports only character storage for argument 1",
-        ),
-        (
             "int memcmp(const void *, const void *, unsigned long int); struct Bytes { char left; char right; } value = {'a', 'a'}; int main(void) { return memcmp(&value.left, &value.right, 2); }",
             "input argument 1 to function 'memcmp' requires 2 bytes, but only 1 bytes are available",
         ),
@@ -2664,31 +2660,31 @@ fn aggregate_character_array_fields_preserve_bounded_memory_safety() {
         ),
         (
             "void *memset(void *, int, unsigned long int); union Byte { char first; char second; } value = {.first = 'x'}; int main(void) { return memset(&value.second, 'y', 1) != &value.second; }",
-            "function 'memset' does not yet support union-backed character storage for argument 1",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
         ),
         (
             "void *memcpy(void *, const void *, unsigned long int); union Byte { char first; char second; } value = {.first = 'x'}; int main(void) { return memcpy(&value.first, &value.second, 1) != &value.first; }",
-            "function 'memcpy' does not yet support union-backed character storage for argument 1",
+            "function 'memcpy' does not yet support union-backed scalar object storage for argument 1",
         ),
         (
             "void *memset(void *, int, unsigned long int); union Byte { char first; char second; }; struct Bytes { union Byte items[1]; } value = {{{.first = 'x'}}}; int main(void) { return memset(&value.items[0].second, 'y', 1) != &value.items[0].second; }",
-            "function 'memset' does not yet support union-backed character storage for argument 1",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
         ),
         (
             "void *memset(void *, int, unsigned long int); union Bytes { char first[2]; char second[2]; } value = {{'x', 'y'}}; int main(void) { return memset(value.second, '#', 1) != value.second; }",
-            "function 'memset' does not yet support union-backed character storage for argument 1",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
         ),
         (
             "void *memset(void *, int, unsigned long int); struct Byte { char value; }; union Bytes { struct Byte first; struct Byte second; } value = {.first = {'x'}}; int main(void) { return memset(&value.second.value, '#', 1) != &value.second.value; }",
-            "function 'memset' does not yet support union-backed character storage for argument 1",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
         ),
         (
             "void *memset(void *, int, unsigned long int); struct Bytes { char values[2]; }; union Storage { struct Bytes first; struct Bytes second; } value = {.first = {{'x', 'y'}}}; int main(void) { return memset(value.second.values, '#', 1) != value.second.values; }",
-            "function 'memset' does not yet support union-backed character storage for argument 1",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
         ),
         (
             "void *memset(void *, int, unsigned long int); union Values { int first; int second; } value = {.first = 1}; int main(void) { return memset(&value.second, 0, 1) != &value.second; }",
-            "function 'memset' currently supports only character storage for argument 1",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
         ),
     ];
 
@@ -2715,7 +2711,7 @@ fn aggregate_character_array_memory_rejects_union_compound_literals() {
 
     assert_eq!(
         interpret(program).unwrap_err().to_string(),
-        "function 'memset' does not yet support union-backed character storage for argument 1"
+        "function 'memset' does not yet support union-backed scalar object storage for argument 1"
     );
 }
 
@@ -2944,6 +2940,198 @@ fn bounded_memory_two_dimensional_character_rows_preserve_lifetime_and_sizeof_ru
 }
 
 #[test]
+fn bounded_memory_intrinsics_support_scalar_object_bytes() {
+    let program = include_str!("fixtures/compat/valid/bounded_memory_scalar_object_bytes.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_scalar_object_bytes_use_deterministic_little_endian_storage() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            int source = 0x0102030405060708;
+            int destination = 0x1112131415161718;
+            if (memcpy(&destination, &source, 1) != &destination) return 1;
+            if (destination != 0x1112131415161708) return 2;
+            if (memset(&destination, 0, 2) != &destination) return 3;
+            if (destination != 0x1112131415160000) return 4;
+            if (memcmp(&source, &destination, 1) <= 0) return 5;
+            void *found = memchr(&source, 0x06, sizeof(source));
+            if (found == 0) return 6;
+            if ((char *)found - (char *)&source != 2) return 7;
+            if (memset(found, 0xaa, 1) != found) return 8;
+            if (source != 0x0102030405aa0708) return 9;
+
+            int values[2] = {0, 0x22};
+            if (memchr(values, 0x22, sizeof(values)) != values + 1) return 10;
+            if (memchr(values + 1, 0x22, sizeof(values[1])) != values + 1) return 11;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_scalar_object_byte_pointers_rebase_across_cells() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            int values[2] = {0x0100, 0x22};
+            char *interior = memchr(values, 1, sizeof(values));
+            if (interior == 0) return 1;
+            if (interior - 1 != (char *)values) return 2;
+            if (interior + 7 != (char *)(values + 1)) return 3;
+            if ((interior + 7) - interior != 7) return 4;
+
+            char *aligned = memchr(values, 0x22, sizeof(values));
+            if (aligned == 0) return 5;
+            if (aligned != (char *)(values + 1)) return 6;
+            if (aligned - (char *)values != sizeof(values[0])) return 7;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_scalar_object_byte_pointers_support_indexed_access() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            int value = 0x0100;
+            char *selected = memchr(&value, 1, sizeof(value));
+            if (selected == 0) return 1;
+            if (selected[0] != 1) return 2;
+            selected[0] = 2;
+            if (value != 0x0200) return 3;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_scalar_object_byte_pointers_support_indexed_lvalue_operations() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            int value = 0x0100;
+            char *selected = memchr(&value, 1, sizeof(value));
+            if (selected == 0) return 1;
+            if (&selected[0] != selected) return 2;
+            selected[0] += 1;
+            if (value != 0x0200) return 3;
+            if (selected[0]++ != 2) return 4;
+            if (++selected[0] != 4) return 5;
+            if (value != 0x0400) return 6;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_scalar_object_bytes_preserve_aligned_typed_pointer_results() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int *identity(int *value) { return value; }
+        int *find(int *values) { return memchr(values, 0x22, sizeof(int) * 2); }
+        struct Holder { int *selected; };
+        int main(void) {
+            int values[2] = {0x11, 0x22};
+            int *selected = memchr(values, 0x22, sizeof(values));
+            if (selected != values + 1) return 1;
+            if (*selected != 0x22) return 2;
+            selected = 0;
+            selected = memchr(values, 0x22, sizeof(values));
+            if (selected != values + 1) return 3;
+            if (identity(memchr(values, 0x22, sizeof(values))) != values + 1) return 4;
+            if ((selected = memchr(values, 0x22, sizeof(values))) != values + 1) return 5;
+            if (find(values) != values + 1) return 6;
+            struct Holder holder = {memchr(values, 0x22, sizeof(values))};
+            if (holder.selected != values + 1) return 7;
+            holder.selected = memchr(values, 0x22, sizeof(values));
+            if (holder.selected != values + 1) return 8;
+            struct Holder *holder_pointer = &holder;
+            holder_pointer->selected = memchr(values, 0x22, sizeof(values));
+            if (holder_pointer->selected != values + 1) return 9;
+            if (((struct Holder){memchr(values, 0x22, sizeof(values))}).selected != values + 1) return 10;
+            if ((((struct Holder){0}).selected = memchr(values, 0x22, sizeof(values))) != values + 1) return 11;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_scalar_object_bytes_preserve_safety_diagnostics() {
+    let cases = [
+        (
+            "void *memcpy(void *, const void *, unsigned long int); int main(void) { int source = 1; int destination = 2; memcpy(&destination, &source, 9); return 0; }",
+            "source argument 2 to function 'memcpy' requires 9 bytes, but only 8 bytes are available",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { const int value = 1; memset(&value, 0, 1); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); int main(void) { int values[3] = {1, 2, 3}; memcpy(values + 1, values, sizeof(int) * 2); return 0; }",
+            "overlapping source and destination ranges passed to function 'memcpy'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair value = {1, 2}; memset(&value, 0, 1); return 0; }",
+            "function 'memset' currently supports only scalar object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair value = {1, 2}; memset(&value.left, 0, sizeof(value.left)); return 0; }",
+            "function 'memset' currently supports only standalone non-character scalar object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Buffer { int values[2]; }; int main(void) { struct Buffer value = {{1, 2}}; memset(value.values, 0, sizeof(value.values)); return 0; }",
+            "function 'memset' currently supports only standalone non-character scalar object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { int rows[2][2] = {{1, 2}, {3, 4}}; memset(rows[0], 0, sizeof(rows[0])); return 0; }",
+            "function 'memset' currently supports only scalar object storage for argument 1",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); void *saved; int main(void) { { int value = 0x0102; saved = memchr(&value, 1, sizeof(value)); } return memchr(saved, 1, 1) != 0; }",
+            "pointer to out-of-scope variable 'value'",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); void *saved; int main(void) { { int values[1] = {0x0100}; saved = memchr(values, 1, sizeof(values)); } return *(char *)saved; }",
+            "pointer to out-of-scope variable 'values'",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { int value = 0x0100; void *selected = memchr(&value, 1, sizeof(value)); return &selected[0] != 0; }",
+            "cannot index pointer to void",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { int value = 0x0100; void *selected = memchr(&value, 1, sizeof(value)); selected[0] += 1; return 0; }",
+            "cannot index pointer to void",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); int main(void) { int value = 0x0100; void *selected = memchr(&value, 1, sizeof(value)); selected[0]++; return 0; }",
+            "cannot index pointer to void",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
 fn aggregate_character_compound_literal_memory_results_expire_with_their_scope() {
     let program = r#"
         void *memset(void *, int, unsigned long int);
@@ -3022,8 +3210,8 @@ fn memchr_preserves_character_storage_safety_diagnostics() {
             "input argument 1 to function 'memchr' requires 2 bytes, but only 1 bytes are available",
         ),
         (
-            "void *memchr(const void *, int, unsigned long int); int main(void) { int value = 0; return memchr(&value, 0, 1) != 0; }",
-            "function 'memchr' currently supports only character storage for argument 1",
+            "void *memchr(const void *, int, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair value = {0, 0}; return memchr(&value, 0, 1) != 0; }",
+            "function 'memchr' currently supports only scalar object storage for argument 1",
         ),
         (
             "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; return memchr(bytes, 0, -1) != 0; }",
@@ -3232,8 +3420,8 @@ fn memset_preserves_character_storage_safety_diagnostics() {
             "destination argument 1 to function 'memset' requires 2 bytes, but only 1 bytes are available",
         ),
         (
-            "void *memset(void *, int, unsigned long int); int main(void) { int destination = 0; return memset(&destination, 0, 1) != &destination; }",
-            "function 'memset' currently supports only character storage for argument 1",
+            "void *memset(void *, int, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair destination = {0, 0}; return memset(&destination, 0, 1) != &destination; }",
+            "function 'memset' currently supports only scalar object storage for argument 1",
         ),
         (
             "void *memset(void *, int, unsigned long int); int main(void) { char destination[1] = {0}; int value = 1; return memset(destination, &value, 1) != destination; }",
@@ -3429,12 +3617,12 @@ fn memcmp_requires_its_exact_explicit_prototype_at_runtime_and_in_sizeof() {
 fn memcmp_preserves_character_storage_safety_diagnostics() {
     let cases = [
         (
-            "int memcmp(const void *, const void *, unsigned long int); int main(void) { int left = 0; char right[1] = {0}; return memcmp(&left, right, 1); }",
-            "function 'memcmp' currently supports only character storage for argument 1",
+            "int memcmp(const void *, const void *, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair left = {0, 0}; char right[1] = {0}; return memcmp(&left, right, 1); }",
+            "function 'memcmp' currently supports only scalar object storage for argument 1",
         ),
         (
-            "int memcmp(const void *, const void *, unsigned long int); int main(void) { char left[1] = {0}; int right = 0; return memcmp(left, &right, 1); }",
-            "function 'memcmp' currently supports only character storage for argument 2",
+            "int memcmp(const void *, const void *, unsigned long int); struct Pair { int left; int right; }; int main(void) { char left[1] = {0}; struct Pair right = {0, 0}; return memcmp(left, &right, 1); }",
+            "function 'memcmp' currently supports only scalar object storage for argument 2",
         ),
         (
             "int memcmp(const void *, const void *, unsigned long int); int main(void) { char left[1] = {0}; char right[1] = {0}; return memcmp(left, right, -1); }",
@@ -3570,8 +3758,8 @@ fn memmove_preserves_character_storage_safety_diagnostics() {
             "function 'memmove' requires an integer count",
         ),
         (
-            "void *memmove(void *, const void *, unsigned long int); int main(void) { char destination[1] = {0}; int source = 7; return memmove(destination, &source, 1) != destination; }",
-            "function 'memmove' currently supports only character storage for argument 2",
+            "void *memmove(void *, const void *, unsigned long int); struct Pair { int left; int right; }; int main(void) { char destination[1] = {0}; struct Pair source = {7, 8}; return memmove(destination, &source, 1) != destination; }",
+            "function 'memmove' currently supports only scalar object storage for argument 2",
         ),
         (
             "void *memmove(void *, const void *, unsigned long int); void *escaped; int main(void) { { char local[1] = {'x'}; escaped = local; } char destination[1] = {0}; return memmove(destination, escaped, 1) != destination; }",
@@ -3773,12 +3961,12 @@ fn memcpy_supports_aggregate_backed_character_scalar_storage() {
 }
 
 #[test]
-fn memcpy_rejects_noncharacter_storage_with_context() {
+fn memcpy_rejects_aggregate_storage_with_context() {
     let program = r#"
         void *memcpy(void *destination, const void *source, unsigned long int count);
         int main(void) {
             char destination[1] = {0};
-            int source = 7;
+            struct Pair { int left; int right; } source = {7, 8};
             memcpy(destination, &source, 1);
             return 0;
         }
@@ -3786,7 +3974,7 @@ fn memcpy_rejects_noncharacter_storage_with_context() {
 
     assert_eq!(
         interpret(program).unwrap_err().to_string(),
-        "function 'memcpy' currently supports only character storage for argument 2"
+        "function 'memcpy' currently supports only scalar object storage for argument 2"
     );
 }
 

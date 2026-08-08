@@ -17625,6 +17625,10 @@ enum PointerValue {
         row: usize,
         owner: Option<ArrayPointerOwner>,
     },
+    ObjectByte {
+        base: Box<PointerValue>,
+        offset: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17981,6 +17985,7 @@ impl Interpreter {
                         arg_expr,
                     )?;
                     let pointer = self.eval_pointer(arg_expr)?;
+                    let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
                     self.ensure_pointer_type_matches(&ty, &pointer)?;
                     Value::Pointer {
                         pointer,
@@ -18490,7 +18495,8 @@ impl Interpreter {
             | PointerValue::StructElement { .. }
             | PointerValue::StructFieldElement { .. }
             | PointerValue::NestedStructArrayElement { .. }
-            | PointerValue::Array2DRow { .. } => {
+            | PointerValue::Array2DRow { .. }
+            | PointerValue::ObjectByte { .. } => {
                 return Err(CustError::new(format!(
                     "function '{name}' requires a pointer to character storage"
                 )));
@@ -18911,7 +18917,8 @@ impl Interpreter {
             | PointerValue::StructElement { .. }
             | PointerValue::StructFieldElement { .. }
             | PointerValue::NestedStructArrayElement { .. }
-            | PointerValue::Array2DRow { .. } => {
+            | PointerValue::Array2DRow { .. }
+            | PointerValue::ObjectByte { .. } => {
                 return Err(CustError::new(format!(
                     "function '{name}' requires character storage for argument {argument}"
                 )));
@@ -19238,7 +19245,8 @@ impl Interpreter {
             | PointerValue::StructElement { .. }
             | PointerValue::StructFieldElement { .. }
             | PointerValue::NestedStructArrayElement { .. }
-            | PointerValue::Array2DRow { .. } => {
+            | PointerValue::Array2DRow { .. }
+            | PointerValue::ObjectByte { .. } => {
                 return Err(CustError::new(format!(
                     "function '{name}' requires character storage for argument {argument}"
                 )));
@@ -19822,18 +19830,12 @@ impl Interpreter {
         let count = Self::validate_memory_operation_count(name, count, "fill")?;
 
         self.ensure_pointer_conversion_preserves_const(false, &arg_exprs[0])?;
-        self.validate_memory_copy_character_pointer_argument(name, 1, &destination)?;
+        self.validate_memory_scalar_pointer_argument(name, 1, &destination)?;
         let current = self.deref_pointer(&destination)?;
         self.assign_deref_pointer(&destination, current)?;
-        self.ensure_string_copy_destination_capacity(name, &destination, count)?;
+        self.validate_memory_range(name, "destination", 1, &destination, count)?;
         let value = value.rem_euclid(256);
-        for offset in 0..count {
-            if offset == 0 {
-                self.assign_deref_pointer(&destination, value)?;
-            } else {
-                self.assign_pointer_index(&destination, offset as i64, value)?;
-            }
-        }
+        self.write_scalar_memory_values(&destination, &vec![value; count])?;
 
         Ok(Some(ReturnValue::Pointer {
             pointer: destination,
@@ -19879,28 +19881,16 @@ impl Interpreter {
         let count = Self::validate_memory_operation_count(name, count, "copy")?;
 
         self.ensure_pointer_conversion_preserves_const(false, &arg_exprs[0])?;
-        self.validate_memory_copy_character_pointer_argument(name, 1, &destination)?;
-        self.validate_memory_copy_character_pointer_argument(name, 2, &source)?;
-        let values = self.read_character_memory_values(name, "source", 2, &source, count)?;
+        self.validate_memory_scalar_pointer_argument(name, 1, &destination)?;
+        self.validate_memory_scalar_pointer_argument(name, 2, &source)?;
+        let values = self.read_scalar_memory_values(name, "source", 2, &source, count)?;
         let current = self.deref_pointer(&destination)?;
         self.assign_deref_pointer(&destination, current)?;
-        self.ensure_string_copy_destination_capacity(name, &destination, count)?;
+        self.validate_memory_range(name, "destination", 1, &destination, count)?;
         if name == "memcpy" {
-            self.ensure_string_copy_ranges_do_not_overlap(
-                name,
-                &destination,
-                count,
-                &source,
-                count,
-            )?;
+            self.ensure_memory_ranges_do_not_overlap(name, &destination, count, &source, count)?;
         }
-        for (offset, value) in values.into_iter().enumerate() {
-            if offset == 0 {
-                self.assign_deref_pointer(&destination, value)?;
-            } else {
-                self.assign_pointer_index(&destination, offset as i64, value)?;
-            }
-        }
+        self.write_scalar_memory_values(&destination, &values)?;
 
         Ok(Some(ReturnValue::Pointer {
             pointer: destination,
@@ -19932,32 +19922,303 @@ impl Interpreter {
         Ok(count)
     }
 
-    fn validate_memory_copy_character_pointer_argument(
+    fn validate_memory_scalar_pointer_argument(
         &self,
         name: &str,
         argument: usize,
         pointer: &PointerValue,
     ) -> CustResult<()> {
-        self.validate_character_pointer_argument(name, argument, pointer)
-            .map_err(|error| {
-                if error.message.starts_with("cannot convert pointer") {
-                    CustError::new(format!(
-                        "function '{name}' currently supports only character storage for argument {argument}"
-                    ))
-                } else {
-                    error
-                }
-            })?;
+        if matches!(pointer, PointerValue::Null) {
+            return Err(CustError::new(format!(
+                "null pointer passed as argument {argument} to function '{name}'"
+            )));
+        }
+        let base = Self::object_byte_base(pointer);
+        let unsupported_two_dimensional_scalar_row = match base {
+            PointerValue::ArrayBase { array, .. }
+            | PointerValue::ArrayElement { array, .. }
+            | PointerValue::Array2DRow { array, .. } => {
+                let array = array.borrow();
+                array.dimensions.is_some() && array.elem_type != CType::Char
+            }
+            _ => false,
+        };
+        if unsupported_two_dimensional_scalar_row {
+            return Err(CustError::new(format!(
+                "function '{name}' currently supports only scalar object storage for argument {argument}"
+            )));
+        }
+        let Some(PointeeType::Scalar(ty)) = self.pointer_value_type(base)? else {
+            return Err(CustError::new(format!(
+                "function '{name}' currently supports only scalar object storage for argument {argument}"
+            )));
+        };
         if self.memory_pointer_targets_union_field(pointer)? {
             return Err(CustError::new(format!(
-                "function '{name}' does not yet support union-backed character storage for argument {argument}"
+                "function '{name}' does not yet support union-backed scalar object storage for argument {argument}"
+            )));
+        }
+        if ty != CType::Char && self.memory_pointer_targets_aggregate_field(pointer) {
+            return Err(CustError::new(format!(
+                "function '{name}' currently supports only standalone non-character scalar object storage for argument {argument}"
             )));
         }
         Ok(())
     }
 
+    fn object_byte_base(pointer: &PointerValue) -> &PointerValue {
+        match pointer {
+            PointerValue::ObjectByte { base, .. } => Self::object_byte_base(base),
+            pointer => pointer,
+        }
+    }
+
+    fn object_byte_offset(pointer: &PointerValue) -> usize {
+        match pointer {
+            PointerValue::ObjectByte { base, offset } => {
+                Self::object_byte_offset(base).saturating_add(*offset)
+            }
+            _ => 0,
+        }
+    }
+
+    fn scalar_memory_cell_size(&self, pointer: &PointerValue) -> CustResult<usize> {
+        match self.pointer_value_type(Self::object_byte_base(pointer))? {
+            Some(PointeeType::Scalar(ty)) => Ok(ty.size() as usize),
+            _ => Err(CustError::new(
+                "pointer does not reference scalar object storage",
+            )),
+        }
+    }
+
+    fn scalar_memory_available_bytes(&self, pointer: &PointerValue) -> CustResult<usize> {
+        let base = Self::object_byte_base(pointer);
+        let cell_size = self.scalar_memory_cell_size(base)?;
+        let cells = match base {
+            PointerValue::ArrayBase { array, owner, .. } => {
+                self.ensure_array_pointer_owner_live(owner.as_ref())?;
+                let array = array.borrow();
+                if array.dimensions.is_some() {
+                    return Err(CustError::new(
+                        "pointer does not reference scalar object storage",
+                    ));
+                }
+                array.elements.len()
+            }
+            PointerValue::ArrayElement {
+                array,
+                index,
+                owner,
+                ..
+            } => {
+                self.ensure_array_pointer_owner_live(owner.as_ref())?;
+                let array = array.borrow();
+                Self::character_sequence_array_end(&array, *index).saturating_sub(*index)
+            }
+            PointerValue::Scalar { .. }
+            | PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. } => 1,
+            _ => {
+                return Err(CustError::new(
+                    "pointer does not reference scalar object storage",
+                ));
+            }
+        };
+        Ok(cells
+            .saturating_mul(cell_size)
+            .saturating_sub(Self::object_byte_offset(pointer)))
+    }
+
+    fn validate_memory_range(
+        &self,
+        name: &str,
+        role: &str,
+        argument: usize,
+        pointer: &PointerValue,
+        count: usize,
+    ) -> CustResult<()> {
+        let available = self.scalar_memory_available_bytes(pointer)?;
+        if count > available {
+            return Err(CustError::new(format!(
+                "{role} argument {argument} to function '{name}' requires {count} bytes, but only {available} bytes are available"
+            )));
+        }
+        Ok(())
+    }
+
+    fn scalar_memory_cell_pointer(
+        &self,
+        pointer: &PointerValue,
+        byte_offset: usize,
+    ) -> CustResult<(PointerValue, CType, usize)> {
+        let base = Self::object_byte_base(pointer);
+        let absolute = Self::object_byte_offset(pointer)
+            .checked_add(byte_offset)
+            .ok_or_else(|| CustError::new("scalar object byte offset overflow"))?;
+        let ty = match self.pointer_value_type(base)? {
+            Some(PointeeType::Scalar(ty)) => ty,
+            _ => {
+                return Err(CustError::new(
+                    "pointer does not reference scalar object storage",
+                ));
+            }
+        };
+        let cell_size = ty.size() as usize;
+        let cell_offset = absolute / cell_size;
+        let within = absolute % cell_size;
+        let cell_pointer = if cell_offset == 0 {
+            base.clone()
+        } else {
+            self.offset_array_pointer(base, cell_offset as i64)?
+        };
+        Ok((cell_pointer, ty, within))
+    }
+
+    fn read_scalar_memory_byte(
+        &self,
+        pointer: &PointerValue,
+        byte_offset: usize,
+    ) -> CustResult<i64> {
+        let (cell_pointer, ty, within) = self.scalar_memory_cell_pointer(pointer, byte_offset)?;
+        let value = self.deref_pointer(&cell_pointer)?;
+        Ok(match ty {
+            CType::Char => value,
+            CType::Bool => i64::from(value != 0),
+            CType::Int => i64::from(value.to_le_bytes()[within]),
+        })
+    }
+
+    fn write_scalar_memory_byte(
+        &mut self,
+        pointer: &PointerValue,
+        byte_offset: usize,
+        value: i64,
+    ) -> CustResult<()> {
+        let (cell_pointer, ty, within) = self.scalar_memory_cell_pointer(pointer, byte_offset)?;
+        let value = match ty {
+            CType::Char => value,
+            CType::Bool => i64::from(value.rem_euclid(256) != 0),
+            CType::Int => {
+                let mut bytes = self.deref_pointer(&cell_pointer)?.to_le_bytes();
+                bytes[within] = value.rem_euclid(256) as u8;
+                i64::from_le_bytes(bytes)
+            }
+        };
+        self.assign_deref_pointer(&cell_pointer, value)
+    }
+
+    fn read_scalar_memory_values(
+        &self,
+        name: &str,
+        role: &str,
+        argument: usize,
+        pointer: &PointerValue,
+        count: usize,
+    ) -> CustResult<Vec<i64>> {
+        self.validate_memory_range(name, role, argument, pointer, count)?;
+        (0..count)
+            .map(|offset| self.read_scalar_memory_byte(pointer, offset))
+            .collect()
+    }
+
+    fn write_scalar_memory_values(
+        &mut self,
+        pointer: &PointerValue,
+        values: &[i64],
+    ) -> CustResult<()> {
+        for (offset, value) in values.iter().copied().enumerate() {
+            self.write_scalar_memory_byte(pointer, offset, value)?;
+        }
+        Ok(())
+    }
+
+    fn memory_pointer_position(&self, pointer: &PointerValue) -> CustResult<(PointerValue, usize)> {
+        let base = Self::object_byte_base(pointer);
+        let byte_offset = Self::object_byte_offset(pointer);
+        let cell_size = self.scalar_memory_cell_size(base)?;
+        let (identity, cell_index) = match base {
+            PointerValue::ArrayBase { array, .. } => (
+                PointerValue::ArrayBase {
+                    array: Rc::clone(array),
+                    source_name: None,
+                    owner: None,
+                },
+                0,
+            ),
+            PointerValue::ArrayElement { array, index, .. } => (
+                PointerValue::ArrayBase {
+                    array: Rc::clone(array),
+                    source_name: None,
+                    owner: None,
+                },
+                *index,
+            ),
+            pointer => (pointer.clone(), 0),
+        };
+        Ok((identity, cell_index.saturating_mul(cell_size) + byte_offset))
+    }
+
+    fn ensure_memory_ranges_do_not_overlap(
+        &self,
+        name: &str,
+        destination: &PointerValue,
+        destination_len: usize,
+        source: &PointerValue,
+        source_len: usize,
+    ) -> CustResult<()> {
+        if destination_len == 0 || source_len == 0 {
+            return Ok(());
+        }
+        let (destination_identity, destination_start) =
+            self.memory_pointer_position(destination)?;
+        let (source_identity, source_start) = self.memory_pointer_position(source)?;
+        let overlaps = Self::pointer_eq(&destination_identity, &source_identity)
+            && destination_start < source_start.saturating_add(source_len)
+            && source_start < destination_start.saturating_add(destination_len);
+        if overlaps {
+            return Err(CustError::new(format!(
+                "overlapping source and destination ranges passed to function '{name}'"
+            )));
+        }
+        Ok(())
+    }
+
+    fn memory_pointer_with_byte_offset(
+        &self,
+        pointer: &PointerValue,
+        offset: usize,
+    ) -> CustResult<PointerValue> {
+        let base = Self::object_byte_base(pointer);
+        let absolute = Self::object_byte_offset(pointer)
+            .checked_add(offset)
+            .ok_or_else(|| CustError::new("scalar object byte offset overflow"))?;
+        let cell_size = self.scalar_memory_cell_size(base)?;
+        let cell_offset = absolute / cell_size;
+        let within = absolute % cell_size;
+        let cell_pointer = if cell_offset == 0 {
+            base.clone()
+        } else {
+            let cell_offset = i64::try_from(cell_offset)
+                .map_err(|_| CustError::new("scalar object byte offset overflow"))?;
+            self.offset_array_pointer(base, cell_offset)?
+        };
+        let is_character_storage = matches!(
+            self.pointer_value_type(base)?,
+            Some(PointeeType::Scalar(CType::Char))
+        );
+        if is_character_storage {
+            Ok(cell_pointer)
+        } else {
+            Ok(PointerValue::ObjectByte {
+                base: Box::new(cell_pointer),
+                offset: within,
+            })
+        }
+    }
+
     fn memory_pointer_targets_union_field(&self, pointer: &PointerValue) -> CustResult<bool> {
         match pointer {
+            PointerValue::ObjectByte { base, .. } => self.memory_pointer_targets_union_field(base),
             PointerValue::StructField {
                 scope_id,
                 name,
@@ -19995,6 +20256,16 @@ impl Interpreter {
                 Ok(self.array_pointer_targets_union_field(array))
             }
             _ => Ok(false),
+        }
+    }
+
+    fn memory_pointer_targets_aggregate_field(&self, pointer: &PointerValue) -> bool {
+        match Self::object_byte_base(pointer) {
+            PointerValue::StructField { .. } | PointerValue::StructFieldElementField { .. } => true,
+            PointerValue::ArrayBase { array, .. } | PointerValue::ArrayElement { array, .. } => {
+                self.array_pointer_targets_aggregate_field(array)
+            }
+            _ => false,
         }
     }
 
@@ -20078,46 +20349,22 @@ impl Interpreter {
             .unwrap_or(false)
     }
 
-    fn read_character_memory_values(
-        &self,
-        name: &str,
-        role: &str,
-        argument: usize,
-        pointer: &PointerValue,
-        count: usize,
-    ) -> CustResult<Vec<i64>> {
-        let available = match pointer {
-            PointerValue::ArrayBase { array, .. } => array.borrow().elements.len(),
-            PointerValue::ArrayElement { array, index, .. } => {
-                let array = array.borrow();
-                Self::character_sequence_array_end(&array, *index).saturating_sub(*index)
-            }
-            PointerValue::Scalar { .. }
-            | PointerValue::StructField { .. }
-            | PointerValue::StructFieldElementField { .. } => 1,
-            _ => 0,
+    fn array_pointer_targets_aggregate_field(&self, array: &Rc<RefCell<ArrayValue>>) -> bool {
+        let contains = |value: &Value| match value {
+            Value::Struct { .. } | Value::StructArray { .. } => self
+                .value_contains_array_with_union_ancestor(value, array)
+                .is_some(),
+            Value::Scalar { .. } | Value::Array(_) | Value::Pointer { .. } => false,
         };
-        if count > available {
-            return Err(CustError::new(format!(
-                "{role} argument {argument} to function '{name}' requires {count} bytes, but only {available} bytes are available"
-            )));
-        }
-
-        let mut values = Vec::with_capacity(count);
-        for offset in 0..count {
-            let value = match pointer {
-                PointerValue::ArrayBase { array, .. } => array.borrow().elements[offset],
-                PointerValue::ArrayElement { array, index, .. } => {
-                    array.borrow().elements[index.saturating_add(offset)]
-                }
-                PointerValue::Scalar { .. }
-                | PointerValue::StructField { .. }
-                | PointerValue::StructFieldElementField { .. } => self.deref_pointer(pointer)?,
-                _ => unreachable!("validated character storage has a readable byte representation"),
-            };
-            values.push(value);
-        }
-        Ok(values)
+        self.scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.values.values())
+            .any(contains)
+            || self
+                .static_locals
+                .values()
+                .any(|storage| contains(&storage.value))
     }
 
     fn unsupported_memory_copy_declaration_error(name: &str) -> CustError {
@@ -20217,14 +20464,13 @@ impl Interpreter {
         let count = self.eval_scalar_conversion(CType::Int, count_expr)?;
         let count = Self::validate_memory_operation_count(name, count, "search")?;
 
-        self.validate_memory_copy_character_pointer_argument(name, 1, &source)?;
-        let values = self.read_character_memory_values(name, "input", 1, &source, count)?;
+        self.validate_memory_scalar_pointer_argument(name, 1, &source)?;
+        let values = self.read_scalar_memory_values(name, "input", 1, &source, count)?;
         let matched_offset = values
             .into_iter()
             .position(|value| value.rem_euclid(256) as u8 == search);
         let pointer = match matched_offset {
-            Some(0) => source,
-            Some(offset) => self.offset_array_pointer(&source, offset as i64)?,
+            Some(offset) => self.memory_pointer_with_byte_offset(&source, offset)?,
             None => PointerValue::Null,
         };
         Ok(Some(ReturnValue::Pointer {
@@ -20300,10 +20546,10 @@ impl Interpreter {
         let count = self.eval_scalar_conversion(CType::Int, count_expr)?;
         let count = Self::validate_memory_operation_count(name, count, "comparison")?;
 
-        self.validate_memory_copy_character_pointer_argument(name, 1, &left)?;
-        self.validate_memory_copy_character_pointer_argument(name, 2, &right)?;
-        let left = self.read_character_memory_values(name, "input", 1, &left, count)?;
-        let right = self.read_character_memory_values(name, "input", 2, &right, count)?;
+        self.validate_memory_scalar_pointer_argument(name, 1, &left)?;
+        self.validate_memory_scalar_pointer_argument(name, 2, &right)?;
+        let left = self.read_scalar_memory_values(name, "input", 1, &left, count)?;
+        let right = self.read_scalar_memory_values(name, "input", 2, &right, count)?;
         let result = left
             .into_iter()
             .map(|value| value.rem_euclid(256) as u8)
@@ -20638,7 +20884,8 @@ impl Interpreter {
                 | PointerValue::StructElement { .. }
                 | PointerValue::StructFieldElement { .. }
                 | PointerValue::NestedStructArrayElement { .. }
-                | PointerValue::Array2DRow { .. } => {
+                | PointerValue::Array2DRow { .. }
+                | PointerValue::ObjectByte { .. } => {
                     return Err(CustError::new(format!(
                         "function '{name}' requires character storage for argument {argument}"
                     )));
@@ -20679,7 +20926,8 @@ impl Interpreter {
             | PointerValue::StructElement { .. }
             | PointerValue::StructFieldElement { .. }
             | PointerValue::NestedStructArrayElement { .. }
-            | PointerValue::Array2DRow { .. } => {
+            | PointerValue::Array2DRow { .. }
+            | PointerValue::ObjectByte { .. } => {
                 return Err(CustError::new(format!(
                     "function '{name}' requires character storage for argument 1"
                 )));
@@ -23648,6 +23896,10 @@ impl Interpreter {
                     owner,
                 }
             }
+            PointerValue::ObjectByte { base, offset } => PointerValue::ObjectByte {
+                base: Box::new(self.attach_array_pointer_owner(*base)),
+                offset,
+            },
             pointer => pointer,
         }
     }
@@ -23664,6 +23916,10 @@ impl Interpreter {
     fn pointer_value_type(&self, pointer: &PointerValue) -> CustResult<Option<PointeeType>> {
         match pointer {
             PointerValue::Null => Ok(None),
+            PointerValue::ObjectByte { base, .. } => {
+                self.pointer_value_type(Self::object_byte_base(base))?;
+                Ok(Some(PointeeType::Scalar(CType::Char)))
+            }
             PointerValue::Scalar { scope_id, name } => {
                 let value = self
                     .scopes
@@ -23801,6 +24057,29 @@ impl Interpreter {
                     Ok(Some(PointeeType::Struct(type_name.clone())))
                 }
             },
+        }
+    }
+
+    fn coerce_object_byte_pointer(
+        &self,
+        expected: &PointeeType,
+        pointer: PointerValue,
+    ) -> CustResult<PointerValue> {
+        match pointer {
+            PointerValue::ObjectByte { base, offset }
+                if offset == 0
+                    && !matches!(
+                        expected,
+                        PointeeType::Void | PointeeType::Scalar(CType::Char)
+                    ) =>
+            {
+                if self.pointer_value_type(&base)?.as_ref() == Some(expected) {
+                    Ok(*base)
+                } else {
+                    Ok(PointerValue::ObjectByte { base, offset })
+                }
+            }
+            pointer => Ok(pointer),
         }
     }
 
@@ -24805,9 +25084,10 @@ impl Interpreter {
                 let assigned = self.eval_pointer(expr)?;
                 let assigned = self.attach_array_pointer_owner(assigned);
                 if let StructFieldType::Pointer(expected_ty) = &field.ty {
+                    let assigned = self.coerce_object_byte_pointer(expected_ty, assigned)?;
                     self.ensure_pointer_type_matches(expected_ty, &assigned)?;
+                    *pointer = assigned;
                 }
-                *pointer = assigned;
             }
             (
                 StructFieldType::Pointer(_),
@@ -25309,8 +25589,9 @@ impl Interpreter {
         value: PointerValue,
     ) -> CustResult<()> {
         self.ensure_variable_mutable(name)?;
-        let value = self.attach_array_pointer_owner(value);
+        let mut value = self.attach_array_pointer_owner(value);
         if let Some(expected) = self.direct_struct_pointer_field_type(name, path)? {
+            value = self.coerce_object_byte_pointer(&expected, value)?;
             self.ensure_pointer_type_matches(&expected, &value)?;
         }
         match self.find_variable_mut(name) {
@@ -27260,8 +27541,9 @@ impl Interpreter {
         value: PointerValue,
     ) -> CustResult<()> {
         self.ensure_struct_pointer_target_mutable(pointer)?;
-        let value = self.attach_array_pointer_owner(value);
+        let mut value = self.attach_array_pointer_owner(value);
         if let Some(expected) = self.struct_pointer_pointer_field_type(pointer, path)? {
+            value = self.coerce_object_byte_pointer(&expected, value)?;
             self.ensure_pointer_type_matches(&expected, &value)?;
         }
         let (type_name, fields) = self.find_struct_pointer_fields_mut(pointer)?;
@@ -27892,18 +28174,25 @@ impl Interpreter {
                     self.find_struct_element_pointer(name, index)
                 } else if let Some(pointer) = self.indexed_struct_pointer(name, index)? {
                     Ok(pointer)
-                } else if let Some(Value::Pointer { pointer, .. }) =
+                } else if let Some(Value::Pointer { pointer, ty, .. }) =
                     self.find_variable(name).cloned()
                 {
+                    if ty == PointeeType::Void {
+                        return Err(CustError::new("cannot index pointer to void"));
+                    }
                     let index_value = self.eval(index)?;
-                    let (array, source_name, index, owner) =
-                        self.checked_pointer_value_index(&pointer, index_value)?;
-                    Ok(PointerValue::ArrayElement {
-                        array,
-                        source_name,
-                        index,
-                        owner,
-                    })
+                    if matches!(pointer, PointerValue::ObjectByte { .. }) {
+                        self.offset_array_pointer(&pointer, index_value)
+                    } else {
+                        let (array, source_name, index, owner) =
+                            self.checked_pointer_value_index(&pointer, index_value)?;
+                        Ok(PointerValue::ArrayElement {
+                            array,
+                            source_name,
+                            index,
+                            owner,
+                        })
+                    }
                 } else {
                     let (array, index) = self.checked_array_index(name, index)?;
                     Ok(PointerValue::ArrayElement {
@@ -28026,6 +28315,7 @@ impl Interpreter {
                 }
                 self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
                 let pointer = self.eval_pointer(value)?;
+                let pointer = self.coerce_object_byte_pointer(&expected_ty, pointer)?;
                 self.ensure_pointer_type_matches(&expected_ty, &pointer)?;
                 Ok(pointer)
             }
@@ -28083,6 +28373,7 @@ impl Interpreter {
                     self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
                     let pointer = self.eval_pointer(value)?;
                     let pointer = self.attach_array_pointer_owner(pointer);
+                    let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
                     self.ensure_pointer_slot_type_matches(&current_pointer, &ty, &pointer)?;
                     if let Some(Value::Pointer { pointer: slot, .. }) = self.find_variable_mut(name)
                     {
@@ -28714,6 +29005,28 @@ impl Interpreter {
                     row,
                 )
             }
+            PointerValue::ObjectByte {
+                base,
+                offset: byte_offset,
+            } => {
+                let cell_size = i64::try_from(self.scalar_memory_cell_size(base)?)
+                    .map_err(|_| CustError::new("scalar object byte offset overflow"))?;
+                let byte_offset = i64::try_from(*byte_offset)
+                    .ok()
+                    .and_then(|byte_offset| byte_offset.checked_add(offset))
+                    .ok_or_else(|| CustError::new("scalar object byte offset overflow"))?;
+                let cell_offset = byte_offset.div_euclid(cell_size);
+                let within = byte_offset.rem_euclid(cell_size) as usize;
+                let cell_pointer = if cell_offset == 0 {
+                    base.as_ref().clone()
+                } else {
+                    self.offset_array_pointer(base, cell_offset)?
+                };
+                Ok(PointerValue::ObjectByte {
+                    base: Box::new(cell_pointer),
+                    offset: within,
+                })
+            }
         }
     }
 
@@ -28848,6 +29161,7 @@ impl Interpreter {
     fn deref_pointer(&self, pointer: &PointerValue) -> CustResult<i64> {
         match pointer {
             PointerValue::Null => Err(CustError::new("null pointer dereference")),
+            PointerValue::ObjectByte { .. } => self.read_scalar_memory_byte(pointer, 0),
             PointerValue::Scalar { scope_id, name } => {
                 if !self.live_scope_ids.contains(scope_id) {
                     return Err(CustError::new(format!(
@@ -28919,6 +29233,7 @@ impl Interpreter {
     fn assign_deref_pointer(&mut self, pointer: &PointerValue, value: i64) -> CustResult<()> {
         match pointer {
             PointerValue::Null => Err(CustError::new("null pointer dereference")),
+            PointerValue::ObjectByte { .. } => self.write_scalar_memory_byte(pointer, 0, value),
             PointerValue::Scalar { scope_id, name } => {
                 if !self.live_scope_ids.contains(scope_id) {
                     return Err(CustError::new(format!(
@@ -29133,7 +29448,8 @@ impl Interpreter {
             PointerValue::Null => Err(CustError::new("null pointer dereference")),
             PointerValue::Scalar { .. }
             | PointerValue::StructField { .. }
-            | PointerValue::StructFieldElementField { .. } => {
+            | PointerValue::StructFieldElementField { .. }
+            | PointerValue::ObjectByte { .. } => {
                 Err(CustError::new("scalar pointer is not indexable"))
             }
             PointerValue::Struct { .. }
@@ -29587,6 +29903,15 @@ impl Interpreter {
     fn pointer_eq(left: &PointerValue, right: &PointerValue) -> bool {
         match (left, right) {
             (PointerValue::Null, PointerValue::Null) => true,
+            (left @ PointerValue::ObjectByte { .. }, right @ PointerValue::ObjectByte { .. }) => {
+                Self::object_byte_offset(left) == Self::object_byte_offset(right)
+                    && Self::pointer_eq(Self::object_byte_base(left), Self::object_byte_base(right))
+            }
+            (wrapped @ PointerValue::ObjectByte { .. }, pointer)
+            | (pointer, wrapped @ PointerValue::ObjectByte { .. }) => {
+                Self::object_byte_offset(wrapped) == 0
+                    && Self::pointer_eq(Self::object_byte_base(wrapped), pointer)
+            }
             (PointerValue::Null, _) | (_, PointerValue::Null) => false,
             (
                 PointerValue::Scalar {
@@ -29778,7 +30103,8 @@ impl Interpreter {
             | PointerValue::StructFieldElement { .. }
             | PointerValue::NestedStructArrayElement { .. }
             | PointerValue::StructField { .. }
-            | PointerValue::StructFieldElementField { .. } => {
+            | PointerValue::StructFieldElementField { .. }
+            | PointerValue::ObjectByte { .. } => {
                 Err(CustError::new("scalar pointer arithmetic is not supported"))
             }
         }
@@ -29814,6 +30140,22 @@ impl Interpreter {
     }
 
     fn pointer_difference(&self, left: &PointerValue, right: &PointerValue) -> CustResult<i64> {
+        if matches!(left, PointerValue::ObjectByte { .. })
+            || matches!(right, PointerValue::ObjectByte { .. })
+        {
+            let (left_identity, left_offset) = self.memory_pointer_position(left)?;
+            let (right_identity, right_offset) = self.memory_pointer_position(right)?;
+            if !Self::pointer_eq(&left_identity, &right_identity) {
+                return Err(CustError::new(
+                    "cannot subtract pointers to different arrays",
+                ));
+            }
+            let left_offset = i64::try_from(left_offset)
+                .map_err(|_| CustError::new("scalar object byte offset overflow"))?;
+            let right_offset = i64::try_from(right_offset)
+                .map_err(|_| CustError::new("scalar object byte offset overflow"))?;
+            return Ok(left_offset - right_offset);
+        }
         match (left, right) {
             (
                 PointerValue::Array2DRow {
@@ -32110,6 +32452,22 @@ impl Interpreter {
                     return Ok(Self::increment_result(current, updated, prefix));
                 }
                 let (array, index) = match self.find_variable(name).cloned() {
+                    Some(Value::Pointer {
+                        pointer: pointer @ PointerValue::ObjectByte { .. },
+                        ty,
+                        ..
+                    }) => {
+                        if ty == PointeeType::Void {
+                            return Err(CustError::new("cannot index pointer to void"));
+                        }
+                        self.ensure_pointer_variable_pointee_mutable(name)?;
+                        let index_value = self.eval(index)?;
+                        let pointer = self.offset_array_pointer(&pointer, index_value)?;
+                        let current = self.deref_pointer(&pointer)?;
+                        let updated = Self::apply_increment_op(current, op);
+                        self.assign_deref_pointer(&pointer, updated)?;
+                        return Ok(Self::increment_result(current, updated, prefix));
+                    }
                     Some(Value::Pointer { pointer, .. }) => {
                         self.ensure_pointer_variable_pointee_mutable(name)?;
                         let index_value = self.eval(index)?;
@@ -32327,6 +32685,23 @@ impl Interpreter {
             return Ok(result);
         }
         let (array, index) = match self.find_variable(name).cloned() {
+            Some(Value::Pointer {
+                pointer: pointer @ PointerValue::ObjectByte { .. },
+                ty,
+                ..
+            }) => {
+                if ty == PointeeType::Void {
+                    return Err(CustError::new("cannot index pointer to void"));
+                }
+                self.ensure_pointer_variable_pointee_mutable(name)?;
+                let index_value = self.eval(index)?;
+                let pointer = self.offset_array_pointer(&pointer, index_value)?;
+                let current = self.deref_pointer(&pointer)?;
+                let rhs = self.eval(value)?;
+                let result = Self::apply_compound_op(current, op, rhs)?;
+                self.assign_deref_pointer(&pointer, result)?;
+                return Ok(result);
+            }
             Some(Value::Pointer { pointer, .. }) => {
                 self.ensure_pointer_variable_pointee_mutable(name)?;
                 let index_value = self.eval(index)?;
@@ -32682,6 +33057,7 @@ impl Interpreter {
                 self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
                 let pointer = self.attach_array_pointer_owner(pointer);
+                let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
                 self.ensure_pointer_type_matches(&ty, &pointer)?;
                 Ok(Some(ReturnValue::Pointer {
                     pointer,
@@ -32744,6 +33120,7 @@ impl Interpreter {
             } => {
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
+                let pointer = self.coerce_object_byte_pointer(ty, pointer)?;
                 self.ensure_pointer_type_matches(ty, &pointer)?;
                 Ok(Value::Pointer {
                     pointer,
@@ -32908,6 +33285,7 @@ impl Interpreter {
             } => {
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
+                let pointer = self.coerce_object_byte_pointer(ty, pointer)?;
                 self.ensure_pointer_type_matches(ty, &pointer)?;
                 if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
@@ -33118,6 +33496,7 @@ impl Interpreter {
                         self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
                         let pointer = self.eval_pointer(expr)?;
                         let pointer = self.attach_array_pointer_owner(pointer);
+                        let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
                         if let PointerValue::Array2DRow { array, .. } = &current_pointer {
                             let array = array.borrow();
                             let Some((_, columns)) = array.dimensions else {
@@ -33216,7 +33595,12 @@ impl Interpreter {
                     Some(Value::Pointer { pointer, .. }) => {
                         self.ensure_pointer_variable_pointee_mutable(name)?;
                         let index_value = self.eval(index)?;
-                        self.assign_pointer_index(&pointer, index_value, value)?;
+                        if matches!(pointer, PointerValue::ObjectByte { .. }) {
+                            let pointer = self.offset_array_pointer(&pointer, index_value)?;
+                            self.assign_deref_pointer(&pointer, value)?;
+                        } else {
+                            self.assign_pointer_index(&pointer, index_value, value)?;
+                        }
                     }
                     Some(_) | None => {
                         let (array, index) = self.checked_array_index(name, index)?;
@@ -33657,7 +34041,12 @@ impl Interpreter {
                     Some(Value::Pointer { pointer, .. }) => {
                         self.ensure_pointer_variable_pointee_mutable(name)?;
                         let index_value = self.eval(index)?;
-                        self.assign_pointer_index(&pointer, index_value, value)?;
+                        if matches!(pointer, PointerValue::ObjectByte { .. }) {
+                            let pointer = self.offset_array_pointer(&pointer, index_value)?;
+                            self.assign_deref_pointer(&pointer, value)?;
+                        } else {
+                            self.assign_pointer_index(&pointer, index_value, value)?;
+                        }
                     }
                     Some(_) | None => {
                         let (array, index) = self.checked_array_index(name, index)?;
@@ -33945,9 +34334,18 @@ impl Interpreter {
                     self.deref_pointer(&pointer)
                 } else {
                     match self.find_variable(name).cloned() {
-                        Some(Value::Pointer { .. }) => {
-                            let (array, _, index) = self.checked_pointer_index(name, index)?;
-                            Ok(array.borrow().elements[index])
+                        Some(Value::Pointer { pointer, ty, .. }) => {
+                            if ty == PointeeType::Void {
+                                return Err(CustError::new("cannot index pointer to void"));
+                            }
+                            if matches!(pointer, PointerValue::ObjectByte { .. }) {
+                                let index_value = self.eval(index)?;
+                                let pointer = self.offset_array_pointer(&pointer, index_value)?;
+                                self.deref_pointer(&pointer)
+                            } else {
+                                let (array, _, index) = self.checked_pointer_index(name, index)?;
+                                Ok(array.borrow().elements[index])
+                            }
                         }
                         Some(_) | None => {
                             let (array, index) = self.checked_array_index(name, index)?;

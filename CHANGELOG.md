@@ -4,7 +4,13 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
-No unreleased changes yet.
+### Standard library subset
+
+- Extended exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` to standalone `int`/`_Bool` scalars and one-dimensional arrays under Cust's fixed little-endian eight-byte integer representation. Partial/full reads and writes, overlap-safe snapshots, unsigned-byte comparison/search, canonical interior pointers, and pointer differences remain interpreter-owned without host addresses or host ABI inference.
+
+### Diagnostics and verification
+
+- Added exact scalar-object capacity, const, lifetime, overlap, aggregate, and union boundaries; deterministic partial-write reconstruction; review-driven aligned `memchr` byte-view/coercion regressions; seven interpreter tests; and a warning-free compiler-oracle fixture limited to ABI-independent relationships.
 
 ## v0.24.0 — 2026-08-08
 
