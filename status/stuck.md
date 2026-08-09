@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.27.0 release preparation on 2026-08-09. Release RED/GREEN, fresh independent complete-diff review, formatting, warning-denied Clippy, all 1,479 local/rebuilt-Docker tests, doc tests, focused version/license/compiler-oracle checks, runtime output `10`, local/Cargo/container version `cust 0.27.0`, empty local/remote tag preflight, and diff checks pass. No implementation, Docker, Git, research, or environment blocker is currently known; publication remains ordered behind exact `origin/main` acceptance of the release commit.
+None. Last reviewed after bounded v0.27.0 publication on 2026-08-09. Release RED/GREEN, fresh independent complete-diff review, formatting, warning-denied Clippy, all 1,479 local/rebuilt-Docker tests, doc tests, focused version/license/compiler-oracle checks, runtime output `10`, local/Cargo/container version `cust 0.27.0`, and diff checks pass. Release commit `0afffbf5f06528a225d672d886f82af4bdbc3f50` reached exact `origin/main` before annotated tag object `b2b763214212b7bc6b3c678754384a68b97518d7`; local and remote tag refs peel exactly to the release commit. No implementation, Docker, Git, research, or environment blocker is currently known.
 
 ## Blocker template
 
