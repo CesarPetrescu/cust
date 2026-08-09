@@ -4,6 +4,8 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.26.0 — 2026-08-09
+
 ### Standard library subset
 
 - Extended exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` to deterministic `int`/`_Bool` scalar and one-dimensional-array fields in supported named, anonymous, nested, direct/arrow, and embedded-aggregate-array-element struct paths. The implementation reuses the selected field's interpreter-owned storage rather than synthesizing aggregate padding or host addresses.
@@ -11,6 +13,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Diagnostics and verification
 
 - Preserved field-local byte capacity and overlap, recursive const and lexical-lifetime checks, aligned/interior `memchr` identity, canonical typed-pointer coercion, `_Bool` normalization, and non-evaluating call validation. Whole aggregates, union-backed storage, and two-dimensional non-character rows retain exact unsupported diagnostics. Five focused interpreter tests and a registered warning-free ABI-independent compiler-oracle fixture bring the executable inventory to 1,475 tests.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.26.0`.
+- Reconciled an executable inventory of 1,475 tests: 1,340 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Raw-memory intrinsics accept interpreter-owned standalone character storage, character scalars or one-dimensional character arrays embedded in struct fields, one selected row of supported two-dimensional character storage, and scalar/one-dimensional-array `int` and `_Bool` storage both standalone and embedded in supported struct fields. Ranges remain selected-object or field local and cannot cross character-row boundaries. Two-dimensional non-character rows, whole aggregate object representations, union-backed storage, host ABI layout, and host addresses remain unsupported. General pointer levels beyond the narrow tracked unqualified `char **` model, floating-point and complex runtime values, variable-length arrays, arrays with more than two dimensions, aggregate-valued multidimensional elements, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
 
 ## v0.25.0 — 2026-08-08
 

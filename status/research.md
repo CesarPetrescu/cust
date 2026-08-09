@@ -18,6 +18,14 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-09 — v0.26.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.25.0`, then passed after Cargo/lock and both image tags moved to `0.26.0`. Built CLI and Cargo metadata report `cust 0.26.0`; local and remote annotated-tag preflight found no `v0.26.0` refs.
+- `cargo test -- --list` independently enumerates 1,475 executable tests: 1,340 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. The total is 1,475 and the grouped non-interpreter/non-fuzz remainder is 36. The preceding feature-run status retained the old 1,335 interpreter subtotal despite reporting the correct new total; release docs use the executable listing.
+- Candidate evaluation selected release closure over two-dimensional non-character row bytes, whole-aggregate layout, and parser-diagnostic expansion because it is first in both authoritative queues and atomically packages the independently reviewed struct-field slice. Two-dimensional non-character rows are the next coherent vertical slice; whole aggregates and unions remain deferred because Cust must not invent padding or union byte aliasing.
+- Release procedure follows the loaded `versioned-release-closure` checklist: review the complete consistency diff before the canonical gate, push the verified release commit before creating the annotated tag, and require the remote unpeeled tag object plus peeled target to match exact local identities.
+- The separate static release-surface scan found no secret, shell-injection, dangerous-evaluation, or unsafe-deserialization matches. Independent complete-diff review returned `APPROVED` with no findings. Canonical preparation verification then passed formatting, warning-denied Clippy, all 1,475 local tests, the rebuilt 1,475-test Docker gate, compiler-oracle comparisons, runtime output `10`, built/Cargo version `cust 0.26.0`, and `git diff --check`.
+
 ## 2026-08-09 — Struct-field scalar object bytes
 
 - Existing scalar-field pointers (`StructField` and `StructFieldElementField`) already carry field path, owner, lifetime, and recursive const metadata; scalar-array fields already retain exact `Rc<ArrayValue>` identity. Extending non-character object bytes therefore requires removing only the obsolete standalone-only admission guard, not synthesizing aggregate layout.
