@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after the two-dimensional non-character scalar-row object-byte feature on 2026-08-09. Focused direct/route/safety/non-evaluating tests and the actual compiler-oracle harness are GREEN; independent review returned `APPROVED`; formatting, warning-denied Clippy, all 1,479 local/rebuilt-Docker tests, runtime output `10`, and diff checks pass. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed after bounded v0.27.0 release preparation on 2026-08-09. Release RED/GREEN, fresh independent complete-diff review, formatting, warning-denied Clippy, all 1,479 local/rebuilt-Docker tests, doc tests, focused version/license/compiler-oracle checks, runtime output `10`, local/Cargo/container version `cust 0.27.0`, empty local/remote tag preflight, and diff checks pass. No implementation, Docker, Git, research, or environment blocker is currently known; publication remains ordered behind exact `origin/main` acceptance of the release commit.
 
 ## Blocker template
 
