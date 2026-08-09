@@ -19934,20 +19934,6 @@ impl Interpreter {
             )));
         }
         let base = Self::object_byte_base(pointer);
-        let unsupported_two_dimensional_scalar_row = match base {
-            PointerValue::ArrayBase { array, .. }
-            | PointerValue::ArrayElement { array, .. }
-            | PointerValue::Array2DRow { array, .. } => {
-                let array = array.borrow();
-                array.dimensions.is_some() && array.elem_type != CType::Char
-            }
-            _ => false,
-        };
-        if unsupported_two_dimensional_scalar_row {
-            return Err(CustError::new(format!(
-                "function '{name}' currently supports only scalar object storage for argument {argument}"
-            )));
-        }
         let Some(PointeeType::Scalar(_)) = self.pointer_value_type(base)? else {
             return Err(CustError::new(format!(
                 "function '{name}' currently supports only scalar object storage for argument {argument}"

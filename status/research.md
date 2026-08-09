@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-09 — Two-dimensional non-character scalar-row object bytes
+
+- Dimensioned scalar row expressions already lower to `PointerValue::ArrayElement` over an `ArrayValue` that retains `(rows, columns)`. The obsolete blocker was the raw-memory validator's blanket rejection of every non-character dimensioned `ArrayValue`, not missing storage or provenance.
+- `character_sequence_array_end()` computes the current selected row boundary from the flattened index modulo the retained column count. Reusing it in `scalar_memory_available_bytes()` limits every byte range to the current row; removing the admission guard does not flatten adjacent rows.
+- Existing scalar byte-cell reconstruction preserves Cust's deterministic eight-byte little-endian `int` and canonical one-byte `_Bool` representation. Existing pointer offset, owner/lifetime, recursive const, union-ancestry, and checked row-index logic covers direct, adjusted-parameter, pointer-to-row, and supported struct-field routes.
+- Native parity must remain ABI-independent: use whole-element counts such as `columns * sizeof(element)` and compare copy/search relationships, never Cust's fixed `int` width, host endianness, or partial integer bytes. See `references/cust-bounded-memory-two-dimensional-scalar-object-rows.md`.
+
 ## 2026-08-09 — v0.26.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.25.0`, then passed after Cargo/lock and both image tags moved to `0.26.0`. Built CLI and Cargo metadata report `cust 0.26.0`; local and remote annotated-tag preflight found no `v0.26.0` refs.

@@ -2940,6 +2940,118 @@ fn bounded_memory_two_dimensional_character_rows_preserve_lifetime_and_sizeof_ru
 }
 
 #[test]
+fn bounded_memory_intrinsics_support_two_dimensional_scalar_object_rows() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memmove(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            int source[2][2] = {{11, 13}, {17, 19}};
+            int destination[2][2] = {{23, 29}, {31, 37}};
+            if (memcpy(destination[0], source[1], sizeof(source[1][0]) * 2) != destination[0]) return 1;
+            if (destination[0][0] != 17 || destination[0][1] != 19) return 2;
+            if (memcmp(destination[0], source[1], sizeof(source[1][0]) * 2) != 0) return 3;
+            if (memmove(destination[0] + 1, destination[0], sizeof(destination[0][0])) !=
+                destination[0] + 1) return 4;
+            if (destination[0][0] != 17 || destination[0][1] != 17) return 5;
+            if (memset(destination[0], 0, sizeof(destination[0][0])) != destination[0]) return 6;
+            if (destination[0][0] != 0 || destination[0][1] != 17) return 7;
+            void *found = memchr(destination[0], 17, sizeof(destination[0][0]) * 2);
+            if (found == 0) return 8;
+            if ((char *)found - (char *)destination[0] != sizeof(destination[0][0])) return 9;
+            int *typed = found;
+            if (typed != destination[0] + 1) return 10;
+            return destination[1][0] != 31 || destination[1][1] != 37;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_two_dimensional_scalar_object_row_routes_match_compiler_oracle_fixture() {
+    let program =
+        include_str!("fixtures/compat/valid/bounded_memory_two_dimensional_scalar_object_rows.c",);
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_two_dimensional_scalar_object_rows_preserve_safety() {
+    let cases = [
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { int rows[2][2] = {{0}}; memset(rows[0] + 1, 0, sizeof(int) * 2); return 0; }",
+            "destination argument 1 to function 'memset' requires 16 bytes, but only 8 bytes are available",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int); int main(void) { int rows[2][2] = {{0}}; return memcmp(rows[0] + 1, rows[1], sizeof(int) * 2); }",
+            "input argument 1 to function 'memcmp' requires 16 bytes, but only 8 bytes are available",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); int main(void) { int rows[1][3] = {{1, 2, 3}}; memcpy(rows[0] + 1, rows[0], sizeof(int) * 2); return 0; }",
+            "overlapping source and destination ranges passed to function 'memcpy'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { const int rows[1][2] = {{1, 2}}; memset(rows[0], 0, sizeof(int)); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Nested { int rows[1][2]; }; struct Leaf { const struct Nested nested; }; struct Outer { struct Leaf leaves[1]; }; int main(void) { struct Outer outer = {{{{{{1, 2}}}}}}; memset(outer.leaves[0].nested.rows[0], 0, sizeof(int)); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { int rows[2][2] = {{0}}; int (*row)[2] = rows + 1; memset(row[9223372036854775807], 0, sizeof(int)); return 0; }",
+            "two-dimensional array row pointer index overflow during pointer arithmetic",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Matrix { int rows[2][2]; int alternate; } value = {{{1, 2}, {3, 4}}}; int main(void) { memset(value.rows[0], 0, sizeof(int)); return 0; }",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
+        ),
+    ];
+
+    for (index, (program, expected)) in cases.into_iter().enumerate() {
+        let error = match interpret(program) {
+            Ok(value) => panic!("case {index} unexpectedly returned {value}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.to_string(), expected, "case {index}");
+    }
+
+    let expired = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int *expired(void) {
+            int rows[2][2] = {{1, 2}, {3, 4}};
+            return rows[1];
+        }
+        int main(void) { return memchr(expired(), 3, sizeof(int)) != 0; }
+    "#;
+    let error = interpret(expired).unwrap_err().to_string();
+    assert!(
+        error.contains("pointer to out-of-scope variable"),
+        "{error}"
+    );
+}
+
+#[test]
+fn bounded_memory_two_dimensional_scalar_object_rows_preserve_zero_count_and_sizeof() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        int main(void) {
+            int rows[2][2] = {{11, 13}, {17, 19}};
+            int marker = 0;
+            if (sizeof(memset(rows[marker++], 0, sizeof(int) * 2)) != sizeof(void *)) return 1;
+            if (marker != 0 || rows[0][0] != 11) return 2;
+            if (memset(rows[marker++], 0, 0) != rows[0]) return 3;
+            return marker != 1 || rows[0][0] != 11 || rows[1][0] != 17;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn bounded_memory_intrinsics_support_scalar_object_bytes() {
     let program = include_str!("fixtures/compat/valid/bounded_memory_scalar_object_bytes.c");
 
@@ -3101,10 +3213,6 @@ fn bounded_memory_scalar_object_bytes_preserve_safety_diagnostics() {
             "destination argument 1 to function 'memset' requires 16 bytes, but only 8 bytes are available",
         ),
         (
-            "void *memset(void *, int, unsigned long int); int main(void) { int rows[2][2] = {{1, 2}, {3, 4}}; memset(rows[0], 0, sizeof(rows[0])); return 0; }",
-            "function 'memset' currently supports only scalar object storage for argument 1",
-        ),
-        (
             "void *memchr(const void *, int, unsigned long int); void *saved; int main(void) { { int value = 0x0102; saved = memchr(&value, 1, sizeof(value)); } return memchr(saved, 1, 1) != 0; }",
             "pointer to out-of-scope variable 'value'",
         ),
@@ -3207,8 +3315,8 @@ fn aggregate_non_character_scalar_fields_preserve_memory_safety() {
             "function 'memset' does not yet support union-backed scalar object storage for argument 1",
         ),
         (
-            "void *memset(void *, int, unsigned long int); struct Matrix { int rows[2][2]; }; int main(void) { struct Matrix value = {{{1, 2}, {3, 4}}}; memset(value.rows[0], 0, sizeof(value.rows[0])); return 0; }",
-            "function 'memset' currently supports only scalar object storage for argument 1",
+            "void *memset(void *, int, unsigned long int); struct Matrix { int rows[2][2]; }; int main(void) { struct Matrix value = {{{1, 2}, {3, 4}}}; memset(value.rows[0] + 1, 0, sizeof(int) * 2); return 0; }",
+            "destination argument 1 to function 'memset' requires 16 bytes, but only 8 bytes are available",
         ),
     ];
 
