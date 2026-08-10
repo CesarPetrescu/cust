@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.28.0 — 2026-08-10
+
+### Standard library subset
+
+- Extended exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` to complete supported struct objects under Cust's deterministic field-order, no-padding layout. Full and interior ranges traverse scalar fields, one- and two-dimensional scalar arrays, nested structs, and embedded struct arrays without host addresses or host ABI inference.
+
+### Diagnostics and verification
+
+- Preserved canonical aligned/interior pointer identity, selected-range capacity and overlap, owner and lexical-lifetime identity, recursive const protection, zero-count behavior, and nested non-evaluating validation. Union-backed subobjects and pointer fields remain exact unsupported boundaries because Cust does not model shared union bytes or pointer object encodings. Fifty-six focused whole-struct tests and one registered ABI-independent compiler-oracle fixture are included.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.28.0`.
+- Reconciled an executable inventory of 1,534 tests: 1,399 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Raw-memory intrinsics accept interpreter-owned character and deterministic scalar storage, selected two-dimensional rows, supported struct fields, and complete supported structs under Cust's field-order no-padding model. Union-backed storage, structs containing pointer fields, host ABI padding/layout, and host addresses remain unsupported. General pointer levels beyond the narrow tracked unqualified `char **` model, floating-point and complex runtime values, variable-length arrays, arrays with more than two dimensions, aggregate-valued multidimensional elements, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
+
 ## v0.27.0 — 2026-08-09
 
 ### Standard library subset
