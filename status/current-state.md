@@ -1,8 +1,16 @@
 # Cust Current State
 
-Last updated: 2026-08-09
+Last updated: 2026-08-10
 
 ## Latest autonomous verification
+
+All five exactly prototyped bounded raw-memory intrinsics now traverse complete supported structs using Cust's deterministic field-order, no-padding object representation. Full and interior byte ranges cover scalar fields, one- and two-dimensional scalar arrays, nested structs, and embedded struct arrays while preserving typed aligned/interior `memchr` identity, owner/lifetime, recursive const, overlap, zero-count, and non-evaluating behavior. Union-backed subobjects and pointer fields remain exact unsupported boundaries because Cust does not model shared union bytes or pointer object encodings.
+
+The run recovered and finished an inherited uncommitted whole-struct implementation rather than selecting a second package. Candidates preserved for evaluation were whole-struct completion, bounded v0.28.0 release closure, union-backed object bytes, and parser/fuzz expansion; recovery rules and queue priority made the inherited whole-struct package mandatory. Review-driven TDD closed standalone two-dimensional-row identity, const-array metadata lost through nested/struct-array initialization, contextual const leaking into mutable aggregate copies, declared row-pointer metadata after null initialization, standalone-row typed coercion, backward byte arithmetic from later struct-array elements, unchecked minimum-integer negation in every pointer-field compound-subtraction route, and unchecked struct-array pointer index addition. The registered warning-free compiler oracle and 56 focused whole-struct tests pass.
+
+Four independent review rounds found assignment-expression row coercion, runtime-value-based row type inference, standalone-row coercion, later-element backward range, unchecked `i64::MIN` subtraction negation across pointer-field lvalue routes, unchecked struct-array index addition, formatting, and stale inventory gaps. Each behavioral regression failed for the expected reason before its focused fix and now passes. Executable listing now reconciles 1,534 tests: 1,399 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle, and 1 repository-license test. Fresh independent re-review approved the checked-arithmetic closure. Formatting, warning-denied Clippy, all local and rebuilt-Docker tests, the compiler oracle, runtime output `10`, and the diff check pass.
+
+## Previous v0.27.0 verification
 
 Bounded Cust v0.27.0 is published around the completed two-dimensional non-character scalar-row object-byte package. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README central inventory/limitations/roadmap text, changelog notes, and the authoritative status ledgers are synchronized for `0.27.0`. Executable listing independently reconciles 1,479 tests: 1,344 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 

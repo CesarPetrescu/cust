@@ -3201,10 +3201,6 @@ fn bounded_memory_scalar_object_bytes_preserve_safety_diagnostics() {
             "overlapping source and destination ranges passed to function 'memcpy'",
         ),
         (
-            "void *memset(void *, int, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair value = {1, 2}; memset(&value, 0, 1); return 0; }",
-            "function 'memset' currently supports only scalar object storage for argument 1",
-        ),
-        (
             "void *memset(void *, int, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair value = {1, 2}; memset(&value.left, 0, sizeof(value.left) + 1); return 0; }",
             "destination argument 1 to function 'memset' requires 9 bytes, but only 8 bytes are available",
         ),
@@ -3354,6 +3350,1051 @@ fn aggregate_scalar_object_byte_routes_match_compiler_oracle_fixture() {
 }
 
 #[test]
+fn bounded_memory_intrinsics_support_whole_struct_object_bytes() {
+    let program = include_str!("fixtures/compat/valid/bounded_memory_whole_struct_object_bytes.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_object_bytes_use_no_padding_layout_and_preserve_interior_identity() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        struct Mixed { char tag; int value; _Bool flag; int items[2]; };
+        int main(void) {
+            struct Mixed value = {7, 0x1122334455667788, 1, {13, 17}};
+            int *aligned = memchr(&value, 0x88, sizeof(value));
+            char *interior = memchr(&value, 0x66, sizeof(value));
+            if (sizeof(value) != sizeof(char) + sizeof(int) + sizeof(_Bool) +
+                                     2 * sizeof(int)) return 1;
+            if (aligned != &value.value) return 2;
+            if (interior - (char *)&value != 3) return 3;
+            if (memset(interior, 0, 1) != interior) return 4;
+            if (value.value != 0x1122334455007788) return 5;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_object_bytes_traverse_struct_arrays_and_two_dimensional_scalar_fields() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        struct Point { int x; _Bool set; };
+        struct Shape { struct Point points[2]; int matrix[2][2]; };
+        int main(void) {
+            struct Shape source = {{{2, 1}, {3, 0}}, {{5, 7}, {11, 13}}};
+            struct Shape destination = {{{17, 0}, {19, 1}}, {{23, 29}, {31, 37}}};
+            struct Shape shapes[2] = {
+                {{{2, 1}, {3, 0}}, {{5, 7}, {11, 13}}},
+                {{{17, 0}, {19, 1}}, {{23, 29}, {31, 37}}}
+            };
+            if (memcpy(&destination, &source, sizeof(source)) != &destination) return 1;
+            if (memcmp(&destination, &source, sizeof(source)) != 0) return 2;
+            if (destination.points[1].x != 3 || destination.points[1].set != 0) return 3;
+            if (destination.matrix[1][0] != 11 || destination.matrix[1][1] != 13) return 4;
+            if (memcpy(&shapes[1], &shapes[0], sizeof(shapes[0])) != &shapes[1]) return 5;
+            return memcmp(&shapes[1], &shapes[0], sizeof(shapes[0])) != 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_object_bytes_preserve_safety_boundaries() {
+    let cases = [
+        (
+            "void *memset(void *, int, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair value = {1, 2}; memset(&value, 0, sizeof(value) + 1); return 0; }",
+            "destination argument 1 to function 'memset' requires 17 bytes, but only 16 bytes are available",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair value = {1, 2}; memcpy(&value, &value, sizeof(value)); return 0; }",
+            "overlapping source and destination ranges passed to function 'memcpy'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Inner { const int fixed; }; struct Outer { int value; struct Inner inner; }; int main(void) { struct Outer item = {1, {2}}; memset(&item, 0, sizeof(item)); return 0; }",
+            "cannot assign to const struct field 'fixed'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Number { int whole; char byte; }; int main(void) { union Number value = {.whole = 1}; memset(&value, 0, sizeof(value)); return 0; }",
+            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Number { int whole; char byte; }; struct Box { int tag; union Number number; }; int main(void) { struct Box value = {1, {.whole = 2}}; memset(&value, 0, sizeof(value)); return 0; }",
+            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Link { int value; int *next; }; int main(void) { int target = 2; struct Link item = {1, &target}; memset(&item, 0, sizeof(item)); return 0; }",
+            "function 'memset' does not yet support pointer fields in whole-struct object storage for argument 1",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); void *saved; struct Pair { int left; int right; }; int main(void) { { struct Pair local = {1, 2}; saved = &local; } return memchr(saved, 0, 1) != 0; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn whole_struct_object_bytes_preserve_zero_count_and_non_evaluating_calls() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        struct Pair { int left; int right; } value = {1, 2};
+        int marker = 0;
+        void *destination(void) { marker += 1; return &value; }
+        const void *source(void) { marker += 2; return &value; }
+        int count(void) { marker += 4; return sizeof(value); }
+        int main(void) {
+            if (memcpy(&value, &value, 0) != &value) return 1;
+            if (memset(&value, 0, 0) != &value) return 2;
+            if (sizeof(memcpy(destination(), source(), count())) != sizeof(void *)) return 3;
+            if (sizeof(memset(destination(), marker++, count())) != sizeof(void *)) return 4;
+            return marker != 0 || value.left != 1 || value.right != 2;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_preserves_typed_identity_inside_struct_array_fields() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Point { int x; int y; };
+        struct Shape { int tag; struct Point points[2]; };
+        int main(void) {
+            struct Shape shape = {1, {{0x11, 0x22}, {0x33, 0x44}}};
+            int *selected = memchr(&shape, 0x44, sizeof(shape));
+            return selected != &shape.points[1].y || *selected != 0x44;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_preserves_array_field_owner_after_typed_memchr_coercion() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int *saved;
+        struct Buffer { int values[2]; };
+        int main(void) {
+            {
+                struct Buffer local = {{0x11, 0x22}};
+                saved = memchr(&local, 0x22, sizeof(local));
+            }
+            return *saved;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to out-of-scope variable 'local'"
+    );
+}
+
+#[test]
+fn whole_struct_review_detects_overlap_between_object_and_scalar_field() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        struct Pair { int left; int right; };
+        int main(void) {
+            struct Pair value = {1, 2};
+            memcpy(&value, &value.left, sizeof(value.left));
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "overlapping source and destination ranges passed to function 'memcpy'"
+    );
+}
+
+#[test]
+fn whole_struct_review_detects_overlap_between_object_and_scalar_array_field() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        struct Buffer { int items[2]; };
+        int main(void) {
+            struct Buffer value = {{1, 2}};
+            memcpy(&value, value.items, sizeof(value.items));
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "overlapping source and destination ranges passed to function 'memcpy'"
+    );
+}
+
+#[test]
+fn whole_struct_review_preserves_typed_identity_for_arrays_inside_struct_arrays() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Cell { int values[2]; };
+        struct Grid { struct Cell cells[2]; };
+        int main(void) {
+            struct Grid grid = {{{{0x11, 0x22}}, {{0x33, 0x44}}}};
+            int *selected = memchr(&grid, 0x44, sizeof(grid));
+            return selected != &grid.cells[1].values[1] || *selected != 0x44;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_compares_raw_memchr_hits_with_field_addresses() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Packet { char tag; int value; };
+        int main(void) {
+            struct Packet packet = {0x44, 1};
+            void *raw = memchr(&packet, 0x44, sizeof(packet));
+            char *bytes = memchr(&packet, 0x44, sizeof(packet));
+            return raw != &packet.tag || bytes != &packet.tag;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_rejects_scalar_array_storage_selected_through_unions() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        union Storage { char bytes[2]; int scalar; };
+        int main(void) {
+            union Storage storage = {.bytes = {1, 2}};
+            memset(storage.bytes, 0, sizeof(storage.bytes));
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memset' does not yet support union-backed scalar object storage for argument 1"
+    );
+}
+
+#[test]
+fn whole_struct_review_rejects_struct_subobjects_selected_through_unions() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Point { int x; int y; };
+        union Storage { struct Point points[1]; int scalar; };
+        int main(void) {
+            union Storage storage = {.points = {{1, 2}}};
+            memset(storage.points, 0, sizeof(storage.points));
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memset' does not yet support union-backed whole-struct object storage for argument 1"
+    );
+}
+
+#[test]
+fn whole_struct_review_copies_between_embedded_struct_array_elements() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        struct Cell { int x; int y; };
+        struct Grid { int tag; struct Cell cells[2]; };
+        int main(void) {
+            struct Grid left = {1, {{2, 3}, {4, 5}}};
+            struct Grid right = {6, {{7, 8}, {9, 10}}};
+            if (memcpy(left.cells, right.cells, sizeof(left.cells[0])) != left.cells) return 1;
+            return left.cells[0].x != 7 || left.cells[0].y != 8 || left.cells[1].x != 4;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_rejects_nested_struct_array_subobjects_inside_unions() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Point { int x; int y; };
+        struct Bucket { struct Point points[1]; };
+        union Storage { struct Bucket buckets[1]; int scalar; };
+        int main(void) {
+            union Storage storage = {.buckets = {{{{1, 2}}}}};
+            memset(storage.buckets[0].points, 0, sizeof(storage.buckets[0].points));
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memset' does not yet support union-backed whole-struct object storage for argument 1"
+    );
+}
+
+#[test]
+fn whole_struct_review_preserves_typed_identity_at_nested_struct_boundaries() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Inner { int marker; int value; };
+        struct Outer { int prefix; struct Inner inner; };
+        int main(void) {
+            struct Outer outer = {0x11, {0x44, 7}};
+            struct Inner *selected = memchr(&outer, 0x44, sizeof(outer));
+            return selected->marker != 0x44 || selected->value != 7;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_preserves_scalar_identity_through_nested_struct_arrays() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Leaf { int value; };
+        struct Mid { struct Leaf leaves[1]; };
+        struct Top { struct Mid mids[1]; };
+        int main(void) {
+            struct Top top = {{{{{0x44}}}}};
+            int *selected = memchr(&top, 0x44, sizeof(top));
+            return selected != &top.mids[0].leaves[0].value || *selected != 0x44;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_rejects_raw_memchr_writes_to_const_subobjects() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Locked { int mutable; const int fixed; };
+        int main(void) {
+            struct Locked value = {1, 0x44};
+            char *selected = memchr(&value, 0x44, sizeof(value));
+            *selected = 0;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const struct field 'fixed'"
+    );
+}
+
+#[test]
+fn whole_struct_review_rejects_typed_memchr_writes_to_const_struct_subobjects() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Point { int x; int y; };
+        struct Holder { int tag; const struct Point point; };
+        int main(void) {
+            struct Holder value = {1, {0x44, 2}};
+            struct Point *selected = memchr(&value, 0x44, sizeof(value));
+            selected->x = 0;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+}
+
+#[test]
+fn whole_struct_review_rejects_scalar_memchr_writes_through_const_struct_ancestors() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Inner { int scalar; int values[1]; };
+        struct Outer { const struct Inner inner; };
+        int main(void) {
+            struct Outer value = {{0x44, {7}}};
+            int *selected = memchr(&value, 0x44, sizeof(value));
+            *selected = 0;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+}
+
+#[test]
+fn whole_struct_review_rejects_array_memchr_writes_through_const_struct_ancestors() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Inner { int scalar; int values[1]; };
+        struct Outer { const struct Inner inner; };
+        int main(void) {
+            struct Outer value = {{7, {0x44}}};
+            int *selected = memchr(&value, 0x44, sizeof(value));
+            *selected = 0;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot modify read-only array 'values'"
+    );
+}
+
+#[test]
+fn whole_struct_review_preserves_const_arrays_after_nested_struct_copy_initialization() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Inner { int values[1]; };
+        struct Outer { const struct Inner inner; };
+        int main(void) {
+            struct Inner seed = {{0x44}};
+            struct Outer value = {seed};
+            int *selected = memchr(&value, 0x44, sizeof(value));
+            *selected = 0;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot modify read-only array 'values'"
+    );
+}
+
+#[test]
+fn whole_struct_review_preserves_const_arrays_after_nested_braced_copy_initialization() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Leaf { int values[1]; };
+        struct Mid { struct Leaf leaf; };
+        struct Outer { const struct Mid mid; };
+        int main(void) {
+            struct Leaf seed = {{0x44}};
+            struct Outer value = {{seed}};
+            int *selected = memchr(&value, 0x44, sizeof(value));
+            *selected = 0;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot modify read-only array 'values'"
+    );
+}
+
+#[test]
+fn whole_struct_review_preserves_const_arrays_after_positional_struct_array_initialization() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Cell { int values[1]; };
+        struct Grid { const struct Cell cells[1]; };
+        int main(void) {
+            struct Grid value = {{{{0x44}}}};
+            int *selected = memchr(&value, 0x44, sizeof(value));
+            *selected = 0;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot modify read-only array 'values'"
+    );
+}
+
+#[test]
+fn whole_struct_review_preserves_const_arrays_after_designated_struct_array_initialization() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Leaf { int values[1]; };
+        struct Cell { struct Leaf leaf; };
+        struct Grid { const struct Cell cells[1]; };
+        int main(void) {
+            struct Leaf seed = {{0x44}};
+            struct Grid value = {.cells = {[0] = {.leaf = seed}}};
+            int *selected = memchr(&value, 0x44, sizeof(value));
+            *selected = 0;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot modify read-only array 'values'"
+    );
+}
+
+#[test]
+fn whole_struct_review_makes_arrays_mutable_when_copying_from_const_struct_fields() {
+    let program = r#"
+        struct Leaf { int values[1]; };
+        struct Holder { const struct Leaf source; };
+        int main(void) {
+            struct Holder value = {{{1}}};
+            struct Leaf copy = value.source;
+            copy.values[0] = 2;
+            return copy.values[0] != 2 || value.source.values[0] != 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_makes_arrays_mutable_in_nested_fields_copied_from_const_sources() {
+    let program = r#"
+        struct Leaf { int values[1]; };
+        struct Holder { const struct Leaf source; };
+        struct Target { struct Leaf copy; };
+        int main(void) {
+            struct Holder value = {{{1}}};
+            struct Target target = {value.source};
+            target.copy.values[0] = 2;
+            return target.copy.values[0] != 2 || value.source.values[0] != 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_rejects_raw_writes_through_typed_const_struct_subobjects() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        struct Point { int x; int y; };
+        struct Holder { int tag; const struct Point point; };
+        int main(void) {
+            struct Holder value = {1, {0x44, 2}};
+            struct Point *selected = memchr(&value, 0x44, sizeof(value));
+            memset(selected, 0, sizeof(*selected));
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+}
+
+#[test]
+fn whole_struct_review_allows_raw_writes_limited_to_mutable_subobjects() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Mixed { int mutable; const int fixed; };
+        int main(void) {
+            struct Mixed value = {9, 7};
+            if (memset(&value, 0, sizeof(value.mutable)) != &value) return 1;
+            return value.mutable != 0 || value.fixed != 7;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_allows_zero_length_writes_to_const_objects() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Locked { const int fixed; };
+        int main(void) {
+            struct Locked value = {7};
+            if (memset(&value, 0, 0) != &value) return 1;
+            return value.fixed != 7;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_allows_zero_length_writes_at_const_field_interiors() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        struct Locked { int mutable; const int fixed; };
+        int main(void) {
+            struct Locked value = {1, 0x4400};
+            char *selected = memchr(&value, 0x44, sizeof(value));
+            if (memset(selected, 0, 0) != selected) return 1;
+            return value.fixed != 0x4400;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_preserves_typed_identity_at_struct_array_elements() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Point { int x; int y; };
+        struct Grid { int tag; struct Point points[2]; };
+        int main(void) {
+            struct Grid grid = {1, {{2, 3}, {0x44, 5}}};
+            struct Point *selected = memchr(&grid, 0x44, sizeof(grid));
+            return selected != &grid.points[1] || selected->x != 0x44 || selected->y != 5;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_reports_first_const_field_deterministically() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Locked { const int first; const int second; };
+        int main(void) {
+            struct Locked value = {1, 2};
+            memset(&value, 0, sizeof(value));
+            return 0;
+        }
+    "#;
+
+    for _ in 0..32 {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "cannot assign to const struct field 'first'"
+        );
+    }
+}
+
+#[test]
+fn whole_struct_review_preserves_interior_offsets_for_owned_array_identity() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Buffer { int values[2]; };
+        int main(void) {
+            struct Buffer value = {{0x0102030405060708, 0x1112131415161718}};
+            char *hit = memchr(value.values, 0x01, sizeof(value.values));
+            return hit - (char *)value.values != 7;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_detects_overlap_between_owned_array_byte_interiors() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        struct Buffer { int values[2]; };
+        int main(void) {
+            struct Buffer value = {{0x0102030405060708, 0x1112131415161718}};
+            char *left = memchr(value.values, 0x01, sizeof(value.values));
+            char *right = memchr(value.values, 0x18, sizeof(value.values));
+            memcpy(left, right, 2);
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "overlapping source and destination ranges passed to function 'memcpy'"
+    );
+}
+
+#[test]
+fn whole_struct_review_rejects_byte_pointer_arithmetic_beyond_one_past_object() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        struct Pair { int first; int second; };
+        int main(void) {
+            struct Pair value = {1, 2};
+            char *bytes = memchr(&value, 1, sizeof(value));
+            char *beyond = bytes + sizeof(value) + 1;
+            memset(beyond, 0, 0);
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "whole-struct object byte offset 17 out of bounds for object size 16"
+    );
+}
+
+#[test]
+fn whole_struct_review_preserves_raw_byte_equality_with_standalone_two_dimensional_rows() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            int rows[2][2] = {{1, 2}, {0x44, 4}};
+            void *selected = memchr(rows[1], 0x44, sizeof(rows[1]));
+            int (*row)[2] = rows + 1;
+            return selected != row;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_coerces_standalone_two_dimensional_row_matches_to_row_pointers() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            int rows[2][2] = {{1, 2}, {0x44, 4}};
+            int (*selected)[2] = rows;
+            selected = memchr(rows[1], 0x44, sizeof(rows[1]));
+            return selected != rows + 1 || (*selected)[1] != 4;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_coerces_two_dimensional_row_matches_for_assignment() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Grid { int tag; int rows[2][2]; };
+        int main(void) {
+            struct Grid grid = {1, {{2, 3}, {0x44, 5}}};
+            int (*selected)[2] = 0;
+            selected = memchr(&grid, 0x44, sizeof(grid));
+            return selected != grid.rows + 1 || (*selected)[1] != 5;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_coerces_two_dimensional_row_matches_for_assignment_expressions() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Grid { int tag; int rows[2][2]; };
+        int main(void) {
+            struct Grid grid = {1, {{2, 3}, {0x44, 5}}};
+            int (*selected)[2] = 0;
+            return ((selected = memchr(&grid, 0x44, sizeof(grid))) != grid.rows + 1) ||
+                   (*selected)[0] != 0x44 || (*selected)[1] != 5;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_coerces_two_dimensional_row_matches_for_returns() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Grid { int tag; int rows[2][2]; };
+        int (*find_row(struct Grid *grid))[2] {
+            return memchr(grid, 0x44, sizeof(*grid));
+        }
+        int main(void) {
+            struct Grid grid = {1, {{2, 3}, {0x44, 5}}};
+            int (*selected)[2] = find_row(&grid);
+            return selected != grid.rows + 1 || (*selected)[1] != 5;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_coerces_two_dimensional_row_matches_for_parameters() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Grid { int tag; int rows[2][2]; };
+        int read_row(int row[][2]) { return row[0][0] + row[0][1]; }
+        int main(void) {
+            struct Grid grid = {1, {{2, 3}, {0x44, 5}}};
+            return read_row(memchr(&grid, 0x44, sizeof(grid))) != 0x49;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_coerces_two_dimensional_field_row_matches_to_row_pointers() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Grid { int tag; int rows[2][2]; };
+        int main(void) {
+            struct Grid grid = {1, {{2, 3}, {0x44, 5}}};
+            int (*selected)[2] = memchr(&grid, 0x44, sizeof(grid));
+            return selected != grid.rows + 1 || (*selected)[0] != 0x44 ||
+                   (*selected)[1] != 5;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_preserves_byte_pointer_arithmetic_across_struct_array_elements() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Cell { int x; int y; };
+        int main(void) {
+            struct Cell cells[2] = {{0x44, 2}, {0x55, 4}};
+            char *first = memchr(cells, 0x44, sizeof(cells));
+            char *second = memchr(cells, 0x55, sizeof(cells));
+            return first + sizeof(cells[0]) != (char *)&cells[1] ||
+                first + sizeof(cells[0]) + 1 != (char *)&cells[1] + 1 ||
+                second - sizeof(cells[0]) != (char *)&cells[0] ||
+                second - first != sizeof(cells[0]);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_preserves_backward_byte_arithmetic_across_embedded_struct_array_elements() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Cell { int x; int y; };
+        struct Grid { int tag; struct Cell cells[2]; };
+        int main(void) {
+            struct Grid grid = {1, {{0x44, 2}, {0x55, 4}}};
+            char *first = memchr(grid.cells, 0x44, sizeof(grid.cells));
+            char *second = memchr(grid.cells, 0x55, sizeof(grid.cells));
+            return second - sizeof(grid.cells[0]) != first;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_preserves_backward_byte_arithmetic_across_nested_struct_array_elements() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Cell { int x; int y; };
+        struct Group { struct Cell cells[2]; };
+        struct Grid { int tag; struct Group groups[2]; };
+        int main(void) {
+            struct Grid grid = {1, {{{{2, 3}, {4, 5}}}, {{{0x44, 6}, {0x55, 7}}}}};
+            char *first = memchr(grid.groups[1].cells, 0x44, sizeof(grid.groups[1].cells));
+            char *second = memchr(grid.groups[1].cells, 0x55, sizeof(grid.groups[1].cells));
+            return second - sizeof(struct Cell) != first;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_rejects_minimum_byte_pointer_subtraction_without_panicking() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Box { int value; };
+        int main(void) {
+            struct Box box = {1};
+            long long int minimum = -9223372036854775807 - 1;
+            char *byte = memchr(&box, 1, sizeof box);
+            byte - minimum;
+            return 0;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "pointer offset overflow");
+}
+
+#[test]
+fn whole_struct_review_rejects_minimum_byte_pointer_compound_subtraction_without_panicking() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Box { int value; };
+        int main(void) {
+            struct Box box = {1};
+            long long int minimum = -9223372036854775807 - 1;
+            char *byte = memchr(&box, 1, sizeof box);
+            byte -= minimum;
+            return 0;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+
+    assert_eq!(err.to_string(), "pointer offset overflow");
+}
+
+#[test]
+fn whole_struct_review_rejects_minimum_pointer_field_compound_subtraction_on_every_route() {
+    let routes = [
+        "struct Holder holder = {byte}; holder.pointer -= minimum;",
+        "((struct Holder){byte}).pointer -= minimum;",
+        "struct Holder holders[1] = {{byte}}; holders[0].pointer -= minimum;",
+        "struct Group group = {{{byte}}}; group.holders[0].pointer -= minimum;",
+        "struct Holder holder = {byte}; struct Holder *slot = &holder; slot->pointer -= minimum;",
+    ];
+
+    for route in routes {
+        let program = format!(
+            r#"
+                void *memchr(const void *, int, unsigned long int);
+                struct Box {{ int value; }};
+                struct Holder {{ char *pointer; }};
+                struct Group {{ struct Holder holders[1]; }};
+                int main(void) {{
+                    struct Box box = {{1}};
+                    char *byte = memchr(&box, 1, sizeof box);
+                    long long int minimum = -9223372036854775807 - 1;
+                    {route}
+                    return 0;
+                }}
+            "#
+        );
+
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(err.to_string(), "pointer offset overflow", "{route}");
+    }
+}
+
+#[test]
+fn whole_struct_review_rejects_struct_array_pointer_index_overflow_without_panicking() {
+    let routes = [
+        "struct Cell *pointer = cells + 1; pointer + maximum;",
+        "struct Cell *pointer = box.cells + 1; pointer + maximum;",
+        "struct Box *slot = &box; struct Cell *pointer = slot->cells + 1; pointer + maximum;",
+    ];
+
+    for route in routes {
+        let program = format!(
+            r#"
+                struct Cell {{ int value; }};
+                struct Box {{ struct Cell cells[2]; }};
+                int main(void) {{
+                    struct Cell cells[2] = {{{{1}}, {{2}}}};
+                    struct Box box = {{{{{{3}}, {{4}}}}}};
+                    long long int maximum = 9223372036854775807;
+                    {route}
+                    return 0;
+                }}
+            "#
+        );
+
+        let err = interpret(&program).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "array pointer index overflow during pointer arithmetic",
+            "{route}"
+        );
+    }
+}
+
+#[test]
+fn whole_struct_review_rejects_byte_access_to_zero_sized_structs_without_panicking() {
+    let program = r#"
+        struct Empty {};
+        int main(void) {
+            struct Empty empty = {};
+            return *(char *)&empty;
+        }
+    "#;
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "character pointer casts require non-empty whole-struct object storage"
+    );
+}
+
+#[test]
+fn whole_struct_review_canonicalizes_owned_fields_inside_struct_arrays() {
+    let program = r#"
+        void *memchr(const void *, int, unsigned long int);
+        struct Bucket { int pad; int items[2]; };
+        int main(void) {
+            struct Bucket buckets[2] = {{1, {2, 3}}, {4, {0x66, 6}}};
+            char *found = memchr(buckets, 0x66, sizeof(buckets));
+            if (found != (char *)&buckets[1].items[0]) return 1;
+            return found - (char *)buckets != sizeof(buckets[0]) + sizeof(buckets[1].pad);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_rejects_character_views_of_unsupported_nested_layouts() {
+    let programs = [
+        (
+            "struct Bad { union { int left; int right; } value; }; int main(void) { struct Bad bad = {{1}}; return *(char *)&bad; }",
+            "character pointer casts do not support union-backed whole-struct object storage",
+        ),
+        (
+            "struct Bad { int value; int *next; }; int main(void) { int target = 1; struct Bad bad = {2, &target}; return *(char *)&bad; }",
+            "character pointer casts do not support pointer fields in whole-struct object storage",
+        ),
+        (
+            "struct Point { int x; int y; }; union Storage { struct Point points[1]; int scalar; }; int main(void) { union Storage storage = {.points = {{1, 2}}}; return *(char *)&storage.points[0]; }",
+            "character pointer casts do not support union-backed whole-struct object storage",
+        ),
+    ];
+
+    for (program, expected) in programs {
+        let err = interpret(program).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn whole_struct_review_preserves_complete_struct_array_field_ranges() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        struct Cell { int x; int y; };
+        struct Grid { int tag; struct Cell cells[2]; };
+        int main(void) {
+            struct Grid destination = {1, {{2, 3}, {4, 5}}};
+            struct Grid source = {6, {{7, 8}, {9, 10}}};
+            if (memcpy(destination.cells, source.cells, sizeof(source.cells)) !=
+                destination.cells) return 1;
+            return destination.cells[0].x != 7 || destination.cells[0].y != 8 ||
+                   destination.cells[1].x != 9 || destination.cells[1].y != 10;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_struct_review_memmove_supports_overlapping_interior_ranges() {
+    let program = r#"
+        void *memmove(void *, const void *, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        struct Pair { int first; int second; };
+        int main(void) {
+            struct Pair value = {0x1122, 0x3344};
+            char *bytes = memchr(&value, 0x22, sizeof(value));
+            if (memmove(bytes + 1, bytes, sizeof(value) - 1) != bytes + 1) return 1;
+            return value.first != 0x112222 || value.second != 0x334400;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn aggregate_character_compound_literal_memory_results_expire_with_their_scope() {
     let program = r#"
         void *memset(void *, int, unsigned long int);
@@ -3430,10 +4471,6 @@ fn memchr_preserves_character_storage_safety_diagnostics() {
         (
             "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; return memchr(bytes, 0, 2) != 0; }",
             "input argument 1 to function 'memchr' requires 2 bytes, but only 1 bytes are available",
-        ),
-        (
-            "void *memchr(const void *, int, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair value = {0, 0}; return memchr(&value, 0, 1) != 0; }",
-            "function 'memchr' currently supports only scalar object storage for argument 1",
         ),
         (
             "void *memchr(const void *, int, unsigned long int); int main(void) { char bytes[1] = {0}; return memchr(bytes, 0, -1) != 0; }",
@@ -3642,10 +4679,6 @@ fn memset_preserves_character_storage_safety_diagnostics() {
             "destination argument 1 to function 'memset' requires 2 bytes, but only 1 bytes are available",
         ),
         (
-            "void *memset(void *, int, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair destination = {0, 0}; return memset(&destination, 0, 1) != &destination; }",
-            "function 'memset' currently supports only scalar object storage for argument 1",
-        ),
-        (
             "void *memset(void *, int, unsigned long int); int main(void) { char destination[1] = {0}; int value = 1; return memset(destination, &value, 1) != destination; }",
             "function 'memset' requires an integer fill value",
         ),
@@ -3839,14 +4872,6 @@ fn memcmp_requires_its_exact_explicit_prototype_at_runtime_and_in_sizeof() {
 fn memcmp_preserves_character_storage_safety_diagnostics() {
     let cases = [
         (
-            "int memcmp(const void *, const void *, unsigned long int); struct Pair { int left; int right; }; int main(void) { struct Pair left = {0, 0}; char right[1] = {0}; return memcmp(&left, right, 1); }",
-            "function 'memcmp' currently supports only scalar object storage for argument 1",
-        ),
-        (
-            "int memcmp(const void *, const void *, unsigned long int); struct Pair { int left; int right; }; int main(void) { char left[1] = {0}; struct Pair right = {0, 0}; return memcmp(left, &right, 1); }",
-            "function 'memcmp' currently supports only scalar object storage for argument 2",
-        ),
-        (
             "int memcmp(const void *, const void *, unsigned long int); int main(void) { char left[1] = {0}; char right[1] = {0}; return memcmp(left, right, -1); }",
             "function 'memcmp' requires a nonnegative count, got -1",
         ),
@@ -3978,10 +5003,6 @@ fn memmove_preserves_character_storage_safety_diagnostics() {
         (
             "void *memmove(void *, const void *, unsigned long int); int main(void) { char destination[1] = {0}; int count = 1; return memmove(destination, \"x\", &count) != destination; }",
             "function 'memmove' requires an integer count",
-        ),
-        (
-            "void *memmove(void *, const void *, unsigned long int); struct Pair { int left; int right; }; int main(void) { char destination[1] = {0}; struct Pair source = {7, 8}; return memmove(destination, &source, 1) != destination; }",
-            "function 'memmove' currently supports only scalar object storage for argument 2",
         ),
         (
             "void *memmove(void *, const void *, unsigned long int); void *escaped; int main(void) { { char local[1] = {'x'}; escaped = local; } char destination[1] = {0}; return memmove(destination, escaped, 1) != destination; }",
@@ -4183,21 +5204,18 @@ fn memcpy_supports_aggregate_backed_character_scalar_storage() {
 }
 
 #[test]
-fn memcpy_rejects_aggregate_storage_with_context() {
+fn memcpy_supports_whole_struct_source_storage() {
     let program = r#"
         void *memcpy(void *destination, const void *source, unsigned long int count);
         int main(void) {
             char destination[1] = {0};
             struct Pair { int left; int right; } source = {7, 8};
-            memcpy(destination, &source, 1);
-            return 0;
+            if (memcpy(destination, &source, 1) != destination) return 1;
+            return destination[0] != 7;
         }
     "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "function 'memcpy' currently supports only scalar object storage for argument 2"
-    );
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]

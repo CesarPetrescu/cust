@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.27.0 publication on 2026-08-09. Release RED/GREEN, fresh independent complete-diff review, formatting, warning-denied Clippy, all 1,479 local/rebuilt-Docker tests, doc tests, focused version/license/compiler-oracle checks, runtime output `10`, local/Cargo/container version `cust 0.27.0`, and diff checks pass. Release commit `0afffbf5f06528a225d672d886f82af4bdbc3f50` reached exact `origin/main` before annotated tag object `b2b763214212b7bc6b3c678754384a68b97518d7`; local and remote tag refs peel exactly to the release commit. No implementation, Docker, Git, research, or environment blocker is currently known.
+None. Last reviewed during deterministic whole-struct object-byte completion on 2026-08-10. Four independent review rounds found assignment-expression row coercion, runtime-value-based row type inference, standalone-row coercion, later-element backward range, unchecked `i64::MIN` subtraction negation across pointer-field routes, unchecked struct-array index addition, formatting, and stale inventory gaps; each behavioral regression failed before its focused fix. All 56 whole-struct tests and the reconciled 1,534-test local/rebuilt-Docker inventory pass; independent re-review approved the checked-arithmetic closure and runtime output is `10`. No implementation, Docker, Git, research, or environment blocker is active.
 
 ## Blocker template
 

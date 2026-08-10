@@ -17436,6 +17436,23 @@ impl StructFieldValue {
         }
     }
 
+    fn mark_embedded_arrays_read_only(fields: &mut HashMap<String, StructFieldValue>) {
+        for field in fields.values_mut() {
+            match field {
+                StructFieldValue::Array { value, .. } => value.borrow_mut().read_only = true,
+                StructFieldValue::Struct { fields, .. } => {
+                    Self::mark_embedded_arrays_read_only(fields)
+                }
+                StructFieldValue::StructArray { elements, .. } => {
+                    for fields in elements {
+                        Self::mark_embedded_arrays_read_only(fields);
+                    }
+                }
+                StructFieldValue::Scalar { .. } | StructFieldValue::Pointer { .. } => {}
+            }
+        }
+    }
+
     fn deep_clone(&self) -> Self {
         match self {
             StructFieldValue::Scalar {
@@ -17447,28 +17464,46 @@ impl StructFieldValue {
                 ty: *ty,
                 is_const: *is_const,
             },
-            StructFieldValue::Array { value, is_const } => StructFieldValue::Array {
-                value: Rc::new(RefCell::new(value.borrow().clone())),
-                is_const: *is_const,
-            },
+            StructFieldValue::Array { value, is_const } => {
+                let mut value = value.borrow().clone();
+                value.read_only = *is_const;
+                StructFieldValue::Array {
+                    value: Rc::new(RefCell::new(value)),
+                    is_const: *is_const,
+                }
+            }
             StructFieldValue::Struct {
                 type_name,
                 fields,
                 is_const,
-            } => StructFieldValue::Struct {
-                type_name: type_name.clone(),
-                fields: Self::deep_clone_fields(fields),
-                is_const: *is_const,
-            },
+            } => {
+                let mut fields = Self::deep_clone_fields(fields);
+                if *is_const {
+                    Self::mark_embedded_arrays_read_only(&mut fields);
+                }
+                StructFieldValue::Struct {
+                    type_name: type_name.clone(),
+                    fields,
+                    is_const: *is_const,
+                }
+            }
             StructFieldValue::StructArray {
                 type_name,
                 elements,
                 is_const,
-            } => StructFieldValue::StructArray {
-                type_name: type_name.clone(),
-                elements: elements.iter().map(Self::deep_clone_fields).collect(),
-                is_const: *is_const,
-            },
+            } => {
+                let mut elements: Vec<_> = elements.iter().map(Self::deep_clone_fields).collect();
+                if *is_const {
+                    for fields in &mut elements {
+                        Self::mark_embedded_arrays_read_only(fields);
+                    }
+                }
+                StructFieldValue::StructArray {
+                    type_name: type_name.clone(),
+                    elements,
+                    is_const: *is_const,
+                }
+            }
             StructFieldValue::Pointer {
                 pointer,
                 ty,
@@ -17601,11 +17636,7 @@ enum PointerValue {
         fields: Vec<String>,
     },
     StructFieldElementField {
-        scope_id: usize,
-        name: String,
-        element_index: Option<usize>,
-        array_fields: Vec<String>,
-        index: usize,
+        pointer: Box<PointerValue>,
         fields: Vec<String>,
     },
     ArrayBase {
@@ -17643,6 +17674,19 @@ type CheckedArrayPointerIndex = (
     usize,
     Option<ArrayPointerOwner>,
 );
+
+struct WholeStructScalarLocation {
+    fields: Vec<String>,
+    struct_arrays: Vec<(Vec<String>, usize)>,
+    array_index: Option<usize>,
+    ty: CType,
+    within: usize,
+}
+
+struct WholeStructAggregateLocation {
+    fields: Vec<String>,
+    struct_arrays: Vec<(Vec<String>, usize)>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ArrayValue {
@@ -18023,6 +18067,11 @@ impl Interpreter {
                     }
                     let pointer = self.eval_pointer(arg_expr)?;
                     let pointer = self.attach_array_pointer_owner(pointer);
+                    let pointer = self.coerce_object_byte_row_pointer(
+                        *expected_type,
+                        *expected_columns,
+                        pointer,
+                    )?;
                     let PointerValue::Array2DRow {
                         array,
                         source_name,
@@ -19830,9 +19879,8 @@ impl Interpreter {
         let count = Self::validate_memory_operation_count(name, count, "fill")?;
 
         self.ensure_pointer_conversion_preserves_const(false, &arg_exprs[0])?;
-        self.validate_memory_scalar_pointer_argument(name, 1, &destination)?;
-        let current = self.deref_pointer(&destination)?;
-        self.assign_deref_pointer(&destination, current)?;
+        self.validate_memory_object_pointer_argument(name, 1, &destination)?;
+        self.validate_memory_destination_pointer(&destination, count)?;
         self.validate_memory_range(name, "destination", 1, &destination, count)?;
         let value = value.rem_euclid(256);
         self.write_scalar_memory_values(&destination, &vec![value; count])?;
@@ -19881,11 +19929,10 @@ impl Interpreter {
         let count = Self::validate_memory_operation_count(name, count, "copy")?;
 
         self.ensure_pointer_conversion_preserves_const(false, &arg_exprs[0])?;
-        self.validate_memory_scalar_pointer_argument(name, 1, &destination)?;
-        self.validate_memory_scalar_pointer_argument(name, 2, &source)?;
+        self.validate_memory_object_pointer_argument(name, 1, &destination)?;
+        self.validate_memory_object_pointer_argument(name, 2, &source)?;
         let values = self.read_scalar_memory_values(name, "source", 2, &source, count)?;
-        let current = self.deref_pointer(&destination)?;
-        self.assign_deref_pointer(&destination, current)?;
+        self.validate_memory_destination_pointer(&destination, count)?;
         self.validate_memory_range(name, "destination", 1, &destination, count)?;
         if name == "memcpy" {
             self.ensure_memory_ranges_do_not_overlap(name, &destination, count, &source, count)?;
@@ -19922,7 +19969,7 @@ impl Interpreter {
         Ok(count)
     }
 
-    fn validate_memory_scalar_pointer_argument(
+    fn validate_memory_object_pointer_argument(
         &self,
         name: &str,
         argument: usize,
@@ -19934,15 +19981,235 @@ impl Interpreter {
             )));
         }
         let base = Self::object_byte_base(pointer);
-        let Some(PointeeType::Scalar(_)) = self.pointer_value_type(base)? else {
+        match self.pointer_value_type(base)? {
+            Some(PointeeType::Scalar(_)) => {
+                if self.memory_pointer_targets_union_field(pointer)? {
+                    return Err(CustError::new(format!(
+                        "function '{name}' does not yet support union-backed scalar object storage for argument {argument}"
+                    )));
+                }
+            }
+            Some(PointeeType::Struct(type_name)) => {
+                if self.memory_pointer_targets_union_field(pointer)? {
+                    return Err(CustError::new(format!(
+                        "function '{name}' does not yet support union-backed whole-struct object storage for argument {argument}"
+                    )));
+                }
+                self.find_struct_pointer_fields(base)?;
+                self.validate_whole_struct_memory_layout(name, argument, &type_name)?;
+            }
+            Some(PointeeType::Void) | None => {
+                return Err(CustError::new(format!(
+                    "function '{name}' currently supports only scalar or whole-struct object storage for argument {argument}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_whole_struct_memory_layout(
+        &self,
+        name: &str,
+        argument: usize,
+        type_name: &str,
+    ) -> CustResult<()> {
+        let definition = self
+            .struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        if definition.kind == AggregateKind::Union {
             return Err(CustError::new(format!(
-                "function '{name}' currently supports only scalar object storage for argument {argument}"
+                "function '{name}' does not yet support union-backed whole-struct object storage for argument {argument}"
             )));
-        };
-        if self.memory_pointer_targets_union_field(pointer)? {
-            return Err(CustError::new(format!(
-                "function '{name}' does not yet support union-backed scalar object storage for argument {argument}"
-            )));
+        }
+        for field in &definition.fields {
+            match &field.ty {
+                StructFieldType::Struct(nested) | StructFieldType::StructArray(nested, _) => {
+                    self.validate_whole_struct_memory_layout(name, argument, nested)?;
+                }
+                StructFieldType::Pointer(_) => {
+                    return Err(CustError::new(format!(
+                        "function '{name}' does not yet support pointer fields in whole-struct object storage for argument {argument}"
+                    )));
+                }
+                StructFieldType::Scalar(_)
+                | StructFieldType::Array(_, _)
+                | StructFieldType::Array2D(_, _, _) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_whole_struct_character_pointer_layout(&self, type_name: &str) -> CustResult<()> {
+        let definition = self
+            .struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        if definition.size(&self.struct_types)? == 0 {
+            return Err(CustError::new(
+                "character pointer casts require non-empty whole-struct object storage",
+            ));
+        }
+        if definition.kind == AggregateKind::Union {
+            return Err(CustError::new(
+                "character pointer casts do not support union-backed whole-struct object storage",
+            ));
+        }
+        for field in &definition.fields {
+            match &field.ty {
+                StructFieldType::Struct(nested) | StructFieldType::StructArray(nested, _) => {
+                    self.validate_whole_struct_character_pointer_layout(nested)?;
+                }
+                StructFieldType::Pointer(_) => {
+                    return Err(CustError::new(
+                        "character pointer casts do not support pointer fields in whole-struct object storage",
+                    ));
+                }
+                StructFieldType::Scalar(_)
+                | StructFieldType::Array(_, _)
+                | StructFieldType::Array2D(_, _, _) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_memory_destination_pointer(
+        &mut self,
+        pointer: &PointerValue,
+        count: usize,
+    ) -> CustResult<()> {
+        let base = Self::object_byte_base(pointer);
+        match self.pointer_value_type(base)? {
+            Some(PointeeType::Scalar(_)) => {
+                if count == 0 {
+                    return Ok(());
+                }
+                let current = self.deref_pointer(pointer)?;
+                self.assign_deref_pointer(pointer, current)
+            }
+            Some(PointeeType::Struct(_)) => {
+                if count != 0 {
+                    self.ensure_struct_pointer_target_mutable(base)?;
+                }
+                let (type_name, fields) = self.find_struct_pointer_fields(base)?;
+                Self::ensure_whole_struct_range_writable(
+                    &self.struct_types,
+                    &type_name,
+                    fields,
+                    Self::object_byte_offset(pointer),
+                    count,
+                    &[],
+                )
+            }
+            Some(PointeeType::Void) | None => Err(CustError::new(
+                "pointer does not reference writable object storage",
+            )),
+        }
+    }
+
+    fn ensure_whole_struct_range_writable(
+        struct_types: &HashMap<String, StructTypeDef>,
+        type_name: &str,
+        fields: &HashMap<String, StructFieldValue>,
+        start: usize,
+        count: usize,
+        prefix: &[String],
+    ) -> CustResult<()> {
+        if count == 0 {
+            return Ok(());
+        }
+        let end = start
+            .checked_add(count)
+            .ok_or_else(|| CustError::new("whole-struct object byte range overflow"))?;
+        let definition = struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        let mut field_start = 0usize;
+        for field_def in &definition.fields {
+            let field_size = usize::try_from(field_def.ty.size(struct_types)?)
+                .map_err(|_| CustError::new("whole-struct field size overflow"))?;
+            let field_end = field_start
+                .checked_add(field_size)
+                .ok_or_else(|| CustError::new("whole-struct field range overflow"))?;
+            if start >= field_end || end <= field_start {
+                field_start = field_end;
+                continue;
+            }
+            let name = &field_def.name;
+            let field = fields
+                .get(name)
+                .ok_or_else(|| CustError::new(format!("missing struct field '{name}'")))?;
+            let mut path = prefix.to_vec();
+            path.push(name.clone());
+            if field.is_const() {
+                return Err(CustError::new(format!(
+                    "cannot assign to const struct field '{}'",
+                    Self::field_path_label(&path)
+                )));
+            }
+            let relative_start = start.saturating_sub(field_start);
+            let relative_end = end.min(field_end) - field_start;
+            let relative_count = relative_end - relative_start;
+            match (&field_def.ty, field) {
+                (StructFieldType::Struct(nested_type), StructFieldValue::Struct { fields, .. }) => {
+                    Self::ensure_whole_struct_range_writable(
+                        struct_types,
+                        nested_type,
+                        fields,
+                        relative_start,
+                        relative_count,
+                        &path,
+                    )?
+                }
+                (
+                    StructFieldType::StructArray(nested_type, _),
+                    StructFieldValue::StructArray { elements, .. },
+                ) => {
+                    let element_size = usize::try_from(
+                        struct_types
+                            .get(nested_type)
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{nested_type}'"))
+                            })?
+                            .size(struct_types)?,
+                    )
+                    .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                    for (index, element_fields) in elements.iter().enumerate() {
+                        let element_start = index
+                            .checked_mul(element_size)
+                            .ok_or_else(|| CustError::new("whole-struct element range overflow"))?;
+                        let element_end = element_start
+                            .checked_add(element_size)
+                            .ok_or_else(|| CustError::new("whole-struct element range overflow"))?;
+                        if relative_start >= element_end || relative_end <= element_start {
+                            continue;
+                        }
+                        let nested_start = relative_start.saturating_sub(element_start);
+                        let nested_end = relative_end.min(element_end) - element_start;
+                        Self::ensure_whole_struct_range_writable(
+                            struct_types,
+                            nested_type,
+                            element_fields,
+                            nested_start,
+                            nested_end - nested_start,
+                            &path,
+                        )?;
+                    }
+                }
+                (
+                    StructFieldType::Scalar(_)
+                    | StructFieldType::Array(_, _)
+                    | StructFieldType::Array2D(_, _, _)
+                    | StructFieldType::Pointer(_),
+                    _,
+                ) => {}
+                _ => {
+                    return Err(CustError::new(
+                        "internal whole-struct object-byte field layout mismatch",
+                    ));
+                }
+            }
+            field_start = field_end;
         }
         Ok(())
     }
@@ -19972,8 +20239,116 @@ impl Interpreter {
         }
     }
 
+    fn whole_struct_remaining_elements(&self, pointer: &PointerValue) -> CustResult<usize> {
+        match pointer {
+            PointerValue::StructElement {
+                scope_id,
+                name,
+                index,
+            } => {
+                if !self.live_scope_ids.contains(scope_id) {
+                    return Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    )));
+                }
+                let value = self
+                    .scopes
+                    .iter()
+                    .find(|scope| scope.id == *scope_id)
+                    .and_then(|scope| scope.values.get(name))
+                    .or_else(|| self.static_value_by_scope(*scope_id, name));
+                match value {
+                    Some(Value::StructArray { elements, .. }) => {
+                        Ok(elements.len().saturating_sub(*index))
+                    }
+                    _ => Err(CustError::new(format!(
+                        "pointer to out-of-scope variable '{name}'"
+                    ))),
+                }
+            }
+            PointerValue::StructFieldElement {
+                scope_id,
+                name,
+                element_index,
+                fields,
+                index,
+            } => match self.struct_field_by_scope(*scope_id, name, *element_index, fields)? {
+                StructFieldValue::StructArray { elements, .. } => {
+                    Ok(elements.len().saturating_sub(*index))
+                }
+                _ => Err(CustError::new("pointer does not reference a struct array")),
+            },
+            PointerValue::NestedStructArrayElement {
+                pointer,
+                fields,
+                index,
+            } => {
+                let (type_name, field_map) = self.find_struct_pointer_fields(pointer)?;
+                match Self::nested_field_value(&type_name, field_map, fields)?.1 {
+                    StructFieldValue::StructArray { elements, .. } => {
+                        Ok(elements.len().saturating_sub(*index))
+                    }
+                    _ => Err(CustError::new("pointer does not reference a struct array")),
+                }
+            }
+            _ => Ok(1),
+        }
+    }
+
+    fn whole_struct_memory_cell_pointer(
+        &self,
+        pointer: &PointerValue,
+        byte_offset: usize,
+    ) -> CustResult<(PointerValue, String, usize)> {
+        let base = Self::object_byte_base(pointer);
+        let type_name = match self.pointer_value_type(base)? {
+            Some(PointeeType::Struct(type_name)) => type_name,
+            _ => {
+                return Err(CustError::new(
+                    "pointer does not reference whole-struct object storage",
+                ));
+            }
+        };
+        let object_size = usize::try_from(
+            self.struct_types
+                .get(&type_name)
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?
+                .size(&self.struct_types)?,
+        )
+        .map_err(|_| CustError::new("whole-struct object size overflow"))?;
+        let absolute = Self::object_byte_offset(pointer)
+            .checked_add(byte_offset)
+            .ok_or_else(|| CustError::new("whole-struct object byte offset overflow"))?;
+        let element_offset = absolute / object_size;
+        let within = absolute % object_size;
+        let element_pointer = if element_offset == 0 {
+            base.clone()
+        } else {
+            self.offset_array_pointer(
+                base,
+                i64::try_from(element_offset)
+                    .map_err(|_| CustError::new("whole-struct element offset overflow"))?,
+            )?
+        };
+        Ok((element_pointer, type_name, within))
+    }
+
     fn scalar_memory_available_bytes(&self, pointer: &PointerValue) -> CustResult<usize> {
         let base = Self::object_byte_base(pointer);
+        if let Some(PointeeType::Struct(type_name)) = self.pointer_value_type(base)? {
+            self.find_struct_pointer_fields(base)?;
+            let size = self
+                .struct_types
+                .get(&type_name)
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?
+                .size(&self.struct_types)?;
+            let size = usize::try_from(size)
+                .map_err(|_| CustError::new("whole-struct object size overflow"))?;
+            let elements = self.whole_struct_remaining_elements(base)?;
+            return Ok(size
+                .saturating_mul(elements)
+                .saturating_sub(Self::object_byte_offset(pointer)));
+        }
         let cell_size = self.scalar_memory_cell_size(base)?;
         let cells = match base {
             PointerValue::ArrayBase { array, owner, .. } => {
@@ -20060,13 +20435,21 @@ impl Interpreter {
         pointer: &PointerValue,
         byte_offset: usize,
     ) -> CustResult<i64> {
+        let base = Self::object_byte_base(pointer);
+        if matches!(self.pointer_value_type(base)?, Some(PointeeType::Struct(_))) {
+            let (cell_pointer, type_name, within) =
+                self.whole_struct_memory_cell_pointer(pointer, byte_offset)?;
+            let (_, fields) = self.find_struct_pointer_fields(&cell_pointer)?;
+            return Self::read_whole_struct_memory_byte(
+                &self.struct_types,
+                &type_name,
+                fields,
+                within,
+            );
+        }
         let (cell_pointer, ty, within) = self.scalar_memory_cell_pointer(pointer, byte_offset)?;
         let value = self.deref_pointer(&cell_pointer)?;
-        Ok(match ty {
-            CType::Char => value,
-            CType::Bool => i64::from(value != 0),
-            CType::Int => i64::from(value.to_le_bytes()[within]),
-        })
+        Ok(Self::read_scalar_object_byte(value, ty, within))
     }
 
     fn write_scalar_memory_byte(
@@ -20075,17 +20458,224 @@ impl Interpreter {
         byte_offset: usize,
         value: i64,
     ) -> CustResult<()> {
+        let struct_types = self.struct_types.clone();
+        self.write_scalar_memory_byte_with_types(&struct_types, pointer, byte_offset, value)
+    }
+
+    fn write_scalar_memory_byte_with_types(
+        &mut self,
+        struct_types: &HashMap<String, StructTypeDef>,
+        pointer: &PointerValue,
+        byte_offset: usize,
+        value: i64,
+    ) -> CustResult<()> {
+        let base = Self::object_byte_base(pointer);
+        if matches!(self.pointer_value_type(base)?, Some(PointeeType::Struct(_))) {
+            let (cell_pointer, type_name, within) =
+                self.whole_struct_memory_cell_pointer(pointer, byte_offset)?;
+            let (_, fields) = self.find_struct_pointer_fields_mut(&cell_pointer)?;
+            return Self::write_whole_struct_memory_byte(
+                struct_types,
+                &type_name,
+                fields,
+                within,
+                value,
+                &[],
+            );
+        }
         let (cell_pointer, ty, within) = self.scalar_memory_cell_pointer(pointer, byte_offset)?;
-        let value = match ty {
+        let current = self.deref_pointer(&cell_pointer)?;
+        let value = Self::write_scalar_object_byte(current, ty, within, value);
+        self.assign_deref_pointer(&cell_pointer, value)
+    }
+
+    fn read_scalar_object_byte(value: i64, ty: CType, within: usize) -> i64 {
+        match ty {
+            CType::Char => value,
+            CType::Bool => i64::from(value != 0),
+            CType::Int => i64::from(value.to_le_bytes()[within]),
+        }
+    }
+
+    fn write_scalar_object_byte(current: i64, ty: CType, within: usize, value: i64) -> i64 {
+        match ty {
             CType::Char => value,
             CType::Bool => i64::from(value.rem_euclid(256) != 0),
             CType::Int => {
-                let mut bytes = self.deref_pointer(&cell_pointer)?.to_le_bytes();
+                let mut bytes = current.to_le_bytes();
                 bytes[within] = value.rem_euclid(256) as u8;
                 i64::from_le_bytes(bytes)
             }
-        };
-        self.assign_deref_pointer(&cell_pointer, value)
+        }
+    }
+
+    fn read_whole_struct_memory_byte(
+        struct_types: &HashMap<String, StructTypeDef>,
+        type_name: &str,
+        fields: &HashMap<String, StructFieldValue>,
+        mut offset: usize,
+    ) -> CustResult<i64> {
+        let definition = struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        for field_def in &definition.fields {
+            let field_size = usize::try_from(field_def.ty.size(struct_types)?)
+                .map_err(|_| CustError::new("whole-struct field size overflow"))?;
+            if offset >= field_size {
+                offset -= field_size;
+                continue;
+            }
+            let field = fields.get(&field_def.name).ok_or_else(|| {
+                CustError::new(format!("missing struct field '{}'", field_def.name))
+            })?;
+            return match (&field_def.ty, field) {
+                (StructFieldType::Scalar(ty), StructFieldValue::Scalar { value, .. }) => {
+                    Ok(Self::read_scalar_object_byte(*value, *ty, offset))
+                }
+                (
+                    StructFieldType::Array(ty, _) | StructFieldType::Array2D(ty, _, _),
+                    StructFieldValue::Array { value, .. },
+                ) => {
+                    let cell_size = ty.size() as usize;
+                    let array = value.borrow();
+                    let cell = offset / cell_size;
+                    let within = offset % cell_size;
+                    Ok(Self::read_scalar_object_byte(
+                        array.elements[cell],
+                        *ty,
+                        within,
+                    ))
+                }
+                (StructFieldType::Struct(nested_type), StructFieldValue::Struct { fields, .. }) => {
+                    Self::read_whole_struct_memory_byte(struct_types, nested_type, fields, offset)
+                }
+                (
+                    StructFieldType::StructArray(nested_type, _),
+                    StructFieldValue::StructArray { elements, .. },
+                ) => {
+                    let element_size = usize::try_from(
+                        struct_types
+                            .get(nested_type)
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{nested_type}'"))
+                            })?
+                            .size(struct_types)?,
+                    )
+                    .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                    let element = offset / element_size;
+                    let within = offset % element_size;
+                    Self::read_whole_struct_memory_byte(
+                        struct_types,
+                        nested_type,
+                        &elements[element],
+                        within,
+                    )
+                }
+                (StructFieldType::Pointer(_), StructFieldValue::Pointer { .. }) => Err(
+                    CustError::new("whole-struct object bytes do not support pointer fields"),
+                ),
+                _ => Err(CustError::new(
+                    "internal whole-struct object-byte field layout mismatch",
+                )),
+            };
+        }
+        Err(CustError::new(
+            "whole-struct object byte offset out of bounds",
+        ))
+    }
+
+    fn write_whole_struct_memory_byte(
+        struct_types: &HashMap<String, StructTypeDef>,
+        type_name: &str,
+        fields: &mut HashMap<String, StructFieldValue>,
+        mut offset: usize,
+        value: i64,
+        prefix: &[String],
+    ) -> CustResult<()> {
+        let definition = struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        for field_def in &definition.fields {
+            let field_size = usize::try_from(field_def.ty.size(struct_types)?)
+                .map_err(|_| CustError::new("whole-struct field size overflow"))?;
+            if offset >= field_size {
+                offset -= field_size;
+                continue;
+            }
+            let field = fields.get_mut(&field_def.name).ok_or_else(|| {
+                CustError::new(format!("missing struct field '{}'", field_def.name))
+            })?;
+            let mut path = prefix.to_vec();
+            path.push(field_def.name.clone());
+            if field.is_const() {
+                return Err(CustError::new(format!(
+                    "cannot assign to const struct field '{}'",
+                    Self::field_path_label(&path)
+                )));
+            }
+            return match (&field_def.ty, field) {
+                (StructFieldType::Scalar(ty), StructFieldValue::Scalar { value: current, .. }) => {
+                    *current = Self::write_scalar_object_byte(*current, *ty, offset, value);
+                    Ok(())
+                }
+                (
+                    StructFieldType::Array(ty, _) | StructFieldType::Array2D(ty, _, _),
+                    StructFieldValue::Array { value: array, .. },
+                ) => {
+                    let cell_size = ty.size() as usize;
+                    let cell = offset / cell_size;
+                    let within = offset % cell_size;
+                    let mut array = array.borrow_mut();
+                    let current = array.elements[cell];
+                    array.elements[cell] =
+                        Self::write_scalar_object_byte(current, *ty, within, value);
+                    Ok(())
+                }
+                (StructFieldType::Struct(nested_type), StructFieldValue::Struct { fields, .. }) => {
+                    Self::write_whole_struct_memory_byte(
+                        struct_types,
+                        nested_type,
+                        fields,
+                        offset,
+                        value,
+                        &path,
+                    )
+                }
+                (
+                    StructFieldType::StructArray(nested_type, _),
+                    StructFieldValue::StructArray { elements, .. },
+                ) => {
+                    let element_size = usize::try_from(
+                        struct_types
+                            .get(nested_type)
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{nested_type}'"))
+                            })?
+                            .size(struct_types)?,
+                    )
+                    .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                    let element = offset / element_size;
+                    let within = offset % element_size;
+                    Self::write_whole_struct_memory_byte(
+                        struct_types,
+                        nested_type,
+                        &mut elements[element],
+                        within,
+                        value,
+                        &path,
+                    )
+                }
+                (StructFieldType::Pointer(_), StructFieldValue::Pointer { .. }) => Err(
+                    CustError::new("whole-struct object bytes do not support pointer fields"),
+                ),
+                _ => Err(CustError::new(
+                    "internal whole-struct object-byte field layout mismatch",
+                )),
+            };
+        }
+        Err(CustError::new(
+            "whole-struct object byte offset out of bounds",
+        ))
     }
 
     fn read_scalar_memory_values(
@@ -20107,8 +20697,9 @@ impl Interpreter {
         pointer: &PointerValue,
         values: &[i64],
     ) -> CustResult<()> {
+        let struct_types = self.struct_types.clone();
         for (offset, value) in values.iter().copied().enumerate() {
-            self.write_scalar_memory_byte(pointer, offset, value)?;
+            self.write_scalar_memory_byte_with_types(&struct_types, pointer, offset, value)?;
         }
         Ok(())
     }
@@ -20116,6 +20707,186 @@ impl Interpreter {
     fn memory_pointer_position(&self, pointer: &PointerValue) -> CustResult<(PointerValue, usize)> {
         let base = Self::object_byte_base(pointer);
         let byte_offset = Self::object_byte_offset(pointer);
+        match base {
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => {
+                let (identity, type_name, root_offset) =
+                    self.whole_struct_root_identity(*scope_id, name, *element_index)?;
+                let (field_offset, _) =
+                    self.whole_struct_field_offset_and_type(&type_name, fields)?;
+                return Ok((
+                    identity,
+                    root_offset
+                        .saturating_add(field_offset)
+                        .saturating_add(byte_offset),
+                ));
+            }
+            PointerValue::StructFieldElement {
+                scope_id,
+                name,
+                element_index,
+                fields,
+                index,
+            } => {
+                let (identity, type_name, root_offset) =
+                    self.whole_struct_root_identity(*scope_id, name, *element_index)?;
+                let (field_offset, field_type) =
+                    self.whole_struct_field_offset_and_type(&type_name, fields)?;
+                let cell_size = match field_type {
+                    StructFieldType::Array(ty, _) | StructFieldType::Array2D(ty, _, _) => {
+                        ty.size() as usize
+                    }
+                    StructFieldType::StructArray(element_type, _) => usize::try_from(
+                        self.struct_types
+                            .get(&element_type)
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{element_type}'"))
+                            })?
+                            .size(&self.struct_types)?,
+                    )
+                    .map_err(|_| CustError::new("whole-struct element size overflow"))?,
+                    _ => {
+                        return Err(CustError::new(
+                            "pointer does not reference an array field element",
+                        ));
+                    }
+                };
+                return Ok((
+                    identity,
+                    root_offset
+                        .saturating_add(field_offset)
+                        .saturating_add(index.saturating_mul(cell_size))
+                        .saturating_add(byte_offset),
+                ));
+            }
+            PointerValue::StructElement {
+                scope_id,
+                name,
+                index,
+            } => {
+                let (identity, _, root_offset) =
+                    self.whole_struct_root_identity(*scope_id, name, Some(*index))?;
+                return Ok((identity, root_offset.saturating_add(byte_offset)));
+            }
+            PointerValue::NestedStructArrayElement {
+                pointer,
+                fields,
+                index,
+            } => {
+                let (identity, pointer_offset) = self.memory_pointer_position(pointer)?;
+                let (type_name, _) = self.find_struct_pointer_fields(pointer)?;
+                let (array_offset, array_type) =
+                    self.whole_struct_field_offset_and_type(&type_name, fields)?;
+                let StructFieldType::StructArray(element_type, _) = array_type else {
+                    return Err(CustError::new(
+                        "pointer does not reference an aggregate array field element",
+                    ));
+                };
+                let element_size = usize::try_from(
+                    self.struct_types
+                        .get(&element_type)
+                        .ok_or_else(|| {
+                            CustError::new(format!("undefined struct type '{element_type}'"))
+                        })?
+                        .size(&self.struct_types)?,
+                )
+                .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                return Ok((
+                    identity,
+                    pointer_offset
+                        .saturating_add(array_offset)
+                        .saturating_add(index.saturating_mul(element_size))
+                        .saturating_add(byte_offset),
+                ));
+            }
+            PointerValue::StructFieldElementField { pointer, fields } => {
+                let (identity, pointer_offset) = self.memory_pointer_position(pointer)?;
+                let (type_name, _) = self.find_struct_pointer_fields(pointer)?;
+                let (field_offset, _) =
+                    self.whole_struct_field_offset_and_type(&type_name, fields)?;
+                return Ok((
+                    identity,
+                    pointer_offset
+                        .saturating_add(field_offset)
+                        .saturating_add(byte_offset),
+                ));
+            }
+            PointerValue::ArrayBase { array, owner, .. } => {
+                let owner = owner
+                    .clone()
+                    .or_else(|| self.find_array_pointer_owner(array));
+                let position = match owner {
+                    Some(owner) => self.whole_struct_owned_array_position(&owner, array, 0)?,
+                    None => None,
+                };
+                if let Some((identity, position)) = position {
+                    return Ok((identity, position.saturating_add(byte_offset)));
+                }
+            }
+            PointerValue::ArrayElement {
+                array,
+                index,
+                owner,
+                ..
+            } => {
+                let owner = owner
+                    .clone()
+                    .or_else(|| self.find_array_pointer_owner(array));
+                let position = match owner {
+                    Some(owner) => self.whole_struct_owned_array_position(&owner, array, *index)?,
+                    None => None,
+                };
+                if let Some((identity, position)) = position {
+                    return Ok((identity, position.saturating_add(byte_offset)));
+                }
+            }
+            PointerValue::Array2DRow {
+                array, row, owner, ..
+            } => {
+                let owner = owner
+                    .clone()
+                    .or_else(|| self.find_array_pointer_owner(array));
+                let columns = array
+                    .borrow()
+                    .dimensions
+                    .map(|(_, columns)| columns)
+                    .ok_or_else(|| {
+                        CustError::new("row pointer does not reference a two-dimensional array")
+                    })?;
+                if let Some(owner) = owner
+                    && let Some((identity, position)) = self.whole_struct_owned_array_position(
+                        &owner,
+                        array,
+                        row.saturating_mul(columns),
+                    )?
+                {
+                    return Ok((identity, position.saturating_add(byte_offset)));
+                }
+                let cell_size = array.borrow().elem_type.size() as usize;
+                return Ok((
+                    PointerValue::ArrayBase {
+                        array: Rc::clone(array),
+                        source_name: None,
+                        owner: None,
+                    },
+                    row.saturating_mul(columns)
+                        .saturating_mul(cell_size)
+                        .saturating_add(byte_offset),
+                ));
+            }
+            PointerValue::Null
+            | PointerValue::Scalar { .. }
+            | PointerValue::Struct { .. }
+            | PointerValue::ObjectByte { .. } => {}
+        }
+        if matches!(self.pointer_value_type(base)?, Some(PointeeType::Struct(_))) {
+            self.find_struct_pointer_fields(base)?;
+            return Ok((base.clone(), byte_offset));
+        }
         let cell_size = self.scalar_memory_cell_size(base)?;
         let (identity, cell_index) = match base {
             PointerValue::ArrayBase { array, .. } => (
@@ -20137,6 +20908,267 @@ impl Interpreter {
             pointer => (pointer.clone(), 0),
         };
         Ok((identity, cell_index.saturating_mul(cell_size) + byte_offset))
+    }
+
+    fn whole_struct_owned_array_position(
+        &self,
+        owner: &ArrayPointerOwner,
+        array: &Rc<RefCell<ArrayValue>>,
+        cell_index: usize,
+    ) -> CustResult<Option<(PointerValue, usize)>> {
+        if !self.live_scope_ids.contains(&owner.scope_id) {
+            return Err(CustError::new(format!(
+                "pointer to out-of-scope variable '{}'",
+                owner.name
+            )));
+        }
+        let value = self
+            .scopes
+            .iter()
+            .find(|scope| scope.id == owner.scope_id)
+            .and_then(|scope| scope.values.get(&owner.name))
+            .or_else(|| self.static_value_by_scope(owner.scope_id, &owner.name));
+        match value {
+            Some(Value::Struct { type_name, fields }) => {
+                let Some((field_offset, ty)) = Self::whole_struct_find_array_offset(
+                    &self.struct_types,
+                    type_name,
+                    fields,
+                    array,
+                )?
+                else {
+                    return Ok(None);
+                };
+                Ok(Some((
+                    PointerValue::Struct {
+                        scope_id: owner.scope_id,
+                        name: owner.name.clone(),
+                    },
+                    field_offset.saturating_add(cell_index.saturating_mul(ty.size() as usize)),
+                )))
+            }
+            Some(Value::StructArray {
+                type_name,
+                elements,
+                ..
+            }) => {
+                for (index, fields) in elements.iter().enumerate() {
+                    if let Some((field_offset, ty)) = Self::whole_struct_find_array_offset(
+                        &self.struct_types,
+                        type_name,
+                        fields,
+                        array,
+                    )? {
+                        let element_size = usize::try_from(
+                            self.struct_types
+                                .get(type_name)
+                                .ok_or_else(|| {
+                                    CustError::new(format!("undefined struct type '{type_name}'"))
+                                })?
+                                .size(&self.struct_types)?,
+                        )
+                        .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                        let element_offset = index
+                            .checked_mul(element_size)
+                            .and_then(|offset| offset.checked_add(field_offset))
+                            .and_then(|offset| {
+                                cell_index
+                                    .checked_mul(ty.size() as usize)
+                                    .and_then(|cell_offset| offset.checked_add(cell_offset))
+                            })
+                            .ok_or_else(|| {
+                                CustError::new("whole-struct owned array position overflow")
+                            })?;
+                        return Ok(Some((
+                            PointerValue::StructElement {
+                                scope_id: owner.scope_id,
+                                name: owner.name.clone(),
+                                index: 0,
+                            },
+                            element_offset,
+                        )));
+                    }
+                }
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn whole_struct_find_array_offset(
+        struct_types: &HashMap<String, StructTypeDef>,
+        type_name: &str,
+        fields: &HashMap<String, StructFieldValue>,
+        target: &Rc<RefCell<ArrayValue>>,
+    ) -> CustResult<Option<(usize, CType)>> {
+        let definition = struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        let mut offset = 0usize;
+        for field in &definition.fields {
+            let value = fields.get(&field.name).ok_or_else(|| {
+                CustError::new(format!("missing field '{}' in aggregate value", field.name))
+            })?;
+            match (&field.ty, value) {
+                (
+                    StructFieldType::Array(ty, _) | StructFieldType::Array2D(ty, _, _),
+                    StructFieldValue::Array { value, .. },
+                ) if Rc::ptr_eq(value, target) => return Ok(Some((offset, *ty))),
+                (
+                    StructFieldType::Struct(nested_type),
+                    StructFieldValue::Struct {
+                        fields: nested_fields,
+                        ..
+                    },
+                ) => {
+                    if let Some((nested_offset, ty)) = Self::whole_struct_find_array_offset(
+                        struct_types,
+                        nested_type,
+                        nested_fields,
+                        target,
+                    )? {
+                        return Ok(Some((offset.saturating_add(nested_offset), ty)));
+                    }
+                }
+                (
+                    StructFieldType::StructArray(nested_type, _),
+                    StructFieldValue::StructArray { elements, .. },
+                ) => {
+                    let element_size = usize::try_from(
+                        struct_types
+                            .get(nested_type)
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{nested_type}'"))
+                            })?
+                            .size(struct_types)?,
+                    )
+                    .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                    for (index, element_fields) in elements.iter().enumerate() {
+                        if let Some((nested_offset, ty)) = Self::whole_struct_find_array_offset(
+                            struct_types,
+                            nested_type,
+                            element_fields,
+                            target,
+                        )? {
+                            return Ok(Some((
+                                offset
+                                    .saturating_add(index.saturating_mul(element_size))
+                                    .saturating_add(nested_offset),
+                                ty,
+                            )));
+                        }
+                    }
+                }
+                _ => {}
+            }
+            offset = offset.saturating_add(
+                usize::try_from(field.ty.size(struct_types)?)
+                    .map_err(|_| CustError::new("whole-struct field size overflow"))?,
+            );
+        }
+        Ok(None)
+    }
+
+    fn whole_struct_root_identity(
+        &self,
+        scope_id: usize,
+        name: &str,
+        element_index: Option<usize>,
+    ) -> CustResult<(PointerValue, String, usize)> {
+        if !self.live_scope_ids.contains(&scope_id) {
+            return Err(CustError::new(format!(
+                "pointer to out-of-scope variable '{name}'"
+            )));
+        }
+        let value = self
+            .scopes
+            .iter()
+            .find(|scope| scope.id == scope_id)
+            .and_then(|scope| scope.values.get(name))
+            .or_else(|| self.static_value_by_scope(scope_id, name));
+        match (value, element_index) {
+            (Some(Value::Struct { type_name, .. }), None) => Ok((
+                PointerValue::Struct {
+                    scope_id,
+                    name: name.to_string(),
+                },
+                type_name.clone(),
+                0,
+            )),
+            (
+                Some(Value::StructArray {
+                    type_name,
+                    elements,
+                    ..
+                }),
+                Some(index),
+            ) if index < elements.len() => {
+                let element_size = usize::try_from(
+                    self.struct_types
+                        .get(type_name)
+                        .ok_or_else(|| {
+                            CustError::new(format!("undefined struct type '{type_name}'"))
+                        })?
+                        .size(&self.struct_types)?,
+                )
+                .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                Ok((
+                    PointerValue::StructElement {
+                        scope_id,
+                        name: name.to_string(),
+                        index: 0,
+                    },
+                    type_name.clone(),
+                    index.saturating_mul(element_size),
+                ))
+            }
+            _ => Err(CustError::new(format!(
+                "pointer to out-of-scope variable '{name}'"
+            ))),
+        }
+    }
+
+    fn whole_struct_field_offset_and_type(
+        &self,
+        type_name: &str,
+        path: &[String],
+    ) -> CustResult<(usize, StructFieldType)> {
+        let mut current_type = type_name;
+        let mut offset = 0usize;
+        for (path_index, selected_name) in path.iter().enumerate() {
+            let definition = self
+                .struct_types
+                .get(current_type)
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{current_type}'")))?;
+            let mut selected = None;
+            for field in &definition.fields {
+                if &field.name == selected_name {
+                    selected = Some(field.ty.clone());
+                    break;
+                }
+                offset = offset.saturating_add(
+                    usize::try_from(field.ty.size(&self.struct_types)?)
+                        .map_err(|_| CustError::new("whole-struct field size overflow"))?,
+                );
+            }
+            let field_type = selected.ok_or_else(|| {
+                CustError::new(format!("unknown field '{selected_name}' in struct"))
+            })?;
+            if path_index + 1 == path.len() {
+                return Ok((offset, field_type));
+            }
+            let StructFieldType::Struct(nested_type) = field_type else {
+                return Err(CustError::new(format!(
+                    "field '{selected_name}' is not a nested struct"
+                )));
+            };
+            current_type = self
+                .struct_types
+                .get_key_value(&nested_type)
+                .map(|(name, _)| name.as_str())
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{nested_type}'")))?;
+        }
+        Err(CustError::new("empty whole-struct field path"))
     }
 
     fn ensure_memory_ranges_do_not_overlap(
@@ -20170,9 +21202,17 @@ impl Interpreter {
         offset: usize,
     ) -> CustResult<PointerValue> {
         let base = Self::object_byte_base(pointer);
+        if matches!(self.pointer_value_type(base)?, Some(PointeeType::Struct(_))) {
+            let (cell_pointer, _, within) =
+                self.whole_struct_memory_cell_pointer(pointer, offset)?;
+            return Ok(PointerValue::ObjectByte {
+                base: Box::new(cell_pointer),
+                offset: within,
+            });
+        }
         let absolute = Self::object_byte_offset(pointer)
             .checked_add(offset)
-            .ok_or_else(|| CustError::new("scalar object byte offset overflow"))?;
+            .ok_or_else(|| CustError::new("object byte offset overflow"))?;
         let cell_size = self.scalar_memory_cell_size(base)?;
         let cell_offset = absolute / cell_size;
         let within = absolute % cell_size;
@@ -20208,30 +21248,30 @@ impl Interpreter {
             } => {
                 self.struct_field_path_has_union_container(*scope_id, name, *element_index, fields)
             }
-            PointerValue::StructFieldElementField {
+            PointerValue::StructFieldElementField { pointer, fields } => {
+                if self.memory_pointer_targets_union_field(pointer)? {
+                    return Ok(true);
+                }
+                let (type_name, pointer_fields) = self.find_struct_pointer_fields(pointer)?;
+                self.aggregate_field_path_has_union_container(&type_name, pointer_fields, fields)
+            }
+            PointerValue::StructFieldElement {
                 scope_id,
                 name,
                 element_index,
-                array_fields,
-                index,
                 fields,
+                ..
             } => {
-                if self.struct_field_path_has_union_container(
-                    *scope_id,
-                    name,
-                    *element_index,
-                    array_fields,
-                )? {
+                self.struct_field_path_has_union_container(*scope_id, name, *element_index, fields)
+            }
+            PointerValue::NestedStructArrayElement {
+                pointer, fields, ..
+            } => {
+                if self.memory_pointer_targets_union_field(pointer)? {
                     return Ok(true);
                 }
-                let (element_type, element_fields) = self.struct_field_array_element_fields(
-                    *scope_id,
-                    name,
-                    *element_index,
-                    array_fields,
-                    *index,
-                )?;
-                self.aggregate_field_path_has_union_container(&element_type, element_fields, fields)
+                let (type_name, pointer_fields) = self.find_struct_pointer_fields(pointer)?;
+                self.aggregate_field_path_has_union_container(&type_name, pointer_fields, fields)
             }
             PointerValue::ArrayBase { array, .. } | PointerValue::ArrayElement { array, .. } => {
                 Ok(self.array_pointer_targets_union_field(array))
@@ -20417,7 +21457,7 @@ impl Interpreter {
         let count = self.eval_scalar_conversion(CType::Int, count_expr)?;
         let count = Self::validate_memory_operation_count(name, count, "search")?;
 
-        self.validate_memory_scalar_pointer_argument(name, 1, &source)?;
+        self.validate_memory_object_pointer_argument(name, 1, &source)?;
         let values = self.read_scalar_memory_values(name, "input", 1, &source, count)?;
         let matched_offset = values
             .into_iter()
@@ -20499,8 +21539,8 @@ impl Interpreter {
         let count = self.eval_scalar_conversion(CType::Int, count_expr)?;
         let count = Self::validate_memory_operation_count(name, count, "comparison")?;
 
-        self.validate_memory_scalar_pointer_argument(name, 1, &left)?;
-        self.validate_memory_scalar_pointer_argument(name, 2, &right)?;
+        self.validate_memory_object_pointer_argument(name, 1, &left)?;
+        self.validate_memory_object_pointer_argument(name, 2, &right)?;
         let left = self.read_scalar_memory_values(name, "input", 1, &left, count)?;
         let right = self.read_scalar_memory_values(name, "input", 2, &right, count)?;
         let result = left
@@ -23963,22 +25003,9 @@ impl Interpreter {
                     _ => Ok(None),
                 }
             }
-            PointerValue::StructFieldElementField {
-                scope_id,
-                name,
-                element_index,
-                array_fields,
-                index,
-                fields,
-            } => {
-                let (type_name, element_fields) = self.struct_field_array_element_fields(
-                    *scope_id,
-                    name,
-                    *element_index,
-                    array_fields,
-                    *index,
-                )?;
-                match Self::nested_field_value(&type_name, element_fields, fields)?.1 {
+            PointerValue::StructFieldElementField { pointer, fields } => {
+                let (type_name, pointer_fields) = self.find_struct_pointer_fields(pointer)?;
+                match Self::nested_field_value(&type_name, pointer_fields, fields)?.1 {
                     StructFieldValue::Scalar { ty, .. } => Ok(Some(PointeeType::Scalar(*ty))),
                     StructFieldValue::Array { value, .. } => {
                         Ok(Some(PointeeType::Scalar(value.borrow().elem_type)))
@@ -24014,26 +25041,472 @@ impl Interpreter {
     }
 
     fn coerce_object_byte_pointer(
-        &self,
+        &mut self,
         expected: &PointeeType,
         pointer: PointerValue,
     ) -> CustResult<PointerValue> {
         match pointer {
-            PointerValue::ObjectByte { base, offset }
-                if offset == 0
-                    && !matches!(
-                        expected,
-                        PointeeType::Void | PointeeType::Scalar(CType::Char)
-                    ) =>
-            {
-                if self.pointer_value_type(&base)?.as_ref() == Some(expected) {
-                    Ok(*base)
-                } else {
-                    Ok(PointerValue::ObjectByte { base, offset })
+            PointerValue::ObjectByte { base, offset } => {
+                if matches!(
+                    expected,
+                    PointeeType::Void | PointeeType::Scalar(CType::Char)
+                ) {
+                    return Ok(PointerValue::ObjectByte { base, offset });
                 }
+                if offset == 0 && self.pointer_value_type(&base)?.as_ref() == Some(expected) {
+                    return Ok(*base);
+                }
+                if let (Some(PointeeType::Struct(type_name)), PointeeType::Struct(expected_type)) =
+                    (self.pointer_value_type(&base)?, expected)
+                    && let Some(location) = Self::whole_struct_aggregate_path(
+                        &self.struct_types,
+                        &type_name,
+                        offset,
+                        expected_type,
+                        Vec::new(),
+                    )?
+                {
+                    return self.whole_struct_pointer_from_location(
+                        base.as_ref(),
+                        location.struct_arrays,
+                        &location.fields,
+                    );
+                }
+                if let (Some(PointeeType::Struct(type_name)), PointeeType::Scalar(expected_ty)) =
+                    (self.pointer_value_type(&base)?, expected)
+                {
+                    let (_, fields) = self.find_struct_pointer_fields(&base)?;
+                    if let Some(pointer) = Self::whole_struct_aligned_array_pointer(
+                        &self.struct_types,
+                        &type_name,
+                        fields,
+                        offset,
+                        *expected_ty,
+                    )? {
+                        return Ok(self.attach_array_pointer_owner(pointer));
+                    }
+                }
+                if let (Some(PointeeType::Struct(type_name)), PointeeType::Scalar(expected_ty)) =
+                    (self.pointer_value_type(&base)?, expected)
+                    && let Some(location) = Self::whole_struct_scalar_location(
+                        &self.struct_types,
+                        &type_name,
+                        offset,
+                        Vec::new(),
+                    )?
+                    && location.within == 0
+                    && location.ty == *expected_ty
+                {
+                    let mut field_pointer = self.whole_struct_pointer_from_location(
+                        base.as_ref(),
+                        location.struct_arrays,
+                        &location.fields,
+                    )?;
+                    if let Some(index) = location.array_index {
+                        field_pointer = self.offset_array_pointer(
+                            &field_pointer,
+                            i64::try_from(index)
+                                .map_err(|_| CustError::new("whole-struct field index overflow"))?,
+                        )?;
+                    }
+                    return Ok(self.attach_array_pointer_owner(field_pointer));
+                }
+                Ok(PointerValue::ObjectByte { base, offset })
             }
             pointer => Ok(pointer),
         }
+    }
+
+    fn coerce_object_byte_row_pointer(
+        &self,
+        expected_type: CType,
+        expected_columns: usize,
+        pointer: PointerValue,
+    ) -> CustResult<PointerValue> {
+        let PointerValue::ObjectByte { base, offset } = pointer else {
+            return Ok(pointer);
+        };
+        let standalone_row = match Self::object_byte_base(base.as_ref()) {
+            PointerValue::ArrayBase {
+                array,
+                source_name,
+                owner,
+            } => Some((Rc::clone(array), source_name.clone(), owner.clone(), 0usize)),
+            PointerValue::ArrayElement {
+                array,
+                source_name,
+                index,
+                owner,
+            } => Some((Rc::clone(array), source_name.clone(), owner.clone(), *index)),
+            PointerValue::Array2DRow {
+                array,
+                source_name,
+                row,
+                owner,
+            } => {
+                let columns = array
+                    .borrow()
+                    .dimensions
+                    .map(|(_, columns)| columns)
+                    .ok_or_else(|| {
+                        CustError::new("row pointer does not reference a two-dimensional array")
+                    })?;
+                let index = row
+                    .checked_mul(columns)
+                    .ok_or_else(|| CustError::new("two-dimensional array row index overflow"))?;
+                Some((Rc::clone(array), source_name.clone(), owner.clone(), index))
+            }
+            _ => None,
+        };
+        if let Some((array, source_name, owner, cell_index)) = standalone_row {
+            let (actual_type, rows, columns) = {
+                let array = array.borrow();
+                let Some((rows, columns)) = array.dimensions else {
+                    return Ok(PointerValue::ObjectByte { base, offset });
+                };
+                (array.elem_type, rows, columns)
+            };
+            if actual_type == expected_type && columns == expected_columns {
+                let cell_size = expected_type.size() as usize;
+                let byte_offset = Self::object_byte_offset(base.as_ref())
+                    .checked_add(offset)
+                    .and_then(|offset| {
+                        cell_index
+                            .checked_mul(cell_size)
+                            .and_then(|start| start.checked_add(offset))
+                    })
+                    .ok_or_else(|| {
+                        CustError::new("two-dimensional array row byte offset overflow")
+                    })?;
+                let row_size = columns
+                    .checked_mul(cell_size)
+                    .ok_or_else(|| CustError::new("two-dimensional array row size overflow"))?;
+                if row_size != 0 && byte_offset.is_multiple_of(row_size) {
+                    let row = byte_offset / row_size;
+                    if row <= rows {
+                        return Ok(PointerValue::Array2DRow {
+                            array,
+                            source_name,
+                            row,
+                            owner,
+                        });
+                    }
+                }
+            }
+        }
+        let Some(PointeeType::Struct(type_name)) = self.pointer_value_type(&base)? else {
+            return Ok(PointerValue::ObjectByte { base, offset });
+        };
+        let (_, fields) = self.find_struct_pointer_fields(&base)?;
+        let Some(pointer) = Self::whole_struct_aligned_array_pointer(
+            &self.struct_types,
+            &type_name,
+            fields,
+            offset,
+            expected_type,
+        )?
+        else {
+            return Ok(PointerValue::ObjectByte { base, offset });
+        };
+        let pointer = self.attach_array_pointer_owner(pointer);
+        let PointerValue::ArrayElement {
+            array,
+            source_name,
+            index,
+            owner,
+        } = pointer
+        else {
+            return Ok(PointerValue::ObjectByte { base, offset });
+        };
+        let Some((_, columns)) = array.borrow().dimensions else {
+            return Ok(PointerValue::ObjectByte { base, offset });
+        };
+        if columns != expected_columns || !index.is_multiple_of(columns) {
+            return Ok(PointerValue::ObjectByte { base, offset });
+        }
+        Ok(PointerValue::Array2DRow {
+            array,
+            source_name,
+            row: index / columns,
+            owner,
+        })
+    }
+
+    fn whole_struct_pointer_from_location(
+        &mut self,
+        base: &PointerValue,
+        struct_arrays: Vec<(Vec<String>, usize)>,
+        fields: &[String],
+    ) -> CustResult<PointerValue> {
+        let mut pointer = base.clone();
+        for (array_fields, index) in struct_arrays {
+            pointer = match &pointer {
+                PointerValue::Struct { scope_id, name } => PointerValue::StructFieldElement {
+                    scope_id: *scope_id,
+                    name: name.clone(),
+                    element_index: None,
+                    fields: array_fields,
+                    index,
+                },
+                PointerValue::StructElement {
+                    scope_id,
+                    name,
+                    index: element_index,
+                } => PointerValue::StructFieldElement {
+                    scope_id: *scope_id,
+                    name: name.clone(),
+                    element_index: Some(*element_index),
+                    fields: array_fields,
+                    index,
+                },
+                PointerValue::StructField {
+                    scope_id,
+                    name,
+                    element_index,
+                    fields,
+                } => PointerValue::StructFieldElement {
+                    scope_id: *scope_id,
+                    name: name.clone(),
+                    element_index: *element_index,
+                    fields: Self::append_field_path(fields, &array_fields),
+                    index,
+                },
+                _ => PointerValue::NestedStructArrayElement {
+                    pointer: Box::new(pointer),
+                    fields: array_fields,
+                    index,
+                },
+            };
+        }
+        if fields.is_empty() {
+            Ok(pointer)
+        } else {
+            self.find_struct_pointer_field_pointer(&pointer, fields)
+        }
+    }
+
+    fn whole_struct_aligned_array_pointer(
+        struct_types: &HashMap<String, StructTypeDef>,
+        type_name: &str,
+        fields: &HashMap<String, StructFieldValue>,
+        mut offset: usize,
+        expected: CType,
+    ) -> CustResult<Option<PointerValue>> {
+        let definition = struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        for field in &definition.fields {
+            let field_size = usize::try_from(field.ty.size(struct_types)?)
+                .map_err(|_| CustError::new("whole-struct field size overflow"))?;
+            if offset >= field_size {
+                offset -= field_size;
+                continue;
+            }
+            let value = fields.get(&field.name).ok_or_else(|| {
+                CustError::new(format!("missing field '{}' in aggregate value", field.name))
+            })?;
+            return match (&field.ty, value) {
+                (
+                    StructFieldType::Array(ty, _) | StructFieldType::Array2D(ty, _, _),
+                    StructFieldValue::Array { value, .. },
+                ) if *ty == expected && offset.is_multiple_of(ty.size() as usize) => {
+                    Ok(Some(PointerValue::ArrayElement {
+                        array: Rc::clone(value),
+                        source_name: Some(field.name.clone()),
+                        index: offset / (ty.size() as usize),
+                        owner: None,
+                    }))
+                }
+                (
+                    StructFieldType::Struct(nested_type),
+                    StructFieldValue::Struct {
+                        fields: nested_fields,
+                        ..
+                    },
+                ) => Self::whole_struct_aligned_array_pointer(
+                    struct_types,
+                    nested_type,
+                    nested_fields,
+                    offset,
+                    expected,
+                ),
+                (
+                    StructFieldType::StructArray(nested_type, _),
+                    StructFieldValue::StructArray { elements, .. },
+                ) => {
+                    let element_size = usize::try_from(
+                        struct_types
+                            .get(nested_type)
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{nested_type}'"))
+                            })?
+                            .size(struct_types)?,
+                    )
+                    .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                    let index = offset / element_size;
+                    let within = offset % element_size;
+                    let element_fields = elements.get(index).ok_or_else(|| {
+                        CustError::new("whole-struct aggregate array index out of bounds")
+                    })?;
+                    Self::whole_struct_aligned_array_pointer(
+                        struct_types,
+                        nested_type,
+                        element_fields,
+                        within,
+                        expected,
+                    )
+                }
+                _ => Ok(None),
+            };
+        }
+        Ok(None)
+    }
+
+    fn whole_struct_aggregate_path(
+        struct_types: &HashMap<String, StructTypeDef>,
+        type_name: &str,
+        mut offset: usize,
+        expected_type: &str,
+        prefix: Vec<String>,
+    ) -> CustResult<Option<WholeStructAggregateLocation>> {
+        let definition = struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        for field in &definition.fields {
+            let field_size = usize::try_from(field.ty.size(struct_types)?)
+                .map_err(|_| CustError::new("whole-struct field size overflow"))?;
+            if offset >= field_size {
+                offset -= field_size;
+                continue;
+            }
+            let mut path = prefix;
+            path.push(field.name.clone());
+            return match &field.ty {
+                StructFieldType::Struct(nested_type)
+                    if offset == 0 && nested_type == expected_type =>
+                {
+                    Ok(Some(WholeStructAggregateLocation {
+                        fields: path,
+                        struct_arrays: Vec::new(),
+                    }))
+                }
+                StructFieldType::Struct(nested_type) => Self::whole_struct_aggregate_path(
+                    struct_types,
+                    nested_type,
+                    offset,
+                    expected_type,
+                    path,
+                ),
+                StructFieldType::StructArray(nested_type, _) => {
+                    let element_size = usize::try_from(
+                        struct_types
+                            .get(nested_type)
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{nested_type}'"))
+                            })?
+                            .size(struct_types)?,
+                    )
+                    .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                    let element = offset / element_size;
+                    let within = offset % element_size;
+                    if within == 0 && nested_type == expected_type {
+                        return Ok(Some(WholeStructAggregateLocation {
+                            fields: Vec::new(),
+                            struct_arrays: vec![(path, element)],
+                        }));
+                    }
+                    let Some(mut location) = Self::whole_struct_aggregate_path(
+                        struct_types,
+                        nested_type,
+                        within,
+                        expected_type,
+                        Vec::new(),
+                    )?
+                    else {
+                        return Ok(None);
+                    };
+                    location.struct_arrays.insert(0, (path, element));
+                    Ok(Some(location))
+                }
+                StructFieldType::Scalar(_)
+                | StructFieldType::Array(_, _)
+                | StructFieldType::Array2D(_, _, _)
+                | StructFieldType::Pointer(_) => Ok(None),
+            };
+        }
+        Ok(None)
+    }
+
+    fn whole_struct_scalar_location(
+        struct_types: &HashMap<String, StructTypeDef>,
+        type_name: &str,
+        mut offset: usize,
+        prefix: Vec<String>,
+    ) -> CustResult<Option<WholeStructScalarLocation>> {
+        let definition = struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        for field in &definition.fields {
+            let field_size = usize::try_from(field.ty.size(struct_types)?)
+                .map_err(|_| CustError::new("whole-struct field size overflow"))?;
+            if offset >= field_size {
+                offset -= field_size;
+                continue;
+            }
+            let mut path = prefix;
+            path.push(field.name.clone());
+            return match &field.ty {
+                StructFieldType::Scalar(ty) => Ok(Some(WholeStructScalarLocation {
+                    fields: path,
+                    struct_arrays: Vec::new(),
+                    array_index: None,
+                    ty: *ty,
+                    within: offset,
+                })),
+                StructFieldType::Array(ty, _) | StructFieldType::Array2D(ty, _, _) => {
+                    let cell_size = ty.size() as usize;
+                    Ok(Some(WholeStructScalarLocation {
+                        fields: path,
+                        struct_arrays: Vec::new(),
+                        array_index: Some(offset / cell_size),
+                        ty: *ty,
+                        within: offset % cell_size,
+                    }))
+                }
+                StructFieldType::Struct(nested_type) => {
+                    Self::whole_struct_scalar_location(struct_types, nested_type, offset, path)
+                }
+                StructFieldType::StructArray(nested_type, _) => {
+                    let element_size = usize::try_from(
+                        struct_types
+                            .get(nested_type)
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{nested_type}'"))
+                            })?
+                            .size(struct_types)?,
+                    )
+                    .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                    let element = offset / element_size;
+                    let within = offset % element_size;
+                    let Some(mut location) = Self::whole_struct_scalar_location(
+                        struct_types,
+                        nested_type,
+                        within,
+                        Vec::new(),
+                    )?
+                    else {
+                        return Ok(None);
+                    };
+                    if location.array_index.is_some() {
+                        return Ok(None);
+                    }
+                    location.struct_arrays.insert(0, (path, element));
+                    Ok(Some(location))
+                }
+                StructFieldType::Pointer(_) => Ok(None),
+            };
+        }
+        Ok(None)
     }
 
     fn ensure_pointer_type_matches(
@@ -24201,21 +25674,107 @@ impl Interpreter {
     }
 
     fn ensure_struct_pointer_target_mutable(&self, pointer: &PointerValue) -> CustResult<()> {
+        if self.struct_pointer_target_is_const(pointer)? {
+            Err(CustError::new("cannot assign through pointer to const"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn struct_pointer_target_is_const(&self, pointer: &PointerValue) -> CustResult<bool> {
         match pointer {
-            PointerValue::Struct { scope_id, name }
-                if self
+            PointerValue::Struct { scope_id, name } => Ok(self
+                .scopes
+                .iter()
+                .find(|scope| scope.id == *scope_id)
+                .is_some_and(|scope| scope.const_variables.contains(name))
+                || self.static_locals.values().any(|storage| {
+                    storage.scope_id == *scope_id && storage.name == *name && storage.is_const
+                })),
+            PointerValue::StructElement { scope_id, name, .. } => {
+                let value = self
                     .scopes
                     .iter()
                     .find(|scope| scope.id == *scope_id)
-                    .is_some_and(|scope| scope.const_variables.contains(name))
-                    || self.static_locals.values().any(|storage| {
-                        storage.scope_id == *scope_id && storage.name == *name && storage.is_const
-                    }) =>
-            {
-                Err(CustError::new("cannot assign through pointer to const"))
+                    .and_then(|scope| scope.values.get(name))
+                    .or_else(|| self.static_value_by_scope(*scope_id, name));
+                match value {
+                    Some(Value::StructArray { read_only, .. }) => Ok(*read_only),
+                    _ => {
+                        self.find_struct_pointer_fields(pointer)?;
+                        Ok(false)
+                    }
+                }
             }
-            _ => Ok(()),
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            }
+            | PointerValue::StructFieldElement {
+                scope_id,
+                name,
+                element_index,
+                fields,
+                ..
+            } => {
+                let root = match element_index {
+                    Some(index) => PointerValue::StructElement {
+                        scope_id: *scope_id,
+                        name: name.clone(),
+                        index: *index,
+                    },
+                    None => PointerValue::Struct {
+                        scope_id: *scope_id,
+                        name: name.clone(),
+                    },
+                };
+                if self.struct_pointer_target_is_const(&root)? {
+                    return Ok(true);
+                }
+                let (_, root_fields) = self.find_struct_pointer_fields(&root)?;
+                Self::struct_value_path_contains_const(root_fields, fields)
+            }
+            PointerValue::NestedStructArrayElement {
+                pointer, fields, ..
+            }
+            | PointerValue::StructFieldElementField { pointer, fields } => {
+                if self.struct_pointer_target_is_const(pointer)? {
+                    return Ok(true);
+                }
+                let (_, pointer_fields) = self.find_struct_pointer_fields(pointer)?;
+                Self::struct_value_path_contains_const(pointer_fields, fields)
+            }
+            PointerValue::Null
+            | PointerValue::Scalar { .. }
+            | PointerValue::ArrayBase { .. }
+            | PointerValue::ArrayElement { .. }
+            | PointerValue::Array2DRow { .. }
+            | PointerValue::ObjectByte { .. } => Ok(false),
         }
+    }
+
+    fn struct_value_path_contains_const(
+        fields: &HashMap<String, StructFieldValue>,
+        path: &[String],
+    ) -> CustResult<bool> {
+        let mut current_fields = fields;
+        for (index, name) in path.iter().enumerate() {
+            let field = current_fields
+                .get(name)
+                .ok_or_else(|| CustError::new(format!("missing struct field '{name}'")))?;
+            if field.is_const() {
+                return Ok(true);
+            }
+            if index + 1 < path.len() {
+                let StructFieldValue::Struct { fields, .. } = field else {
+                    return Ok(false);
+                };
+                current_fields = fields;
+            }
+        }
+        Ok(false)
     }
 
     fn pop_scope(&mut self) {
@@ -24765,15 +26324,25 @@ impl Interpreter {
                     is_const: field.is_const,
                 })
             }
-            StructFieldType::Struct(nested_type) => Ok(StructFieldValue::Struct {
-                type_name: nested_type.clone(),
-                fields: self.make_struct_fields(nested_type, &[])?,
-                is_const: field.is_const,
-            }),
+            StructFieldType::Struct(nested_type) => {
+                let mut fields = self.make_struct_fields(nested_type, &[])?;
+                if field.is_const {
+                    StructFieldValue::mark_embedded_arrays_read_only(&mut fields);
+                }
+                Ok(StructFieldValue::Struct {
+                    type_name: nested_type.clone(),
+                    fields,
+                    is_const: field.is_const,
+                })
+            }
             StructFieldType::StructArray(nested_type, len) => {
                 let mut elements = Vec::with_capacity(*len);
                 for _ in 0..*len {
-                    elements.push(self.make_struct_fields(nested_type, &[])?);
+                    let mut fields = self.make_struct_fields(nested_type, &[])?;
+                    if field.is_const {
+                        StructFieldValue::mark_embedded_arrays_read_only(&mut fields);
+                    }
+                    elements.push(fields);
                 }
                 Ok(StructFieldValue::StructArray {
                     type_name: nested_type.clone(),
@@ -24929,6 +26498,9 @@ impl Interpreter {
                         Self::sync_union_scalar_fields_from_active(nested_fields, field)?;
                     }
                 }
+                if field.is_const {
+                    StructFieldValue::mark_embedded_arrays_read_only(nested_fields);
+                }
             }
             (StructFieldType::Struct(_), _, StructInitializer::Array(_)) => {
                 return Err(CustError::new(format!(
@@ -24954,8 +26526,12 @@ impl Interpreter {
                                     "too many initializers for struct array",
                                 ));
                             }
-                            elements[next_positional_index] =
+                            let mut initialized =
                                 self.make_struct_fields(type_name, element_init.as_slice())?;
+                            if field.is_const {
+                                StructFieldValue::mark_embedded_arrays_read_only(&mut initialized);
+                            }
+                            elements[next_positional_index] = initialized;
                             next_positional_index += 1;
                         }
                         StructArrayInitializer::Designated { index, value } => {
@@ -24988,6 +26564,11 @@ impl Interpreter {
                                     )?;
                                 }
                             }
+                            if field.is_const {
+                                StructFieldValue::mark_embedded_arrays_read_only(
+                                    &mut elements[*index],
+                                );
+                            }
                             next_positional_index = index + 1;
                         }
                     }
@@ -25007,7 +26588,13 @@ impl Interpreter {
             }
             (StructFieldType::Struct(nested_type), field_value, StructInitializer::Expr(expr)) => {
                 match self.eval_struct_expr(expr)? {
-                    ReturnValue::Struct { type_name, fields } if type_name == *nested_type => {
+                    ReturnValue::Struct {
+                        type_name,
+                        mut fields,
+                    } if type_name == *nested_type => {
+                        if field.is_const {
+                            StructFieldValue::mark_embedded_arrays_read_only(&mut fields);
+                        }
                         *field_value = StructFieldValue::Struct {
                             type_name,
                             fields,
@@ -25624,7 +27211,9 @@ impl Interpreter {
         let offset = self.eval(value)?;
         let offset = match op {
             CompoundOp::Add => offset,
-            CompoundOp::Sub => -offset,
+            CompoundOp::Sub => offset
+                .checked_neg()
+                .ok_or_else(|| CustError::new("pointer offset overflow"))?,
             CompoundOp::Mul
             | CompoundOp::Div
             | CompoundOp::Rem
@@ -26396,23 +27985,12 @@ impl Interpreter {
         element_index: Option<usize>,
         path: &[String],
     ) -> CustResult<bool> {
-        let root_is_const = self
-            .scopes
-            .iter()
-            .find(|scope| scope.id == scope_id)
-            .is_some_and(|scope| scope.const_variables.contains(name))
-            || self.static_locals.values().any(|storage| {
-                storage.scope_id == scope_id && storage.name == name && storage.is_const
-            });
-        let field_is_const =
-            match self.struct_field_by_scope(scope_id, name, element_index, path)? {
-                StructFieldValue::Scalar { is_const, .. }
-                | StructFieldValue::Array { is_const, .. }
-                | StructFieldValue::Struct { is_const, .. }
-                | StructFieldValue::StructArray { is_const, .. }
-                | StructFieldValue::Pointer { is_const, .. } => *is_const,
-            };
-        Ok(root_is_const || field_is_const)
+        self.struct_pointer_target_is_const(&PointerValue::StructField {
+            scope_id,
+            name: name.to_string(),
+            element_index,
+            fields: path.to_vec(),
+        })
     }
 
     fn find_struct_field_pointer(
@@ -26537,11 +28115,37 @@ impl Interpreter {
                 match Self::nested_field_value(&type_name, element_fields, fields)?.1 {
                     StructFieldValue::Scalar { .. } | StructFieldValue::Struct { .. } => {
                         return Ok(PointerValue::StructFieldElementField {
-                            scope_id: *scope_id,
-                            name: name.clone(),
-                            element_index: *element_index,
-                            array_fields: array_fields.clone(),
-                            index: *index,
+                            pointer: Box::new(pointer.clone()),
+                            fields: fields.to_vec(),
+                        });
+                    }
+                    StructFieldValue::Array { value, .. } => {
+                        return Ok(PointerValue::ArrayBase {
+                            array: Rc::clone(value),
+                            source_name: Some(Self::field_path_label(fields).to_string()),
+                            owner: None,
+                        });
+                    }
+                    StructFieldValue::StructArray { .. } => {
+                        return Err(CustError::new(format!(
+                            "struct field '{}' requires indexed field access",
+                            Self::field_path_label(fields)
+                        )));
+                    }
+                    StructFieldValue::Pointer { .. } => {
+                        return Err(CustError::new(format!(
+                            "pointer field '{}' cannot be addressed in this pointer milestone",
+                            Self::field_path_label(fields)
+                        )));
+                    }
+                }
+            }
+            PointerValue::NestedStructArrayElement { .. } => {
+                let (type_name, pointer_fields) = self.find_struct_pointer_fields(pointer)?;
+                match Self::nested_field_value(&type_name, pointer_fields, fields)?.1 {
+                    StructFieldValue::Scalar { .. } | StructFieldValue::Struct { .. } => {
+                        return Ok(PointerValue::StructFieldElementField {
+                            pointer: Box::new(pointer.clone()),
                             fields: fields.to_vec(),
                         });
                     }
@@ -26804,76 +28408,20 @@ impl Interpreter {
         }
     }
 
-    fn read_struct_field_element_field_pointer(
-        &self,
-        scope_id: usize,
-        name: &str,
-        element_index: Option<usize>,
-        array_fields: &[String],
-        index: usize,
-        fields: &[String],
-    ) -> CustResult<i64> {
-        let (type_name, element_fields) = self.struct_field_array_element_fields(
-            scope_id,
-            name,
-            element_index,
-            array_fields,
-            index,
-        )?;
-        match Self::nested_field_value(&type_name, element_fields, fields)?.1 {
-            StructFieldValue::Scalar { value, .. } => Ok(*value),
-            _ => Err(CustError::new(format!(
-                "struct field '{}' used as non-scalar pointer target",
-                Self::field_path_label(fields)
-            ))),
-        }
-    }
-
     fn assign_struct_field_element_field_pointer(
         &mut self,
         pointer: &PointerValue,
         value: i64,
     ) -> CustResult<()> {
-        let PointerValue::StructFieldElementField {
-            scope_id,
-            name,
-            element_index,
-            array_fields,
-            index,
-            fields,
-        } = pointer
-        else {
+        let PointerValue::StructFieldElementField { pointer, fields } = pointer else {
             return Err(CustError::new(
                 "pointer does not reference an embedded struct field",
             ));
         };
-        if self.struct_field_points_to_const(*scope_id, name, *element_index, array_fields)? {
-            return Err(CustError::new("cannot assign through pointer to const"));
-        }
-        let (type_name, element_fields) = self.struct_field_array_element_fields_mut(
-            *scope_id,
-            name,
-            *element_index,
-            array_fields,
-            *index,
-        )?;
-        match Self::nested_field_value_mut(&type_name, element_fields, fields)?.1 {
-            StructFieldValue::Scalar {
-                value: slot,
-                ty,
-                is_const,
-            } => {
-                if *is_const {
-                    return Err(CustError::new("cannot assign through pointer to const"));
-                }
-                *slot = ty.normalize(value);
-                Ok(())
-            }
-            _ => Err(CustError::new(format!(
-                "struct field '{}' used as non-scalar pointer target",
-                Self::field_path_label(fields)
-            ))),
-        }
+        self.ensure_struct_pointer_target_mutable(pointer)?;
+        let struct_types = self.struct_types.clone();
+        let (type_name, pointer_fields) = self.find_struct_pointer_fields_mut(pointer)?;
+        Self::assign_scalar_field_in_map(&struct_types, &type_name, pointer_fields, fields, value)
     }
 
     fn read_struct_element_field(
@@ -27235,22 +28783,9 @@ impl Interpreter {
                 } => Ok((type_name.clone(), fields)),
                 _ => Err(CustError::new("pointer does not reference a struct")),
             },
-            PointerValue::StructFieldElementField {
-                scope_id,
-                name,
-                element_index,
-                array_fields,
-                index,
-                fields,
-            } => {
-                let (element_type_name, element_fields) = self.struct_field_array_element_fields(
-                    *scope_id,
-                    name,
-                    *element_index,
-                    array_fields,
-                    *index,
-                )?;
-                Self::nested_struct_field(&element_type_name, element_fields, fields)
+            PointerValue::StructFieldElementField { pointer, fields } => {
+                let (type_name, pointer_fields) = self.find_struct_pointer_fields(pointer)?;
+                Self::nested_struct_field(&type_name, pointer_fields, fields)
             }
             _ => Err(CustError::new("pointer does not reference a struct")),
         }
@@ -27357,23 +28892,9 @@ impl Interpreter {
                 } => Ok((type_name.clone(), fields)),
                 _ => Err(CustError::new("pointer does not reference a struct")),
             },
-            PointerValue::StructFieldElementField {
-                scope_id,
-                name,
-                element_index,
-                array_fields,
-                index,
-                fields,
-            } => {
-                let (element_type_name, element_fields) = self
-                    .struct_field_array_element_fields_mut(
-                        *scope_id,
-                        name,
-                        *element_index,
-                        array_fields,
-                        *index,
-                    )?;
-                Self::nested_struct_field_mut(&element_type_name, element_fields, fields)
+            PointerValue::StructFieldElementField { pointer, fields } => {
+                let (type_name, pointer_fields) = self.find_struct_pointer_fields_mut(pointer)?;
+                Self::nested_struct_field_mut(&type_name, pointer_fields, fields)
             }
             _ => Err(CustError::new("pointer does not reference a struct")),
         }
@@ -28093,13 +29614,34 @@ impl Interpreter {
                     owner,
                 })
             }
-            Expr::PointerCast { expr, .. } => {
-                if self.expr_is_pointer_value(expr) {
-                    self.eval_pointer(expr)
+            Expr::PointerCast { pointee, expr, .. } => {
+                let pointer = if self.expr_is_pointer_value(expr) {
+                    self.eval_pointer(expr)?
                 } else if self.eval(expr)? == 0 {
-                    Ok(PointerValue::Null)
+                    PointerValue::Null
                 } else {
-                    Err(CustError::new("expected pointer expression"))
+                    return Err(CustError::new("expected pointer expression"));
+                };
+                if *pointee == PointeeType::Scalar(CType::Char)
+                    && !matches!(
+                        pointer,
+                        PointerValue::Null | PointerValue::ObjectByte { .. }
+                    )
+                    && let Some(PointeeType::Struct(type_name)) =
+                        self.pointer_value_type(&pointer)?
+                {
+                    if self.memory_pointer_targets_union_field(&pointer)? {
+                        return Err(CustError::new(
+                            "character pointer casts do not support union-backed whole-struct object storage",
+                        ));
+                    }
+                    self.validate_whole_struct_character_pointer_layout(&type_name)?;
+                    Ok(PointerValue::ObjectByte {
+                        base: Box::new(pointer),
+                        offset: 0,
+                    })
+                } else {
+                    Ok(pointer)
                 }
             }
             Expr::Conditional {
@@ -28289,7 +29831,9 @@ impl Interpreter {
                 let offset = self.eval(value)?;
                 let offset = match op {
                     CompoundOp::Add => offset,
-                    CompoundOp::Sub => -offset,
+                    CompoundOp::Sub => offset
+                        .checked_neg()
+                        .ok_or_else(|| CustError::new("pointer offset overflow"))?,
                     CompoundOp::Mul
                     | CompoundOp::Div
                     | CompoundOp::Rem
@@ -28326,8 +29870,20 @@ impl Interpreter {
                     self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
                     let pointer = self.eval_pointer(value)?;
                     let pointer = self.attach_array_pointer_owner(pointer);
-                    let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
-                    self.ensure_pointer_slot_type_matches(&current_pointer, &ty, &pointer)?;
+                    let pointer = if let Some((elem_type, columns)) =
+                        self.array2d_pointer_variable_type(name)
+                    {
+                        let pointer =
+                            self.coerce_object_byte_row_pointer(elem_type, columns, pointer)?;
+                        self.ensure_two_dimensional_row_pointer_type_matches(
+                            elem_type, columns, &pointer,
+                        )?;
+                        pointer
+                    } else {
+                        let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
+                        self.ensure_pointer_slot_type_matches(&current_pointer, &ty, &pointer)?;
+                        pointer
+                    };
                     if let Some(Value::Pointer { pointer: slot, .. }) = self.find_variable_mut(name)
                     {
                         *slot = pointer.clone();
@@ -28554,7 +30110,9 @@ impl Interpreter {
                 let offset = self.eval(value)?;
                 let offset = match op {
                     CompoundOp::Add => offset,
-                    CompoundOp::Sub => -offset,
+                    CompoundOp::Sub => offset
+                        .checked_neg()
+                        .ok_or_else(|| CustError::new("pointer offset overflow"))?,
                     CompoundOp::Mul
                     | CompoundOp::Div
                     | CompoundOp::Rem
@@ -28580,7 +30138,9 @@ impl Interpreter {
                 let offset = self.eval(value)?;
                 let offset = match op {
                     CompoundOp::Add => offset,
-                    CompoundOp::Sub => -offset,
+                    CompoundOp::Sub => offset
+                        .checked_neg()
+                        .ok_or_else(|| CustError::new("pointer offset overflow"))?,
                     CompoundOp::Mul
                     | CompoundOp::Div
                     | CompoundOp::Rem
@@ -28611,7 +30171,9 @@ impl Interpreter {
                 let offset = self.eval(value)?;
                 let offset = match op {
                     CompoundOp::Add => offset,
-                    CompoundOp::Sub => -offset,
+                    CompoundOp::Sub => offset
+                        .checked_neg()
+                        .ok_or_else(|| CustError::new("pointer offset overflow"))?,
                     CompoundOp::Mul
                     | CompoundOp::Div
                     | CompoundOp::Rem
@@ -28656,7 +30218,12 @@ impl Interpreter {
                 self.ensure_variable_mutable(name)?;
                 let pointer = match op {
                     CompoundOp::Add => self.offset_array_pointer(&pointer, offset)?,
-                    CompoundOp::Sub => self.offset_array_pointer(&pointer, -offset)?,
+                    CompoundOp::Sub => {
+                        let offset = offset
+                            .checked_neg()
+                            .ok_or_else(|| CustError::new("pointer offset overflow"))?;
+                        self.offset_array_pointer(&pointer, offset)?
+                    }
                     CompoundOp::Mul
                     | CompoundOp::Div
                     | CompoundOp::Rem
@@ -28862,7 +30429,12 @@ impl Interpreter {
                 let offset = self.eval(right)?;
                 match op {
                     BinaryOp::Add => self.offset_array_pointer(&pointer, offset),
-                    BinaryOp::Sub => self.offset_array_pointer(&pointer, -offset),
+                    BinaryOp::Sub => {
+                        let offset = offset
+                            .checked_neg()
+                            .ok_or_else(|| CustError::new("pointer offset overflow"))?;
+                        self.offset_array_pointer(&pointer, offset)
+                    }
                     _ => unreachable!("only pointer add/sub reach pointer arithmetic"),
                 }
             }
@@ -28895,25 +30467,34 @@ impl Interpreter {
                 scope_id,
                 name,
                 index,
-            } => self.struct_array_pointer_at(*scope_id, name, *index as i64 + offset),
+            } => {
+                let index = (*index as i64).checked_add(offset).ok_or_else(|| {
+                    CustError::new("array pointer index overflow during pointer arithmetic")
+                })?;
+                self.struct_array_pointer_at(*scope_id, name, index)
+            }
             PointerValue::StructFieldElement {
                 scope_id,
                 name,
                 element_index,
                 fields,
                 index,
-            } => self.struct_field_array_pointer_at(
-                *scope_id,
-                name,
-                *element_index,
-                fields,
-                *index as i64 + offset,
-            ),
+            } => {
+                let index = (*index as i64).checked_add(offset).ok_or_else(|| {
+                    CustError::new("array pointer index overflow during pointer arithmetic")
+                })?;
+                self.struct_field_array_pointer_at(*scope_id, name, *element_index, fields, index)
+            }
             PointerValue::NestedStructArrayElement {
                 pointer,
                 fields,
                 index,
-            } => self.nested_struct_array_pointer_at(pointer, fields, *index as i64 + offset),
+            } => {
+                let index = (*index as i64).checked_add(offset).ok_or_else(|| {
+                    CustError::new("array pointer index overflow during pointer arithmetic")
+                })?;
+                self.nested_struct_array_pointer_at(pointer, fields, index)
+            }
             PointerValue::ArrayBase {
                 array,
                 source_name,
@@ -28962,6 +30543,124 @@ impl Interpreter {
                 base,
                 offset: byte_offset,
             } => {
+                if let Some(PointeeType::Struct(type_name)) = self.pointer_value_type(base)? {
+                    let (range_base, range_offset) = match base.as_ref() {
+                        PointerValue::StructElement {
+                            scope_id,
+                            name,
+                            index,
+                        } => {
+                            let (root, root_type, root_offset) =
+                                self.whole_struct_root_identity(*scope_id, name, Some(*index))?;
+                            if root_type != type_name {
+                                return Err(CustError::new(
+                                    "internal whole-struct array element type mismatch",
+                                ));
+                            }
+                            let range_offset =
+                                root_offset.checked_add(*byte_offset).ok_or_else(|| {
+                                    CustError::new("whole-struct object byte offset overflow")
+                                })?;
+                            (root, range_offset)
+                        }
+                        PointerValue::StructFieldElement {
+                            scope_id,
+                            name,
+                            element_index,
+                            fields,
+                            index,
+                        } => {
+                            let element_size = usize::try_from(
+                                self.struct_types
+                                    .get(&type_name)
+                                    .ok_or_else(|| {
+                                        CustError::new(format!(
+                                            "undefined struct type '{type_name}'"
+                                        ))
+                                    })?
+                                    .size(&self.struct_types)?,
+                            )
+                            .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                            let range_offset = index
+                                .checked_mul(element_size)
+                                .and_then(|offset| offset.checked_add(*byte_offset))
+                                .ok_or_else(|| {
+                                    CustError::new("whole-struct object byte offset overflow")
+                                })?;
+                            (
+                                PointerValue::StructFieldElement {
+                                    scope_id: *scope_id,
+                                    name: name.clone(),
+                                    element_index: *element_index,
+                                    fields: fields.clone(),
+                                    index: 0,
+                                },
+                                range_offset,
+                            )
+                        }
+                        PointerValue::NestedStructArrayElement {
+                            pointer,
+                            fields,
+                            index,
+                        } => {
+                            let element_size = usize::try_from(
+                                self.struct_types
+                                    .get(&type_name)
+                                    .ok_or_else(|| {
+                                        CustError::new(format!(
+                                            "undefined struct type '{type_name}'"
+                                        ))
+                                    })?
+                                    .size(&self.struct_types)?,
+                            )
+                            .map_err(|_| CustError::new("whole-struct element size overflow"))?;
+                            let range_offset = index
+                                .checked_mul(element_size)
+                                .and_then(|offset| offset.checked_add(*byte_offset))
+                                .ok_or_else(|| {
+                                    CustError::new("whole-struct object byte offset overflow")
+                                })?;
+                            (
+                                PointerValue::NestedStructArrayElement {
+                                    pointer: pointer.clone(),
+                                    fields: fields.clone(),
+                                    index: 0,
+                                },
+                                range_offset,
+                            )
+                        }
+                        _ => (base.as_ref().clone(), *byte_offset),
+                    };
+                    let byte_offset = i64::try_from(range_offset)
+                        .ok()
+                        .and_then(|byte_offset| byte_offset.checked_add(offset))
+                        .ok_or_else(|| {
+                            CustError::new("whole-struct object byte offset overflow")
+                        })?;
+                    let byte_offset = usize::try_from(byte_offset)
+                        .map_err(|_| CustError::new("whole-struct object byte offset overflow"))?;
+                    let object_size = usize::try_from(
+                        self.struct_types
+                            .get(&type_name)
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{type_name}'"))
+                            })?
+                            .size(&self.struct_types)?,
+                    )
+                    .map_err(|_| CustError::new("whole-struct object size overflow"))?;
+                    let available = object_size
+                        .checked_mul(self.whole_struct_remaining_elements(&range_base)?)
+                        .ok_or_else(|| CustError::new("whole-struct object range overflow"))?;
+                    if byte_offset > available {
+                        return Err(CustError::new(format!(
+                            "whole-struct object byte offset {byte_offset} out of bounds for object size {available}"
+                        )));
+                    }
+                    return Ok(PointerValue::ObjectByte {
+                        base: Box::new(range_base),
+                        offset: byte_offset,
+                    });
+                }
                 let cell_size = i64::try_from(self.scalar_memory_cell_size(base)?)
                     .map_err(|_| CustError::new("scalar object byte offset overflow"))?;
                 let byte_offset = i64::try_from(*byte_offset)
@@ -29140,21 +30839,9 @@ impl Interpreter {
             | PointerValue::NestedStructArrayElement { .. } => {
                 Err(CustError::new("struct pointer used as scalar"))
             }
-            PointerValue::StructFieldElementField {
-                scope_id,
-                name,
-                element_index,
-                array_fields,
-                index,
-                fields,
-            } => self.read_struct_field_element_field_pointer(
-                *scope_id,
-                name,
-                *element_index,
-                array_fields,
-                *index,
-                fields,
-            ),
+            PointerValue::StructFieldElementField { pointer, fields } => {
+                self.read_struct_pointer_field(pointer, fields)
+            }
             PointerValue::StructField {
                 scope_id,
                 name,
@@ -29957,29 +31644,14 @@ impl Interpreter {
             }
             (
                 PointerValue::StructFieldElementField {
-                    scope_id: left_scope,
-                    name: left_name,
-                    element_index: left_element,
-                    array_fields: left_array_fields,
-                    index: left_index,
+                    pointer: left_pointer,
                     fields: left_fields,
                 },
                 PointerValue::StructFieldElementField {
-                    scope_id: right_scope,
-                    name: right_name,
-                    element_index: right_element,
-                    array_fields: right_array_fields,
-                    index: right_index,
+                    pointer: right_pointer,
                     fields: right_fields,
                 },
-            ) => {
-                left_scope == right_scope
-                    && left_name == right_name
-                    && left_element == right_element
-                    && left_array_fields == right_array_fields
-                    && left_index == right_index
-                    && left_fields == right_fields
-            }
+            ) => Self::pointer_eq(left_pointer, right_pointer) && left_fields == right_fields,
             (PointerValue::Struct { .. }, PointerValue::StructElement { .. })
             | (PointerValue::StructElement { .. }, PointerValue::Struct { .. })
             | (PointerValue::Struct { .. }, PointerValue::StructField { .. })
@@ -30042,6 +31714,22 @@ impl Interpreter {
             | (PointerValue::Struct { .. }, PointerValue::ArrayElement { .. }) => false,
             _ => false,
         }
+    }
+
+    fn pointer_values_equal(&self, left: &PointerValue, right: &PointerValue) -> CustResult<bool> {
+        if matches!(left, PointerValue::Null) || matches!(right, PointerValue::Null) {
+            return Ok(Self::pointer_eq(left, right));
+        }
+        if matches!(left, PointerValue::ObjectByte { .. })
+            || matches!(right, PointerValue::ObjectByte { .. })
+        {
+            let (left_identity, left_offset) = self.memory_pointer_position(left)?;
+            let (right_identity, right_offset) = self.memory_pointer_position(right)?;
+            return Ok(
+                Self::pointer_eq(&left_identity, &right_identity) && left_offset == right_offset
+            );
+        }
+        Ok(Self::pointer_eq(left, right))
     }
 
     fn array_pointer_index(pointer: &PointerValue) -> CustResult<(&Rc<RefCell<ArrayValue>>, i64)> {
@@ -32756,7 +34444,7 @@ impl Interpreter {
             (true, true) => {
                 let left_pointer = self.eval_pointer(left)?;
                 let right_pointer = self.eval_pointer(right)?;
-                Self::pointer_eq(&left_pointer, &right_pointer)
+                self.pointer_values_equal(&left_pointer, &right_pointer)?
             }
             (true, false) => {
                 let pointer = self.eval_pointer(left)?;
@@ -33026,6 +34714,7 @@ impl Interpreter {
                 self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
                 let pointer = self.attach_array_pointer_owner(pointer);
+                let pointer = self.coerce_object_byte_row_pointer(elem_type, columns, pointer)?;
                 self.ensure_two_dimensional_row_pointer_type_matches(elem_type, columns, &pointer)?;
                 Ok(Some(ReturnValue::Pointer {
                     pointer,
@@ -33308,6 +34997,7 @@ impl Interpreter {
             } => {
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
+                let pointer = self.coerce_object_byte_row_pointer(*elem_type, *columns, pointer)?;
                 self.ensure_two_dimensional_row_pointer_type_matches(
                     *elem_type, *columns, &pointer,
                 )?;
@@ -33441,7 +35131,7 @@ impl Interpreter {
                         Ok(ExecFlow::None)
                     }
                     Some(Value::Pointer {
-                        pointer: current_pointer,
+                        pointer: _,
                         ty,
                         points_to_const,
                     }) => {
@@ -33449,22 +35139,20 @@ impl Interpreter {
                         self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
                         let pointer = self.eval_pointer(expr)?;
                         let pointer = self.attach_array_pointer_owner(pointer);
-                        let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
-                        if let PointerValue::Array2DRow { array, .. } = &current_pointer {
-                            let array = array.borrow();
-                            let Some((_, columns)) = array.dimensions else {
-                                return Err(CustError::new(
-                                    "internal two-dimensional row pointer storage mismatch",
-                                ));
-                            };
+                        let pointer = if let Some((elem_type, columns)) =
+                            self.array2d_pointer_variable_type(name)
+                        {
+                            let pointer =
+                                self.coerce_object_byte_row_pointer(elem_type, columns, pointer)?;
                             self.ensure_two_dimensional_row_pointer_type_matches(
-                                array.elem_type,
-                                columns,
-                                &pointer,
+                                elem_type, columns, &pointer,
                             )?;
+                            pointer
                         } else {
+                            let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
                             self.ensure_pointer_type_matches(&ty, &pointer)?;
-                        }
+                            pointer
+                        };
                         if let Some(Value::Pointer { pointer: slot, .. }) =
                             self.find_variable_mut(name)
                         {
