@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-12 — v0.29.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.28.0`, then passed after Cargo/lock and both image tags moved to `0.29.0`. Cargo metadata and the built CLI report `cust 0.29.0`; local and remote annotated-tag preflight found no `v0.29.0` refs.
+- Executable target-by-target listing reconciles 1,592 tests: 1,457 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over direct double function boundaries, shared-storage union bytes, and parser/fuzz expansion because release closure is first in both queues and packages reviewed behavior without widening runtime semantics.
+- Publication follows release-commit-first ordering: independent complete-diff review precedes the canonical gate; exact `origin/main` acceptance precedes annotated-tag creation; and local/remote tag objects plus peeled targets must match. Direct double parameter/return declarations are preserved as the concrete next language package.
+- Independent review initially blocked “exact source-located” diagnostic overclaims, hexadecimal-float specificity, premature “released” wording, and stale sole-next queue wording. After correcting only those claims, fresh complete-diff re-review returned `APPROVED`; the canonical local/rebuilt-Docker gate then passed all 1,592 tests, runtime output `10`, local/Cargo/container version checks, repeated tag preflight, and the diff check.
+
 ## 2026-08-11 — Bounded `double` runtime values
 
 - Cust stores supported scalar doubles as exact `f64` bit patterns in the existing deterministic scalar slot; every numeric consumer must classify the expression before decoding the bits. `_Bool` conversion must test `value != 0.0` directly rather than cast through `i64`, because positive and negative fractions truncate to zero as integers but are true in C.

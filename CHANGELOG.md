@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.29.0 — 2026-08-12
+
+### Language subset
+
+- Added a bounded first `double` runtime-value slice. Decimal literals and direct local, file-global, and block-static scalar objects support initialization, replacement and compound assignment, prefix/postfix update, mixed arithmetic and comparison, conditional/comma forwarding, truthiness, scalar compound literals, `int`/`double`/`_Bool` casts, `_Generic`, integer-constant casts, conversion through supported scalar function signatures, and deterministic eight-byte size/alignment queries.
+
+### Diagnostics and verification
+
+- Preserved targeted boundaries for `float`, `long double`, unsupported floating literal spellings, double arrays and aggregate fields, double pointers, direct double parameter/return declarations, and invalid floating remainder/bitwise/shift operations. Review-driven regressions cover fractional `_Bool` conversion, assignment/call/return pointer escapes, non-evaluating literal and generic validation, and linear nested generic/call classification. A registered warning-free native fixture covers ABI-independent relationships.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.29.0`.
+- Reconciled an executable inventory of 1,592 tests: 1,457 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- The `double` slice is limited to direct scalar storage and expressions. `float`, `long double`, hexadecimal/suffixed/non-finite floating literals, double arrays, aggregate fields, pointers, and direct double parameter/return declarations remain unsupported. Complex runtime values, host floating ABI/promotion behavior, general pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
+
 ## v0.28.0 — 2026-08-10
 
 ### Standard library subset

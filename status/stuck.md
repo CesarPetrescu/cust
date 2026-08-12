@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after completion of the bounded first `double` runtime-value slice on 2026-08-12. Focused review-driven RED/GREEN covers the double interpreter slice, generic-selection and nested-call arithmetic linearity regressions, valid unselected-double generic associations, literal-wrapper non-evaluating validation, and double-address assignment/call/return/cast/conditional/ordering boundaries; executable inventory is 1,592 tests. No implementation, environment, or research blocker is active; bounded v0.29.0 release closure is next.
+None. Last reviewed after bounded v0.29.0 release preparation verification on 2026-08-12. Focused version RED/GREEN, fresh independent `APPROVED` re-review, formatting, warning-denied Clippy, all 1,592 local/rebuilt-Docker tests, runtime output `10`, local/Cargo/container version `cust 0.29.0`, empty tag preflight, and the diff check pass. Release-commit-first publication and exact remote tag verification remain ordered release steps, not blockers.
 
 ## Blocker template
 
