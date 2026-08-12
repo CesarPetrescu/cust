@@ -8989,6 +8989,7 @@ impl Parser {
         self.pending_inline_enum_constants = None;
         let (mut return_type, leading_return_const) = self.parse_function_return_type()?;
         let inline_return_enum_decl = self.take_pending_inline_enum_decl();
+        let mut function_name_token = self.peek_located().clone();
         let row_pointer_return = self.check(&Token::LParen)
             && matches!(self.peek_next(), Token::Star)
             && matches!(
@@ -8999,9 +9000,11 @@ impl Parser {
                 self.tokens.get(self.pos + 3).map(|token| &token.kind),
                 Some(Token::LParen)
             );
+        let row_pointer_return_star = row_pointer_return.then(|| self.tokens[self.pos + 1].clone());
         let name = if row_pointer_return {
             self.advance();
             self.advance();
+            function_name_token = self.peek_located().clone();
             let name = self.expect_ident_after("row-pointer function name after '*'")?;
             self.expect_opening_paren_after("row-pointer function name")?;
             name
@@ -9025,6 +9028,14 @@ impl Parser {
             let inline_param_enum_decl = self.take_pending_inline_enum_decl();
             self.expect_closing_paren_after("function parameters")?;
             if row_pointer_return {
+                if matches!(return_type, ReturnType::Scalar(CType::Double)) {
+                    return Err(Self::error_at(
+                        "double row pointers are not supported".to_string(),
+                        row_pointer_return_star
+                            .as_ref()
+                            .expect("row-pointer return has a star token"),
+                    ));
+                }
                 self.expect_closing_paren_after("row-pointer function declarator")?;
                 self.expect(Token::LBracket)?;
                 let columns = self.expect_array_len()?;
@@ -9044,6 +9055,12 @@ impl Parser {
                 return Err(Self::error_at(
                     "array return types are not supported".to_string(),
                     self.peek_located(),
+                ));
+            }
+            if name == "main" && !matches!(return_type, ReturnType::Scalar(CType::Int)) {
+                return Err(Self::error_at(
+                    "main must have return type int".to_string(),
+                    &function_name_token,
                 ));
             }
             if self.matches(&Token::Semi) {
@@ -9172,16 +9189,15 @@ impl Parser {
             }
             return Ok((ReturnType::Void, false));
         }
-        let return_type_token = self.peek_located().clone();
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("function return type")?;
-        if matches!(decl_type, DeclType::Scalar(CType::Double)) {
-            return Err(Self::error_at(
-                "double function returns are not supported".to_string(),
-                &return_type_token,
-            ));
-        }
         if self.matches(&Token::Star) {
+            if matches!(decl_type, DeclType::Scalar(CType::Double)) {
+                return Err(Self::error_at(
+                    "double pointers are not supported".to_string(),
+                    self.previous(),
+                ));
+            }
             if matches!(decl_type, DeclType::Pointer { .. }) || self.check(&Token::Star) {
                 return Err(Self::error_at(
                     "pointer-to-pointer return types are not supported".to_string(),
@@ -9352,12 +9368,7 @@ impl Parser {
             };
             let (leading_const, decl_type) =
                 self.parse_const_qualified_decl_type("parameter type")?;
-            if matches!(decl_type, DeclType::Scalar(CType::Double)) {
-                return Err(Self::error_at(
-                    "double function parameters are not supported".to_string(),
-                    &parameter_type_token,
-                ));
-            }
+
             let parameter_type_qualifier = self.tokens[parameter_type_start..self.pos]
                 .iter()
                 .find(|token| {
@@ -9389,6 +9400,12 @@ impl Parser {
                 && matches!(self.peek_next(), Token::Star)
                 && !self.parenthesized_pointer_declarator_is_function_at(self.pos)
             {
+                if matches!(decl_type, DeclType::Scalar(CType::Double)) {
+                    return Err(Self::error_at(
+                        "double row pointers are not supported".to_string(),
+                        &self.tokens[self.pos + 1],
+                    ));
+                }
                 let DeclType::Scalar(elem_type) = &decl_type else {
                     unreachable!("guard requires scalar row pointer parameter type")
                 };
@@ -9415,6 +9432,12 @@ impl Parser {
                 explicit_row_pointer_param = Some((name, pointer_is_const));
             }
             let has_explicit_star = self.matches(&Token::Star);
+            if has_explicit_star && matches!(decl_type, DeclType::Scalar(CType::Double)) {
+                return Err(Self::error_at(
+                    "double pointers are not supported".to_string(),
+                    self.previous(),
+                ));
+            }
             let post_star_qualifier = if has_explicit_star {
                 self.leading_type_qualifier_token()
             } else {
@@ -9554,6 +9577,13 @@ impl Parser {
                     }
                 }
             };
+            if matches!(decl_type, DeclType::Scalar(CType::Double)) && self.check(&Token::LBracket)
+            {
+                return Err(Self::error_at(
+                    "double arrays are not supported".to_string(),
+                    self.peek_located(),
+                ));
+            }
             let mut array_parameter_const = false;
             let mut array_parameter_is_qualified = false;
             let kind = if is_character_pointer_output {
@@ -18586,6 +18616,18 @@ impl Interpreter {
             Expr::GenericSelection { .. } => self
                 .selected_generic_association_after_validation(expr)
                 .is_ok_and(|selected| self.expr_is_double_value(selected)),
+            Expr::Call { name, .. } => self
+                .functions
+                .get(name)
+                .map(|function| &function.return_type)
+                .or_else(|| {
+                    self.prototypes
+                        .get(name)
+                        .map(|signature| &signature.return_type)
+                })
+                .is_some_and(|return_type| {
+                    matches!(return_type, ReturnType::Scalar(CType::Double))
+                }),
             Expr::Number(_)
             | Expr::StringLiteral(_)
             | Expr::SizeOfType(_)
@@ -18640,7 +18682,6 @@ impl Interpreter {
             | Expr::Array2DGet { .. }
             | Expr::StructArray2DGet { .. }
             | Expr::StringGet { .. }
-            | Expr::Call { .. }
             | Expr::VoidCast(_)
             | Expr::AggregateLiteral { .. }
             | Expr::BitwiseNot(_)

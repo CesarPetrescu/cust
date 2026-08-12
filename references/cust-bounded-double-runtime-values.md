@@ -4,13 +4,20 @@ Date: 2026-08-11
 
 ## Completed slice
 
-Cust supports decimal `double` literals and direct local, file-global, and block-static scalar storage. The bounded slice covers initialization, replacement and compound assignment, prefix/postfix update, mixed arithmetic, comparisons, conditional/comma forwarding, truthiness, scalar function-call arguments converted to supported parameter types, scalar function returns converted to supported return types, scalar compound literals, `_Generic`, integer-constant casts, and deterministic `sizeof(double) == 8` / `_Alignof(double) == 8`. Direct double parameter and return declarations remain outside this first slice.
+Cust supports decimal `double` literals and direct local, file-global, and block-static scalar storage. The bounded slice covers initialization, replacement and compound assignment, prefix/postfix update, mixed arithmetic, comparisons, conditional/comma forwarding, truthiness, scalar compound literals, `_Generic`, integer-constant casts, and deterministic `sizeof(double) == 8` / `_Alignof(double) == 8`. The follow-up function-boundary slice adds direct `double` parameters and returns across prototypes, definitions, recursion, call-result metadata, conversions, casts, `_Generic`, and non-evaluating `sizeof(call)`.
 
 `double` values are stored as exact `f64::to_bits()` payloads in the existing scalar `i64` slot. Every numeric read must therefore use the expression's scalar-type metadata before interpreting the bits. Integer destinations use Rust's defined saturating float-to-integer conversion, while `_Bool` conversion is based on `value != 0.0`, not an intermediate integer cast.
 
 ## Exact boundaries
 
-The first slice rejects `float`, `long double`, hexadecimal floating literals, floating suffixes, non-finite literals, double arrays, aggregate fields, pointers, pointer arithmetic/ordering/equality involving double values, and direct double-returning or double-parameter function declarations outside the supported scalar-call boundary. Keep adjacent unsupported syntax source-located.
+The bounded model rejects `float`, `long double`, hexadecimal floating literals, floating suffixes, non-finite literals, double arrays, aggregate fields, pointers, pointer-to-row forms, pointer arithmetic/ordering/equality involving double values, and non-`int` `main`. Keep adjacent unsupported syntax source-located.
+
+## Direct function-boundary follow-up
+
+- Parser signatures now admit `ReturnType::Scalar(CType::Double)` and `ParamKind::Scalar(CType::Double)`; existing scalar argument binding and return conversion provide C-compatible integer/double conversion while retaining exact f64 bits for double destinations.
+- `expr_is_double_value()` must consult both function definitions and prototypes for `Expr::Call`. Without this metadata, mixed call arithmetic decodes f64 bits as an integer even though plain assignment into a double slot may still appear to work.
+- Keep direct `double *`, `double[N]`, and `double (*)[N]` checks before generic pointer/array/row-pointer lowering. Cover named and unnamed prototype parameters plus return declarators.
+- Require `main` to have Cust's scalar `int` return type after complete declarator classification; otherwise a direct `double main` exposes an internal IEEE bit payload, while a row-pointer `main` can bypass an early base-type-only guard. Cust intentionally normalizes its supported signed/unsigned/short/long integer spellings to this deterministic `int` model.
 
 ## Non-evaluating and generic validation
 
@@ -45,5 +52,6 @@ The final review-driven regressions cover:
 6. Discarded double-address expressions.
 7. Linear validation/evaluation for deeply nested selected generic associations.
 8. Exact double-address ordering rejection and linear right-associated arithmetic across nested calls.
+9. Row-pointer `main` rejection after return-declarator lowering, closing the entry-point guard bypass.
 
 Run `cargo test --test interpreter double -- --nocapture` and the actual `cargo test --test c_compat -- --nocapture`; fixture-name filters run zero compiler-oracle tests and are not valid evidence. The registered native fixture uses warning-free, ABI-independent relationships and is also checked directly with GCC and Clang under `-std=c11 -Wall -Wextra -Werror`.

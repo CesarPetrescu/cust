@@ -2927,6 +2927,96 @@ fn rejects_atomic_double_pointer_forms() {
 }
 
 #[test]
+fn double_function_parameters_returns_and_calls_preserve_numeric_metadata() {
+    let program = r#"
+double add_half(double);
+double add_half(double value) {
+    return value + 0.5;
+}
+double from_int(int value) {
+    return value;
+}
+double recurse(double value, int depth) {
+    return depth ? recurse(value + 0.25, depth - 1) : value;
+}
+int main(void) {
+    int marker = 0;
+    double result = add_half((marker += 1, 2));
+    return result == 2.5
+                && marker == 1
+                && from_int(3) == 3.0
+                && recurse(1.0, 4) == 2.0
+                && (int)add_half(3.75) == 4
+                && _Generic(add_half(1), double: 1, default: 0)
+                && sizeof(add_half(marker++)) == sizeof(double)
+                && marker == 1
+           ? 0
+           : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    let prototype_only = r#"
+double declared_only(double);
+int main(void) {
+    int marker = 0;
+    return sizeof(declared_only(marker++)) == sizeof(double)
+                && _Generic(declared_only(marker++), double: 1, default: 0)
+                && marker == 0
+           ? 0
+           : 1;
+}
+"#;
+    assert_eq!(interpret(prototype_only).unwrap(), 0);
+}
+
+#[test]
+fn double_function_declarations_keep_pointer_and_array_boundaries_source_located() {
+    let cases = [
+        (
+            "int read(double *value);\nint main(void) { return 0; }",
+            "double pointers are not supported at line 1, column 17",
+        ),
+        (
+            "double *make(void);\nint main(void) { return 0; }",
+            "double pointers are not supported at line 1, column 8",
+        ),
+        (
+            "int sum(double values[2]);\nint main(void) { return 0; }",
+            "double arrays are not supported at line 1, column 22",
+        ),
+        (
+            "double (*make(void))[2];\nint main(void) { return 0; }",
+            "double row pointers are not supported at line 1, column 9",
+        ),
+        (
+            "int sum(double (*values)[2]);\nint main(void) { return 0; }",
+            "double row pointers are not supported at line 1, column 17",
+        ),
+        (
+            "int sum(double (*)[2]);\nint main(void) { return 0; }",
+            "double row pointers are not supported at line 1, column 17",
+        ),
+        (
+            "double main(void) { return 1.5; }",
+            "main must have return type int at line 1, column 8",
+        ),
+        (
+            "int (*main(void))[2];",
+            "main must have return type int at line 1, column 7",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        match interpret(program) {
+            Err(error) => assert_eq!(error.to_string(), expected, "{program}"),
+            Ok(value) => panic!("expected rejection for {program}, got {value}"),
+        }
+    }
+}
+
+#[test]
 fn rejects_unsupported_floating_point_forms_with_context() {
     let cases = [
         (
@@ -2952,18 +3042,6 @@ fn rejects_unsupported_floating_point_forms_with_context() {
         (
             "typedef double Real;\nint main(void) { return 0; }",
             "double typedef aliases are not supported at line 1, column 9",
-        ),
-        (
-            "int consume(double value);\nint main(void) { return 0; }",
-            "double function parameters are not supported at line 1, column 13",
-        ),
-        (
-            "double produce(void);\nint main(void) { return 0; }",
-            "double function returns are not supported at line 1, column 1",
-        ),
-        (
-            "double main(void) { return 0; }",
-            "double function returns are not supported at line 1, column 1",
         ),
         (
             "int main(void) { return (int)1.0f; }",

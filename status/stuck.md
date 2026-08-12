@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.29.0 publication on 2026-08-12. Focused version RED/GREEN, fresh independent `APPROVED` re-review, formatting, warning-denied Clippy, all 1,592 local/rebuilt-Docker tests, runtime output `10`, local/Cargo/container version `cust 0.29.0`, release-commit-first publication, and exact local/remote annotated-tag peeled identity pass. No implementation, Docker, Git, research, or environment blocker is active.
+None. Last reviewed during direct bounded `double` function-boundary implementation on 2026-08-12. Focused RED/GREEN, the review-driven row-pointer `main` guard, fresh independent `APPROVED` re-review, all 1,594 local/rebuilt-Docker tests, and rebuilt runtime output `10` pass; no implementation, Docker, Git, research, or environment blocker is active.
 
 ## Blocker template
 
