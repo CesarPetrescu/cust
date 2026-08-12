@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 #[cfg(target_os = "linux")]
@@ -88,6 +88,7 @@ impl Error for CustError {}
 
 const INT_SIZE: i64 = 8;
 const CHAR_SIZE: i64 = 1;
+const DOUBLE_SIZE: i64 = 8;
 const POINTER_SIZE: i64 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,6 +139,7 @@ enum Token {
     Goto,
     Ident(String),
     Number(i64),
+    DoubleNumber(u64),
     PreprocessorNumber(PreprocessorInteger),
     RawPreprocessor(String),
     StringLiteral(Vec<i64>),
@@ -385,6 +387,7 @@ struct OpenedSourceIdentity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Expr {
     Number(i64),
+    DoubleNumber(u64),
     StringLiteral(Vec<i64>),
     SizeOfType(SizeOfType),
     SizeOfValue(Box<Expr>),
@@ -965,6 +968,7 @@ impl ReturnType {
             ReturnType::Scalar(CType::Int) => "int",
             ReturnType::Scalar(CType::Char) => "char",
             ReturnType::Scalar(CType::Bool) => "_Bool",
+            ReturnType::Scalar(CType::Double) => "double",
             ReturnType::Pointer { .. } | ReturnType::Array2DPointer { .. } => "pointer",
             ReturnType::Struct(_) => "struct",
             ReturnType::Void => "void",
@@ -991,13 +995,14 @@ enum CType {
     Int,
     Char,
     Bool,
+    Double,
 }
 
 impl CType {
     fn normalize(self, value: i64) -> i64 {
         match self {
             CType::Bool => i64::from(value != 0),
-            CType::Int | CType::Char => value,
+            CType::Int | CType::Char | CType::Double => value,
         }
     }
 
@@ -1006,6 +1011,7 @@ impl CType {
             CType::Int => INT_SIZE,
             CType::Char => CHAR_SIZE,
             CType::Bool => CHAR_SIZE,
+            CType::Double => DOUBLE_SIZE,
         }
     }
 
@@ -1814,6 +1820,65 @@ fn lex_spliced_with_state(
                     start_column,
                 ));
             }
+            c if decimal_floating_literal_end(chars, i).is_some() => {
+                let start = i;
+                let start_line = line;
+                let start_column = column;
+                let end = decimal_floating_literal_end(chars, i)
+                    .expect("floating-literal guard requires an end");
+                while i < end {
+                    advance_position(chars, chars[i], &mut line, &mut column, &mut i);
+                }
+                let text: String = chars[start..end].iter().collect();
+                if matches!(chars.get(i), Some('f' | 'F')) {
+                    return Err(lexer_error_with_context(
+                        "float literals are not supported",
+                        source,
+                        start_line,
+                        start_column,
+                    ));
+                }
+                if matches!(chars.get(i), Some('l' | 'L')) {
+                    return Err(lexer_error_with_context(
+                        "long double literals are not supported",
+                        source,
+                        start_line,
+                        start_column,
+                    ));
+                }
+                if chars
+                    .get(i)
+                    .is_some_and(|character| character.is_ascii_alphanumeric() || *character == '_')
+                {
+                    return Err(lexer_error_with_context(
+                        "invalid floating literal suffix",
+                        source,
+                        start_line,
+                        start_column,
+                    ));
+                }
+                let value = text.parse::<f64>().map_err(|_| {
+                    lexer_error_with_context(
+                        "invalid decimal floating literal",
+                        source,
+                        start_line,
+                        start_column,
+                    )
+                })?;
+                if !value.is_finite() {
+                    return Err(lexer_error_with_context(
+                        "non-finite double literals are not supported",
+                        source,
+                        start_line,
+                        start_column,
+                    ));
+                }
+                tokens.push(LocatedToken::new(
+                    Token::DoubleNumber(value.to_bits()),
+                    start_line,
+                    start_column,
+                ));
+            }
             '0'..='9' => {
                 let start = i;
                 let start_line = line;
@@ -2525,6 +2590,7 @@ fn default_preprocessing_spelling(kind: &Token) -> String {
         Token::Goto => "goto".into(),
         Token::Ident(name) => name.clone(),
         Token::Number(value) => value.to_string(),
+        Token::DoubleNumber(bits) => f64::from_bits(*bits).to_string(),
         Token::PreprocessorNumber(value) if value.unsigned => format!("{}U", value.bits),
         Token::PreprocessorNumber(value) => (value.bits as i64).to_string(),
         Token::RawPreprocessor(spelling) => spelling.clone(),
@@ -6861,6 +6927,41 @@ fn consume_integer_suffix(
     Ok(suffix.contains(['u', 'U']))
 }
 
+fn decimal_floating_literal_end(chars: &SplicedSourceChars, start: usize) -> Option<usize> {
+    let starts_with_digit = chars.get(start).is_some_and(char::is_ascii_digit);
+    let starts_with_fraction =
+        chars.get(start) == Some(&'.') && chars.get(start + 1).is_some_and(char::is_ascii_digit);
+    if !starts_with_digit && !starts_with_fraction {
+        return None;
+    }
+    if chars.get(start) == Some(&'0') && matches!(chars.get(start + 1), Some('x' | 'X')) {
+        return None;
+    }
+    let mut cursor = start;
+    while chars.get(cursor).is_some_and(char::is_ascii_digit) {
+        cursor += 1;
+    }
+    let mut floating = false;
+    if chars.get(cursor) == Some(&'.') {
+        floating = true;
+        cursor += 1;
+        while chars.get(cursor).is_some_and(char::is_ascii_digit) {
+            cursor += 1;
+        }
+    }
+    if matches!(chars.get(cursor), Some('e' | 'E')) {
+        floating = true;
+        cursor += 1;
+        if matches!(chars.get(cursor), Some('+' | '-')) {
+            cursor += 1;
+        }
+        while chars.get(cursor).is_some_and(char::is_ascii_digit) {
+            cursor += 1;
+        }
+    }
+    floating.then_some(cursor)
+}
+
 fn advance_position(
     chars: &SplicedSourceChars,
     _c: char,
@@ -7506,9 +7607,9 @@ impl Parser {
     }
 
     fn reject_floating_point_type_specifier(&self, token: &LocatedToken) -> CustResult<()> {
-        if matches!(token.kind, Token::Float | Token::Double) {
+        if matches!(token.kind, Token::Float) {
             return Err(Self::error_at(
-                "floating-point types are not supported".to_string(),
+                "float types are not supported".to_string(),
                 token,
             ));
         }
@@ -7529,6 +7630,30 @@ impl Parser {
         &mut self,
         context: &str,
     ) -> CustResult<(bool, DeclType)> {
+        let mut offset = 0;
+        let mut long_token = None;
+        let mut saw_double = false;
+        loop {
+            match self.tokens.get(self.pos + offset) {
+                Some(token) if matches!(token.kind, Token::Long) => {
+                    long_token.get_or_insert_with(|| token.clone());
+                }
+                Some(token) if matches!(token.kind, Token::Double) => saw_double = true,
+                Some(token) if matches!(token.kind, Token::Const | Token::Volatile) => {}
+                Some(token)
+                    if matches!(token.kind, Token::Atomic)
+                        && self.bare_atomic_qualifier_at(self.pos + offset) => {}
+                _ => break,
+            }
+            offset += 1;
+        }
+        if saw_double && let Some(long_token) = long_token {
+            return Err(Self::error_at(
+                "long double types are not supported".to_string(),
+                &long_token,
+            ));
+        }
+
         self.reject_leading_restrict_qualifier()?;
         let found = self.advance();
         self.reject_floating_point_type_specifier(&found)?;
@@ -7546,6 +7671,10 @@ impl Parser {
             | Token::Unsigned
             | Token::Long
             | Token::Short => self.parse_scalar_decl_type_specifiers(found),
+            Token::Double => {
+                saw_const |= self.consume_type_qualifiers();
+                Ok((saw_const, DeclType::Scalar(CType::Double)))
+            }
             Token::Atomic => {
                 self.expect_opening_paren_after("_Atomic")?;
                 if self.check(&Token::LBracket) {
@@ -7649,6 +7778,12 @@ impl Parser {
                     }
                 }
                 if self.matches(&Token::Star) {
+                    if matches!(decl_type, DeclType::Scalar(CType::Double)) {
+                        return Err(Self::error_at(
+                            "double pointers are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
                     let pointee = match decl_type {
                         DeclType::Void => PointeeType::Void,
                         DeclType::Scalar(ty) => PointeeType::Scalar(ty),
@@ -7835,6 +7970,12 @@ impl Parser {
         &mut self,
         first: LocatedToken,
     ) -> CustResult<(bool, DeclType)> {
+        if matches!(first.kind, Token::Long) && self.check(&Token::Double) {
+            return Err(Self::error_at(
+                "long double types are not supported".to_string(),
+                &first,
+            ));
+        }
         let mut saw_const = false;
         let mut saw_char = false;
         let mut saw_bool = false;
@@ -8216,6 +8357,12 @@ impl Parser {
                 &self.tokens[base_start],
             ));
         }
+        if matches!(base_type, DeclType::Scalar(CType::Double)) {
+            return Err(Self::error_at(
+                "double typedef aliases are not supported".to_string(),
+                &self.tokens[base_start],
+            ));
+        }
 
         loop {
             let (
@@ -8516,6 +8663,10 @@ impl Parser {
         let mut index = self.skip_type_qualifiers_at(self.pos);
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(Token::Void) => {
+                index += 1;
+                index = self.skip_type_qualifiers_at(index);
+            }
+            Some(Token::Double) => {
                 index += 1;
                 index = self.skip_type_qualifiers_at(index);
             }
@@ -9021,8 +9172,15 @@ impl Parser {
             }
             return Ok((ReturnType::Void, false));
         }
+        let return_type_token = self.peek_located().clone();
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("function return type")?;
+        if matches!(decl_type, DeclType::Scalar(CType::Double)) {
+            return Err(Self::error_at(
+                "double function returns are not supported".to_string(),
+                &return_type_token,
+            ));
+        }
         if self.matches(&Token::Star) {
             if matches!(decl_type, DeclType::Pointer { .. }) || self.check(&Token::Star) {
                 return Err(Self::error_at(
@@ -9194,6 +9352,12 @@ impl Parser {
             };
             let (leading_const, decl_type) =
                 self.parse_const_qualified_decl_type("parameter type")?;
+            if matches!(decl_type, DeclType::Scalar(CType::Double)) {
+                return Err(Self::error_at(
+                    "double function parameters are not supported".to_string(),
+                    &parameter_type_token,
+                ));
+            }
             let parameter_type_qualifier = self.tokens[parameter_type_start..self.pos]
                 .iter()
                 .find(|token| {
@@ -9803,6 +9967,7 @@ impl Parser {
             }
             Token::Ident(_)
             | Token::Number(_)
+            | Token::DoubleNumber(_)
             | Token::PreprocessorNumber(_)
             | Token::StringLiteral(_)
             | Token::Generic
@@ -9941,6 +10106,7 @@ impl Parser {
             Token::Int
             | Token::Char
             | Token::Bool
+            | Token::Double
             | Token::Signed
             | Token::Unsigned
             | Token::Long
@@ -10009,6 +10175,7 @@ impl Parser {
             Token::Int
             | Token::Char
             | Token::Bool
+            | Token::Double
             | Token::Signed
             | Token::Unsigned
             | Token::Long
@@ -10038,6 +10205,7 @@ impl Parser {
             Token::Int
             | Token::Char
             | Token::Bool
+            | Token::Double
             | Token::Signed
             | Token::Unsigned
             | Token::Long
@@ -10081,6 +10249,7 @@ impl Parser {
             Token::Int
             | Token::Char
             | Token::Bool
+            | Token::Double
             | Token::Signed
             | Token::Unsigned
             | Token::Long
@@ -10167,6 +10336,7 @@ impl Parser {
             Token::Int
             | Token::Char
             | Token::Bool
+            | Token::Double
             | Token::Signed
             | Token::Unsigned
             | Token::Long
@@ -10236,6 +10406,12 @@ impl Parser {
             ));
         }
         let has_explicit_star = self.matches(&Token::Star);
+        if has_explicit_star && matches!(decl_type, DeclType::Scalar(CType::Double)) {
+            return Err(Self::error_at(
+                "double pointers are not supported".to_string(),
+                self.previous(),
+            ));
+        }
         let post_star_qualifier = if has_explicit_star {
             self.leading_type_qualifier_token()
         } else {
@@ -10671,6 +10847,12 @@ impl Parser {
         let DeclType::Scalar(ty) = decl_type else {
             unreachable!("void and struct declarations return above")
         };
+        if ty == CType::Double && self.check(&Token::LBracket) {
+            return Err(Self::error_at(
+                "double arrays are not supported".to_string(),
+                self.peek_located(),
+            ));
+        }
         if self.matches(&Token::LBracket) {
             let (len, init) = if self.matches(&Token::RBracket) {
                 if !self.matches(&Token::Assign) {
@@ -10800,6 +10982,12 @@ impl Parser {
         points_to_const: bool,
         require_semi: bool,
     ) -> CustResult<Stmt> {
+        if elem_type == CType::Double {
+            return Err(Self::error_at(
+                "double pointers are not supported".to_string(),
+                &self.tokens[self.pos + 1],
+            ));
+        }
         self.expect(Token::LParen)?;
         self.expect(Token::Star)?;
         let is_const = self.consume_type_qualifiers();
@@ -10917,6 +11105,12 @@ impl Parser {
             ));
         }
         let has_explicit_star = self.matches(&Token::Star);
+        if has_explicit_star && matches!(base_type, DeclType::Scalar(CType::Double)) {
+            return Err(Self::error_at(
+                "double pointers are not supported".to_string(),
+                self.previous(),
+            ));
+        }
         let post_star_qualifier = if has_explicit_star {
             self.leading_type_qualifier_token()
         } else {
@@ -11162,6 +11356,12 @@ impl Parser {
         match base_type {
             DeclType::Void => unreachable!("void objects are rejected above"),
             DeclType::Scalar(ty) => {
+                if ty == CType::Double && self.check(&Token::LBracket) {
+                    return Err(Self::error_at(
+                        "double arrays are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 if self.matches(&Token::LBracket) {
                     let (len, init) = if self.matches(&Token::RBracket) {
                         if !self.matches(&Token::Assign) {
@@ -12353,6 +12553,7 @@ impl Parser {
                 _ => false,
             };
             let leading_const = leading_const || alias_const;
+            let field_type_token = self.peek_located().clone();
             let decl_type = if matches!(self.peek(), Token::Struct | Token::Union) {
                 if matches!(self.peek_next(), Token::LBrace)
                     || matches!(
@@ -12384,6 +12585,12 @@ impl Parser {
             } else {
                 self.parse_decl_type(&format!("{keyword} field type"))?
             };
+            if matches!(decl_type, DeclType::Scalar(CType::Double)) {
+                return Err(Self::error_at(
+                    "double aggregate fields are not supported".to_string(),
+                    &field_type_token,
+                ));
+            }
             loop {
                 let has_explicit_star = self.matches(&Token::Star);
                 let post_star_const = has_explicit_star && self.consume_type_qualifiers();
@@ -13191,8 +13398,8 @@ impl Parser {
         self.consume_type_qualifiers();
         let type_token = self.peek_located().clone();
         let decl_type = self.parse_decl_type("integer constant expression cast type")?;
-        match decl_type {
-            DeclType::Scalar(_) => {}
+        let target_type = match decl_type {
+            DeclType::Scalar(ty) => ty,
             DeclType::Struct(_) => {
                 return Err(Self::error_at(
                     "aggregate casts are not supported".to_string(),
@@ -13209,14 +13416,63 @@ impl Parser {
                     &type_token,
                 ));
             }
+        };
+        if target_type == CType::Double {
+            return Err(Self::error_at(
+                "double casts are not allowed in integer constant expressions".to_string(),
+                &type_token,
+            ));
         }
         self.expect_closing_paren_after("integer constant expression cast type")?;
         self.reject_missing_integer_constant_cast_operand()?;
+        if let Some(value) = self.consume_parenthesized_double_constant_operand() {
+            let value = if target_type == CType::Bool {
+                i64::from(value != 0.0)
+            } else {
+                value as i64
+            };
+            return Ok((target_type.normalize(value), opening));
+        }
         let (value, _) = self.parse_integer_constant_unary(
             local_constants,
             "expected integer constant in integer constant expression",
         )?;
-        Ok((value, opening))
+        Ok((target_type.normalize(value), opening))
+    }
+
+    fn consume_parenthesized_double_constant_operand(&mut self) -> Option<f64> {
+        let start = self.pos;
+        let mut parenthesis_depth = 0usize;
+        while self.matches(&Token::LParen) {
+            parenthesis_depth += 1;
+        }
+        let sign = if self.matches(&Token::Minus) {
+            -1.0
+        } else {
+            self.matches(&Token::Plus);
+            1.0
+        };
+        let Token::DoubleNumber(bits) = self.peek().clone() else {
+            self.pos = start;
+            return None;
+        };
+        self.advance();
+        for _ in 0..parenthesis_depth {
+            if !self.matches(&Token::RParen) {
+                self.pos = start;
+                return None;
+            }
+        }
+        Some(sign * f64::from_bits(bits))
+    }
+
+    fn double_constant_expr_value(expr: &Expr) -> Option<f64> {
+        match expr {
+            Expr::DoubleNumber(bits) => Some(f64::from_bits(*bits)),
+            Expr::UnaryPlus(inner) => Self::double_constant_expr_value(inner),
+            Expr::UnaryMinus(inner) => Self::double_constant_expr_value(inner).map(|value| -value),
+            _ => None,
+        }
     }
 
     fn reject_missing_integer_constant_cast_operand(&self) -> CustResult<()> {
@@ -13346,6 +13602,76 @@ impl Parser {
         Ok((value, operator))
     }
 
+    fn validate_integer_constant_array_initializers(
+        &self,
+        initializers: &[ArrayInitializer],
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                ArrayInitializer::Expr(expr) | ArrayInitializer::Designated { value: expr, .. } => {
+                    self.sizeof_integer_constant_expr(expr, local_constants)?;
+                }
+                ArrayInitializer::StringLiteral(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_integer_constant_struct_initializers(
+        &self,
+        initializers: &[StructInitializer],
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                StructInitializer::Expr(expr) => {
+                    self.sizeof_integer_constant_expr(expr, local_constants)?;
+                }
+                StructInitializer::Array(values) => {
+                    self.validate_integer_constant_array_initializers(values, local_constants)?;
+                }
+                StructInitializer::Array2D(rows) => {
+                    for row in rows {
+                        self.validate_integer_constant_array_initializers(row, local_constants)?;
+                    }
+                }
+                StructInitializer::Struct(values) => {
+                    self.validate_integer_constant_struct_initializers(values, local_constants)?;
+                }
+                StructInitializer::StructArray(values) => {
+                    self.validate_integer_constant_struct_array_initializers(
+                        values,
+                        local_constants,
+                    )?;
+                }
+                StructInitializer::Designated { value, .. } => {
+                    self.validate_integer_constant_struct_initializers(
+                        std::slice::from_ref(value),
+                        local_constants,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_integer_constant_struct_array_initializers(
+        &self,
+        initializers: &[StructArrayInitializer],
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                StructArrayInitializer::Element(values)
+                | StructArrayInitializer::Designated { value: values, .. } => {
+                    self.validate_integer_constant_struct_initializers(values, local_constants)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn sizeof_integer_constant_expr(
         &self,
         expr: &Expr,
@@ -13357,6 +13683,7 @@ impl Parser {
                 local_constants,
             ),
             Expr::Number(_) => Ok(INT_SIZE),
+            Expr::DoubleNumber(_) => Ok(DOUBLE_SIZE),
             Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
             Expr::SizeOfType(sizeof_type) => sizeof_type.size(&self.struct_types),
             Expr::SizeOfValue(inner) => self.sizeof_integer_constant_expr(inner, local_constants),
@@ -13370,21 +13697,37 @@ impl Parser {
                     )))
                 }
             }
-            Expr::UnaryPlus(inner)
-            | Expr::UnaryMinus(inner)
-            | Expr::BitwiseNot(inner)
-            | Expr::LogicalNot(inner) => {
+            Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::LogicalNot(inner) => {
                 self.sizeof_integer_constant_expr(inner, local_constants)?;
+                Ok(INT_SIZE)
+            }
+            Expr::BitwiseNot(inner) => {
+                self.sizeof_integer_constant_expr(inner, local_constants)?;
+                if matches!(
+                    self.generic_integer_constant_expr_type(inner, local_constants)?,
+                    DeclType::Scalar(CType::Double)
+                ) {
+                    return Err(CustError::new(
+                        "bitwise operations on double values are not supported",
+                    ));
+                }
                 Ok(INT_SIZE)
             }
             Expr::Cast { ty, expr: inner } => {
                 self.sizeof_integer_constant_expr(inner, local_constants)?;
                 Ok(ty.size())
             }
-            Expr::Binary(left, _, right) | Expr::Comma(left, right) => {
+            Expr::Binary(left, _, right) => {
                 self.sizeof_integer_constant_expr(left, local_constants)?;
                 self.sizeof_integer_constant_expr(right, local_constants)?;
-                Ok(INT_SIZE)
+                match self.generic_integer_constant_expr_type(expr, local_constants)? {
+                    DeclType::Scalar(ty) => Ok(ty.size()),
+                    _ => Ok(INT_SIZE),
+                }
+            }
+            Expr::Comma(left, right) => {
+                self.sizeof_integer_constant_expr(left, local_constants)?;
+                self.sizeof_integer_constant_expr(right, local_constants)
             }
             Expr::Conditional {
                 cond,
@@ -13394,12 +13737,38 @@ impl Parser {
                 self.sizeof_integer_constant_expr(cond, local_constants)?;
                 self.sizeof_integer_constant_expr(then_expr, local_constants)?;
                 self.sizeof_integer_constant_expr(else_expr, local_constants)?;
-                Ok(INT_SIZE)
+                match self.generic_integer_constant_expr_type(expr, local_constants)? {
+                    DeclType::Scalar(ty) => Ok(ty.size()),
+                    _ => Ok(INT_SIZE),
+                }
             }
-            Expr::ScalarLiteral { ty, init }
-            | Expr::ScalarLiteralSet { ty, init, .. }
-            | Expr::ScalarLiteralCompoundSet { ty, init, .. } => {
+            Expr::ScalarLiteral { ty, init } => {
                 self.sizeof_integer_constant_expr(init, local_constants)?;
+                Ok(ty.size())
+            }
+            Expr::ScalarLiteralSet {
+                ty, init, value, ..
+            } => {
+                self.sizeof_integer_constant_expr(init, local_constants)?;
+                self.sizeof_integer_constant_expr(value, local_constants)?;
+                Ok(ty.size())
+            }
+            Expr::ScalarLiteralCompoundSet {
+                ty,
+                init,
+                op,
+                value,
+            } => {
+                self.sizeof_integer_constant_expr(init, local_constants)?;
+                self.sizeof_integer_constant_expr(value, local_constants)?;
+                if *ty == CType::Double
+                    || matches!(
+                        self.generic_integer_constant_expr_type(value, local_constants)?,
+                        DeclType::Scalar(CType::Double)
+                    )
+                {
+                    Interpreter::apply_double_compound_op(0.0, *op, 1.0)?;
+                }
                 Ok(ty.size())
             }
             Expr::ArrayLiteral {
@@ -13408,21 +13777,27 @@ impl Parser {
                 init,
                 ..
             } => {
+                self.validate_integer_constant_array_initializers(init, local_constants)?;
                 let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
                 Ok(len as i64 * elem_type.size())
             }
-            Expr::AggregateLiteral { type_name, .. } => self
-                .struct_types
-                .get(type_name)
-                .map(|struct_type| struct_type.size(&self.struct_types))
-                .transpose()?
-                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
+            Expr::AggregateLiteral {
+                type_name, init, ..
+            } => {
+                self.validate_integer_constant_struct_initializers(init, local_constants)?;
+                self.struct_types
+                    .get(type_name)
+                    .map(|struct_type| struct_type.size(&self.struct_types))
+                    .transpose()?
+                    .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))
+            }
             Expr::AggregateArrayLiteral {
                 type_name,
                 len,
                 init,
                 ..
             } => {
+                self.validate_integer_constant_struct_array_initializers(init, local_constants)?;
                 let len = len.unwrap_or_else(|| Self::infer_struct_array_initializer_len(init));
                 let element_size = self
                     .struct_types
@@ -13456,16 +13831,246 @@ impl Parser {
         };
         let controlling_type =
             self.generic_integer_constant_expr_type(controlling, local_constants)?;
-        if let Some((_, selected)) = associations
+        for (_, association) in associations {
+            self.validate_integer_constant_generic_association_constraints(
+                association,
+                local_constants,
+            )?;
+        }
+        if let Some(default) = default {
+            self.validate_integer_constant_generic_association_constraints(
+                default,
+                local_constants,
+            )?;
+        }
+        let selected = if let Some((_, selected)) = associations
             .iter()
             .find(|(association_type, _)| association_type == &controlling_type)
         {
-            return Ok(selected);
+            selected
+        } else {
+            default.as_deref().ok_or_else(|| CustError {
+                message: no_match_error.clone(),
+                io_error: false,
+            })?
+        };
+        if matches!(
+            self.generic_integer_constant_expr_type(selected, local_constants)?,
+            DeclType::Scalar(CType::Double)
+        ) {
+            return Err(CustError::new(
+                "selected generic association is not an integer constant expression",
+            ));
         }
-        default.as_deref().ok_or_else(|| CustError {
-            message: no_match_error.clone(),
-            io_error: false,
-        })
+        Ok(selected)
+    }
+
+    fn validate_integer_constant_generic_association_constraints(
+        &self,
+        expr: &Expr,
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<()> {
+        match expr {
+            Expr::Call { args, .. } => {
+                for argument in args {
+                    self.validate_integer_constant_generic_association_constraints(
+                        argument,
+                        local_constants,
+                    )?;
+                }
+            }
+            Expr::UnaryPlus(inner)
+            | Expr::UnaryMinus(inner)
+            | Expr::LogicalNot(inner)
+            | Expr::VoidCast(inner)
+            | Expr::SizeOfValue(inner)
+            | Expr::Cast { expr: inner, .. }
+            | Expr::PointerCast { expr: inner, .. }
+            | Expr::AddressOfScalarLiteral { init: inner, .. }
+            | Expr::Deref(inner) => {
+                self.validate_integer_constant_generic_association_constraints(
+                    inner,
+                    local_constants,
+                )?;
+            }
+            Expr::BitwiseNot(inner) => {
+                self.validate_integer_constant_generic_association_constraints(
+                    inner,
+                    local_constants,
+                )?;
+                self.generic_integer_constant_expr_type(expr, local_constants)?;
+            }
+            Expr::Binary(left, _, right) | Expr::Comma(left, right) => {
+                self.validate_integer_constant_generic_association_constraints(
+                    left,
+                    local_constants,
+                )?;
+                self.validate_integer_constant_generic_association_constraints(
+                    right,
+                    local_constants,
+                )?;
+                if matches!(expr, Expr::Binary(_, _, _)) {
+                    self.generic_integer_constant_expr_type(expr, local_constants)?;
+                }
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                for nested in [cond.as_ref(), then_expr.as_ref(), else_expr.as_ref()] {
+                    self.validate_integer_constant_generic_association_constraints(
+                        nested,
+                        local_constants,
+                    )?;
+                }
+            }
+            Expr::GenericSelection {
+                controlling,
+                associations,
+                default,
+                ..
+            } => {
+                self.validate_integer_constant_generic_association_constraints(
+                    controlling,
+                    local_constants,
+                )?;
+                for (_, association) in associations {
+                    self.validate_integer_constant_generic_association_constraints(
+                        association,
+                        local_constants,
+                    )?;
+                }
+                if let Some(default) = default {
+                    self.validate_integer_constant_generic_association_constraints(
+                        default,
+                        local_constants,
+                    )?;
+                }
+            }
+            Expr::ScalarLiteral { init, .. } => {
+                self.validate_integer_constant_generic_association_constraints(
+                    init,
+                    local_constants,
+                )?;
+            }
+            Expr::ArrayLiteral { init, .. } => {
+                for initializer in init {
+                    match initializer {
+                        ArrayInitializer::Expr(value)
+                        | ArrayInitializer::Designated { value, .. } => {
+                            self.validate_integer_constant_generic_association_constraints(
+                                value,
+                                local_constants,
+                            )?;
+                        }
+                        ArrayInitializer::StringLiteral(_) => {}
+                    }
+                }
+            }
+            Expr::AggregateLiteral { init, .. } | Expr::AddressOfAggregateLiteral { init, .. } => {
+                self.validate_integer_constant_generic_struct_constraints(init, local_constants)?;
+            }
+            Expr::AggregateArrayLiteral { init, .. } => {
+                for initializer in init {
+                    match initializer {
+                        StructArrayInitializer::Element(values)
+                        | StructArrayInitializer::Designated { value: values, .. } => {
+                            self.validate_integer_constant_generic_struct_constraints(
+                                values,
+                                local_constants,
+                            )?;
+                        }
+                    }
+                }
+            }
+            Expr::ScalarLiteralSet { init, value, .. }
+            | Expr::ScalarLiteralCompoundSet { init, value, .. } => {
+                self.validate_integer_constant_generic_association_constraints(
+                    init,
+                    local_constants,
+                )?;
+                self.validate_integer_constant_generic_association_constraints(
+                    value,
+                    local_constants,
+                )?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn validate_integer_constant_generic_struct_constraints(
+        &self,
+        initializers: &[StructInitializer],
+        local_constants: &HashMap<String, i64>,
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                StructInitializer::Expr(expr) => {
+                    self.validate_integer_constant_generic_association_constraints(
+                        expr,
+                        local_constants,
+                    )?;
+                }
+                StructInitializer::Array(values) => {
+                    for value in values {
+                        match value {
+                            ArrayInitializer::Expr(expr)
+                            | ArrayInitializer::Designated { value: expr, .. } => {
+                                self.validate_integer_constant_generic_association_constraints(
+                                    expr,
+                                    local_constants,
+                                )?;
+                            }
+                            ArrayInitializer::StringLiteral(_) => {}
+                        }
+                    }
+                }
+                StructInitializer::Array2D(rows) => {
+                    for row in rows {
+                        for value in row {
+                            match value {
+                                ArrayInitializer::Expr(expr)
+                                | ArrayInitializer::Designated { value: expr, .. } => {
+                                    self.validate_integer_constant_generic_association_constraints(
+                                        expr,
+                                        local_constants,
+                                    )?;
+                                }
+                                ArrayInitializer::StringLiteral(_) => {}
+                            }
+                        }
+                    }
+                }
+                StructInitializer::Struct(values) => {
+                    self.validate_integer_constant_generic_struct_constraints(
+                        values,
+                        local_constants,
+                    )?;
+                }
+                StructInitializer::StructArray(values) => {
+                    for value in values {
+                        match value {
+                            StructArrayInitializer::Element(fields)
+                            | StructArrayInitializer::Designated { value: fields, .. } => {
+                                self.validate_integer_constant_generic_struct_constraints(
+                                    fields,
+                                    local_constants,
+                                )?;
+                            }
+                        }
+                    }
+                }
+                StructInitializer::Designated { value, .. } => {
+                    self.validate_integer_constant_generic_struct_constraints(
+                        std::slice::from_ref(value),
+                        local_constants,
+                    )?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn generic_integer_constant_expr_type(
@@ -13480,18 +14085,97 @@ impl Parser {
                     local_constants,
                 );
             }
+            Expr::DoubleNumber(_) => CType::Double,
+            Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) => {
+                return self.generic_integer_constant_expr_type(inner, local_constants);
+            }
+            Expr::Binary(
+                left,
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div,
+                right,
+            ) => {
+                let left_type = self.generic_integer_constant_expr_type(left, local_constants)?;
+                let right_type = self.generic_integer_constant_expr_type(right, local_constants)?;
+                return Ok(DeclType::Scalar(
+                    if matches!(left_type, DeclType::Scalar(CType::Double))
+                        || matches!(right_type, DeclType::Scalar(CType::Double))
+                    {
+                        CType::Double
+                    } else {
+                        CType::Int
+                    },
+                ));
+            }
+            Expr::Binary(left, BinaryOp::Rem, right) => {
+                let left_type = self.generic_integer_constant_expr_type(left, local_constants)?;
+                let right_type = self.generic_integer_constant_expr_type(right, local_constants)?;
+                if matches!(left_type, DeclType::Scalar(CType::Double))
+                    || matches!(right_type, DeclType::Scalar(CType::Double))
+                {
+                    return Err(CustError::new(
+                        "remainder on double values is not supported",
+                    ));
+                }
+                CType::Int
+            }
+            Expr::Binary(
+                left,
+                BinaryOp::ShiftLeft
+                | BinaryOp::ShiftRight
+                | BinaryOp::BitAnd
+                | BinaryOp::BitXor
+                | BinaryOp::BitOr,
+                right,
+            ) => {
+                let left_type = self.generic_integer_constant_expr_type(left, local_constants)?;
+                let right_type = self.generic_integer_constant_expr_type(right, local_constants)?;
+                if matches!(left_type, DeclType::Scalar(CType::Double))
+                    || matches!(right_type, DeclType::Scalar(CType::Double))
+                {
+                    return Err(CustError::new(
+                        "bitwise operations on double values are not supported",
+                    ));
+                }
+                CType::Int
+            }
+            Expr::Binary(
+                left,
+                BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge
+                | BinaryOp::LogicalAnd
+                | BinaryOp::LogicalOr,
+                right,
+            ) => {
+                self.generic_integer_constant_expr_type(left, local_constants)?;
+                self.generic_integer_constant_expr_type(right, local_constants)?;
+                CType::Int
+            }
             Expr::Number(_)
             | Expr::SizeOfType(_)
             | Expr::SizeOfValue(_)
             | Expr::AlignOfType(_)
-            | Expr::UnaryPlus(_)
-            | Expr::UnaryMinus(_)
-            | Expr::BitwiseNot(_)
-            | Expr::LogicalNot(_)
-            | Expr::Binary(_, _, _) => CType::Int,
+            | Expr::LogicalNot(_) => CType::Int,
+            Expr::BitwiseNot(inner) => {
+                if matches!(
+                    self.generic_integer_constant_expr_type(inner, local_constants)?,
+                    DeclType::Scalar(CType::Double)
+                ) {
+                    return Err(CustError::new(
+                        "bitwise operations on double values are not supported",
+                    ));
+                }
+                CType::Int
+            }
             Expr::StringGet { .. } => CType::Char,
-            Expr::Cast { ty, .. }
-            | Expr::ScalarLiteral { ty, .. }
+            Expr::Cast { ty, expr: inner } => {
+                self.generic_integer_constant_expr_type(inner, local_constants)?;
+                *ty
+            }
+            Expr::ScalarLiteral { ty, .. }
             | Expr::ScalarLiteralSet { ty, .. }
             | Expr::ScalarLiteralCompoundSet { ty, .. } => *ty,
             Expr::Var(name)
@@ -13512,11 +14196,16 @@ impl Parser {
                     self.generic_integer_constant_expr_type(then_expr, local_constants)?;
                 let else_type =
                     self.generic_integer_constant_expr_type(else_expr, local_constants)?;
-                if matches!(
-                    (&then_type, &else_type),
-                    (DeclType::Scalar(_), DeclType::Scalar(_))
-                ) {
-                    return Ok(DeclType::Scalar(CType::Int));
+                if let (DeclType::Scalar(then_type), DeclType::Scalar(else_type)) =
+                    (&then_type, &else_type)
+                {
+                    return Ok(DeclType::Scalar(
+                        if *then_type == CType::Double || *else_type == CType::Double {
+                            CType::Double
+                        } else {
+                            CType::Int
+                        },
+                    ));
                 }
                 if then_type == else_type {
                     return Ok(then_type);
@@ -13676,8 +14365,15 @@ impl Parser {
             Expr::UnaryPlus(inner)
             | Expr::UnaryMinus(inner)
             | Expr::BitwiseNot(inner)
-            | Expr::LogicalNot(inner)
-            | Expr::Cast { expr: inner, .. } => {
+            | Expr::LogicalNot(inner) => {
+                self.validate_integer_constant_expr_ast(inner, local_constants)
+            }
+            Expr::Cast { ty, expr: inner }
+                if *ty != CType::Double && Self::double_constant_expr_value(inner).is_some() =>
+            {
+                Ok(())
+            }
+            Expr::Cast { expr: inner, .. } => {
                 self.validate_integer_constant_expr_ast(inner, local_constants)
             }
             Expr::Binary(left, _, right) | Expr::Comma(left, right) => {
@@ -13723,6 +14419,18 @@ impl Parser {
             Expr::SizeOfValue(inner) => self.sizeof_integer_constant_expr(inner, local_constants),
             Expr::AlignOfType(alignof_type) => alignof_type.alignment(&self.struct_types),
             Expr::UnaryPlus(inner) => self.eval_integer_constant_expr_ast(inner, local_constants),
+            Expr::Cast { ty, expr: inner }
+                if *ty != CType::Double && Self::double_constant_expr_value(inner).is_some() =>
+            {
+                let value = Self::double_constant_expr_value(inner)
+                    .expect("double-constant cast guard requires a double constant");
+                let value = if *ty == CType::Bool {
+                    i64::from(value != 0.0)
+                } else {
+                    value as i64
+                };
+                Ok(ty.normalize(value))
+            }
             Expr::Cast { ty, expr: inner } => {
                 Ok(ty.normalize(self.eval_integer_constant_expr_ast(inner, local_constants)?))
             }
@@ -14263,6 +14971,7 @@ impl Parser {
             Token::Int
                 | Token::Char
                 | Token::Bool
+                | Token::Double
                 | Token::Signed
                 | Token::Unsigned
                 | Token::Long
@@ -15482,6 +16191,12 @@ impl Parser {
             ));
         }
         if self.matches(&Token::Star) {
+            if matches!(decl_type, DeclType::Scalar(CType::Double)) {
+                return Err(Self::error_at(
+                    "double pointers are not supported".to_string(),
+                    self.previous(),
+                ));
+            }
             let pointee = match decl_type {
                 DeclType::Void => PointeeType::Void,
                 DeclType::Scalar(ty) => PointeeType::Scalar(ty),
@@ -15620,6 +16335,12 @@ impl Parser {
             }
         };
         if self.matches(&Token::LBracket) {
+            if ty == CType::Double {
+                return Err(Self::error_at(
+                    "double arrays are not supported".to_string(),
+                    &type_token,
+                ));
+            }
             let len = if self.check(&Token::RBracket) {
                 None
             } else {
@@ -16027,6 +16748,7 @@ impl Parser {
                 Token::Int
                     | Token::Char
                     | Token::Bool
+                    | Token::Double
                     | Token::Signed
                     | Token::Unsigned
                     | Token::Long
@@ -16095,6 +16817,12 @@ impl Parser {
             DeclType::Void => unreachable!("void sizeof types return above"),
             DeclType::Scalar(ty) => {
                 if self.matches(&Token::Star) {
+                    if ty == CType::Double {
+                        return Err(Self::error_at(
+                            "double pointers are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
                     self.consume_type_qualifiers();
                     if self.check(&Token::Star) {
                         return Err(Self::error_at(
@@ -16110,6 +16838,11 @@ impl Parser {
                     }
                     self.reject_function_type_suffix(&format!("function {operator} types"))?;
                     Ok(SizeOfType::Pointer)
+                } else if self.check(&Token::LBracket) && ty == CType::Double {
+                    Err(Self::error_at(
+                        "double arrays are not supported".to_string(),
+                        self.peek_located(),
+                    ))
                 } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
                     self.reject_function_type_suffix(&format!("function {operator} types"))?;
                     Ok(SizeOfType::Array(PointeeType::Scalar(ty), len))
@@ -16486,6 +17219,7 @@ impl Parser {
         let found = self.advance();
         match found.kind.clone() {
             Token::Number(value) => Ok(Expr::Number(value)),
+            Token::DoubleNumber(bits) => Ok(Expr::DoubleNumber(bits)),
             Token::PreprocessorNumber(value) if value.bits <= i64::MAX as u64 => {
                 Ok(Expr::Number(value.bits as i64))
             }
@@ -16675,6 +17409,12 @@ impl Parser {
         }
         self.reject_function_type_suffix("function generic associations")?;
         if self.matches(&Token::Star) {
+            if matches!(decl_type, DeclType::Scalar(CType::Double)) {
+                return Err(Self::error_at(
+                    "double pointers are not supported".to_string(),
+                    self.previous(),
+                ));
+            }
             let pointee = match decl_type {
                 DeclType::Void => PointeeType::Void,
                 DeclType::Scalar(ty) => PointeeType::Scalar(ty),
@@ -17036,6 +17776,7 @@ impl Parser {
             token,
             Token::Ident(_)
                 | Token::Number(_)
+                | Token::DoubleNumber(_)
                 | Token::PreprocessorNumber(_)
                 | Token::StringLiteral(_)
                 | Token::Plus
@@ -17056,6 +17797,7 @@ impl Parser {
             token,
             Token::Ident(_)
                 | Token::Number(_)
+                | Token::DoubleNumber(_)
                 | Token::PreprocessorNumber(_)
                 | Token::StringLiteral(_)
                 | Token::Star
@@ -17300,6 +18042,7 @@ impl Parser {
 // Interpreted calls recurse through Rust; keep deterministic headroom on the
 // test harness's smaller worker-thread stack as interpreter frames evolve.
 const MAX_CALL_DEPTH: usize = 24;
+const MAX_GENERIC_SELECTION_VALIDATION_DEPTH: usize = 32;
 const MAX_INTEGER_STRING_BYTES: usize = 4096;
 const CUST_RAND_MAX: u32 = 32_767;
 const CUST_RAND_DEFAULT_SEED: u32 = 1;
@@ -17321,6 +18064,12 @@ struct Interpreter {
     function_name_arrays: HashMap<String, Rc<RefCell<ArrayValue>>>,
     strtok_next: Option<PointerValue>,
     random_state: u32,
+    sizeof_validation_depth: Cell<usize>,
+    generic_selection_validation_depth: Cell<usize>,
+    generic_selection_evaluation_depth: Cell<usize>,
+    nested_intrinsic_validation_depth: Cell<usize>,
+    eval_expression_depth: Cell<usize>,
+    double_expression_type_cache: RefCell<HashMap<usize, bool>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17744,6 +18493,12 @@ impl Interpreter {
             function_name_arrays: HashMap::new(),
             strtok_next: None,
             random_state: CUST_RAND_DEFAULT_SEED,
+            sizeof_validation_depth: Cell::new(0),
+            generic_selection_validation_depth: Cell::new(0),
+            generic_selection_evaluation_depth: Cell::new(0),
+            nested_intrinsic_validation_depth: Cell::new(0),
+            eval_expression_depth: Cell::new(0),
+            double_expression_type_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -17756,10 +18511,174 @@ impl Interpreter {
                 CharacterPointerOutput::Slot { .. }
             )));
         }
+        if self.expr_is_unsupported_double_pointer(expr) {
+            return Err(CustError::new("double pointers are not supported"));
+        }
         if ty == CType::Bool && self.expr_is_pointer_value(expr) {
             return Ok(i64::from(Self::pointer_truthy(&self.eval_pointer(expr)?)));
         }
+        if ty == CType::Double {
+            return Ok(self.eval_numeric_as_f64(expr)?.to_bits() as i64);
+        }
+        if self.expr_is_double_value(expr) {
+            let value = self.eval_numeric_as_f64(expr)?;
+            return Ok(match ty {
+                CType::Bool => i64::from(value != 0.0),
+                CType::Int | CType::Char => value as i64,
+                CType::Double => unreachable!("double conversion returned above"),
+            });
+        }
         Ok(ty.normalize(self.eval(expr)?))
+    }
+
+    fn eval_numeric_as_f64(&mut self, expr: &Expr) -> CustResult<f64> {
+        if self.expr_is_double_value(expr) {
+            Ok(f64::from_bits(self.eval(expr)? as u64))
+        } else {
+            Ok(self.eval(expr)? as f64)
+        }
+    }
+
+    fn expr_is_double_value(&self, expr: &Expr) -> bool {
+        if self.eval_expression_depth.get() == 0 {
+            return self.expr_is_double_value_uncached(expr);
+        }
+        let key = expr as *const Expr as usize;
+        if let Some(is_double) = self.double_expression_type_cache.borrow().get(&key) {
+            return *is_double;
+        }
+        let is_double = self.expr_is_double_value_uncached(expr);
+        self.double_expression_type_cache
+            .borrow_mut()
+            .insert(key, is_double);
+        is_double
+    }
+
+    fn expr_is_double_value_uncached(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::DoubleNumber(_) => true,
+            Expr::Var(name) | Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
+                matches!(
+                    self.find_variable(name),
+                    Some(Value::Scalar {
+                        ty: CType::Double,
+                        ..
+                    })
+                )
+            }
+            Expr::Cast { ty, .. }
+            | Expr::ScalarLiteral { ty, .. }
+            | Expr::ScalarLiteralSet { ty, .. }
+            | Expr::ScalarLiteralCompoundSet { ty, .. } => *ty == CType::Double,
+            Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) => self.expr_is_double_value(inner),
+            Expr::Increment { target, .. } => self.expr_is_double_value(target),
+            Expr::Binary(
+                left,
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div,
+                right,
+            ) => self.expr_is_double_value(left) || self.expr_is_double_value(right),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => self.expr_is_double_value(then_expr) || self.expr_is_double_value(else_expr),
+            Expr::Comma(_, right) => self.expr_is_double_value(right),
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association_after_validation(expr)
+                .is_ok_and(|selected| self.expr_is_double_value(selected)),
+            Expr::Number(_)
+            | Expr::StringLiteral(_)
+            | Expr::SizeOfType(_)
+            | Expr::SizeOfValue(_)
+            | Expr::AlignOfType(_)
+            | Expr::AddressOf(_)
+            | Expr::AddressOfArray { .. }
+            | Expr::AddressOfStructField { .. }
+            | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfStructArrayField { .. }
+            | Expr::AddressOfStructElementArrayField { .. }
+            | Expr::AddressOfStructPtrField { .. }
+            | Expr::AddressOfStructPtrArrayField { .. }
+            | Expr::AddressOfScalarLiteral { .. }
+            | Expr::AddressOfAggregateLiteral { .. }
+            | Expr::AddressOfAggregateField { .. }
+            | Expr::ArrayLiteral { .. }
+            | Expr::AggregateArrayLiteral { .. }
+            | Expr::PointerCast { .. }
+            | Expr::StructGet { .. }
+            | Expr::StructArrayGet { .. }
+            | Expr::StructFieldArrayElementGet { .. }
+            | Expr::StructFieldArrayElementSet { .. }
+            | Expr::StructFieldArrayElementCompoundSet { .. }
+            | Expr::StructElementGet { .. }
+            | Expr::StructElementArrayGet { .. }
+            | Expr::StructPtrArrayGet { .. }
+            | Expr::StructPtrGet { .. }
+            | Expr::AggregateFieldGet { .. }
+            | Expr::AggregateFieldSet { .. }
+            | Expr::AggregateFieldCompoundSet { .. }
+            | Expr::ArraySet { .. }
+            | Expr::ArrayCompoundSet { .. }
+            | Expr::Array2DSet { .. }
+            | Expr::Array2DCompoundSet { .. }
+            | Expr::StructArray2DSet { .. }
+            | Expr::StructArray2DCompoundSet { .. }
+            | Expr::StructArraySet { .. }
+            | Expr::StructArrayCompoundSet { .. }
+            | Expr::StructElementSet { .. }
+            | Expr::StructElementArraySet { .. }
+            | Expr::StructElementCompoundSet { .. }
+            | Expr::StructElementArrayCompoundSet { .. }
+            | Expr::DerefSet { .. }
+            | Expr::DerefCompoundSet { .. }
+            | Expr::StructSet { .. }
+            | Expr::StructPtrSet { .. }
+            | Expr::StructCompoundSet { .. }
+            | Expr::StructPtrCompoundSet { .. }
+            | Expr::Deref(_)
+            | Expr::ArrayGet { .. }
+            | Expr::Array2DGet { .. }
+            | Expr::StructArray2DGet { .. }
+            | Expr::StringGet { .. }
+            | Expr::Call { .. }
+            | Expr::VoidCast(_)
+            | Expr::AggregateLiteral { .. }
+            | Expr::BitwiseNot(_)
+            | Expr::LogicalNot(_)
+            | Expr::Binary(_, _, _) => false,
+        }
+    }
+
+    fn expr_is_unsupported_double_pointer(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::AddressOf(name) => matches!(
+                self.find_variable(name),
+                Some(Value::Scalar {
+                    ty: CType::Double,
+                    ..
+                })
+            ),
+            Expr::AddressOfScalarLiteral {
+                ty: CType::Double, ..
+            } => true,
+            Expr::PointerCast { pointee, expr, .. } => {
+                matches!(pointee, PointeeType::Scalar(CType::Double))
+                    || self.expr_is_unsupported_double_pointer(expr)
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.expr_is_unsupported_double_pointer(then_expr)
+                    || self.expr_is_unsupported_double_pointer(else_expr)
+            }
+            Expr::Comma(_, right) => self.expr_is_unsupported_double_pointer(right),
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .is_ok_and(|selected| self.expr_is_unsupported_double_pointer(selected)),
+            _ => false,
+        }
     }
 
     fn aggregate_kind_label(&self, type_name: &str) -> &'static str {
@@ -18028,6 +18947,9 @@ impl Interpreter {
                         param.points_to_const,
                         arg_expr,
                     )?;
+                    if self.expr_is_unsupported_double_pointer(arg_expr) {
+                        return Err(CustError::new("double pointers are not supported"));
+                    }
                     let pointer = self.eval_pointer(arg_expr)?;
                     let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
                     self.ensure_pointer_type_matches(&ty, &pointer)?;
@@ -18113,6 +19035,7 @@ impl Interpreter {
                             CType::Int => "int",
                             CType::Char => "char",
                             CType::Bool => "_Bool",
+                            CType::Double => "double",
                         };
                         return Err(CustError::new(format!(
                             "function '{name}' parameter '{}' expected a two-dimensional {expected_label} array with {expected_columns} columns",
@@ -18166,7 +19089,16 @@ impl Interpreter {
                 self.mark_current_array2d_pointer_type(&param.name, *elem_type, *columns);
             }
         }
-        let result = match self.exec_block(&function.body) {
+        // Function definitions are cloned before execution. Raw AST-address cache keys from
+        // the caller can therefore be reused by a freshly allocated cloned body with a
+        // different scalar type. Give the cloned body its own cache, but restore the caller's
+        // cache after the call so a nested call cannot make the caller reclassify the rest of
+        // a right-associated expression tree.
+        let caller_double_expression_type_cache =
+            std::mem::take(&mut *self.double_expression_type_cache.borrow_mut());
+        let execution = self.exec_block(&function.body);
+        *self.double_expression_type_cache.borrow_mut() = caller_double_expression_type_cache;
+        let result = match execution {
             Ok(ExecFlow::Return(value)) => {
                 self.validate_return_value(name, &function.return_type, value)
             }
@@ -19982,6 +20914,11 @@ impl Interpreter {
         }
         let base = Self::object_byte_base(pointer);
         match self.pointer_value_type(base)? {
+            Some(PointeeType::Scalar(CType::Double)) => {
+                return Err(CustError::new(format!(
+                    "function '{name}' does not yet support double object storage for argument {argument}"
+                )));
+            }
             Some(PointeeType::Scalar(_)) => {
                 if self.memory_pointer_targets_union_field(pointer)? {
                     return Err(CustError::new(format!(
@@ -20493,7 +21430,7 @@ impl Interpreter {
         match ty {
             CType::Char => value,
             CType::Bool => i64::from(value != 0),
-            CType::Int => i64::from(value.to_le_bytes()[within]),
+            CType::Int | CType::Double => i64::from(value.to_le_bytes()[within]),
         }
     }
 
@@ -20501,7 +21438,7 @@ impl Interpreter {
         match ty {
             CType::Char => value,
             CType::Bool => i64::from(value.rem_euclid(256) != 0),
-            CType::Int => {
+            CType::Int | CType::Double => {
                 let mut bytes = current.to_le_bytes();
                 bytes[within] = value.rem_euclid(256) as u8;
                 i64::from_le_bytes(bytes)
@@ -22143,9 +23080,13 @@ impl Interpreter {
                     } else {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
-                    // The helper owns recursive validation of the base expression;
-                    // only the pointer argument still needs an explicit nested-call walk.
-                    self.validate_nested_string_intrinsic_calls(&args[0])?;
+                    // The shape helpers may recurse through sizeof_expr(), whose
+                    // top-level guard deliberately avoids a second full AST walk.
+                    // Walk every argument exactly once here so nested calls in
+                    // text, endptr, and base expressions still enforce constraints.
+                    for argument in args {
+                        self.validate_nested_string_intrinsic_calls(argument)?;
+                    }
                     return Ok(());
                 }
                 if matches!(name.as_str(), "strcmp" | "strcoll")
@@ -22167,11 +23108,9 @@ impl Interpreter {
                     } else {
                         return Err(CustError::new(format!("undefined function '{name}'")));
                     }
-                    for argument in &args[..2] {
+                    for argument in args {
                         self.validate_nested_string_intrinsic_calls(argument)?;
                     }
-                    // sizeof_string_transform_call recursively validates the count;
-                    // traversing it again here makes nested transforms exponential.
                     return Ok(());
                 }
                 if matches!(name.as_str(), "strpbrk" | "strstr")
@@ -22305,6 +23244,7 @@ impl Interpreter {
                 }
             }
             Expr::Number(_)
+            | Expr::DoubleNumber(_)
             | Expr::StringLiteral(_)
             | Expr::SizeOfType(_)
             | Expr::AlignOfType(_)
@@ -22499,20 +23439,23 @@ impl Interpreter {
                 default,
                 ..
             } => {
-                self.selected_generic_association(expr)?;
-                self.validate_nested_string_intrinsic_calls(controlling)?;
-                for (_, association) in associations {
-                    self.validate_nested_string_intrinsic_calls(association)?;
-                    if !self.expr_is_void_value(association) {
-                        self.generic_selection_type(association)?;
+                let depth = self.nested_intrinsic_validation_depth.get();
+                self.nested_intrinsic_validation_depth.set(depth + 1);
+                let result = (|| {
+                    if depth == 0 {
+                        self.selected_generic_association_with_type(expr)?;
                     }
-                }
-                if let Some(default) = default {
-                    self.validate_nested_string_intrinsic_calls(default)?;
-                    if !self.expr_is_void_value(default) {
-                        self.generic_selection_type(default)?;
+                    self.validate_nested_string_intrinsic_calls(controlling)?;
+                    for (_, association) in associations {
+                        self.validate_nested_string_intrinsic_calls(association)?;
                     }
-                }
+                    if let Some(default) = default {
+                        self.validate_nested_string_intrinsic_calls(default)?;
+                    }
+                    Ok(())
+                })();
+                self.nested_intrinsic_validation_depth.set(depth);
+                result?;
             }
             Expr::Conditional {
                 cond,
@@ -22575,7 +23518,7 @@ impl Interpreter {
                 }
                 continue;
             }
-            let actual_type = self.generic_selection_type(argument)?;
+            let actual_type = self.validated_generic_selection_type(argument)?;
             match (expected_kind, expected_type, actual_type) {
                 (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Scalar(_))
                 | (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Pointer { .. }) => {
@@ -23741,6 +24684,9 @@ impl Interpreter {
                 }
                 _ => Ok(None),
             },
+            Expr::AddressOfScalarLiteral {
+                ty: CType::Double, ..
+            } => Err(CustError::new("double pointers are not supported")),
             Expr::AddressOfScalarLiteral { ty, .. } => Ok(Some(PointeeType::Scalar(*ty))),
             Expr::AddressOfAggregateLiteral { type_name, .. } => {
                 Ok(Some(PointeeType::Struct(type_name.clone())))
@@ -23850,6 +24796,13 @@ impl Interpreter {
             | Expr::StructPtrArrayGet {
                 pointer, fields, ..
             } => {
+                match expr {
+                    Expr::AddressOfStructPtrArrayField { index, .. }
+                    | Expr::StructPtrArrayGet { index, .. } => {
+                        self.validate_array_subscript(index)?;
+                    }
+                    _ => {}
+                }
                 let Some(PointeeType::Struct(mut current_type_name)) =
                     self.pointer_expr_pointee_type(pointer)?
                 else {
@@ -24215,7 +25168,7 @@ impl Interpreter {
     fn eval_array2d_indexed_row_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
         let (base, index) = Self::array2d_indexed_row_base(expr)
             .ok_or_else(|| CustError::new("expression does not select a two-dimensional row"))?;
-        let row = self.eval(index)?;
+        let row = self.eval_array_subscript(index)?;
         let pointer = self.eval_pointer(&base)?;
         let pointer = self.offset_array_pointer(&pointer, row)?;
         let PointerValue::Array2DRow {
@@ -24778,6 +25731,7 @@ impl Interpreter {
             PointeeType::Scalar(CType::Int) => "int".to_string(),
             PointeeType::Scalar(CType::Char) => "char".to_string(),
             PointeeType::Scalar(CType::Bool) => "_Bool".to_string(),
+            PointeeType::Scalar(CType::Double) => "double".to_string(),
             PointeeType::Struct(type_name) => {
                 let aggregate = self.struct_types.get(type_name);
                 let keyword = aggregate
@@ -25571,6 +26525,7 @@ impl Interpreter {
                         CType::Int => "int",
                         CType::Char => "char",
                         CType::Bool => "_Bool",
+                        CType::Double => "double",
                     };
                     return Err(CustError::new(format!(
                         "row pointer expected a two-dimensional {expected_label} array with {expected_columns} columns"
@@ -27105,7 +28060,7 @@ impl Interpreter {
         index: &Expr,
     ) -> CustResult<PointerValue> {
         let field_pointer = self.read_direct_struct_pointer_field(name, path)?;
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         if matches!(
             self.direct_struct_pointer_field_type(name, path)?,
             Some(PointeeType::Struct(_))
@@ -27208,7 +28163,7 @@ impl Interpreter {
         op: CompoundOp,
         value: &Expr,
     ) -> CustResult<PointerValue> {
-        let offset = self.eval(value)?;
+        let offset = self.eval_pointer_offset(value)?;
         let offset = match op {
             CompoundOp::Add => offset,
             CompoundOp::Sub => offset
@@ -27281,7 +28236,7 @@ impl Interpreter {
         fields: &[String],
         index: &Expr,
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         let array = self.find_struct_array_field(name, fields)?;
         let len = array.borrow().elements.len();
         let Ok(index) = usize::try_from(index_value) else {
@@ -27306,7 +28261,7 @@ impl Interpreter {
         index: &Expr,
         fields: &[String],
     ) -> CustResult<i64> {
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         match self.find_variable(name) {
             Some(Value::Struct {
                 type_name,
@@ -27525,7 +28480,7 @@ impl Interpreter {
         let scope_id = self
             .find_variable_scope_id(name)
             .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         let len = match self.struct_field_by_scope(scope_id, name, element_index, fields)? {
             StructFieldValue::StructArray { elements, .. } => elements.len(),
             _ => {
@@ -27732,7 +28687,7 @@ impl Interpreter {
                 StructFieldValue::StructArray { elements, .. } => elements.len(),
                 _ => return Ok(None),
             };
-            let index_value = self.eval(index)?;
+            let index_value = self.eval_array_subscript(index)?;
             let Ok(index) = usize::try_from(index_value) else {
                 return Err(CustError::new(format!(
                     "struct array field '{}' index {index_value} out of bounds for length {len}",
@@ -27755,7 +28710,7 @@ impl Interpreter {
             StructFieldValue::StructArray { elements, .. } => elements.len(),
             _ => return Ok(None),
         };
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         let Ok(index) = usize::try_from(index_value) else {
             return Err(CustError::new(format!(
                 "struct array field '{}' index {index_value} out of bounds for length {len}",
@@ -27783,7 +28738,7 @@ impl Interpreter {
         fields: &[String],
         index: &Expr,
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         let array = self.find_struct_pointer_array_field(pointer, fields)?;
         let len = array.borrow().elements.len();
         let Ok(index) = usize::try_from(index_value) else {
@@ -27849,7 +28804,7 @@ impl Interpreter {
     }
 
     fn checked_struct_element_index(&mut self, name: &str, index: &Expr) -> CustResult<usize> {
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         let len = match self.find_variable(name) {
             Some(Value::StructArray { elements, .. }) => elements.len(),
             Some(_) => {
@@ -27893,7 +28848,7 @@ impl Interpreter {
         if !matches!(ty, PointeeType::Struct(_)) {
             return Ok(None);
         }
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         let pointer = self.offset_array_pointer(&pointer, index_value)?;
         match pointer {
             PointerValue::StructElement { .. }
@@ -28602,7 +29557,7 @@ impl Interpreter {
         array_index: &Expr,
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
         let array = self.find_struct_element_array_field(name, index, fields)?;
-        let index_value = self.eval(array_index)?;
+        let index_value = self.eval_array_subscript(array_index)?;
         let len = array.borrow().elements.len();
         let Ok(index) = usize::try_from(index_value) else {
             return Err(CustError::new(format!(
@@ -28628,7 +29583,10 @@ impl Interpreter {
     ) -> CustResult<i64> {
         if let Some(pointer) = self.scalar_field_reverse_subscript_pointer(name, fields, index)? {
             self.ensure_reverse_subscript_pointee_mutable(index)?;
-            let value = self.eval(value)?;
+            let value = match self.pointer_value_type(&pointer)? {
+                Some(PointeeType::Scalar(ty)) => self.eval_scalar_conversion(ty, value)?,
+                _ => self.eval(value)?,
+            };
             self.assign_deref_pointer(&pointer, value)?;
             return Ok(value);
         }
@@ -28658,17 +29616,19 @@ impl Interpreter {
         if let Some(pointer) = self.scalar_field_reverse_subscript_pointer(name, fields, index)? {
             self.ensure_reverse_subscript_pointee_mutable(index)?;
             let current = self.deref_pointer(&pointer)?;
-            let rhs = self.eval(value)?;
-            let result = Self::apply_compound_op(current, op, rhs)?;
+            let ty = match self.pointer_value_type(&pointer)? {
+                Some(PointeeType::Scalar(ty)) => ty,
+                _ => CType::Int,
+            };
+            let result = self.eval_scalar_compound_result(current, ty, op, value)?;
             self.assign_deref_pointer(&pointer, result)?;
             return Ok(result);
         }
         self.ensure_variable_mutable(name)?;
         let (array, index) = self.checked_struct_array_index(name, fields, index)?;
         let current = array.borrow().elements[index];
-        let rhs = self.eval(value)?;
         let elem_type = array.borrow().elem_type;
-        let result = elem_type.normalize(Self::apply_compound_op(current, op, rhs)?);
+        let result = self.eval_scalar_compound_result(current, elem_type, op, value)?;
         let mut array = array.borrow_mut();
         if array.read_only {
             return Err(CustError::new(format!(
@@ -28963,7 +29923,7 @@ impl Interpreter {
         index: &Expr,
     ) -> CustResult<PointerValue> {
         let field_pointer = self.read_struct_pointer_pointer_field(pointer, path)?;
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         if matches!(
             self.struct_pointer_pointer_field_type(pointer, path)?,
             Some(PointeeType::Struct(_))
@@ -29115,8 +30075,10 @@ impl Interpreter {
         self.ensure_pointer_expr_pointee_mutable(pointer)?;
         let pointer = self.eval_pointer(pointer)?;
         let current = self.read_struct_pointer_field(&pointer, path)?;
-        let rhs = self.eval(value)?;
-        let result = Self::apply_compound_op(current, op, rhs)?;
+        let ty = self
+            .struct_pointer_scalar_field_type(&pointer, path)?
+            .unwrap_or(CType::Int);
+        let result = self.eval_scalar_compound_result(current, ty, op, value)?;
         self.assign_struct_pointer_field(&pointer, path, result)?;
         self.read_struct_pointer_field(&pointer, path)
     }
@@ -29484,8 +30446,17 @@ impl Interpreter {
         value: &Expr,
     ) -> CustResult<i64> {
         let current = self.read_struct_field(name, fields)?;
-        let rhs = self.eval(value)?;
-        let result = Self::apply_compound_op(current, op, rhs)?;
+        let ty = match self.find_variable(name) {
+            Some(Value::Struct { type_name, .. }) => self
+                .aggregate_type_field_metadata(type_name, fields)?
+                .and_then(|(field_type, _, _)| match field_type {
+                    StructFieldType::Scalar(ty) => Some(ty),
+                    _ => None,
+                })
+                .unwrap_or(CType::Int),
+            _ => CType::Int,
+        };
+        let result = self.eval_scalar_compound_result(current, ty, op, value)?;
         self.assign_struct_field(name, fields, result)?;
         self.read_struct_field(name, fields)
     }
@@ -29559,11 +30530,10 @@ impl Interpreter {
 
     fn eval_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
         match expr {
-            Expr::GenericSelection { .. } => {
-                self.validate_nested_string_intrinsic_calls(expr)?;
-                let selected = self.selected_generic_association(expr)?.clone();
-                self.eval_pointer(&selected)
-            }
+            Expr::GenericSelection { .. } => self
+                .eval_selected_generic(expr, |interpreter, selected| {
+                    interpreter.eval_pointer(selected)
+                }),
             Expr::ArrayGet { .. }
             | Expr::StructArrayGet { .. }
             | Expr::StructElementArrayGet { .. }
@@ -29615,6 +30585,9 @@ impl Interpreter {
                 })
             }
             Expr::PointerCast { pointee, expr, .. } => {
+                if self.expr_is_double_value(expr) {
+                    return Err(CustError::new("expected pointer expression"));
+                }
                 let pointer = if self.expr_is_pointer_value(expr) {
                     self.eval_pointer(expr)?
                 } else if self.eval(expr)? == 0 {
@@ -29649,6 +30622,9 @@ impl Interpreter {
                 then_expr,
                 else_expr,
             } => {
+                self.validate_double_conditional_expression(expr)?;
+                self.sizeof_expr(then_expr)?;
+                self.sizeof_expr(else_expr)?;
                 if self.eval_truthy(cond)? {
                     self.eval_pointer(then_expr)
                 } else {
@@ -29675,7 +30651,7 @@ impl Interpreter {
                     if ty == PointeeType::Void {
                         return Err(CustError::new("cannot index pointer to void"));
                     }
-                    let index_value = self.eval(index)?;
+                    let index_value = self.eval_array_subscript(index)?;
                     if matches!(pointer, PointerValue::ObjectByte { .. }) {
                         self.offset_array_pointer(&pointer, index_value)
                     } else {
@@ -29762,6 +30738,9 @@ impl Interpreter {
                 let pointer = self.eval_pointer(pointer)?;
                 self.find_struct_pointer_field_pointer(&pointer, fields)
             }
+            Expr::AddressOfScalarLiteral {
+                ty: CType::Double, ..
+            } => Err(CustError::new("double pointers are not supported")),
             Expr::AddressOfScalarLiteral { ty, init } => {
                 self.make_scalar_compound_literal_pointer(*ty, init)
             }
@@ -29828,7 +30807,7 @@ impl Interpreter {
                         Self::field_path_label(fields)
                     )));
                 }
-                let offset = self.eval(value)?;
+                let offset = self.eval_pointer_offset(value)?;
                 let offset = match op {
                     CompoundOp::Add => offset,
                     CompoundOp::Sub => offset
@@ -29868,6 +30847,9 @@ impl Interpreter {
                 }) => {
                     self.ensure_variable_mutable(name)?;
                     self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
+                    if self.expr_is_unsupported_double_pointer(value) {
+                        return Err(CustError::new("double pointers are not supported"));
+                    }
                     let pointer = self.eval_pointer(value)?;
                     let pointer = self.attach_array_pointer_owner(pointer);
                     let pointer = if let Some((elem_type, columns)) =
@@ -30107,7 +31089,7 @@ impl Interpreter {
                 op,
                 value,
             } => {
-                let offset = self.eval(value)?;
+                let offset = self.eval_pointer_offset(value)?;
                 let offset = match op {
                     CompoundOp::Add => offset,
                     CompoundOp::Sub => offset
@@ -30135,7 +31117,7 @@ impl Interpreter {
                 op,
                 value,
             } => {
-                let offset = self.eval(value)?;
+                let offset = self.eval_pointer_offset(value)?;
                 let offset = match op {
                     CompoundOp::Add => offset,
                     CompoundOp::Sub => offset
@@ -30168,7 +31150,7 @@ impl Interpreter {
                 op,
                 value,
             } => {
-                let offset = self.eval(value)?;
+                let offset = self.eval_pointer_offset(value)?;
                 let offset = match op {
                     CompoundOp::Add => offset,
                     CompoundOp::Sub => offset
@@ -30214,7 +31196,7 @@ impl Interpreter {
                     }
                     None => return Err(CustError::new(format!("undefined variable '{name}'"))),
                 };
-                let offset = self.eval(value)?;
+                let offset = self.eval_pointer_offset(value)?;
                 self.ensure_variable_mutable(name)?;
                 let pointer = match op {
                     CompoundOp::Add => self.offset_array_pointer(&pointer, offset)?,
@@ -30357,6 +31339,11 @@ impl Interpreter {
                 "character pointer output ordering comparisons are not supported",
             ));
         }
+        if self.expr_is_unsupported_double_pointer(left)
+            || self.expr_is_unsupported_double_pointer(right)
+        {
+            return Err(CustError::new("double pointers are not supported"));
+        }
         let left_is_pointer = self.expr_is_pointer_value(left);
         let right_is_pointer = self.expr_is_pointer_value(right);
         if (left_is_pointer
@@ -30377,14 +31364,27 @@ impl Interpreter {
 
         match (left_is_pointer, right_is_pointer) {
             (false, false) => {
-                let lhs = self.eval(left)?;
-                let rhs = self.eval(right)?;
-                let result = match op {
-                    BinaryOp::Lt => lhs < rhs,
-                    BinaryOp::Le => lhs <= rhs,
-                    BinaryOp::Gt => lhs > rhs,
-                    BinaryOp::Ge => lhs >= rhs,
-                    _ => unreachable!("only ordering operators use eval_ordering"),
+                let result = if self.expr_is_double_value(left) || self.expr_is_double_value(right)
+                {
+                    let lhs = self.eval_numeric_as_f64(left)?;
+                    let rhs = self.eval_numeric_as_f64(right)?;
+                    match op {
+                        BinaryOp::Lt => lhs < rhs,
+                        BinaryOp::Le => lhs <= rhs,
+                        BinaryOp::Gt => lhs > rhs,
+                        BinaryOp::Ge => lhs >= rhs,
+                        _ => unreachable!("only ordering operators use eval_ordering"),
+                    }
+                } else {
+                    let lhs = self.eval(left)?;
+                    let rhs = self.eval(right)?;
+                    match op {
+                        BinaryOp::Lt => lhs < rhs,
+                        BinaryOp::Le => lhs <= rhs,
+                        BinaryOp::Gt => lhs > rhs,
+                        BinaryOp::Ge => lhs >= rhs,
+                        _ => unreachable!("only ordering operators use eval_ordering"),
+                    }
                 };
                 Ok(result as i64)
             }
@@ -30407,6 +31407,26 @@ impl Interpreter {
     ) -> CustResult<PointerValue> {
         let left_is_pointer = self.expr_is_pointer_value(left);
         let right_is_pointer = self.expr_is_pointer_value(right);
+        if (left_is_pointer
+            && matches!(
+                self.pointer_expr_pointee_type(left)?,
+                Some(PointeeType::Scalar(CType::Double))
+            ))
+            || (right_is_pointer
+                && matches!(
+                    self.pointer_expr_pointee_type(right)?,
+                    Some(PointeeType::Scalar(CType::Double))
+                ))
+        {
+            return Err(CustError::new("double pointers are not supported"));
+        }
+        if (left_is_pointer && self.expr_is_double_value(right))
+            || (right_is_pointer && self.expr_is_double_value(left))
+        {
+            return Err(CustError::new(
+                "pointer arithmetic requires an integer offset",
+            ));
+        }
         if (left_is_pointer
             && matches!(
                 self.pointer_expr_pointee_type(left)?,
@@ -30827,6 +31847,9 @@ impl Interpreter {
                     .and_then(|scope| scope.values.get(name))
                     .or_else(|| self.static_value_by_scope(*scope_id, name));
                 match value {
+                    Some(Value::Scalar {
+                        ty: CType::Double, ..
+                    }) => Err(CustError::new("double pointers are not supported")),
                     Some(Value::Scalar { value, .. }) => Ok(*value),
                     _ => Err(CustError::new(format!(
                         "pointer to out-of-scope variable '{name}'"
@@ -30900,6 +31923,9 @@ impl Interpreter {
                     .and_then(|scope| scope.values.get_mut(name))
                 {
                     Some(Value::Scalar {
+                        ty: CType::Double, ..
+                    }) => Err(CustError::new("double pointers are not supported")),
+                    Some(Value::Scalar {
                         value: slot, ty, ..
                     }) => {
                         *slot = ty.normalize(value);
@@ -30959,7 +31985,7 @@ impl Interpreter {
         ) {
             return Err(CustError::new("cannot index pointer to void"));
         }
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         let pointer = match self.find_variable(name) {
             Some(Value::Pointer { pointer, .. }) => pointer.clone(),
             Some(Value::Scalar { .. }) => {
@@ -30988,6 +32014,11 @@ impl Interpreter {
         pointer_expr: &Expr,
     ) -> CustResult<Option<PointerValue>> {
         let offset = match self.find_variable(name) {
+            Some(Value::Scalar {
+                ty: CType::Double, ..
+            }) => {
+                return Err(CustError::new("array subscript requires an integer value"));
+            }
             Some(Value::Scalar { value, .. }) => *value,
             Some(_) | None => return Ok(None),
         };
@@ -31163,12 +32194,34 @@ impl Interpreter {
         Ok(())
     }
 
+    fn eval_array_subscript(&mut self, index: &Expr) -> CustResult<i64> {
+        self.validate_array_subscript(index)?;
+        self.eval(index)
+    }
+
+    fn validate_array_subscript(&self, index: &Expr) -> CustResult<()> {
+        if self.expr_is_double_value(index) {
+            return Err(CustError::new("array subscript requires an integer value"));
+        }
+        self.sizeof_expr(index)?;
+        Ok(())
+    }
+
+    fn eval_pointer_offset(&mut self, value: &Expr) -> CustResult<i64> {
+        if self.expr_is_double_value(value) {
+            return Err(CustError::new(
+                "pointer arithmetic requires an integer offset",
+            ));
+        }
+        self.eval(value)
+    }
+
     fn checked_array_index(
         &mut self,
         name: &str,
         index: &Expr,
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
-        let index_value = self.eval(index)?;
+        let index_value = self.eval_array_subscript(index)?;
         let array = self.find_array(name)?;
         if array.borrow().dimensions.is_some() {
             return Err(CustError::new(format!(
@@ -31195,8 +32248,8 @@ impl Interpreter {
         row: &Expr,
         column: &Expr,
     ) -> CustResult<(Rc<RefCell<ArrayValue>>, usize)> {
-        let row_value = self.eval(row)?;
-        let column_value = self.eval(column)?;
+        let row_value = self.eval_array_subscript(row)?;
+        let column_value = self.eval_array_subscript(column)?;
         let (array, base_row, owner) = match self.find_variable(name) {
             Some(Value::Array(array)) => (Rc::clone(array), 0, None),
             Some(Value::Pointer {
@@ -31298,8 +32351,8 @@ impl Interpreter {
                 )
             }
         };
-        let row_value = self.eval(row)?;
-        let column_value = self.eval(column)?;
+        let row_value = self.eval_array_subscript(row)?;
+        let column_value = self.eval_array_subscript(column)?;
         let (rows, columns) = array.borrow().dimensions.ok_or_else(|| {
             CustError::new(format!("array field '{label}' is not two-dimensional"))
         })?;
@@ -31939,11 +32992,28 @@ impl Interpreter {
 
     fn generic_selection_type(&self, expr: &Expr) -> CustResult<DeclType> {
         if let Expr::GenericSelection { .. } = expr {
-            return self.generic_selection_type(self.selected_generic_association(expr)?);
+            if self.generic_selection_evaluation_depth.get() > 0 {
+                return self.generic_selection_type(
+                    self.selected_generic_association_after_validation(expr)?,
+                );
+            }
+            return self.validated_generic_selection_type(expr);
+        }
+        if let Expr::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } = expr
+        {
+            return self.generic_conditional_expression_type(then_expr, else_expr);
         }
 
         if let Expr::Call { name, args } = expr {
-            self.validate_non_evaluating_function_argument_types(name, args)?;
+            if self.generic_selection_validation_depth.get() == 0
+                && self.generic_selection_evaluation_depth.get() == 0
+            {
+                self.validate_non_evaluating_function_argument_types(name, args)?;
+            }
             let return_type = self
                 .functions
                 .get(name)
@@ -31973,13 +33043,29 @@ impl Interpreter {
             };
         }
 
-        if self.array2d_row_pointer_element_type(expr).is_some() {
+        if self.array2d_row_pointer_element_type(expr).is_some()
+            && !matches!(expr, Expr::PointerCast { .. })
+        {
             return Err(CustError::new(
                 "two-dimensional array generic controlling expressions are not supported",
             ));
         }
 
         if self.expr_is_pointer_value(expr) {
+            if let Expr::Binary(left, BinaryOp::Add | BinaryOp::Sub, right) = expr {
+                match (
+                    self.expr_is_pointer_value(left),
+                    self.expr_is_pointer_value(right),
+                ) {
+                    (true, false) => {
+                        self.sizeof_expr(right)?;
+                    }
+                    (false, true) => {
+                        self.sizeof_expr(left)?;
+                    }
+                    _ => {}
+                }
+            }
             let pointee = self
                 .pointer_expr_pointee_type(expr)?
                 .ok_or_else(|| CustError::new("cannot determine generic selection pointer type"))?;
@@ -31997,16 +33083,23 @@ impl Interpreter {
             return Ok(field_type);
         }
 
+        if self.expr_is_double_value(expr) {
+            self.sizeof_expr(expr)?;
+            return Ok(DeclType::Scalar(CType::Double));
+        }
+
         let scalar_type = match expr {
-            Expr::Number(_)
-            | Expr::SizeOfType(_)
-            | Expr::SizeOfValue(_)
-            | Expr::AlignOfType(_)
-            | Expr::UnaryPlus(_)
+            Expr::Number(_) | Expr::SizeOfType(_) | Expr::SizeOfValue(_) | Expr::AlignOfType(_) => {
+                CType::Int
+            }
+            Expr::UnaryPlus(_)
             | Expr::UnaryMinus(_)
             | Expr::BitwiseNot(_)
             | Expr::LogicalNot(_)
-            | Expr::Binary(_, _, _) => CType::Int,
+            | Expr::Binary(_, _, _) => {
+                self.sizeof_expr(expr)?;
+                CType::Int
+            }
             Expr::StringGet { .. } => CType::Char,
             Expr::Cast { ty, .. }
             | Expr::ScalarLiteral { ty, .. }
@@ -32048,60 +33141,8 @@ impl Interpreter {
             }
             Expr::Call { .. } => unreachable!("function calls return above"),
             Expr::Comma(_, right) => return self.generic_selection_type(right),
-            Expr::Conditional {
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                let then_type = self.generic_selection_type(then_expr)?;
-                let else_type = self.generic_selection_type(else_expr)?;
-                return match (&then_type, &else_type) {
-                    (DeclType::Scalar(_), DeclType::Scalar(_)) => Ok(DeclType::Scalar(CType::Int)),
-                    (
-                        DeclType::Pointer {
-                            pointee: then_pointee,
-                            points_to_const: then_const,
-                        },
-                        DeclType::Pointer {
-                            pointee: else_pointee,
-                            points_to_const: else_const,
-                        },
-                    ) if matches!(then_pointee, PointeeType::Void)
-                        || matches!(else_pointee, PointeeType::Void) =>
-                    {
-                        Ok(DeclType::Pointer {
-                            pointee: PointeeType::Void,
-                            points_to_const: *then_const || *else_const,
-                        })
-                    }
-                    (
-                        DeclType::Pointer {
-                            pointee: then_pointee,
-                            points_to_const: then_const,
-                        },
-                        DeclType::Pointer {
-                            pointee: else_pointee,
-                            points_to_const: else_const,
-                        },
-                    ) if then_pointee == else_pointee => Ok(DeclType::Pointer {
-                        pointee: then_pointee.clone(),
-                        points_to_const: *then_const || *else_const,
-                    }),
-                    (DeclType::Pointer { .. }, DeclType::Scalar(_))
-                        if self.generic_expr_is_null_pointer_constant(else_expr) =>
-                    {
-                        Ok(then_type)
-                    }
-                    (DeclType::Scalar(_), DeclType::Pointer { .. })
-                        if self.generic_expr_is_null_pointer_constant(then_expr) =>
-                    {
-                        Ok(else_type)
-                    }
-                    _ if then_type == else_type => Ok(then_type),
-                    _ => Err(CustError::new(
-                        "conditional branches have incompatible generic controlling types",
-                    )),
-                };
+            Expr::Conditional { .. } => {
+                unreachable!("conditional generic expression types return above")
             }
             Expr::Increment { target, .. } => return self.generic_selection_type(target),
             Expr::Deref(pointer) | Expr::DerefSet { pointer, .. } => {
@@ -32122,6 +33163,97 @@ impl Interpreter {
             },
         };
         Ok(DeclType::Scalar(scalar_type))
+    }
+
+    fn validated_generic_selection_type(&self, expr: &Expr) -> CustResult<DeclType> {
+        let depth = self.generic_selection_validation_depth.get();
+        if depth >= MAX_GENERIC_SELECTION_VALIDATION_DEPTH {
+            return Err(CustError::new(format!(
+                "generic selection validation nesting limit of {MAX_GENERIC_SELECTION_VALIDATION_DEPTH} exceeded"
+            )));
+        }
+        self.generic_selection_validation_depth.set(depth + 1);
+        let result = (|| {
+            if matches!(expr, Expr::GenericSelection { .. }) {
+                let (selected, selected_type) =
+                    self.selected_generic_association_with_type(expr)?;
+                selected_type.map_or_else(|| self.validated_generic_selection_type(selected), Ok)
+            } else {
+                self.sizeof_expr(expr)?;
+                self.generic_selection_type(expr)
+            }
+        })();
+        self.generic_selection_validation_depth.set(depth);
+        result
+    }
+
+    fn validate_double_conditional_expression(&self, expr: &Expr) -> CustResult<()> {
+        if matches!(expr, Expr::Conditional { .. }) && self.expr_is_double_value(expr) {
+            self.generic_selection_type(expr)?;
+        }
+        Ok(())
+    }
+
+    fn generic_conditional_expression_type(
+        &self,
+        then_expr: &Expr,
+        else_expr: &Expr,
+    ) -> CustResult<DeclType> {
+        let then_type = self.generic_selection_type(then_expr)?;
+        let else_type = self.generic_selection_type(else_expr)?;
+        match (&then_type, &else_type) {
+            (DeclType::Scalar(then_scalar), DeclType::Scalar(else_scalar)) => Ok(DeclType::Scalar(
+                if *then_scalar == CType::Double || *else_scalar == CType::Double {
+                    CType::Double
+                } else {
+                    CType::Int
+                },
+            )),
+            (
+                DeclType::Pointer {
+                    pointee: then_pointee,
+                    points_to_const: then_const,
+                },
+                DeclType::Pointer {
+                    pointee: else_pointee,
+                    points_to_const: else_const,
+                },
+            ) if matches!(then_pointee, PointeeType::Void)
+                || matches!(else_pointee, PointeeType::Void) =>
+            {
+                Ok(DeclType::Pointer {
+                    pointee: PointeeType::Void,
+                    points_to_const: *then_const || *else_const,
+                })
+            }
+            (
+                DeclType::Pointer {
+                    pointee: then_pointee,
+                    points_to_const: then_const,
+                },
+                DeclType::Pointer {
+                    pointee: else_pointee,
+                    points_to_const: else_const,
+                },
+            ) if then_pointee == else_pointee => Ok(DeclType::Pointer {
+                pointee: then_pointee.clone(),
+                points_to_const: *then_const || *else_const,
+            }),
+            (DeclType::Pointer { .. }, DeclType::Scalar(_))
+                if self.generic_expr_is_null_pointer_constant(else_expr) =>
+            {
+                Ok(then_type)
+            }
+            (DeclType::Scalar(_), DeclType::Pointer { .. })
+                if self.generic_expr_is_null_pointer_constant(then_expr) =>
+            {
+                Ok(else_type)
+            }
+            _ if then_type == else_type => Ok(then_type),
+            _ => Err(CustError::new(
+                "conditional branches have incompatible expression types",
+            )),
+        }
     }
 
     fn generic_expr_is_null_pointer_constant(&self, expr: &Expr) -> bool {
@@ -32221,7 +33353,52 @@ impl Interpreter {
         Err(CustError::new("generic aggregate field path is empty"))
     }
 
+    fn selected_generic_association_with_type<'a>(
+        &self,
+        expr: &'a Expr,
+    ) -> CustResult<(&'a Expr, Option<DeclType>)> {
+        let Expr::GenericSelection {
+            controlling,
+            associations,
+            default,
+            no_match_error,
+        } = expr
+        else {
+            return Err(CustError::new("expected generic selection expression"));
+        };
+        let controlling_type = self.validated_generic_selection_type(controlling)?;
+        let mut selected = None;
+        for (association_type, association) in associations {
+            let value_type = self.validate_generic_association_constraints(association)?;
+            if association_type == &controlling_type {
+                selected = Some((association, value_type));
+            }
+        }
+        let default_type = if let Some(default) = default {
+            Some(self.validate_generic_association_constraints(default)?)
+        } else {
+            None
+        };
+        if let Some(selected) = selected {
+            return Ok(selected);
+        }
+        if let (Some(default), Some(default_type)) = (default.as_deref(), default_type) {
+            return Ok((default, default_type));
+        }
+        Err(CustError {
+            message: no_match_error.clone(),
+            io_error: false,
+        })
+    }
+
     fn selected_generic_association<'a>(&self, expr: &'a Expr) -> CustResult<&'a Expr> {
+        self.selected_generic_association_after_validation(expr)
+    }
+
+    fn selected_generic_association_after_validation<'a>(
+        &self,
+        expr: &'a Expr,
+    ) -> CustResult<&'a Expr> {
         let Expr::GenericSelection {
             controlling,
             associations,
@@ -32232,19 +33409,72 @@ impl Interpreter {
             return Err(CustError::new("expected generic selection expression"));
         };
         let controlling_type = self.generic_selection_type(controlling)?;
-        if let Some((_, selected)) = associations
+        associations
             .iter()
             .find(|(association_type, _)| association_type == &controlling_type)
-        {
-            return Ok(selected);
+            .map(|(_, selected)| selected)
+            .or(default.as_deref())
+            .ok_or_else(|| CustError {
+                message: no_match_error.clone(),
+                io_error: false,
+            })
+    }
+
+    fn eval_selected_generic<T>(
+        &mut self,
+        expr: &Expr,
+        evaluate: impl FnOnce(&mut Self, &Expr) -> CustResult<T>,
+    ) -> CustResult<T> {
+        let depth = self.generic_selection_evaluation_depth.get();
+        let selected = if depth == 0 {
+            self.validate_nested_string_intrinsic_calls(expr)?;
+            self.selected_generic_association(expr)?
+        } else {
+            self.selected_generic_association_after_validation(expr)?
+        };
+        self.generic_selection_evaluation_depth.set(depth + 1);
+        let result = evaluate(self, selected);
+        self.generic_selection_evaluation_depth.set(depth);
+        result
+    }
+
+    fn validate_generic_association_constraints(
+        &self,
+        expr: &Expr,
+    ) -> CustResult<Option<DeclType>> {
+        match expr {
+            Expr::VoidCast(inner) => {
+                self.sizeof_expr(inner)?;
+                Ok(None)
+            }
+            Expr::Call { name, args }
+                if matches!(
+                    self.functions
+                        .get(name)
+                        .map(|function| &function.return_type)
+                        .or_else(|| {
+                            self.prototypes
+                                .get(name)
+                                .map(|signature| &signature.return_type)
+                        }),
+                    Some(ReturnType::Void)
+                ) =>
+            {
+                self.validate_non_evaluating_function_argument_types(name, args)?;
+                Ok(None)
+            }
+            Expr::Comma(left, right) => {
+                self.validate_generic_association_constraints(left)?;
+                self.validate_generic_association_constraints(right)
+            }
+            _ => self.validated_generic_selection_type(expr).map(Some),
         }
-        default.as_deref().ok_or_else(|| CustError {
-            message: no_match_error.clone(),
-            io_error: false,
-        })
     }
 
     fn eval_truthy(&mut self, expr: &Expr) -> CustResult<bool> {
+        if self.expr_is_unsupported_double_pointer(expr) {
+            return Err(CustError::new("double pointers are not supported"));
+        }
         if self.expr_is_character_pointer_output_value(expr) {
             let output =
                 self.eval_character_pointer_output_argument("scalar condition", "value", expr)?;
@@ -32253,6 +33483,9 @@ impl Interpreter {
         if self.expr_is_pointer_value(expr) {
             let pointer = self.eval_pointer(expr)?;
             return Ok(Self::pointer_truthy(&pointer));
+        }
+        if self.expr_is_double_value(expr) {
+            return Ok(self.eval_numeric_as_f64(expr)? != 0.0);
         }
 
         match expr {
@@ -32359,6 +33592,7 @@ impl Interpreter {
             }
             Expr::Call { .. } => Ok(self.eval(expr)? != 0),
             Expr::Number(value) => Ok(*value != 0),
+            Expr::DoubleNumber(bits) => Ok(f64::from_bits(*bits) != 0.0),
             Expr::Binary(_, BinaryOp::Add | BinaryOp::Sub, _)
                 if self.expr_is_pointer_value(expr) =>
             {
@@ -32447,9 +33681,9 @@ impl Interpreter {
                     self.eval_discard(right)?;
                 }
                 Expr::GenericSelection { .. } => {
-                    self.validate_nested_string_intrinsic_calls(expr)?;
-                    let selected = self.selected_generic_association(expr)?.clone();
-                    self.eval_discard(&selected)?;
+                    self.eval_selected_generic(expr, |interpreter, selected| {
+                        interpreter.eval_discard(selected)
+                    })?;
                 }
                 _ => unreachable!("direct calls and void casts are handled above"),
             }
@@ -32462,6 +33696,9 @@ impl Interpreter {
                 expr,
             )?;
             return Ok(());
+        }
+        if self.expr_is_unsupported_double_pointer(expr) {
+            return Err(CustError::new("double pointers are not supported"));
         }
         if self.expr_is_pointer_value(expr) {
             self.eval_pointer(expr)?;
@@ -32534,8 +33771,7 @@ impl Interpreter {
                 value: current, ty, ..
             }) => {
                 self.ensure_variable_mutable(name)?;
-                let rhs = self.eval(value)?;
-                let result = ty.normalize(Self::apply_compound_op(current, op, rhs)?);
+                let result = self.eval_scalar_compound_result(current, ty, op, value)?;
                 if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
                     *slot = result;
                 }
@@ -32571,6 +33807,49 @@ impl Interpreter {
             CompoundOp::BitXor => Ok(lhs ^ rhs),
             CompoundOp::ShiftLeft => Self::checked_shift_left(lhs, rhs),
             CompoundOp::ShiftRight => Self::checked_shift_right(lhs, rhs),
+        }
+    }
+
+    fn eval_scalar_compound_result(
+        &mut self,
+        lhs: i64,
+        ty: CType,
+        op: CompoundOp,
+        rhs: &Expr,
+    ) -> CustResult<i64> {
+        if ty == CType::Double {
+            let rhs = self.eval_numeric_as_f64(rhs)?;
+            return Ok(
+                Self::apply_double_compound_op(f64::from_bits(lhs as u64), op, rhs)?.to_bits()
+                    as i64,
+            );
+        }
+        if self.expr_is_double_value(rhs) {
+            let rhs = self.eval_numeric_as_f64(rhs)?;
+            let result = Self::apply_double_compound_op(lhs as f64, op, rhs)?;
+            return Ok(match ty {
+                CType::Bool => i64::from(result != 0.0),
+                CType::Int | CType::Char => result as i64,
+                CType::Double => unreachable!("double compound assignment returned above"),
+            });
+        }
+        Ok(ty.normalize(Self::apply_compound_op(lhs, op, self.eval(rhs)?)?))
+    }
+
+    fn apply_double_compound_op(lhs: f64, op: CompoundOp, rhs: f64) -> CustResult<f64> {
+        match op {
+            CompoundOp::Add => Ok(lhs + rhs),
+            CompoundOp::Sub => Ok(lhs - rhs),
+            CompoundOp::Mul => Ok(lhs * rhs),
+            CompoundOp::Div => Ok(lhs / rhs),
+            CompoundOp::Rem
+            | CompoundOp::BitAnd
+            | CompoundOp::BitOr
+            | CompoundOp::BitXor
+            | CompoundOp::ShiftLeft
+            | CompoundOp::ShiftRight => Err(CustError::new(
+                "integer-only compound assignment used with double value",
+            )),
         }
     }
 
@@ -32770,6 +34049,9 @@ impl Interpreter {
         pointer_expr: &Expr,
     ) -> CustResult<Option<PointeeType>> {
         match self.find_variable(name) {
+            Some(Value::Scalar {
+                ty: CType::Double, ..
+            }) => Err(CustError::new("array subscript requires an integer value")),
             Some(Value::Scalar { .. }) => {
                 self.reverse_subscript_pointee_type(pointer_expr).map(Some)
             }
@@ -32871,7 +34153,12 @@ impl Interpreter {
                 }
                 None => return Err(CustError::new(format!("undefined variable '{name}'"))),
             },
-            Array2DFieldTarget::Element { name, fields, .. } => {
+            Array2DFieldTarget::Element {
+                name,
+                index,
+                fields,
+            } => {
+                self.validate_array_subscript(index)?;
                 self.struct_element_field_metadata(name, fields)?
             }
             Array2DFieldTarget::Pointer { pointer, fields } => {
@@ -32885,542 +34172,1077 @@ impl Interpreter {
         }
     }
 
+    fn validate_non_evaluating_assignment_value(
+        &self,
+        value: &Expr,
+        op: Option<CompoundOp>,
+    ) -> CustResult<()> {
+        self.sizeof_expr(value)?;
+        if let Some(op) = op
+            && self.expr_is_double_value(value)
+        {
+            Self::apply_double_compound_op(0.0, op, 1.0)?;
+        }
+        Ok(())
+    }
+
+    fn validate_non_evaluating_array_initializers(
+        &self,
+        initializers: &[ArrayInitializer],
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                ArrayInitializer::Expr(expr) | ArrayInitializer::Designated { value: expr, .. } => {
+                    self.sizeof_expr(expr)?;
+                }
+                ArrayInitializer::StringLiteral(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_non_evaluating_struct_initializers(
+        &self,
+        initializers: &[StructInitializer],
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                StructInitializer::Expr(expr) => {
+                    self.sizeof_expr(expr)?;
+                }
+                StructInitializer::Array(values) => {
+                    self.validate_non_evaluating_array_initializers(values)?;
+                }
+                StructInitializer::Array2D(rows) => {
+                    for row in rows {
+                        self.validate_non_evaluating_array_initializers(row)?;
+                    }
+                }
+                StructInitializer::Struct(values) => {
+                    self.validate_non_evaluating_struct_initializers(values)?;
+                }
+                StructInitializer::StructArray(values) => {
+                    self.validate_non_evaluating_struct_array_initializers(values)?;
+                }
+                StructInitializer::Designated { value, .. } => {
+                    self.validate_non_evaluating_struct_initializers(std::slice::from_ref(value))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_non_evaluating_struct_array_initializers(
+        &self,
+        initializers: &[StructArrayInitializer],
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                StructArrayInitializer::Element(values)
+                | StructArrayInitializer::Designated { value: values, .. } => {
+                    self.validate_non_evaluating_struct_initializers(values)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn sizeof_expr(&self, expr: &Expr) -> CustResult<i64> {
-        self.validate_nested_string_intrinsic_calls(expr)?;
-        match expr {
-            Expr::GenericSelection { .. } => {
-                self.sizeof_expr(self.selected_generic_association(expr)?)
+        let depth = self.sizeof_validation_depth.get();
+        self.sizeof_validation_depth.set(depth + 1);
+        let result = (|| {
+            if depth == 0 {
+                self.validate_nested_string_intrinsic_calls(expr)?;
             }
-            Expr::Number(_) => Ok(INT_SIZE),
-            Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
-            Expr::ArrayLiteral {
-                elem_type,
-                len,
-                init,
-                ..
-            } => {
-                let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
-                Ok(len as i64 * elem_type.size())
-            }
-            Expr::AggregateArrayLiteral {
-                type_name,
-                len,
-                init,
-                ..
-            } => {
-                let len = len.unwrap_or_else(|| Self::infer_struct_array_initializer_len(init));
-                let element_size = self
-                    .struct_types
-                    .get(type_name)
-                    .map(|struct_type| struct_type.size(&self.struct_types))
-                    .transpose()?
-                    .ok_or_else(|| {
-                        CustError::new(format!("undefined struct type '{type_name}'"))
-                    })?;
-                Ok(len as i64 * element_size)
-            }
-            Expr::SizeOfType(_) | Expr::AlignOfType(_) => Ok(INT_SIZE),
-            Expr::SizeOfValue(inner) => {
-                self.sizeof_expr(inner)?;
-                Ok(INT_SIZE)
-            }
-            Expr::Var(name) if self.identifier_resolves_to_enum_constant(name) => Ok(INT_SIZE),
-            Expr::Var(name) if self.find_character_pointer_output(name).is_some() => {
-                Ok(POINTER_SIZE)
-            }
-            Expr::Var(name) => self.sizeof_variable(name),
-            Expr::StructGet { name, fields } => self.sizeof_struct_field(name, fields),
-            Expr::StructArrayGet {
-                name,
-                fields,
-                index,
-            } => match self.sizeof_scalar_field_reverse_subscript(name, fields, index)? {
-                Some(size) => Ok(size),
-                None => self.sizeof_struct_array_indexed_value(name, fields),
-            },
-            Expr::StructFieldArrayElementGet {
-                name,
-                array_fields,
-                index,
-                fields,
-            } => match self.sizeof_scalar_field_reverse_subscript_field(
-                name,
-                array_fields,
-                index,
-                fields,
-            )? {
-                Some(size) => Ok(size),
-                None => self.sizeof_struct_field_array_element_field(name, array_fields, fields),
-            },
-            Expr::StructFieldArrayElementSet {
-                name,
-                array_fields,
-                index,
-                fields,
-                ..
-            }
-            | Expr::StructFieldArrayElementCompoundSet {
-                name,
-                array_fields,
-                index,
-                fields,
-                ..
-            } => match self.sizeof_scalar_field_reverse_subscript_field(
-                name,
-                array_fields,
-                index,
-                fields,
-            )? {
-                Some(size) => Ok(size),
-                None => self.sizeof_struct_field_array_element_field(name, array_fields, fields),
-            },
-            Expr::StructElementGet {
-                name,
-                index,
-                fields,
-            } => match self.sizeof_scalar_variable_reverse_subscript_field(name, index, fields)? {
-                Some(size) => Ok(size),
-                None => self.sizeof_struct_element_field(name, fields),
-            },
-            Expr::StructElementArrayGet { name, fields, .. } => {
-                self.sizeof_struct_element_array_indexed_value(name, fields)
-            }
-            Expr::StructPtrGet { pointer, fields } => {
-                self.sizeof_struct_pointer_field(pointer, fields)
-            }
-            Expr::StructPtrArrayGet {
-                pointer, fields, ..
-            } => {
-                let pointee = self.pointer_expr_pointee_type(&Expr::StructPtrGet {
-                    pointer: pointer.clone(),
-                    fields: fields.clone(),
-                })?;
-                match pointee {
-                    Some(PointeeType::Void) => Err(CustError::new("cannot index pointer to void")),
-                    Some(PointeeType::Scalar(ty)) => Ok(ty.size()),
-                    Some(PointeeType::Struct(type_name)) => self
-                        .struct_types
-                        .get(&type_name)
-                        .map(|struct_type| struct_type.size(&self.struct_types))
-                        .transpose()?
-                        .ok_or_else(|| {
-                            CustError::new(format!("undefined struct type '{type_name}'"))
-                        }),
-                    None => Err(CustError::new("expected pointer expression")),
+            match expr {
+                Expr::GenericSelection { .. } => {
+                    self.sizeof_expr(self.selected_generic_association(expr)?)
                 }
-            }
-            Expr::ArrayGet { name, index } => {
-                if let Some(size) = self.sizeof_scalar_variable_reverse_subscript(name, index)? {
-                    return Ok(size);
+                Expr::Number(_) => Ok(INT_SIZE),
+                Expr::DoubleNumber(_) => Ok(DOUBLE_SIZE),
+                Expr::StringLiteral(values) => Ok(values.len() as i64 * CHAR_SIZE),
+                Expr::ArrayLiteral {
+                    elem_type,
+                    len,
+                    init,
+                    ..
+                } => {
+                    self.validate_non_evaluating_array_initializers(init)?;
+                    let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
+                    Ok(len as i64 * elem_type.size())
                 }
-                match self.find_variable(name) {
-                    Some(Value::StructArray { type_name, .. }) => self
+                Expr::AggregateArrayLiteral {
+                    type_name,
+                    len,
+                    init,
+                    ..
+                } => {
+                    self.validate_non_evaluating_struct_array_initializers(init)?;
+                    let len = len.unwrap_or_else(|| Self::infer_struct_array_initializer_len(init));
+                    let element_size = self
                         .struct_types
                         .get(type_name)
                         .map(|struct_type| struct_type.size(&self.struct_types))
                         .transpose()?
                         .ok_or_else(|| {
                             CustError::new(format!("undefined struct type '{type_name}'"))
-                        }),
-                    _ => self.sizeof_indexed_value(name),
+                        })?;
+                    Ok(len as i64 * element_size)
                 }
-            }
-            Expr::Array2DGet { name, .. }
-            | Expr::Array2DSet { name, .. }
-            | Expr::Array2DCompoundSet { name, .. } => self.sizeof_indexed_value(name),
-            Expr::StructArray2DGet { target, .. } => {
-                self.sizeof_two_dimensional_struct_field_element(target)
-            }
-            Expr::StructArray2DSet { target, .. }
-            | Expr::StructArray2DCompoundSet { target, .. } => {
-                self.sizeof_two_dimensional_struct_field_element(target)
-            }
-            Expr::StringGet { .. } => Ok(CHAR_SIZE),
-            Expr::AddressOf(name) if self.find_character_pointer_output(name).is_some() => {
-                Err(CustError::new(
-                    "taking the address of a character pointer output parameter is not supported",
-                ))
-            }
-            Expr::AddressOf(name) if self.identifier_resolves_to_enum_constant(name) => Err(
-                CustError::new(format!("cannot take the address of enum constant '{name}'")),
-            ),
-            Expr::AddressOf(_)
-            | Expr::AddressOfArray { .. }
-            | Expr::AddressOfStructField { .. }
-            | Expr::AddressOfStructElementField { .. }
-            | Expr::AddressOfStructArrayField { .. }
-            | Expr::AddressOfStructElementArrayField { .. }
-            | Expr::AddressOfStructPtrField { .. }
-            | Expr::AddressOfStructPtrArrayField { .. }
-            | Expr::AddressOfScalarLiteral { .. }
-            | Expr::AddressOfAggregateLiteral { .. }
-            | Expr::AddressOfAggregateField { .. }
-            | Expr::PointerCast { .. } => Ok(POINTER_SIZE),
-            Expr::Deref(pointer) => self.sizeof_deref(pointer),
-            Expr::Assign { name, value } if self.find_character_pointer_output(name).is_some() => {
-                self.validate_character_pointer_output_object_assignment_with_liveness(
-                    name, value, false,
-                )?;
-                Ok(POINTER_SIZE)
-            }
-            Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
-                if matches!(expr, Expr::CompoundAssign { .. })
-                    && matches!(
+                Expr::SizeOfType(_) | Expr::AlignOfType(_) => Ok(INT_SIZE),
+                Expr::SizeOfValue(inner) => {
+                    self.sizeof_expr(inner)?;
+                    Ok(INT_SIZE)
+                }
+                Expr::Var(name) if self.identifier_resolves_to_enum_constant(name) => Ok(INT_SIZE),
+                Expr::Var(name) if self.find_character_pointer_output(name).is_some() => {
+                    Ok(POINTER_SIZE)
+                }
+                Expr::Var(name) => self.sizeof_variable(name),
+                Expr::StructGet { name, fields } => self.sizeof_struct_field(name, fields),
+                Expr::StructArrayGet {
+                    name,
+                    fields,
+                    index,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    match self.sizeof_scalar_field_reverse_subscript(name, fields, index)? {
+                        Some(size) => Ok(size),
+                        None => self.sizeof_struct_array_indexed_value(name, fields),
+                    }
+                }
+                Expr::StructFieldArrayElementGet {
+                    name,
+                    array_fields,
+                    index,
+                    fields,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    match self.sizeof_scalar_field_reverse_subscript_field(
+                        name,
+                        array_fields,
+                        index,
+                        fields,
+                    )? {
+                        Some(size) => Ok(size),
+                        None => {
+                            self.sizeof_struct_field_array_element_field(name, array_fields, fields)
+                        }
+                    }
+                }
+                Expr::StructFieldArrayElementSet {
+                    name,
+                    array_fields,
+                    index,
+                    fields,
+                    value,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    match self.sizeof_scalar_field_reverse_subscript_field(
+                        name,
+                        array_fields,
+                        index,
+                        fields,
+                    )? {
+                        Some(size) => Ok(size),
+                        None => {
+                            self.sizeof_struct_field_array_element_field(name, array_fields, fields)
+                        }
+                    }
+                }
+                Expr::StructFieldArrayElementCompoundSet {
+                    name,
+                    array_fields,
+                    index,
+                    fields,
+                    op,
+                    value,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    match self.sizeof_scalar_field_reverse_subscript_field(
+                        name,
+                        array_fields,
+                        index,
+                        fields,
+                    )? {
+                        Some(size) => Ok(size),
+                        None => {
+                            self.sizeof_struct_field_array_element_field(name, array_fields, fields)
+                        }
+                    }
+                }
+                Expr::StructElementGet {
+                    name,
+                    index,
+                    fields,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    match self
+                        .sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?
+                    {
+                        Some(size) => Ok(size),
+                        None => self.sizeof_struct_element_field(name, fields),
+                    }
+                }
+                Expr::StructElementArrayGet {
+                    name,
+                    index,
+                    fields,
+                    array_index,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.validate_array_subscript(array_index)?;
+                    self.sizeof_struct_element_array_indexed_value(name, fields)
+                }
+                Expr::StructPtrGet { pointer, fields } => {
+                    self.sizeof_struct_pointer_field(pointer, fields)
+                }
+                Expr::StructPtrArrayGet {
+                    pointer,
+                    fields,
+                    index,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    let pointee = self.pointer_expr_pointee_type(&Expr::StructPtrGet {
+                        pointer: pointer.clone(),
+                        fields: fields.clone(),
+                    })?;
+                    match pointee {
+                        Some(PointeeType::Void) => {
+                            Err(CustError::new("cannot index pointer to void"))
+                        }
+                        Some(PointeeType::Scalar(ty)) => Ok(ty.size()),
+                        Some(PointeeType::Struct(type_name)) => self
+                            .struct_types
+                            .get(&type_name)
+                            .map(|struct_type| struct_type.size(&self.struct_types))
+                            .transpose()?
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{type_name}'"))
+                            }),
+                        None => Err(CustError::new("expected pointer expression")),
+                    }
+                }
+                Expr::ArrayGet { name, index } => {
+                    self.validate_array_subscript(index)?;
+                    if let Some(size) =
+                        self.sizeof_scalar_variable_reverse_subscript(name, index)?
+                    {
+                        return Ok(size);
+                    }
+                    match self.find_variable(name) {
+                        Some(Value::StructArray { type_name, .. }) => self
+                            .struct_types
+                            .get(type_name)
+                            .map(|struct_type| struct_type.size(&self.struct_types))
+                            .transpose()?
+                            .ok_or_else(|| {
+                                CustError::new(format!("undefined struct type '{type_name}'"))
+                            }),
+                        _ => self.sizeof_indexed_value(name),
+                    }
+                }
+                Expr::Array2DGet { name, row, column } => {
+                    self.validate_array_subscript(row)?;
+                    self.validate_array_subscript(column)?;
+                    self.sizeof_indexed_value(name)
+                }
+                Expr::Array2DSet {
+                    name,
+                    row,
+                    column,
+                    value,
+                } => {
+                    self.validate_array_subscript(row)?;
+                    self.validate_array_subscript(column)?;
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.sizeof_indexed_value(name)
+                }
+                Expr::Array2DCompoundSet {
+                    name,
+                    row,
+                    column,
+                    op,
+                    value,
+                } => {
+                    self.validate_array_subscript(row)?;
+                    self.validate_array_subscript(column)?;
+                    self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.sizeof_indexed_value(name)
+                }
+                Expr::StructArray2DGet {
+                    target,
+                    row,
+                    column,
+                } => {
+                    self.validate_array_subscript(row)?;
+                    self.validate_array_subscript(column)?;
+                    self.sizeof_two_dimensional_struct_field_element(target)
+                }
+                Expr::StructArray2DSet {
+                    target,
+                    row,
+                    column,
+                    value,
+                } => {
+                    self.validate_array_subscript(row)?;
+                    self.validate_array_subscript(column)?;
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.sizeof_two_dimensional_struct_field_element(target)
+                }
+                Expr::StructArray2DCompoundSet {
+                    target,
+                    row,
+                    column,
+                    op,
+                    value,
+                } => {
+                    self.validate_array_subscript(row)?;
+                    self.validate_array_subscript(column)?;
+                    self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.sizeof_two_dimensional_struct_field_element(target)
+                }
+                Expr::StringGet { index, .. } => {
+                    self.validate_array_subscript(index)?;
+                    Ok(CHAR_SIZE)
+                }
+                Expr::AddressOf(name) if self.find_character_pointer_output(name).is_some() => {
+                    Err(CustError::new(
+                        "taking the address of a character pointer output parameter is not supported",
+                    ))
+                }
+                Expr::AddressOf(name) if self.identifier_resolves_to_enum_constant(name) => Err(
+                    CustError::new(format!("cannot take the address of enum constant '{name}'")),
+                ),
+                Expr::AddressOf(name)
+                    if matches!(
+                        self.find_variable(name),
+                        Some(Value::Scalar {
+                            ty: CType::Double,
+                            ..
+                        })
+                    ) =>
+                {
+                    Err(CustError::new("double pointers are not supported"))
+                }
+                Expr::AddressOfScalarLiteral {
+                    ty: CType::Double, ..
+                } => Err(CustError::new("double pointers are not supported")),
+                Expr::AddressOfScalarLiteral { init, .. } => {
+                    self.sizeof_expr(init)?;
+                    Ok(POINTER_SIZE)
+                }
+                Expr::AddressOfAggregateLiteral { init, .. } => {
+                    self.validate_non_evaluating_struct_initializers(init)?;
+                    Ok(POINTER_SIZE)
+                }
+                Expr::AddressOfArray { index, .. }
+                | Expr::AddressOfStructElementField { index, .. }
+                | Expr::AddressOfStructArrayField { index, .. } => {
+                    self.validate_array_subscript(index)?;
+                    Ok(POINTER_SIZE)
+                }
+                Expr::AddressOfStructElementArrayField {
+                    index, array_index, ..
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.validate_array_subscript(array_index)?;
+                    Ok(POINTER_SIZE)
+                }
+                Expr::AddressOfStructPtrArrayField { pointer, index, .. } => {
+                    self.sizeof_expr(pointer)?;
+                    self.validate_array_subscript(index)?;
+                    Ok(POINTER_SIZE)
+                }
+                Expr::AddressOfStructPtrField { pointer, .. } => {
+                    self.sizeof_expr(pointer)?;
+                    Ok(POINTER_SIZE)
+                }
+                Expr::PointerCast { .. } if self.expr_is_unsupported_double_pointer(expr) => {
+                    Err(CustError::new("double pointers are not supported"))
+                }
+                Expr::PointerCast { expr: inner, .. } if self.expr_is_double_value(inner) => {
+                    Err(CustError::new("expected pointer expression"))
+                }
+                Expr::AddressOf(_)
+                | Expr::AddressOfStructField { .. }
+                | Expr::AddressOfAggregateField { .. } => Ok(POINTER_SIZE),
+                Expr::PointerCast { expr: inner, .. } => {
+                    self.sizeof_expr(inner)?;
+                    Ok(POINTER_SIZE)
+                }
+                Expr::Deref(pointer) => self.sizeof_deref(pointer),
+                Expr::Assign { name, value }
+                    if self.find_character_pointer_output(name).is_some() =>
+                {
+                    self.validate_character_pointer_output_object_assignment_with_liveness(
+                        name, value, false,
+                    )?;
+                    Ok(POINTER_SIZE)
+                }
+                Expr::Assign { name, value } => {
+                    self.sizeof_expr(value)?;
+                    if matches!(
+                        self.find_variable(name),
+                        Some(Value::Scalar {
+                            ty: CType::Double,
+                            ..
+                        })
+                    ) && self.expr_is_pointer_value(value)
+                    {
+                        return Err(CustError::new(
+                            "cannot assign pointer expression to double value",
+                        ));
+                    }
+                    if matches!(self.find_variable(name), Some(Value::Pointer { .. }))
+                        && self.expr_is_double_value(value)
+                    {
+                        return Err(CustError::new("expected pointer expression"));
+                    }
+                    self.sizeof_assignment_result(name)
+                }
+                Expr::CompoundAssign { name, op, value } => {
+                    if matches!(
+                        self.find_variable(name),
+                        Some(Value::Scalar {
+                            ty: CType::Double,
+                            ..
+                        })
+                    ) && self.expr_is_pointer_value(value)
+                    {
+                        return Err(CustError::new(
+                            "cannot use pointer expression in double compound assignment",
+                        ));
+                    }
+                    if matches!(
                         self.find_variable(name),
                         Some(Value::Pointer {
                             ty: PointeeType::Void,
                             ..
                         })
-                    )
+                    ) {
+                        return Err(CustError::new(
+                            "pointer to void arithmetic is not supported",
+                        ));
+                    }
+                    if matches!(self.find_variable(name), Some(Value::Pointer { .. }))
+                        && self.expr_is_double_value(value)
+                    {
+                        return Err(CustError::new(
+                            "pointer arithmetic requires an integer offset",
+                        ));
+                    }
+                    self.sizeof_expr(value)?;
+                    if matches!(
+                        self.find_variable(name),
+                        Some(Value::Scalar {
+                            ty: CType::Double,
+                            ..
+                        })
+                    ) || self.expr_is_double_value(value)
+                    {
+                        Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                    }
+                    self.sizeof_assignment_result(name)
+                }
+                Expr::ArraySet { name, index, value } => {
+                    self.validate_array_subscript(index)?;
+                    self.sizeof_expr(value)?;
+                    if let Some(size) =
+                        self.sizeof_scalar_variable_reverse_subscript(name, index)?
+                    {
+                        Ok(size)
+                    } else {
+                        self.sizeof_indexed_value(name)
+                    }
+                }
+                Expr::ArrayCompoundSet {
+                    name,
+                    index,
+                    op,
+                    value,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.sizeof_expr(value)?;
+                    if self.expr_is_double_value(value) {
+                        Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                    }
+                    if let Some(size) =
+                        self.sizeof_scalar_variable_reverse_subscript(name, index)?
+                    {
+                        Ok(size)
+                    } else {
+                        self.sizeof_indexed_value(name)
+                    }
+                }
+                Expr::DerefSet { pointer, value }
+                    if self.expr_is_character_pointer_output_value(pointer) =>
                 {
-                    return Err(CustError::new(
-                        "pointer to void arithmetic is not supported",
-                    ));
+                    self.validate_character_pointer_output_argument_with_liveness(
+                        "character pointer output dereference",
+                        "output",
+                        pointer,
+                        false,
+                    )?;
+                    self.validate_character_pointer_output_assignment_expr(value)?;
+                    Ok(POINTER_SIZE)
                 }
-                self.sizeof_assignment_result(name)
-            }
-            Expr::ArraySet { name, index, .. } | Expr::ArrayCompoundSet { name, index, .. } => {
-                if let Some(size) = self.sizeof_scalar_variable_reverse_subscript(name, index)? {
-                    Ok(size)
-                } else {
-                    self.sizeof_indexed_value(name)
+                Expr::DerefSet { pointer, value } => {
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.sizeof_deref(pointer)
                 }
-            }
-            Expr::DerefSet { pointer, value }
-                if self.expr_is_character_pointer_output_value(pointer) =>
-            {
-                self.validate_character_pointer_output_argument_with_liveness(
-                    "character pointer output dereference",
-                    "output",
+                Expr::DerefCompoundSet { pointer, op, value } => {
+                    self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.sizeof_deref(pointer)
+                }
+                Expr::StructSet {
+                    name,
+                    fields,
+                    value,
+                } => {
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.sizeof_struct_field(name, fields)
+                }
+                Expr::StructCompoundSet {
+                    name,
+                    fields,
+                    op,
+                    value,
+                } => {
+                    self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.sizeof_struct_field(name, fields)
+                }
+                Expr::StructArraySet {
+                    name,
+                    fields,
+                    index,
+                    value,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    match self.sizeof_scalar_field_reverse_subscript(name, fields, index)? {
+                        Some(size) => Ok(size),
+                        None => self.sizeof_struct_array_indexed_value(name, fields),
+                    }
+                }
+                Expr::StructArrayCompoundSet {
+                    name,
+                    fields,
+                    index,
+                    op,
+                    value,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    match self.sizeof_scalar_field_reverse_subscript(name, fields, index)? {
+                        Some(size) => Ok(size),
+                        None => self.sizeof_struct_array_indexed_value(name, fields),
+                    }
+                }
+                Expr::StructElementSet {
+                    name,
+                    index,
+                    fields,
+                    value,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    match self
+                        .sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?
+                    {
+                        Some(size) => Ok(size),
+                        None => self.sizeof_struct_element_field(name, fields),
+                    }
+                }
+                Expr::StructElementCompoundSet {
+                    name,
+                    index,
+                    fields,
+                    op,
+                    value,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    match self
+                        .sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?
+                    {
+                        Some(size) => Ok(size),
+                        None => self.sizeof_struct_element_field(name, fields),
+                    }
+                }
+                Expr::StructElementArraySet {
+                    name,
+                    index,
+                    fields,
+                    array_index,
+                    value,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.validate_array_subscript(array_index)?;
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.sizeof_struct_element_array_indexed_value(name, fields)
+                }
+                Expr::StructElementArrayCompoundSet {
+                    name,
+                    index,
+                    fields,
+                    array_index,
+                    op,
+                    value,
+                } => {
+                    self.validate_array_subscript(index)?;
+                    self.validate_array_subscript(array_index)?;
+                    self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.sizeof_struct_element_array_indexed_value(name, fields)
+                }
+                Expr::StructPtrSet {
                     pointer,
-                    false,
-                )?;
-                self.validate_character_pointer_output_assignment_expr(value)?;
-                Ok(POINTER_SIZE)
-            }
-            Expr::DerefSet { pointer, .. } | Expr::DerefCompoundSet { pointer, .. } => {
-                self.sizeof_deref(pointer)
-            }
-            Expr::StructSet { name, fields, .. } | Expr::StructCompoundSet { name, fields, .. } => {
-                self.sizeof_struct_field(name, fields)
-            }
-            Expr::StructArraySet {
-                name,
-                fields,
-                index,
-                ..
-            }
-            | Expr::StructArrayCompoundSet {
-                name,
-                fields,
-                index,
-                ..
-            } => match self.sizeof_scalar_field_reverse_subscript(name, fields, index)? {
-                Some(size) => Ok(size),
-                None => self.sizeof_struct_array_indexed_value(name, fields),
-            },
-            Expr::StructElementSet {
-                name,
-                index,
-                fields,
-                ..
-            }
-            | Expr::StructElementCompoundSet {
-                name,
-                index,
-                fields,
-                ..
-            } => match self.sizeof_scalar_variable_reverse_subscript_field(name, index, fields)? {
-                Some(size) => Ok(size),
-                None => self.sizeof_struct_element_field(name, fields),
-            },
-            Expr::StructElementArraySet { name, fields, .. }
-            | Expr::StructElementArrayCompoundSet { name, fields, .. } => {
-                self.sizeof_struct_element_array_indexed_value(name, fields)
-            }
-            Expr::StructPtrSet {
-                pointer, fields, ..
-            }
-            | Expr::StructPtrCompoundSet {
-                pointer, fields, ..
-            } => self.sizeof_struct_pointer_field(pointer, fields),
-            Expr::Increment { target, .. } => {
-                if let Expr::Var(name) = target.as_ref()
-                    && self.find_character_pointer_output(name).is_some()
-                {
-                    return Err(CustError::new(
-                        "character pointer output parameter reassignment is not supported",
-                    ));
+                    fields,
+                    value,
+                } => {
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.sizeof_struct_pointer_field(pointer, fields)
                 }
-                if matches!(
-                    self.pointer_expr_pointee_type(target)?,
-                    Some(PointeeType::Void)
-                ) {
-                    return Err(CustError::new(
-                        "pointer to void arithmetic is not supported",
-                    ));
+                Expr::StructPtrCompoundSet {
+                    pointer,
+                    fields,
+                    op,
+                    value,
+                } => {
+                    self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.sizeof_struct_pointer_field(pointer, fields)
                 }
-                self.sizeof_expr(target)
-            }
-            Expr::VoidCast(_) => Err(CustError::new("void expression used as scalar")),
-            Expr::Cast { ty, expr: inner } | Expr::ScalarLiteral { ty, init: inner } => {
-                self.reject_void_scalar_operand(inner)?;
-                Ok(ty.size())
-            }
-            Expr::ScalarLiteralSet { ty, .. } | Expr::ScalarLiteralCompoundSet { ty, .. } => {
-                Ok(ty.size())
-            }
-            Expr::AggregateLiteral { type_name, .. } => self
-                .struct_types
-                .get(type_name)
-                .map(|struct_type| struct_type.size(&self.struct_types))
-                .transpose()?
-                .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'"))),
-            Expr::AggregateFieldGet { aggregate, fields }
-            | Expr::AggregateFieldSet {
-                aggregate, fields, ..
-            }
-            | Expr::AggregateFieldCompoundSet {
-                aggregate, fields, ..
-            } => {
-                let type_name = self.aggregate_expr_type_name(aggregate)?;
-                self.sizeof_aggregate_field_type(&type_name, fields)
-            }
-            Expr::Call { name, args } => match self.functions.get(name) {
-                Some(function) => {
-                    self.validate_non_evaluating_function_argument_types(name, args)?;
-                    function
-                        .return_type
-                        .size(&self.struct_types)
+                Expr::Increment { target, .. } => {
+                    if let Expr::Var(name) = target.as_ref()
+                        && self.find_character_pointer_output(name).is_some()
+                    {
+                        return Err(CustError::new(
+                            "character pointer output parameter reassignment is not supported",
+                        ));
+                    }
+                    if matches!(
+                        self.pointer_expr_pointee_type(target)?,
+                        Some(PointeeType::Void)
+                    ) {
+                        return Err(CustError::new(
+                            "pointer to void arithmetic is not supported",
+                        ));
+                    }
+                    self.sizeof_expr(target)
+                }
+                Expr::VoidCast(_) => Err(CustError::new("void expression used as scalar")),
+                Expr::Cast {
+                    ty: CType::Double,
+                    expr: inner,
+                }
+                | Expr::ScalarLiteral {
+                    ty: CType::Double,
+                    init: inner,
+                } if self.expr_is_pointer_value(inner) => {
+                    Err(CustError::new("cannot cast pointer expression to double"))
+                }
+                Expr::Cast { ty, expr: inner } | Expr::ScalarLiteral { ty, init: inner } => {
+                    self.reject_void_scalar_operand(inner)?;
+                    self.sizeof_expr(inner)?;
+                    Ok(ty.size())
+                }
+                Expr::ScalarLiteralSet { ty, init, value } => {
+                    self.sizeof_expr(init)?;
+                    self.sizeof_expr(value)?;
+                    Ok(ty.size())
+                }
+                Expr::ScalarLiteralCompoundSet {
+                    ty,
+                    init,
+                    op,
+                    value,
+                } => {
+                    self.sizeof_expr(init)?;
+                    self.sizeof_expr(value)?;
+                    if *ty == CType::Double || self.expr_is_double_value(value) {
+                        Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                    }
+                    Ok(ty.size())
+                }
+                Expr::AggregateLiteral {
+                    type_name, init, ..
+                } => {
+                    self.validate_non_evaluating_struct_initializers(init)?;
+                    self.struct_types
+                        .get(type_name)
+                        .map(|struct_type| struct_type.size(&self.struct_types))
+                        .transpose()?
                         .ok_or_else(|| {
-                            CustError::new(format!(
-                                "void function '{name}' used as scalar expression"
-                            ))
+                            CustError::new(format!("undefined struct type '{type_name}'"))
                         })
                 }
-                None if self.has_character_classification_prototype(name) => {
-                    // The entry validation above already checked this intrinsic and
-                    // its argument tree, so validating it again would duplicate work.
-                    Ok(INT_SIZE)
+                Expr::AggregateFieldGet { aggregate, fields } => {
+                    self.sizeof_expr(aggregate)?;
+                    let type_name = self.aggregate_expr_type_name(aggregate)?;
+                    self.sizeof_aggregate_field_type(&type_name, fields)
                 }
-                None if self.has_exit_prototype(name) || self.has_abort_prototype(name) => Err(
-                    CustError::new(format!("void function '{name}' used as scalar expression")),
-                ),
-                None if self.has_random_prototype(name) => {
-                    if name == "srand" {
+                Expr::AggregateFieldSet {
+                    aggregate,
+                    fields,
+                    value,
+                } => {
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    let type_name = self.aggregate_expr_type_name(aggregate)?;
+                    self.sizeof_aggregate_field_type(&type_name, fields)
+                }
+                Expr::AggregateFieldCompoundSet {
+                    aggregate,
+                    fields,
+                    op,
+                    value,
+                } => {
+                    self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    let type_name = self.aggregate_expr_type_name(aggregate)?;
+                    self.sizeof_aggregate_field_type(&type_name, fields)
+                }
+                Expr::Call { name, args } => match self.functions.get(name) {
+                    Some(function) => {
+                        self.validate_non_evaluating_function_argument_types(name, args)?;
+                        function
+                            .return_type
+                            .size(&self.struct_types)
+                            .ok_or_else(|| {
+                                CustError::new(format!(
+                                    "void function '{name}' used as scalar expression"
+                                ))
+                            })
+                    }
+                    None if self.has_character_classification_prototype(name) => {
+                        // The entry validation above already checked this intrinsic and
+                        // its argument tree, so validating it again would duplicate work.
+                        Ok(INT_SIZE)
+                    }
+                    None if self.has_exit_prototype(name) || self.has_abort_prototype(name) => Err(
+                        CustError::new(format!("void function '{name}' used as scalar expression")),
+                    ),
+                    None if self.has_random_prototype(name) => {
+                        if name == "srand" {
+                            Err(CustError::new(
+                                "void function 'srand' used as scalar expression",
+                            ))
+                        } else {
+                            Ok(INT_SIZE)
+                        }
+                    }
+                    None if self.has_integer_absolute_value_prototype(name) => Ok(INT_SIZE),
+                    None if self.has_integer_string_conversion_prototype(name) => {
+                        self.sizeof_integer_string_conversion_call(name, args)
+                    }
+                    None if self.has_base_integer_string_conversion_prototype(name) => Ok(INT_SIZE),
+                    None if self.has_string_comparison_prototype(name) => {
+                        self.sizeof_string_comparison_call(name, args)
+                    }
+                    None if self.has_string_transform_prototype(name) => {
+                        // Entry validation already checked the transform call and its count
+                        // tree; re-running the helper here makes nested calls exponential.
+                        Ok(INT_SIZE)
+                    }
+                    None if self.has_string_prefix_comparison_prototype(name) => {
+                        self.sizeof_string_prefix_comparison_call(name, args)
+                    }
+                    None if self.has_string_length_prototype(name) => {
+                        self.sizeof_string_length_call(name, args)
+                    }
+                    None if self.has_character_search_prototype(name) => {
+                        self.sizeof_character_search_call(name, args)
+                    }
+                    None if self.has_character_set_search_prototype(name) => {
+                        self.sizeof_character_set_search_call(name, args)
+                    }
+                    None if self.has_string_tokenization_prototype(name) => {
+                        self.sizeof_string_tokenization_call(name, args)
+                    }
+                    None if self.has_string_copy_prototype(name) => {
+                        self.sizeof_string_copy_call(name, args)
+                    }
+                    None if self.has_memory_fill_prototype(name) => Ok(POINTER_SIZE),
+                    None if self.has_memory_character_search_prototype(name) => Ok(POINTER_SIZE),
+                    None if self.has_memory_comparison_prototype(name) => Ok(INT_SIZE),
+                    None if self.has_string_span_prototype(name) => {
+                        self.sizeof_string_span_call(name, args)
+                    }
+                    None if Self::is_character_classification_name(name)
+                        && self.prototypes.contains_key(name) =>
+                    {
+                        Err(Self::unsupported_character_classification_declaration_error(name))
+                    }
+                    None if name == "strncmp" && self.prototypes.contains_key(name) => {
                         Err(CustError::new(
-                            "void function 'srand' used as scalar expression",
+                            "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
                         ))
+                    }
+                    None if name == "strlen" && self.prototypes.contains_key(name) => {
+                        Err(CustError::new(
+                            "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
+                        ))
+                    }
+                    None if matches!(
+                        name.as_str(),
+                        "strtol" | "strtoll" | "strtoul" | "strtoull"
+                    ) && self.prototypes.contains_key(name) =>
+                    {
+                        Err(
+                            Self::unsupported_base_integer_string_conversion_declaration_error(
+                                name,
+                            ),
+                        )
+                    }
+                    None if matches!(name.as_str(), "strchr" | "strrchr")
+                        && self.prototypes.contains_key(name) =>
+                    {
+                        Err(CustError::new(format!(
+                            "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type"
+                        )))
+                    }
+                    None if matches!(name.as_str(), "strpbrk" | "strstr")
+                        && self.prototypes.contains_key(name) =>
+                    {
+                        Err(CustError::new(format!(
+                            "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
+                        )))
+                    }
+                    None if name == "strtok" && self.prototypes.contains_key(name) => {
+                        Err(Self::unsupported_string_tokenization_declaration_error())
+                    }
+                    None if matches!(
+                        name.as_str(),
+                        "strcpy" | "strcat" | "strncat" | "strncpy"
+                    ) && self.prototypes.contains_key(name) =>
+                    {
+                        Err(Self::unsupported_string_copy_declaration_error(name))
+                    }
+                    None if name == "memset" && self.prototypes.contains_key(name) => {
+                        Err(Self::unsupported_memory_fill_declaration_error())
+                    }
+                    None if name == "memchr" && self.prototypes.contains_key(name) => {
+                        Err(Self::unsupported_memory_character_search_declaration_error())
+                    }
+                    None if name == "memcmp" && self.prototypes.contains_key(name) => {
+                        Err(Self::unsupported_memory_comparison_declaration_error())
+                    }
+                    None if matches!(name.as_str(), "strspn" | "strcspn")
+                        && self.prototypes.contains_key(name) =>
+                    {
+                        Err(CustError::new(format!(
+                            "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type"
+                        )))
+                    }
+                    None if self.prototypes.contains_key(name) => {
+                        self.validate_non_evaluating_function_argument_types(name, args)?;
+                        self.prototypes[name]
+                            .return_type
+                            .size(&self.struct_types)
+                            .ok_or_else(|| {
+                                CustError::new(format!(
+                                    "void function '{name}' used as scalar expression"
+                                ))
+                            })
+                    }
+                    None => Err(CustError::new(format!("undefined function '{name}'"))),
+                },
+                Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::BitwiseNot(inner)
+                    if self.expr_is_character_pointer_output_value(inner) =>
+                {
+                    Err(CustError::new(
+                        "character pointer output arithmetic is not supported",
+                    ))
+                }
+                Expr::UnaryPlus(inner) => {
+                    if matches!(
+                        self.pointer_expr_pointee_type(inner)?,
+                        Some(PointeeType::Void)
+                    ) {
+                        return Err(CustError::new(
+                            "pointer to void arithmetic is not supported",
+                        ));
+                    }
+                    self.reject_void_scalar_operand(inner)?;
+                    self.sizeof_expr(inner)?;
+                    if self.expr_is_double_value(inner) {
+                        Ok(DOUBLE_SIZE)
                     } else {
                         Ok(INT_SIZE)
                     }
                 }
-                None if self.has_integer_absolute_value_prototype(name) => Ok(INT_SIZE),
-                None if self.has_integer_string_conversion_prototype(name) => {
-                    self.sizeof_integer_string_conversion_call(name, args)
+                Expr::UnaryMinus(inner) => {
+                    self.reject_void_scalar_operand(inner)?;
+                    self.sizeof_expr(inner)?;
+                    if self.expr_is_double_value(inner) {
+                        Ok(DOUBLE_SIZE)
+                    } else {
+                        Ok(INT_SIZE)
+                    }
                 }
-                None if self.has_base_integer_string_conversion_prototype(name) => Ok(INT_SIZE),
-                None if self.has_string_comparison_prototype(name) => {
-                    self.sizeof_string_comparison_call(name, args)
-                }
-                None if self.has_string_transform_prototype(name) => {
-                    // Entry validation already checked the transform call and its count
-                    // tree; re-running the helper here makes nested calls exponential.
+                Expr::BitwiseNot(inner) if self.expr_is_double_value(inner) => Err(CustError::new(
+                    "bitwise operations on double values are not supported",
+                )),
+                Expr::BitwiseNot(inner) | Expr::LogicalNot(inner) => {
+                    self.reject_void_scalar_operand(inner)?;
+                    self.sizeof_expr(inner)?;
                     Ok(INT_SIZE)
                 }
-                None if self.has_string_prefix_comparison_prototype(name) => {
-                    self.sizeof_string_prefix_comparison_call(name, args)
-                }
-                None if self.has_string_length_prototype(name) => {
-                    self.sizeof_string_length_call(name, args)
-                }
-                None if self.has_character_search_prototype(name) => {
-                    self.sizeof_character_search_call(name, args)
-                }
-                None if self.has_character_set_search_prototype(name) => {
-                    self.sizeof_character_set_search_call(name, args)
-                }
-                None if self.has_string_tokenization_prototype(name) => {
-                    self.sizeof_string_tokenization_call(name, args)
-                }
-                None if self.has_string_copy_prototype(name) => {
-                    self.sizeof_string_copy_call(name, args)
-                }
-                None if self.has_memory_fill_prototype(name) => Ok(POINTER_SIZE),
-                None if self.has_memory_character_search_prototype(name) => Ok(POINTER_SIZE),
-                None if self.has_memory_comparison_prototype(name) => Ok(INT_SIZE),
-                None if self.has_string_span_prototype(name) => {
-                    self.sizeof_string_span_call(name, args)
-                }
-                None if Self::is_character_classification_name(name)
-                    && self.prototypes.contains_key(name) =>
+                Expr::Binary(
+                    left,
+                    BinaryOp::Add
+                    | BinaryOp::Sub
+                    | BinaryOp::Mul
+                    | BinaryOp::Div
+                    | BinaryOp::Rem
+                    | BinaryOp::ShiftLeft
+                    | BinaryOp::ShiftRight
+                    | BinaryOp::BitAnd
+                    | BinaryOp::BitXor
+                    | BinaryOp::BitOr,
+                    right,
+                ) if self.expr_is_character_pointer_output_value(left)
+                    || self.expr_is_character_pointer_output_value(right) =>
                 {
-                    Err(Self::unsupported_character_classification_declaration_error(name))
-                }
-                None if name == "strncmp" && self.prototypes.contains_key(name) => {
                     Err(CustError::new(
-                        "standard library function 'strncmp' has an unsupported declaration; expected two pointer-to-const-character parameters, one integer count, and an integer return type",
+                        "character pointer output arithmetic is not supported",
                     ))
                 }
-                None if name == "strlen" && self.prototypes.contains_key(name) => {
+                Expr::Binary(
+                    left,
+                    BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge,
+                    right,
+                ) if self.expr_is_character_pointer_output_value(left)
+                    || self.expr_is_character_pointer_output_value(right) =>
+                {
                     Err(CustError::new(
-                        "standard library function 'strlen' has an unsupported declaration; expected one pointer-to-const-character parameter and an integer return type",
+                        "character pointer output ordering comparisons are not supported",
                     ))
                 }
-                None if matches!(name.as_str(), "strtol" | "strtoll" | "strtoul" | "strtoull")
-                    && self.prototypes.contains_key(name) =>
+                Expr::Binary(left, BinaryOp::Add | BinaryOp::Sub, right) => {
+                    let left_is_pointer = self.expr_is_pointer_value(left);
+                    let right_is_pointer = self.expr_is_pointer_value(right);
+                    if (left_is_pointer && self.expr_is_double_value(right))
+                        || (right_is_pointer && self.expr_is_double_value(left))
+                    {
+                        return Err(CustError::new(
+                            "pointer arithmetic requires an integer offset",
+                        ));
+                    }
+                    if matches!(
+                        self.pointer_expr_pointee_type(left)?,
+                        Some(PointeeType::Void)
+                    ) || matches!(
+                        self.pointer_expr_pointee_type(right)?,
+                        Some(PointeeType::Void)
+                    ) {
+                        return Err(CustError::new(
+                            "pointer to void arithmetic is not supported",
+                        ));
+                    }
+                    self.reject_void_scalar_operand(left)?;
+                    self.reject_void_scalar_operand(right)?;
+                    self.sizeof_expr(left)?;
+                    self.sizeof_expr(right)?;
+                    if self.expr_is_double_value(left) || self.expr_is_double_value(right) {
+                        Ok(DOUBLE_SIZE)
+                    } else {
+                        Ok(INT_SIZE)
+                    }
+                }
+                Expr::Binary(left, BinaryOp::Mul | BinaryOp::Div, right) => {
+                    if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
+                        return Err(CustError::new(
+                            "multiplication and division require scalar operands, not pointers",
+                        ));
+                    }
+                    self.reject_void_scalar_operand(left)?;
+                    self.reject_void_scalar_operand(right)?;
+                    self.sizeof_expr(left)?;
+                    self.sizeof_expr(right)?;
+                    if self.expr_is_double_value(left) || self.expr_is_double_value(right) {
+                        Ok(DOUBLE_SIZE)
+                    } else {
+                        Ok(INT_SIZE)
+                    }
+                }
+                Expr::Binary(left, BinaryOp::Rem, right)
+                    if self.expr_is_double_value(left) || self.expr_is_double_value(right) =>
                 {
-                    Err(Self::unsupported_base_integer_string_conversion_declaration_error(name))
+                    Err(CustError::new(
+                        "remainder on double values is not supported",
+                    ))
                 }
-                None if matches!(name.as_str(), "strchr" | "strrchr")
-                    && self.prototypes.contains_key(name) =>
-                {
-                    Err(CustError::new(format!(
-                        "standard library function '{name}' has an unsupported declaration; expected one pointer-to-const-character parameter, one integer search value, and a pointer-to-character return type"
-                    )))
+                Expr::Binary(
+                    left,
+                    BinaryOp::ShiftLeft
+                    | BinaryOp::ShiftRight
+                    | BinaryOp::BitAnd
+                    | BinaryOp::BitXor
+                    | BinaryOp::BitOr,
+                    right,
+                ) if self.expr_is_double_value(left) || self.expr_is_double_value(right) => Err(
+                    CustError::new("bitwise operations on double values are not supported"),
+                ),
+                Expr::Binary(
+                    left,
+                    BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge,
+                    right,
+                ) => {
+                    let left_is_pointer = self.expr_is_pointer_value(left);
+                    let right_is_pointer = self.expr_is_pointer_value(right);
+                    if (left_is_pointer && self.expr_is_double_value(right))
+                        || (right_is_pointer && self.expr_is_double_value(left))
+                    {
+                        return Err(CustError::new("cannot compare pointer with double value"));
+                    }
+                    if matches!(
+                        self.pointer_expr_pointee_type(left)?,
+                        Some(PointeeType::Void)
+                    ) || matches!(
+                        self.pointer_expr_pointee_type(right)?,
+                        Some(PointeeType::Void)
+                    ) {
+                        return Err(CustError::new(
+                            "pointer to void ordering comparisons are not supported",
+                        ));
+                    }
+                    self.reject_void_scalar_operand(left)?;
+                    self.reject_void_scalar_operand(right)?;
+                    self.sizeof_expr(left)?;
+                    self.sizeof_expr(right)?;
+                    Ok(INT_SIZE)
                 }
-                None if matches!(name.as_str(), "strpbrk" | "strstr")
-                    && self.prototypes.contains_key(name) =>
-                {
-                    Err(CustError::new(format!(
-                        "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and a pointer-to-character return type"
-                    )))
+                Expr::Binary(left, BinaryOp::Eq | BinaryOp::Ne, right) => {
+                    let left_is_pointer = self.expr_is_pointer_value(left);
+                    let right_is_pointer = self.expr_is_pointer_value(right);
+                    if (left_is_pointer && self.expr_is_double_value(right))
+                        || (right_is_pointer && self.expr_is_double_value(left))
+                    {
+                        return Err(CustError::new("cannot compare pointer with double value"));
+                    }
+                    self.reject_void_scalar_operand(left)?;
+                    self.reject_void_scalar_operand(right)?;
+                    self.sizeof_expr(left)?;
+                    self.sizeof_expr(right)?;
+                    Ok(INT_SIZE)
                 }
-                None if name == "strtok" && self.prototypes.contains_key(name) => {
-                    Err(Self::unsupported_string_tokenization_declaration_error())
+                Expr::Binary(left, _, right) => {
+                    self.reject_void_scalar_operand(left)?;
+                    self.reject_void_scalar_operand(right)?;
+                    self.sizeof_expr(left)?;
+                    self.sizeof_expr(right)?;
+                    Ok(INT_SIZE)
                 }
-                None if matches!(name.as_str(), "strcpy" | "strcat" | "strncat" | "strncpy")
-                    && self.prototypes.contains_key(name) =>
-                {
-                    Err(Self::unsupported_string_copy_declaration_error(name))
+                Expr::Conditional { .. } => self.sizeof_conditional_expr(expr),
+                Expr::Comma(left, right) => {
+                    self.validate_non_evaluating_discard_expr(left)?;
+                    self.sizeof_expr(right)
                 }
-                None if name == "memset" && self.prototypes.contains_key(name) => {
-                    Err(Self::unsupported_memory_fill_declaration_error())
-                }
-                None if name == "memchr" && self.prototypes.contains_key(name) => {
-                    Err(Self::unsupported_memory_character_search_declaration_error())
-                }
-                None if name == "memcmp" && self.prototypes.contains_key(name) => {
-                    Err(Self::unsupported_memory_comparison_declaration_error())
-                }
-                None if matches!(name.as_str(), "strspn" | "strcspn")
-                    && self.prototypes.contains_key(name) =>
-                {
-                    Err(CustError::new(format!(
-                        "standard library function '{name}' has an unsupported declaration; expected two pointer-to-const-character parameters and an integer return type"
-                    )))
-                }
-                None if self.prototypes.contains_key(name) => {
-                    self.validate_non_evaluating_function_argument_types(name, args)?;
-                    self.prototypes[name]
-                        .return_type
-                        .size(&self.struct_types)
-                        .ok_or_else(|| {
-                            CustError::new(format!(
-                                "void function '{name}' used as scalar expression"
-                            ))
-                        })
-                }
-                None => Err(CustError::new(format!("undefined function '{name}'"))),
-            },
-            Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::BitwiseNot(inner)
-                if self.expr_is_character_pointer_output_value(inner) =>
-            {
-                Err(CustError::new(
-                    "character pointer output arithmetic is not supported",
-                ))
             }
-            Expr::UnaryPlus(inner) => {
-                if matches!(
-                    self.pointer_expr_pointee_type(inner)?,
-                    Some(PointeeType::Void)
-                ) {
-                    return Err(CustError::new(
-                        "pointer to void arithmetic is not supported",
-                    ));
-                }
-                self.reject_void_scalar_operand(inner)?;
-                Ok(INT_SIZE)
-            }
-            Expr::UnaryMinus(inner) | Expr::BitwiseNot(inner) | Expr::LogicalNot(inner) => {
-                self.reject_void_scalar_operand(inner)?;
-                Ok(INT_SIZE)
-            }
-            Expr::Binary(
-                left,
-                BinaryOp::Add
-                | BinaryOp::Sub
-                | BinaryOp::Mul
-                | BinaryOp::Div
-                | BinaryOp::Rem
-                | BinaryOp::ShiftLeft
-                | BinaryOp::ShiftRight
-                | BinaryOp::BitAnd
-                | BinaryOp::BitXor
-                | BinaryOp::BitOr,
-                right,
-            ) if self.expr_is_character_pointer_output_value(left)
-                || self.expr_is_character_pointer_output_value(right) =>
-            {
-                Err(CustError::new(
-                    "character pointer output arithmetic is not supported",
-                ))
-            }
-            Expr::Binary(
-                left,
-                BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge,
-                right,
-            ) if self.expr_is_character_pointer_output_value(left)
-                || self.expr_is_character_pointer_output_value(right) =>
-            {
-                Err(CustError::new(
-                    "character pointer output ordering comparisons are not supported",
-                ))
-            }
-            Expr::Binary(left, BinaryOp::Add | BinaryOp::Sub, right) => {
-                if matches!(
-                    self.pointer_expr_pointee_type(left)?,
-                    Some(PointeeType::Void)
-                ) || matches!(
-                    self.pointer_expr_pointee_type(right)?,
-                    Some(PointeeType::Void)
-                ) {
-                    return Err(CustError::new(
-                        "pointer to void arithmetic is not supported",
-                    ));
-                }
-                self.reject_void_scalar_operand(left)?;
-                self.reject_void_scalar_operand(right)?;
-                Ok(INT_SIZE)
-            }
-            Expr::Binary(
-                left,
-                BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge,
-                right,
-            ) => {
-                if matches!(
-                    self.pointer_expr_pointee_type(left)?,
-                    Some(PointeeType::Void)
-                ) || matches!(
-                    self.pointer_expr_pointee_type(right)?,
-                    Some(PointeeType::Void)
-                ) {
-                    return Err(CustError::new(
-                        "pointer to void ordering comparisons are not supported",
-                    ));
-                }
-                self.reject_void_scalar_operand(left)?;
-                self.reject_void_scalar_operand(right)?;
-                Ok(INT_SIZE)
-            }
-            Expr::Binary(left, _, right) => {
-                self.reject_void_scalar_operand(left)?;
-                self.reject_void_scalar_operand(right)?;
-                Ok(INT_SIZE)
-            }
-            Expr::Conditional { .. } => self.sizeof_conditional_expr(expr),
-            Expr::Comma(_, right) => self.sizeof_expr(right),
-        }
+        })();
+        self.sizeof_validation_depth.set(depth);
+        result
     }
 
     fn reject_void_scalar_operand(&self, expr: &Expr) -> CustResult<()> {
@@ -33460,6 +35282,20 @@ impl Interpreter {
 
     fn sizeof_conditional_expr(&self, expr: &Expr) -> CustResult<i64> {
         self.reject_void_scalar_operand(expr)?;
+        let Expr::Conditional {
+            cond,
+            then_expr,
+            else_expr,
+        } = expr
+        else {
+            unreachable!("sizeof conditional helper requires conditional expression")
+        };
+        if self.expr_is_double_value(expr) {
+            self.generic_selection_type(expr)?;
+        }
+        self.sizeof_expr(cond)?;
+        self.sizeof_expr(then_expr)?;
+        self.sizeof_expr(else_expr)?;
         if self.expr_is_character_pointer_output_value(expr) {
             return self
                 .validate_character_pointer_output_argument(
@@ -33776,6 +35612,7 @@ impl Interpreter {
     }
 
     fn sizeof_struct_pointer_field(&self, pointer: &Expr, path: &[String]) -> CustResult<i64> {
+        self.sizeof_expr(pointer)?;
         let Some(PointeeType::Struct(type_name)) = self.pointer_expr_pointee_type(pointer)? else {
             return Err(CustError::new("expected pointer expression"));
         };
@@ -34024,9 +35861,13 @@ impl Interpreter {
         if let Some(ty) = self.pointer_expr_pointee_type(pointer)? {
             return match ty {
                 PointeeType::Void => Err(Self::void_pointer_dereference_error(pointer)),
-                ty => ty.size(&self.struct_types),
+                ty => {
+                    self.sizeof_expr(pointer)?;
+                    ty.size(&self.struct_types)
+                }
             };
         }
+        self.sizeof_expr(pointer)?;
         match pointer {
             Expr::Var(name) => match self.find_variable(name) {
                 Some(Value::Scalar { .. }) => Err(CustError::new(format!(
@@ -34063,6 +35904,20 @@ impl Interpreter {
                     value: current, ty, ..
                 }) => {
                     self.ensure_variable_mutable(name)?;
+                    if ty == CType::Double {
+                        let current_value = f64::from_bits(current as u64);
+                        let updated_value = match op {
+                            IncrementOp::Inc => current_value + 1.0,
+                            IncrementOp::Dec => current_value - 1.0,
+                        };
+                        let updated = updated_value.to_bits() as i64;
+                        if let Some(Value::Scalar { value: slot, .. }) =
+                            self.find_variable_mut(name)
+                        {
+                            *slot = updated;
+                        }
+                        return Ok(if prefix { updated } else { current });
+                    }
                     let updated = ty.normalize(Self::apply_increment_op(current, op));
                     if let Some(Value::Scalar { value: slot, .. }) = self.find_variable_mut(name) {
                         *slot = updated;
@@ -34102,7 +35957,7 @@ impl Interpreter {
                             return Err(CustError::new("cannot index pointer to void"));
                         }
                         self.ensure_pointer_variable_pointee_mutable(name)?;
-                        let index_value = self.eval(index)?;
+                        let index_value = self.eval_array_subscript(index)?;
                         let pointer = self.offset_array_pointer(&pointer, index_value)?;
                         let current = self.deref_pointer(&pointer)?;
                         let updated = Self::apply_increment_op(current, op);
@@ -34111,7 +35966,7 @@ impl Interpreter {
                     }
                     Some(Value::Pointer { pointer, .. }) => {
                         self.ensure_pointer_variable_pointee_mutable(name)?;
-                        let index_value = self.eval(index)?;
+                        let index_value = self.eval_array_subscript(index)?;
                         let (array, _, index, _) =
                             self.checked_pointer_value_index(&pointer, index_value)?;
                         (array, index)
@@ -34291,6 +36146,15 @@ impl Interpreter {
             }
             Expr::ScalarLiteral { ty, init } => {
                 let current = self.eval_scalar_conversion(*ty, init)?;
+                if *ty == CType::Double {
+                    let current_value = f64::from_bits(current as u64);
+                    let updated_value = match op {
+                        IncrementOp::Inc => current_value + 1.0,
+                        IncrementOp::Dec => current_value - 1.0,
+                    };
+                    let updated = updated_value.to_bits() as i64;
+                    return Ok(Self::increment_result(current, updated, prefix));
+                }
                 let updated = ty.normalize(Self::apply_increment_op(current, op));
                 Ok(Self::increment_result(current, updated, prefix))
             }
@@ -34320,8 +36184,11 @@ impl Interpreter {
         if let Some(pointer) = self.scalar_variable_reverse_subscript_pointer(name, index)? {
             self.ensure_reverse_subscript_pointee_mutable(index)?;
             let current = self.deref_pointer(&pointer)?;
-            let rhs = self.eval(value)?;
-            let result = Self::apply_compound_op(current, op, rhs)?;
+            let ty = match self.pointer_value_type(&pointer)? {
+                Some(PointeeType::Scalar(ty)) => ty,
+                _ => CType::Int,
+            };
+            let result = self.eval_scalar_compound_result(current, ty, op, value)?;
             self.assign_deref_pointer(&pointer, result)?;
             return Ok(result);
         }
@@ -34335,17 +36202,16 @@ impl Interpreter {
                     return Err(CustError::new("cannot index pointer to void"));
                 }
                 self.ensure_pointer_variable_pointee_mutable(name)?;
-                let index_value = self.eval(index)?;
+                let index_value = self.eval_array_subscript(index)?;
                 let pointer = self.offset_array_pointer(&pointer, index_value)?;
                 let current = self.deref_pointer(&pointer)?;
-                let rhs = self.eval(value)?;
-                let result = Self::apply_compound_op(current, op, rhs)?;
+                let result = self.eval_scalar_compound_result(current, CType::Int, op, value)?;
                 self.assign_deref_pointer(&pointer, result)?;
                 return Ok(result);
             }
             Some(Value::Pointer { pointer, .. }) => {
                 self.ensure_pointer_variable_pointee_mutable(name)?;
-                let index_value = self.eval(index)?;
+                let index_value = self.eval_array_subscript(index)?;
                 let (array, _, index, _) =
                     self.checked_pointer_value_index(&pointer, index_value)?;
                 (array, index)
@@ -34353,9 +36219,8 @@ impl Interpreter {
             Some(_) | None => self.checked_array_index(name, index)?,
         };
         let current = array.borrow().elements[index];
-        let rhs = self.eval(value)?;
         let elem_type = array.borrow().elem_type;
-        let result = elem_type.normalize(Self::apply_compound_op(current, op, rhs)?);
+        let result = self.eval_scalar_compound_result(current, elem_type, op, value)?;
         let mut array = array.borrow_mut();
         if array.read_only {
             return Err(CustError::new(format!(
@@ -34373,17 +36238,28 @@ impl Interpreter {
         value: &Expr,
     ) -> CustResult<i64> {
         self.ensure_pointer_expr_pointee_mutable(pointer)?;
+        let pointee_type = self.pointer_expr_pointee_type(pointer)?;
         let pointer = self.eval_pointer(pointer)?;
         let current = self.deref_pointer(&pointer)?;
-        let rhs = self.eval(value)?;
-        let result = Self::apply_compound_op(current, op, rhs)?;
+        let ty = match pointee_type {
+            Some(PointeeType::Scalar(ty)) => ty,
+            _ => CType::Int,
+        };
+        let result = self.eval_scalar_compound_result(current, ty, op, value)?;
         self.assign_deref_pointer(&pointer, result)?;
         self.deref_pointer(&pointer)
     }
 
     fn eval_equality(&mut self, left: &Expr, op: &BinaryOp, right: &Expr) -> CustResult<i64> {
+        self.validate_double_conditional_expression(left)?;
+        self.validate_double_conditional_expression(right)?;
         let left_is_output = self.expr_is_character_pointer_output_value(left);
         let right_is_output = self.expr_is_character_pointer_output_value(right);
+        if (left_is_output && self.expr_is_double_value(right))
+            || (right_is_output && self.expr_is_double_value(left))
+        {
+            return Err(CustError::new("cannot compare pointer with double value"));
+        }
         if left_is_output || right_is_output {
             let equal = match (left_is_output, right_is_output) {
                 (true, true) => {
@@ -34438,8 +36314,23 @@ impl Interpreter {
 
         let left_is_pointer = self.expr_is_pointer_value(left);
         let right_is_pointer = self.expr_is_pointer_value(right);
+        if self.expr_is_unsupported_double_pointer(left)
+            || self.expr_is_unsupported_double_pointer(right)
+        {
+            return Err(CustError::new("double pointers are not supported"));
+        }
+        if (left_is_pointer && self.expr_is_double_value(right))
+            || (right_is_pointer && self.expr_is_double_value(left))
+        {
+            return Err(CustError::new("cannot compare pointer with double value"));
+        }
 
         let equal = match (left_is_pointer, right_is_pointer) {
+            (false, false)
+                if self.expr_is_double_value(left) || self.expr_is_double_value(right) =>
+            {
+                self.eval_numeric_as_f64(left)? == self.eval_numeric_as_f64(right)?
+            }
             (false, false) => self.eval(left)? == self.eval(right)?,
             (true, true) => {
                 let left_pointer = self.eval_pointer(left)?;
@@ -34477,11 +36368,10 @@ impl Interpreter {
 
     fn eval_struct_expr(&mut self, expr: &Expr) -> CustResult<ReturnValue> {
         match expr {
-            Expr::GenericSelection { .. } => {
-                self.validate_nested_string_intrinsic_calls(expr)?;
-                let selected = self.selected_generic_association(expr)?.clone();
-                self.eval_struct_expr(&selected)
-            }
+            Expr::GenericSelection { .. } => self
+                .eval_selected_generic(expr, |interpreter, selected| {
+                    interpreter.eval_struct_expr(selected)
+                }),
             Expr::Conditional {
                 cond,
                 then_expr,
@@ -34696,6 +36586,9 @@ impl Interpreter {
                 points_to_const,
             }) => {
                 self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
+                if self.expr_is_unsupported_double_pointer(expr) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 let pointer = self.eval_pointer(expr)?;
                 let pointer = self.attach_array_pointer_owner(pointer);
                 let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
@@ -34760,6 +36653,9 @@ impl Interpreter {
                 points_to_const,
                 ..
             } => {
+                if self.expr_is_unsupported_double_pointer(expr) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
                 let pointer = self.coerce_object_byte_pointer(ty, pointer)?;
@@ -34925,6 +36821,9 @@ impl Interpreter {
                 points_to_const,
                 is_qualified,
             } => {
+                if self.expr_is_unsupported_double_pointer(expr) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
                 let pointer = self.coerce_object_byte_pointer(ty, pointer)?;
@@ -35137,6 +37036,9 @@ impl Interpreter {
                     }) => {
                         self.ensure_variable_mutable(name)?;
                         self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
+                        if self.expr_is_unsupported_double_pointer(expr) {
+                            return Err(CustError::new("double pointers are not supported"));
+                        }
                         let pointer = self.eval_pointer(expr)?;
                         let pointer = self.attach_array_pointer_owner(pointer);
                         let pointer = if let Some((elem_type, columns)) =
@@ -35211,7 +37113,10 @@ impl Interpreter {
                     self.scalar_variable_reverse_subscript_pointer(name, index)?
                 {
                     self.ensure_reverse_subscript_pointee_mutable(index)?;
-                    let value = self.eval(value)?;
+                    let value = match self.pointer_value_type(&pointer)? {
+                        Some(PointeeType::Scalar(ty)) => self.eval_scalar_conversion(ty, value)?,
+                        _ => self.eval(value)?,
+                    };
                     self.assign_deref_pointer(&pointer, value)?;
                     return Ok(ExecFlow::None);
                 }
@@ -35235,7 +37140,7 @@ impl Interpreter {
                 match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => {
                         self.ensure_pointer_variable_pointee_mutable(name)?;
-                        let index_value = self.eval(index)?;
+                        let index_value = self.eval_array_subscript(index)?;
                         if matches!(pointer, PointerValue::ObjectByte { .. }) {
                             let pointer = self.offset_array_pointer(&pointer, index_value)?;
                             self.assign_deref_pointer(&pointer, value)?;
@@ -35266,6 +37171,9 @@ impl Interpreter {
                         self.struct_pointer_field_points_to_const(name, fields),
                         value,
                     )?;
+                    if self.expr_is_unsupported_double_pointer(value) {
+                        return Err(CustError::new("double pointers are not supported"));
+                    }
                     let pointer = self.eval_pointer(value)?;
                     self.assign_direct_struct_pointer_field(name, fields, pointer)?;
                 } else {
@@ -35333,6 +37241,11 @@ impl Interpreter {
     }
 
     fn exec_switch(&mut self, expr: &Expr, sections: &[SwitchSection]) -> CustResult<ExecFlow> {
+        if self.expr_is_double_value(expr) {
+            return Err(CustError::new(
+                "switch expression requires an integer value",
+            ));
+        }
         let value = self.eval(expr)?;
         let default_index = sections
             .iter()
@@ -35461,13 +37374,26 @@ impl Interpreter {
     }
 
     fn eval(&mut self, expr: &Expr) -> CustResult<i64> {
+        let depth = self.eval_expression_depth.get();
+        if depth == 0 {
+            self.double_expression_type_cache.borrow_mut().clear();
+        }
+        self.eval_expression_depth.set(depth + 1);
+        let result = self.eval_inner(expr);
+        self.eval_expression_depth.set(depth);
+        if depth == 0 {
+            self.double_expression_type_cache.borrow_mut().clear();
+        }
+        result
+    }
+
+    fn eval_inner(&mut self, expr: &Expr) -> CustResult<i64> {
         match expr {
             Expr::GenericSelection { .. } => {
-                self.validate_nested_string_intrinsic_calls(expr)?;
-                let selected = self.selected_generic_association(expr)?.clone();
-                self.eval(&selected)
+                self.eval_selected_generic(expr, |interpreter, selected| interpreter.eval(selected))
             }
             Expr::Number(value) => Ok(*value),
+            Expr::DoubleNumber(bits) => Ok(*bits as i64),
             Expr::StringLiteral(_) => Err(CustError::new("string literal used as scalar")),
             Expr::ArrayLiteral { .. }
             | Expr::AggregateArrayLiteral { .. }
@@ -35524,8 +37450,10 @@ impl Interpreter {
                 let pointer =
                     self.struct_field_array_element_assignment_pointer(name, array_fields, index)?;
                 let current = self.read_struct_pointer_field(&pointer, fields)?;
-                let rhs = self.eval(value)?;
-                let result = Self::apply_compound_op(current, *op, rhs)?;
+                let ty = self
+                    .struct_pointer_scalar_field_type(&pointer, fields)?
+                    .unwrap_or(CType::Int);
+                let result = self.eval_scalar_compound_result(current, ty, *op, value)?;
                 self.assign_struct_pointer_field(&pointer, fields, result)?;
                 self.read_struct_pointer_field(&pointer, fields)
             }
@@ -35615,8 +37543,7 @@ impl Interpreter {
                 value,
             } => {
                 let current = self.eval_scalar_conversion(*ty, init)?;
-                let rhs = self.eval(value)?;
-                Ok(ty.normalize(Self::apply_compound_op(current, *op, rhs)?))
+                self.eval_scalar_compound_result(current, *ty, *op, value)
             }
             Expr::AggregateFieldSet {
                 aggregate,
@@ -35647,8 +37574,7 @@ impl Interpreter {
                         Self::field_path_label(fields)
                     )));
                 }
-                let rhs = self.eval(value)?;
-                Ok(ty.normalize(Self::apply_compound_op(current, *op, rhs)?))
+                self.eval_scalar_compound_result(current, ty, *op, value)
             }
             Expr::Increment { target, op, prefix } => {
                 self.eval_increment_expr(target, *op, *prefix)
@@ -35658,7 +37584,10 @@ impl Interpreter {
                     self.scalar_variable_reverse_subscript_pointer(name, index)?
                 {
                     self.ensure_reverse_subscript_pointee_mutable(index)?;
-                    let value = self.eval(value)?;
+                    let value = match self.pointer_value_type(&pointer)? {
+                        Some(PointeeType::Scalar(ty)) => self.eval_scalar_conversion(ty, value)?,
+                        _ => self.eval(value)?,
+                    };
                     self.assign_deref_pointer(&pointer, value)?;
                     return Ok(value);
                 }
@@ -35681,7 +37610,7 @@ impl Interpreter {
                 match self.find_variable(name).cloned() {
                     Some(Value::Pointer { pointer, .. }) => {
                         self.ensure_pointer_variable_pointee_mutable(name)?;
-                        let index_value = self.eval(index)?;
+                        let index_value = self.eval_array_subscript(index)?;
                         if matches!(pointer, PointerValue::ObjectByte { .. }) {
                             let pointer = self.offset_array_pointer(&pointer, index_value)?;
                             self.assign_deref_pointer(&pointer, value)?;
@@ -35738,8 +37667,7 @@ impl Interpreter {
                 self.ensure_two_dimensional_array_mutable(name)?;
                 let current = array.borrow().elements[index];
                 let elem_type = array.borrow().elem_type;
-                let rhs = self.eval(value)?;
-                let result = elem_type.normalize(Self::apply_compound_op(current, *op, rhs)?);
+                let result = self.eval_scalar_compound_result(current, elem_type, *op, value)?;
                 let mut array = array.borrow_mut();
                 if array.read_only {
                     return Err(CustError::new(format!(
@@ -35779,8 +37707,7 @@ impl Interpreter {
                     self.checked_two_dimensional_struct_field_index(target, row, column)?;
                 let current = array.borrow().elements[index];
                 let elem_type = array.borrow().elem_type;
-                let rhs = self.eval(value)?;
-                let result = elem_type.normalize(Self::apply_compound_op(current, *op, rhs)?);
+                let result = self.eval_scalar_compound_result(current, elem_type, *op, value)?;
                 let mut array = array.borrow_mut();
                 if array.read_only {
                     return Err(CustError::new("cannot modify read-only array field"));
@@ -35873,8 +37800,14 @@ impl Interpreter {
                 value,
             } => {
                 let current = self.read_struct_element_field(name, index, fields)?;
-                let rhs = self.eval(value)?;
-                let result = Self::apply_compound_op(current, *op, rhs)?;
+                let ty = self
+                    .struct_element_field_metadata(name, fields)?
+                    .and_then(|(field_type, _, _)| match field_type {
+                        StructFieldType::Scalar(ty) => Some(ty),
+                        _ => None,
+                    })
+                    .unwrap_or(CType::Int);
+                let result = self.eval_scalar_compound_result(current, ty, *op, value)?;
                 self.assign_struct_element_field(name, index, fields, result)?;
                 self.read_struct_element_field(name, index, fields)
             }
@@ -35899,8 +37832,11 @@ impl Interpreter {
                         array_index,
                     )?;
                     let current = self.deref_pointer(&field_element_pointer)?;
-                    let rhs = self.eval(value)?;
-                    let result = Self::apply_compound_op(current, *op, rhs)?;
+                    let ty = match self.pointer_value_type(&field_element_pointer)? {
+                        Some(PointeeType::Scalar(ty)) => ty,
+                        _ => CType::Int,
+                    };
+                    let result = self.eval_scalar_compound_result(current, ty, *op, value)?;
                     self.assign_deref_pointer(&field_element_pointer, result)?;
                     self.deref_pointer(&field_element_pointer)
                 } else {
@@ -35908,9 +37844,9 @@ impl Interpreter {
                     let (array, index) =
                         self.checked_struct_element_array_index(name, index, fields, array_index)?;
                     let current = array.borrow().elements[index];
-                    let rhs = self.eval(value)?;
                     let elem_type = array.borrow().elem_type;
-                    let result = elem_type.normalize(Self::apply_compound_op(current, *op, rhs)?);
+                    let result =
+                        self.eval_scalar_compound_result(current, elem_type, *op, value)?;
                     let mut array = array.borrow_mut();
                     if array.read_only {
                         return Err(CustError::new(format!(
@@ -35980,7 +37916,7 @@ impl Interpreter {
                                 return Err(CustError::new("cannot index pointer to void"));
                             }
                             if matches!(pointer, PointerValue::ObjectByte { .. }) {
-                                let index_value = self.eval(index)?;
+                                let index_value = self.eval_array_subscript(index)?;
                                 let pointer = self.offset_array_pointer(&pointer, index_value)?;
                                 self.deref_pointer(&pointer)
                             } else {
@@ -36009,7 +37945,7 @@ impl Interpreter {
                 Ok(array.borrow().elements[index])
             }
             Expr::StringGet { values, index } => {
-                let index_value = self.eval(index)?;
+                let index_value = self.eval_array_subscript(index)?;
                 let Ok(index) = usize::try_from(index_value) else {
                     return Err(CustError::new(format!(
                         "string literal index {index_value} out of bounds for length {}",
@@ -36075,9 +38011,19 @@ impl Interpreter {
                         "pointer to void arithmetic is not supported",
                     ));
                 }
-                self.eval(inner)
+                if self.expr_is_double_value(inner) {
+                    Ok(self.eval_numeric_as_f64(inner)?.to_bits() as i64)
+                } else {
+                    self.eval(inner)
+                }
+            }
+            Expr::UnaryMinus(inner) if self.expr_is_double_value(inner) => {
+                Ok((-self.eval_numeric_as_f64(inner)?).to_bits() as i64)
             }
             Expr::UnaryMinus(inner) => Ok(-self.eval(inner)?),
+            Expr::BitwiseNot(inner) if self.expr_is_double_value(inner) => Err(CustError::new(
+                "bitwise operations on double values are not supported",
+            )),
             Expr::BitwiseNot(inner) => Ok(!self.eval(inner)?),
             Expr::LogicalNot(inner) => Ok((!self.eval_truthy(inner)?) as i64),
             Expr::Conditional {
@@ -36087,19 +38033,34 @@ impl Interpreter {
             } => {
                 self.validate_nested_string_intrinsic_calls(then_expr)?;
                 self.validate_nested_string_intrinsic_calls(else_expr)?;
-                if self.eval_truthy(cond)? {
-                    self.eval(then_expr)
+                self.sizeof_expr(then_expr)?;
+                self.sizeof_expr(else_expr)?;
+                if self.expr_is_double_value(expr) {
+                    self.generic_selection_type(expr)?;
+                }
+                let selected = if self.eval_truthy(cond)? {
+                    then_expr
                 } else {
-                    self.eval(else_expr)
+                    else_expr
+                };
+                if self.expr_is_double_value(expr) {
+                    Ok(self.eval_numeric_as_f64(selected)?.to_bits() as i64)
+                } else {
+                    self.eval(selected)
                 }
             }
             Expr::Comma(left, right) => {
                 self.eval_discard(left)?;
-                self.eval(right)
+                if self.expr_is_double_value(expr) {
+                    Ok(self.eval_numeric_as_f64(right)?.to_bits() as i64)
+                } else {
+                    self.eval(right)
+                }
             }
             Expr::Binary(left, op, right) => match op {
                 BinaryOp::LogicalAnd => {
                     self.validate_nested_string_intrinsic_calls(right)?;
+                    self.sizeof_expr(right)?;
                     if !self.eval_truthy(left)? {
                         Ok(0)
                     } else {
@@ -36108,6 +38069,7 @@ impl Interpreter {
                 }
                 BinaryOp::LogicalOr => {
                     self.validate_nested_string_intrinsic_calls(right)?;
+                    self.sizeof_expr(right)?;
                     if self.eval_truthy(left)? {
                         Ok(1)
                     } else {
@@ -36159,6 +38121,16 @@ impl Interpreter {
                             (Ok(_), Ok(_)) => {}
                         }
                     }
+                    if self.expr_is_double_value(left) || self.expr_is_double_value(right) {
+                        let lhs = self.eval_numeric_as_f64(left)?;
+                        let rhs = self.eval_numeric_as_f64(right)?;
+                        let result = match op {
+                            BinaryOp::Add => lhs + rhs,
+                            BinaryOp::Sub => lhs - rhs,
+                            _ => unreachable!("only addition/subtraction handled in this branch"),
+                        };
+                        return Ok(result.to_bits() as i64);
+                    }
                     let lhs = self.eval(left)?;
                     let rhs = self.eval(right)?;
                     match op {
@@ -36175,6 +38147,11 @@ impl Interpreter {
                 | BinaryOp::BitAnd
                 | BinaryOp::BitXor
                 | BinaryOp::BitOr => {
+                    if self.expr_is_double_value(left) || self.expr_is_double_value(right) {
+                        return Err(CustError::new(
+                            "bitwise operations on double values are not supported",
+                        ));
+                    }
                     if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {
                         return Err(CustError::new(
                             "pointer bitwise operations are not supported",
@@ -36192,6 +38169,21 @@ impl Interpreter {
                     }
                 }
                 BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem => {
+                    if self.expr_is_double_value(left) || self.expr_is_double_value(right) {
+                        if *op == BinaryOp::Rem {
+                            return Err(CustError::new(
+                                "remainder on double values is not supported",
+                            ));
+                        }
+                        let lhs = self.eval_numeric_as_f64(left)?;
+                        let rhs = self.eval_numeric_as_f64(right)?;
+                        let result = match op {
+                            BinaryOp::Mul => lhs * rhs,
+                            BinaryOp::Div => lhs / rhs,
+                            _ => unreachable!("remainder returned above"),
+                        };
+                        return Ok(result.to_bits() as i64);
+                    }
                     let lhs = self.eval(left)?;
                     let rhs = self.eval(right)?;
                     match op {

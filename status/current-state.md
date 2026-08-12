@@ -1,8 +1,14 @@
 # Cust Current State
 
-Last updated: 2026-08-10
+Last updated: 2026-08-12
 
 ## Latest autonomous verification
+
+The bounded first `double` runtime-value slice is complete. Decimal literals and direct local, file-global, and block-static scalar storage support initialization, replacement/compound assignment, prefix/postfix update, mixed arithmetic, comparison, conditional/comma/truthiness, conversion through supported scalar call/return types, scalar compound literals, `int`/`double`/`_Bool` casts, `_Generic`, integer-constant casts, and deterministic eight-byte size/alignment queries. Exact diagnostics retain unsupported `float`, `long double`, suffix/hex/non-finite literals, arrays, fields, pointers, and direct double parameter/return declarations. The registered warning-free native fixture passes GCC/Clang and the compiler-oracle harness.
+
+This run recovered and finished an inherited uncommitted implementation, so the original feature RED is unavailable and is not re-claimed. Independent review drove focused RED/GREEN closure for fractional-double-to-`_Bool` constant conversion, double-address truthiness/discard/ordering rejection, double-to-pointer assignment hidden beneath `sizeof`/`_Generic`, pointer assignment/call/return escape boundaries, invalid double operators wrapped by casts in generic integer-constant controls, invalid double operators in unselected generic associations, valid unselected double-valued generic associations, evaluated pointer-cast/conditional boundaries, literal-wrapper non-evaluating validation, and linear nested-generic plus left- and right-associated call arithmetic evaluation. The inherited full gate exposed duplicate call/generic validation by timing out; debugger/review evidence isolated the cycles and the focused regressions now complete immediately. Executable listing reconciles 1,592 tests: 1,457 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test. See `references/cust-bounded-double-runtime-values.md`.
+
+Work-package candidates were finishing the inherited bounded `double` slice, bounded v0.29.0 release closure, a shared-storage union-byte model, and parser/fuzz expansion. Recovery rules and roadmap priority selected the inherited `double` package; bounded v0.29.0 release closure is now the sole next recommended package.
 
 Bounded Cust v0.28.0 is published around the completed whole-struct object-byte package. Cargo package/lock metadata, exact CLI expectations/output, both Docker Compose image tags, README central inventory/limitations/roadmap text, changelog notes, and the authoritative status ledgers are synchronized for `0.28.0`. Executable target listing independently reconciles 1,534 tests: 1,399 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 

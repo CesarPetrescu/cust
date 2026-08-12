@@ -182,6 +182,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/fixed_array_parameters_decay.c",
     "tests/fixtures/compat/valid/functions_arrays_and_strings.c",
     "tests/fixtures/compat/valid/global_variables.c",
+    "tests/fixtures/compat/valid/bounded_double_runtime_values.c",
     "tests/fixtures/compat/valid/increment_decrement.c",
     "tests/fixtures/compat/valid/embedded_aggregate_array_element_field_assignment.c",
     "tests/fixtures/compat/valid/embedded_aggregate_array_element_field_increment.c",

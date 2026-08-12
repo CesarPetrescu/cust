@@ -1755,31 +1755,1239 @@ fn rejects_flexible_array_aggregate_fields_with_context() {
 }
 
 #[test]
-fn rejects_floating_point_type_specifiers_with_context() {
+fn supports_bounded_double_runtime_values() {
+    let program = include_str!("fixtures/valid/bounded_double_runtime_values.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn double_compound_assignments_and_increments_preserve_numeric_values() {
+    let program = r#"
+int main(void) {
+    double value = 1.5;
+    double old;
+    value += 0.5;
+    value *= 3.0;
+    value -= 2.0;
+    value /= 2.0;
+    old = value++;
+    return old == 2.0 && value == 3.0 && --value == 2.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn mixed_double_rhs_compound_assignments_convert_to_integer_lhs() {
+    let program = r#"
+int main(void) {
+    int value = 3;
+    value += 1.5;
+    value *= 2.0;
+    value -= 1.25;
+    value /= 2.0;
+    return value == 3 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn mixed_double_rhs_compound_assignments_convert_integer_lvalue_routes() {
+    let program = r#"
+struct Box { int field; };
+int main(void) {
+    int values[1] = {3};
+    int direct = 3;
+    int *slot = &direct;
+    struct Box box = {3};
+    values[0] *= 2.0;
+    *slot += 1.5;
+    box.field -= 0.5;
+    return values[0] == 6
+        && direct == 4
+        && box.field == 2
+        && ((int){3} += 1.5) == 4
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bool_lvalue_compound_assignments_preserve_fractional_double_results() {
+    let program = r#"
+struct Box { _Bool field; };
+int main(void) {
+    _Bool direct = 1;
+    _Bool *slot = &direct;
+    struct Box box = {1};
+    struct Box boxes[1] = {{1}};
+    struct Box *box_slot = &box;
+    *slot += -0.5;
+    box.field += -0.5;
+    box_slot->field += -0.5;
+    boxes[0].field += -0.5;
+    return direct && box.field && boxes[0].field ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bool_reverse_subscript_compound_assignments_preserve_fractional_double_results() {
+    let program = r#"
+struct Offset { _Bool value; };
+int main(void) {
+    _Bool values[1] = {1};
+    _Bool index = 0;
+    index[values] += -0.5;
+    return values[0] ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn mixed_double_rhs_replacement_assignments_convert_integer_lvalue_routes() {
+    let program = r#"
+struct Box { int field; };
+int main(void) {
+    int values[2] = {0, 0};
+    int index = 1;
+    int direct = 0;
+    int *slot = &direct;
+    struct Box box = {0};
+    values[0] = 1.75;
+    index[values] = 2.75;
+    *slot = 3.75;
+    box.field = 4.75;
+    if (values[0] != 1) return 1;
+    if (values[1] != 2) return 2;
+    if (direct != 3) return 3;
+    if (box.field != 4) return 4;
+    if (((int){0} = 5.75) != 5) return 5;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_double_array_compound_literals() {
+    let program = "int main(void) { return ((double[1]){1.5})[0] == 1.5; }";
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string().contains("double arrays are not supported"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_double_values_in_integer_only_subscript_and_switch_contexts() {
+    for (program, expected) in [
+        (
+            "int main(void) { int values[2] = {3, 4}; return values[0.0]; }",
+            "array subscript requires an integer value",
+        ),
+        (
+            "int main(void) { int values[1][1] = {{3}}; return values[0.0][0]; }",
+            "array subscript requires an integer value",
+        ),
+        (
+            "int main(void) { int values[1][1] = {{3}}; return values[0][0.0]; }",
+            "array subscript requires an integer value",
+        ),
+        (
+            "struct Box { int values[1]; }; int main(void) { struct Box boxes[1] = {{{3}}}; return boxes[0].values[0.0]; }",
+            "array subscript requires an integer value",
+        ),
+        (
+            "int main(void) { switch (1.0) { case 1: return 0; default: return 1; } }",
+            "switch expression requires an integer value",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string().contains(expected),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_double_reverse_subscripts_in_evaluated_and_unevaluated_contexts() {
+    for program in [
+        "int main(void) { int values[1] = {7}; double index = 0.0; return index[values]; }",
+        "int main(void) { int values[1] = {7}; double index = 0.0; return sizeof(index[values]); }",
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("array subscript requires an integer value"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_pointer_equality_with_double_values() {
+    for program in [
+        "int main(void) { int *p = 0; return p == 0.0; }",
+        "int main(void) { int *p = 0; return 0.0 != p; }",
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot compare pointer with double value"),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_double_values_assigned_to_pointers_in_unevaluated_contexts() {
+    for program in [
+        "int main(void) { int *p = 0; return sizeof(p = 0.0); }",
+        "int main(void) { int *p = 0; return _Generic(p = 0.0, int *: 0, default: 1); }",
+    ] {
+        let err = interpret(program).expect_err(program);
+        assert!(
+            err.to_string().contains("expected pointer expression"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_double_pointer_arithmetic_offsets() {
+    for program in [
+        "int main(void) { int values[2] = {0}; int *p = values; return *(p + 0.0); }",
+        "int main(void) { int values[2] = {0}; int *p = values; return *(0.0 + p); }",
+        "int main(void) { int values[2] = {0}; int *p = values + 1; return *(p - 0.0); }",
+        "int main(void) { int values[2] = {0}; int *p = values; p += 0.0; return 0; }",
+        "int main(void) { int values[2] = {0}; int *p = values; return sizeof(p += 0.0); }",
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("pointer arithmetic requires an integer offset"),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_double_pointer_expressions_outside_the_bounded_slice() {
+    for program in [
+        "int main(void) { double value = 1.5; &value; return 0; }",
+        "int main(void) { double value = 1.5; return *(&value) == 1.5; }",
+        "int main(void) { double value = 1.5; return &value == &value; }",
+        "int main(void) { double left = 1.5; double right = 2.5; return &left < &right; }",
+        "int main(void) { double value = 1.5; return &value ? 0 : 1; }",
+        "int main(void) { double value = 1.5; return (_Bool)&value ? 0 : 1; }",
+        "int main(void) { double value = 1.5; void *pointer = &value; return pointer != 0; }",
+        "int main(void) { double value = 1.5; return sizeof((void *)&value); }",
+        "int main(void) { double value = 1.5; return _Generic((void *)&value, void *: 0, default: 1); }",
+        "int main(void) { return (double *)0 == 0; }",
+        "int main(void) { double value = 1.5; return sizeof(&value); }",
+        "int main(void) { return sizeof(&(double){1.5}); }",
+        "double (*global_row)[2]; int main(void) { return 0; }",
+        "int main(void) { double (*local_row)[2]; return 0; }",
+    ] {
+        let err = interpret(program).expect_err(program);
+        assert!(
+            err.to_string()
+                .contains("double pointers are not supported"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn double_casts_apply_destination_scalar_normalization() {
+    let program = r#"
+int main(void) {
+    char expected_char = 300.75;
+    _Bool expected_bool = -2.5;
+    return (char)300.75 == expected_char && (_Bool)-2.5 == expected_bool ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn scalar_function_returns_convert_double_expressions_to_declared_type() {
+    let program = r#"
+int truncate_value(void) {
+    return 1.75;
+}
+int main(void) {
+    return truncate_value() == 1 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn double_scalar_compound_literal_compound_assignment_uses_numeric_values() {
+    let program = r#"
+int main(void) {
+    return ((double){1.5} += 0.5) == 2.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn double_scalar_compound_literal_increment_uses_numeric_value() {
+    let program = r#"
+int main(void) {
+    return --(double){-0.0} == -1.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn generic_selection_preserves_double_expression_types() {
+    let program = r#"
+int main(void) {
+    return _Generic(1.0, double: 1, default: 0)
+        && _Generic(1.0 + 2.0, double: 1, default: 0)
+        && _Generic(1 ? 1.0 : 2.0, double: 1, default: 0)
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_incompatible_double_pointer_conditional_branches() {
+    for program in [
+        "int main(void) { int *p = 0; return (1 ? 1.0 : p) == 1.0; }",
+        "int main(void) { int *p = 0; return sizeof(1 ? 1.0 : p); }",
+        "int main(void) { int *p = 0; return _Generic(1 ? 1.0 : p, double: 0, default: 1); }",
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("conditional branches have incompatible"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn integer_constant_generic_selection_infers_double_controlling_type() {
+    let program = r#"
+enum { SELECTED = _Generic(1.0, double: 7, default: 3) };
+int main(void) {
+    return SELECTED == 7 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_constant_generic_selection_validates_wrapped_controlling_double_constraints() {
+    let program = r#"
+enum { VALUE = _Generic((int)(1.0 % 2.0), int: 1, default: 0) };
+int main(void) {
+    return VALUE;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("remainder on double values is not supported"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn integer_constant_generic_selection_validates_unselected_double_constraints() {
+    let program = r#"
+enum { VALUE = _Generic(0, int: 7, default: 1.0 % 2.0) };
+int main(void) {
+    return VALUE == 7 ? 0 : 1;
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("remainder on double values is not supported"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn integer_constant_generic_selection_validates_cast_introduced_double_constraints() {
+    for program in [
+        "enum { VALUE = _Generic(0, int: 7, default: (double)1 % 2) }; int main(void) { return VALUE; }",
+        "enum { VALUE = _Generic(0, int: (double)1, default: 0) }; int main(void) { return VALUE; }",
+    ] {
+        let err = interpret(program).expect_err(program);
+        assert!(
+            err.to_string().contains("double")
+                || err
+                    .to_string()
+                    .contains("not an integer constant expression"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn integer_constant_generic_selection_allows_unselected_double_results() {
+    let program = r#"
+        enum { VALUE = _Generic(0, int: 7, default: 1.0) };
+        int main(void) { return VALUE - 7; }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn nested_integer_constant_generic_double_validation_is_bounded() {
+    fn run_nested(depth: usize, iterations: usize) -> std::time::Duration {
+        let mut selected = "1".to_string();
+        for _ in 0..depth {
+            selected = format!("_Generic(0, int: {selected}, default: (double)1 % 2)");
+        }
+        let program =
+            format!("enum {{ VALUE = {selected} }}; int main(void) {{ return VALUE - 1; }}");
+        let started = std::time::Instant::now();
+        for _ in 0..iterations {
+            let err = interpret(&program).unwrap_err();
+            assert!(err.to_string().contains("double"));
+        }
+        started.elapsed()
+    }
+
+    let shallow = run_nested(4, 20);
+    let deep = run_nested(24, 20);
+    let allowed = (shallow * 10).max(std::time::Duration::from_millis(50));
+    assert!(
+        deep < allowed,
+        "nested integer-constant generic validation scaled nonlinearly: {shallow:?} at depth 4 and {deep:?} at depth 24"
+    );
+}
+
+#[test]
+fn sizeof_double_literals_fold_in_integer_constant_expressions() {
+    let program = r#"
+enum { DOUBLE_LITERAL_SIZE = sizeof(1.0) };
+int main(void) {
+    return DOUBLE_LITERAL_SIZE == sizeof(double) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_double_typed_integer_constant_expression_results() {
+    let program = "enum { VALUE = (double)1 }; int main(void) { return VALUE; }";
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("double casts are not allowed in integer constant expressions"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn supports_parenthesized_double_literals_cast_to_integer_constants() {
+    let program = "enum { VALUE = (int)(1.5) }; int main(void) { return VALUE; }";
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn bool_double_constant_casts_use_nonzero_semantics_in_integer_constant_expressions() {
+    let program = r#"
+enum {
+    POSITIVE = (_Bool)0.5,
+    NEGATIVE = (_Bool)-0.5,
+    PARENTHESIZED_NEGATIVE = (_Bool)(-0.5),
+    GENERIC_NEGATIVE = _Generic(0, int: (_Bool)-0.5, default: 0)
+};
+int main(void) {
+    return POSITIVE == 1 && NEGATIVE == 1 && PARENTHESIZED_NEGATIVE == 1
+        && GENERIC_NEGATIVE == 1 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn generic_selection_validates_unselected_double_constraints() {
+    let program = r#"
+int main(void) {
+    return _Generic(0, int: 0, default: 1.0 % 2.0);
+}
+"#;
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("remainder on double values is not supported"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn generic_selection_validates_wrapped_unselected_double_constraints() {
+    for program in [
+        "int main(void) { return _Generic(0, int: 0, default: (int)(1.0 % 2.0)); }",
+        "int main(void) { return _Generic(0, int: 0, default: (int){1.0 % 2.0}); }",
+    ] {
+        let err = interpret(program).expect_err(program);
+        assert!(
+            err.to_string()
+                .contains("remainder on double values is not supported"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn selected_generic_double_casts_fold_as_integer_constants() {
+    let program = r#"
+enum { VALUE = _Generic(0, int: (int)1.5, default: 0) };
+int main(void) {
+    return VALUE == 1 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn selected_generic_bool_double_casts_use_nonzero_semantics() {
+    let program = r#"
+enum { FLAG = _Generic(0, int: (_Bool)0.5, default: 0) };
+int main(void) {
+    return FLAG == 1 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_permuted_long_double_type_specifiers() {
+    for program in [
+        "int main(void) { double long value = 0.0; return 0; }",
+        "int main(void) { long const double value = 0.0; return 0; }",
+        "int main(void) { double const long value = 0.0; return 0; }",
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("long double types are not supported"),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
+fn double_type_queries_do_not_evaluate_expressions() {
+    let program = r#"
+int main(void) {
+    double value = 1.5;
+    int size = sizeof(value = 9.0);
+    int expression_size = sizeof(value + 2.0);
+    return size == 8 && expression_size == 8 && _Alignof(double) == 8 && value == 1.5
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_double_pointer_arithmetic_validates_integer_offset() {
+    let program = "int main(void) { int *p = 0; return sizeof(p + 1.0); }";
+
+    let err = interpret(program).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("pointer arithmetic requires an integer offset"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn sizeof_validates_double_subscripts_across_indexed_expression_routes() {
+    for program in [
+        "int main(void) { return sizeof(\"x\"[0.0]); }",
+        "int main(void) { int values[1][1] = {{0}}; return sizeof(values[0.0][0]); }",
+        "int main(void) { int values[1][1] = {{0}}; return sizeof(values[0][0.0]); }",
+        "struct Box { int values[1]; }; int main(void) { struct Box box = {{0}}; return sizeof(box.values[0.0]); }",
+        "struct Box { int value; }; int main(void) { struct Box boxes[1] = {{0}}; return sizeof(boxes[0.0].value); }",
+        "struct Box { int values[1]; }; int main(void) { struct Box boxes[1] = {{{0}}}; return sizeof(boxes[0].values[0.0]); }",
+        "struct Box { int values[1]; }; int main(void) { struct Box box = {{0}}; struct Box *slot = &box; return sizeof(slot->values[0.0]); }",
+        "int main(void) { int values[1] = {0}; return sizeof(&values[0.0]); }",
+        "struct Box { int values[1]; }; int main(void) { struct Box box = {{0}}; return sizeof(&box.values[0.0]); }",
+        "struct Box { int value; }; int main(void) { struct Box boxes[1] = {{0}}; return sizeof(&boxes[0.0].value); }",
+        "struct Box { int values[1]; }; int main(void) { struct Box boxes[1] = {{{0}}}; return sizeof(&boxes[0].values[0.0]); }",
+        "struct Box { int values[1]; }; int main(void) { struct Box box = {{0}}; struct Box *slot = &box; return sizeof(&slot->values[0.0]); }",
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("array subscript requires an integer value"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn sizeof_rejects_integer_only_double_operations_without_evaluation() {
+    for (program, expected) in [
+        (
+            "int main(void) { return sizeof(1.0 % 2.0); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { return sizeof(~1.0); }",
+            "bitwise operations on double values are not supported",
+        ),
+        (
+            "enum { VALUE = sizeof(~1.0) }; int main(void) { return VALUE; }",
+            "bitwise operations on double values are not supported",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string().contains(expected),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
+fn unevaluated_double_contexts_validate_compound_and_generic_operators() {
+    for (program, expected) in [
+        (
+            "int main(void) { double value = 3.0; return sizeof(value %= 2.0); }",
+            "integer-only compound assignment used with double value",
+        ),
+        (
+            "enum { VALUE = _Generic(1.0 % 2.0, int: 7, default: 3) }; int main(void) { return VALUE; }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { return _Generic(1.0 % 2.0, int: 7, default: 3); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { return _Generic(+(1.0 % 2.0), double: 7, default: 3); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { return _Generic((1.0 % 2.0) + 1, double: 7, default: 3); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { int values[1] = {0}; int *p = values; return _Generic(p + (1.0 % 2.0), int *: 7, default: 3); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { double value = 3.0; return _Generic(value %= 2.0, double: 0, default: 1); }",
+            "integer-only compound assignment used with double value",
+        ),
+        (
+            "int main(void) { int values[1] = {0}; return _Generic(values[0.0], int: 0, default: 1); }",
+            "array subscript requires an integer value",
+        ),
+        (
+            "int main(void) { return 0 && (1.0 % 2.0); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { return 1 || (1.0 % 2.0); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { return 1 ? 0 : (1.0 % 2.0); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { int values[1] = {0}; int *p = values; return _Generic(p + 1.0, int *: 0, default: 1); }",
+            "pointer arithmetic requires an integer offset",
+        ),
+        (
+            "int main(void) { return 0 && ((double){3.0} %= 2.0); }",
+            "integer-only compound assignment used with double value",
+        ),
+    ] {
+        let err = interpret(program).expect_err(program);
+        assert!(
+            err.to_string().contains(expected),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+#[test]
+fn wrapped_unevaluated_double_contexts_preserve_operand_validation() {
+    for (program, expected) in [
+        (
+            "enum { VALUE = sizeof(1.0 % 2.0) }; int main(void) { return VALUE; }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { return sizeof((int)(1.0 % 2.0)); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { double value = 0.0; return sizeof(value = 1.0 % 2.0); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { int values[1] = {0}; return sizeof(values[0.0]); }",
+            "array subscript requires an integer value",
+        ),
+        (
+            "int main(void) { int values[1] = {0}; return sizeof(values[0.0] += 1); }",
+            "array subscript requires an integer value",
+        ),
+        (
+            "int main(void) { int values[1] = {0}; return sizeof(values[0] %= 1.0); }",
+            "integer-only compound assignment used with double value",
+        ),
+        (
+            "int main(void) { return sizeof(+(1.0 % 2.0)); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { return sizeof((1.0 % 2.0) + 1); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { int values[1][1] = {{0}}; return sizeof(values[0][0] %= 1.0); }",
+            "integer-only compound assignment used with double value",
+        ),
+        (
+            "int main(void) { int value = 0; int *slot = &value; return sizeof(*slot %= 1.0); }",
+            "integer-only compound assignment used with double value",
+        ),
+        (
+            "struct Box { int value; }; int main(void) { struct Box box = {0}; return sizeof(box.value %= 1.0); }",
+            "integer-only compound assignment used with double value",
+        ),
+        (
+            "struct Box { int value; }; int main(void) { struct Box box = {0}; struct Box *slot = &box; return sizeof(slot->value %= 1.0); }",
+            "integer-only compound assignment used with double value",
+        ),
+        (
+            "struct Box { int value; }; int main(void) { return sizeof(((struct Box){0}).value %= 1.0); }",
+            "integer-only compound assignment used with double value",
+        ),
+        (
+            "struct Box { int values[1][1]; }; int main(void) { struct Box boxes[1]; return sizeof(boxes[0.0].values[0][0] = 1); }",
+            "array subscript requires an integer value",
+        ),
+        (
+            "struct Box { int values[1]; }; int main(void) { struct Box box = {{0}}; struct Box *slot = &box; return sizeof(slot->values[0.0] = 1); }",
+            "array subscript requires an integer value",
+        ),
+        (
+            "int main(void) { return sizeof(1 ? 2.0 : 1.0 % 2.0); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { return sizeof((int)_Generic(1, int: 1.0 % 2.0, default: 0)); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int f(int x) { return x; } int main(void) { return sizeof(f((int)(1.0 % 2.0))); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int f(int x) { return x; } int main(void) { return _Generic(f((int)(1.0 % 2.0)), int: 0); }",
+            "remainder on double values is not supported",
+        ),
+        (
+            "int main(void) { return sizeof((double){3.0} %= 2.0); }",
+            "integer-only compound assignment used with double value",
+        ),
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string().contains(expected),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn unevaluated_double_contexts_reject_pointer_scalar_conversions_and_operations() {
+    for program in [
+        "int main(void) { int value = 0; double result = 0.0; return sizeof(result = &value); }",
+        "int main(void) { int value = 0; int *pointer = &value; return _Generic(pointer * 1.0, double: 0, default: 1); }",
+        "int main(void) { int value = 0; int *pointer = &value; return sizeof((double)pointer); }",
+        "int main(void) { return sizeof((int *)1.0); }",
+    ] {
+        let err = interpret(program).expect_err(program);
+        assert!(
+            err.to_string().contains("pointer") || err.to_string().contains("double"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn evaluated_double_values_cannot_cross_pointer_cast_or_conditional_boundaries() {
+    for program in [
+        "int main(void) { return (int *)0.0 == 0; }",
+        "int main(void) { int value = 0; int *p = &value; return (0 ? (int *)1.0 : p) == p ? 0 : 1; }",
+        "int main(void) { int value = 0; int *selected = &value; selected = 1 ? selected : 1.0; return selected == &value ? 0 : 1; }",
+        "int main(void) { int value = 0; int *selected = &value; return (0 ? 1.0 : selected) == &value ? 0 : 1; }",
+    ] {
+        let err = interpret(program).expect_err(program);
+        assert!(
+            err.to_string().contains("pointer")
+                || err.to_string().contains("double")
+                || err
+                    .to_string()
+                    .contains("conditional branches have incompatible expression types"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn unevaluated_double_constraints_are_validated_inside_literal_and_pointer_wrappers() {
+    for program in [
+        "int main(void) { return sizeof(&(int){1.0 % 2.0}); }",
+        "int main(void) { return sizeof((int[]){1.0 % 2.0}); }",
+        "struct Sample { int value; }; int main(void) { return sizeof(&((struct Sample){1.0 % 2.0})); }",
+        "int main(void) { return sizeof(*((int *)(1.0 % 2.0))); }",
+        "struct S { int x; }; int main(void) { return sizeof((struct S){1.0 % 2.0}); }",
+        "struct S { int x; }; int main(void) { return sizeof(((struct S){1.0 % 2.0}).x); }",
+        "struct S { int x; }; int main(void) { return sizeof(((struct S *)(1.0 % 2.0))->x); }",
+        "enum { N = sizeof((int[]){1.0 % 2.0}) }; int main(void) { return N; }",
+        "struct S { int x; }; enum { N = sizeof((struct S){1.0 % 2.0}) }; int main(void) { return N; }",
+        "enum { N = sizeof(((int){0} = 1.0 % 2.0)) }; int main(void) { return N; }",
+    ] {
+        let err = interpret(program).expect_err(program);
+        assert!(
+            err.to_string()
+                .contains("remainder on double values is not supported"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn double_addresses_cannot_cross_supported_pointer_assignment_call_or_return_boundaries() {
+    let programs = [
+        r#"
+            int main(void) {
+                void *slot = 0;
+                double value = 1.0;
+                slot = &value;
+                return slot != 0;
+            }
+        "#,
+        r#"
+            int main(void) {
+                void *slot = 0;
+                double value = 1.0;
+                return (slot = &value) != 0;
+            }
+        "#,
+        r#"
+            struct Box { int *slot; };
+            int main(void) {
+                struct Box box = {0};
+                double value = 1.0;
+                box.slot = &value;
+                return box.slot != 0;
+            }
+        "#,
+        r#"
+            int inspect(void *slot) { return slot != 0; }
+            int main(void) {
+                double value = 1.0;
+                return inspect(&value);
+            }
+        "#,
+        r#"
+            void *select(void) {
+                double value = 1.0;
+                return &value;
+            }
+            int main(void) { return select() != 0; }
+        "#,
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "double pointers are not supported"
+        );
+    }
+}
+
+#[test]
+fn nested_generic_controlling_expression_validation_is_bounded() {
+    fn run_nested(depth: usize, iterations: usize) -> std::time::Duration {
+        let mut controlling = "0".to_string();
+        for _ in 0..depth {
+            controlling = format!("_Generic({controlling}, int: 0, default: 1)");
+        }
+        let program =
+            format!("int main(void) {{ return _Generic({controlling}, int: 0, default: 1); }}");
+        let started = std::time::Instant::now();
+        for _ in 0..iterations {
+            assert_eq!(interpret(&program).unwrap(), 0);
+        }
+        started.elapsed()
+    }
+
+    let shallow = run_nested(8, 10);
+    let deep = run_nested(24, 10);
+    let allowed = (shallow * 8).max(std::time::Duration::from_millis(30));
+    assert!(
+        deep < allowed,
+        "nested generic controlling validation scaled nonlinearly: {shallow:?} at depth 8 and {deep:?} at depth 24"
+    );
+}
+
+#[test]
+fn nested_generic_selected_association_validation_is_bounded() {
+    fn run_nested(depth: usize, iterations: usize) -> std::time::Duration {
+        let mut selected = "0".to_string();
+        for _ in 0..depth {
+            selected = format!("_Generic(0, int: {selected}, default: 1)");
+        }
+        let program = format!("int main(void) {{ return {selected}; }}");
+        let started = std::time::Instant::now();
+        for _ in 0..iterations {
+            assert_eq!(interpret(&program).unwrap(), 0);
+        }
+        started.elapsed()
+    }
+
+    let shallow = run_nested(8, 10);
+    let deep = run_nested(24, 10);
+    let allowed = (shallow * 8).max(std::time::Duration::from_millis(30));
+    assert!(
+        deep < allowed,
+        "nested generic selected-association validation scaled nonlinearly: {shallow:?} at depth 8 and {deep:?} at depth 24"
+    );
+}
+
+#[test]
+fn left_associated_double_arithmetic_evaluation_is_bounded() {
+    fn run_chain(terms: usize, iterations: usize) -> std::time::Duration {
+        let expression = std::iter::repeat_n("1.0", terms)
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let program = format!("int main(void) {{ return ({expression}) == {terms}.0 ? 0 : 1; }}");
+        let started = std::time::Instant::now();
+        for _ in 0..iterations {
+            assert_eq!(interpret(&program).unwrap(), 0);
+        }
+        started.elapsed()
+    }
+
+    let shallow = run_chain(8, 50);
+    let deep = run_chain(32, 50);
+    let allowed = (shallow * 10).max(std::time::Duration::from_millis(50));
+    assert!(
+        deep < allowed,
+        "left-associated double evaluation scaled nonlinearly: {shallow:?} at 8 terms and {deep:?} at 32 terms"
+    );
+}
+
+#[test]
+fn right_associated_double_call_arithmetic_evaluation_is_bounded() {
+    fn run_chain(terms: usize, iterations: usize) -> std::time::Duration {
+        let mut expression = "1.0".to_string();
+        for _ in 1..terms {
+            expression = format!("one() + ({expression})");
+        }
+        let program = format!(
+            "int one(void) {{ return 1; }} int main(void) {{ return ({expression}) == {terms}.0 ? 0 : 1; }}"
+        );
+        let started = std::time::Instant::now();
+        for _ in 0..iterations {
+            assert_eq!(interpret(&program).unwrap(), 0);
+        }
+        started.elapsed()
+    }
+
+    let shallow = run_chain(8, 300);
+    let deep = run_chain(32, 300);
+    let allowed = (shallow * 5).max(std::time::Duration::from_millis(30));
+    assert!(
+        deep < allowed,
+        "right-associated double call evaluation scaled nonlinearly: {shallow:?} at 8 terms and {deep:?} at 32 terms"
+    );
+}
+
+#[test]
+fn nested_generic_selected_double_association_validation_is_bounded() {
+    fn run_nested(depth: usize, iterations: usize) -> std::time::Duration {
+        let mut selected = "1.0".to_string();
+        for _ in 0..depth {
+            selected = format!("_Generic(0, int: {selected}, default: 0.0)");
+        }
+        let program = format!("int main(void) {{ return {selected} == 1.0 ? 0 : 1; }}");
+        let started = std::time::Instant::now();
+        for _ in 0..iterations {
+            assert_eq!(interpret(&program).unwrap(), 0);
+        }
+        started.elapsed()
+    }
+
+    let shallow = run_nested(4, 100);
+    let deep = run_nested(28, 100);
+    let allowed = (shallow * 12).max(std::time::Duration::from_millis(50));
+    assert!(
+        deep < allowed,
+        "nested generic selected-double validation scaled nonlinearly: {shallow:?} at depth 4 and {deep:?} at depth 28"
+    );
+}
+
+#[test]
+fn sizeof_generic_validates_unselected_intrinsic_call_constraints() {
+    let program = r#"
+int isalpha(int);
+int main(void) {
+    return sizeof(_Generic(0, int: 1, default: isalpha(1, 2)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'isalpha' expected 1 arguments, got 2"
+    );
+}
+
+#[test]
+fn generic_selection_validation_has_a_deterministic_nesting_limit() {
+    let mut controlling = "0".to_string();
+    for _ in 0..33 {
+        controlling = format!("_Generic({controlling}, int: 0, default: 1)");
+    }
+    let program = format!("int main(void) {{ return _Generic({controlling}, int: 0); }}");
+
+    let err = interpret(&program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "generic selection validation nesting limit of 32 exceeded"
+    );
+}
+
+#[test]
+fn double_type_classification_cache_does_not_cross_cloned_function_bodies() {
+    let program = r#"
+int inspect_double(void) {
+    double value = 1.5;
+    return value + 0.5 == 2.0;
+}
+int inspect_integer(void) {
+    int value = 3;
+    return value + 4 == 7;
+}
+int main(void) {
+    return inspect_double() && inspect_integer() ? 0 : 1;
+}
+"#;
+
+    for _ in 0..100 {
+        assert_eq!(interpret(program).unwrap(), 0);
+    }
+}
+
+#[test]
+fn integer_constant_generic_validation_reaches_double_constraints_inside_calls() {
+    for association in [
+        "consume((int)(1.0 % 2.0))",
+        "(int)consume((int)(1.0 % 2.0))",
+        "(int){consume((int)(1.0 % 2.0))}",
+        "1 ? consume((int)(1.0 % 2.0)) : 0",
+        "(int *)(int)(1.0 % 2.0)",
+        "((int[]){(int)(1.0 % 2.0)})",
+        "((struct Box){(int)(1.0 % 2.0)})",
+        "((struct Box){0}).value + (int)(1.0 % 2.0)",
+        "*((int *)(int)(1.0 % 2.0))",
+    ] {
+        let program = format!(
+            "struct Box {{ int value; }}; int consume(int value) {{ return value; }} enum {{ VALUE = _Generic(0, int: 7, default: {association}) }}; int main(void) {{ return VALUE; }}"
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(association).to_string(),
+            "remainder on double values is not supported",
+            "unexpected diagnostic for {association}"
+        );
+    }
+}
+
+#[test]
+fn rejects_double_pointer_and_array_type_query_forms() {
+    for (program, expected) in [
+        (
+            "int main(void) { return sizeof(double *); }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { return _Alignof(double *); }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { return sizeof(double[2]); }",
+            "double arrays are not supported",
+        ),
+        (
+            "int main(void) { return _Alignof(double[2]); }",
+            "double arrays are not supported",
+        ),
+    ] {
+        assert!(
+            interpret(program)
+                .unwrap_err()
+                .to_string()
+                .contains(expected),
+            "expected {expected:?} for {program}"
+        );
+    }
+}
+
+#[test]
+fn rejects_double_pointer_generic_associations() {
+    let program = "int main(void) { return _Generic(0, int: 0, double *: 1); }";
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported at line 1, column 52"
+    );
+}
+
+#[test]
+fn bounded_memory_intrinsics_reject_double_object_storage() {
+    let program = r#"
+void *memset(void *, int, unsigned long int);
+int main(void) {
+    double value = 1.5;
+    memset(&value, 0, sizeof(value));
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memset' does not yet support double object storage for argument 1"
+    );
+}
+
+#[test]
+fn rejects_atomic_double_pointer_forms() {
+    for program in [
+        "_Atomic(double *) pointer; int main(void) { return 0; }",
+        "int main(void) { return (_Atomic(double *))0 == 0; }",
+        "typedef _Atomic(double *) AtomicDoublePointer; int main(void) { return 0; }",
+    ] {
+        let err = interpret(program).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("double pointers are not supported"),
+            "unexpected error for {program}: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_unsupported_floating_point_forms_with_context() {
     let cases = [
         (
             "float global_value;\nint main(void) { return 0; }",
-            "floating-point types are not supported at line 1, column 1",
+            "float types are not supported at line 1, column 1",
         ),
         (
-            "int main(void) {\n    double local_value;\n    return 0;\n}",
-            "floating-point types are not supported at line 2, column 5",
+            "int main(void) {\n    long double value;\n    return 0;\n}",
+            "long double types are not supported at line 2, column 5",
         ),
         (
-            "int take(float value) { return 0; }\nint main(void) { return take(1); }",
-            "floating-point types are not supported at line 1, column 10",
+            "int main(void) {\n    double values[2];\n    return 0;\n}",
+            "double arrays are not supported at line 2, column 18",
         ),
         (
-            "int main(void) {\n    return sizeof(float);\n}",
-            "floating-point types are not supported at line 2, column 19",
+            "struct Sample {\n    double value;\n};\nint main(void) { return 0; }",
+            "double aggregate fields are not supported at line 2, column 5",
         ),
         (
-            "int main(void) {\n    return (double)1;\n}",
-            "floating-point types are not supported at line 2, column 13",
+            "int main(void) {\n    double *pointer;\n    return 0;\n}",
+            "double pointers are not supported at line 2, column 12",
         ),
         (
-            "struct Sample {\n    float value;\n};\nint main(void) { return 0; }",
-            "floating-point types are not supported at line 2, column 5",
+            "typedef double Real;\nint main(void) { return 0; }",
+            "double typedef aliases are not supported at line 1, column 9",
+        ),
+        (
+            "int consume(double value);\nint main(void) { return 0; }",
+            "double function parameters are not supported at line 1, column 13",
+        ),
+        (
+            "double produce(void);\nint main(void) { return 0; }",
+            "double function returns are not supported at line 1, column 1",
+        ),
+        (
+            "double main(void) { return 0; }",
+            "double function returns are not supported at line 1, column 1",
+        ),
+        (
+            "int main(void) { return (int)1.0f; }",
+            concat!(
+                "float literals are not supported at line 1, column 30\n",
+                "int main(void) { return (int)1.0f; }\n",
+                "                             ^"
+            ),
+        ),
+        (
+            "int main(void) { return (int)1.0L; }",
+            concat!(
+                "long double literals are not supported at line 1, column 30\n",
+                "int main(void) { return (int)1.0L; }\n",
+                "                             ^"
+            ),
+        ),
+        (
+            "int main(void) { return (int)1e999; }",
+            concat!(
+                "non-finite double literals are not supported at line 1, column 30\n",
+                "int main(void) { return (int)1e999; }\n",
+                "                             ^"
+            ),
         ),
     ];
 
@@ -21091,7 +22299,7 @@ fn sizeof_base_integer_string_conversions_validate_argument_shapes() {
     ];
 
     for (program, expected) in cases {
-        let err = interpret(program).unwrap_err();
+        let err = interpret(program).expect_err(program);
         assert_eq!(err.to_string(), expected);
     }
 }
