@@ -18,10 +18,16 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-13 — v0.30.0 publication evidence
+
+- Release commit `86d0d470fc22825e096a3dbca638dde84ca5800b` was exact local `HEAD`, `origin/main`, and remote `refs/heads/main` before this status-only evidence update. Local `v0.30.0` is an annotated tag object (`git cat-file -t` reports `tag`) at `3aaf5af050ca4867e7e928e86d2516370aae3b61`; its peeled target is the release commit.
+- `git ls-remote origin refs/heads/main refs/tags/v0.30.0 'refs/tags/v0.30.0^{}'` independently reports the same branch commit, unpeeled tag object, and peeled release target. This status-only evidence commit does not move or recreate the release tag.
+- Queue decision: publication closure was mandatory because the previous run had already prepared, committed, pushed, and tagged v0.30.0 while authoritative ledgers still described the tag as reserved. Direct one-dimensional double arrays remain the sole next implementation package; shared-storage union bytes and parser/fuzz expansion remain lower-priority alternatives.
+
 ## 2026-08-12 — v0.30.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.29.0`, then passed after Cargo/lock and both image tags moved to `0.30.0`. Cargo metadata and the built CLI report `cust 0.30.0`; local and remote annotated-tag preflight found no `v0.30.0` refs.
-- Executable target-by-target listing reconciles 1,594 tests: 1,459 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over direct one-dimensional double arrays, shared-storage union bytes, and parser/fuzz expansion because the release is first in both queues and packages reviewed behavior without widening runtime semantics.
+- Executable target-by-target listing reconciles 1,594 tests: 1,459 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over direct one-dimensional double arrays, shared-storage union bytes, and parser/fuzz expansion because the release was first in both queues at selection time and packages reviewed behavior without widening runtime semantics.
 - Publication follows release-commit-first ordering: independent complete-diff review precedes the canonical gate; exact `origin/main` acceptance precedes annotated-tag creation; and local/remote tag objects plus peeled targets must match. Direct one-dimensional double arrays are preserved as the next concrete language package.
 - Independent review first found stale README return wording, two historical present-tense queue claims, and an omitted double-typedef limitation. After those documentation-only fixes, fresh complete-diff re-review returned `APPROVED`. The canonical gate passed formatting, warning-denied Clippy, all 1,594 local and rebuilt-Docker tests, runtime output `10`, and diff/tag checks; corrected supplemental probes report local/Cargo/container version `cust 0.30.0`.
 

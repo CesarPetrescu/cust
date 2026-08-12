@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during bounded v0.30.0 release preparation on 2026-08-12. Focused version RED/GREEN, independent `APPROVED` review, the complete local/rebuilt-Docker canonical gate, runtime/version probes, diff check, and empty local/remote tag preflight pass; no implementation, Docker, Git, research, or environment blocker is active.
+None. Last reviewed after bounded v0.30.0 publication on 2026-08-13. Before this status-only evidence update, release commit `86d0d470fc22825e096a3dbca638dde84ca5800b` was exact local `HEAD` and `origin/main`; remote annotated tag object `3aaf5af050ca4867e7e928e86d2516370aae3b61` peels exactly to it. No implementation, Docker, Git, research, or environment blocker is active.
 
 ## Blocker template
 
