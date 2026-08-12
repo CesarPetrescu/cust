@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.30.0 — 2026-08-12
+
+### Language subset
+
+- Extended bounded `double` values through direct function parameter and return declarations. Prototypes, definitions, named and unnamed parameters, recursive calls, integer/double argument and return conversion, casts, `_Generic`, and non-evaluating `sizeof(call)` preserve exact scalar metadata and one-time evaluation.
+
+### Diagnostics and verification
+
+- Preserved source-located rejection for direct double pointers, arrays, pointer-to-row returns/parameters, and non-`int` `main`. Review-driven regressions close pointer/array declarator bypasses, pointer-to-row bypasses, raw IEEE entry-point results, and a row-pointer `main` declarator bypass. The warning-free ABI-independent native fixture passes GCC, Clang, and Cust's compiler-oracle harness.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.30.0`.
+- Reconciled an executable inventory of 1,594 tests: 1,459 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- The `double` slice remains limited to direct scalar storage, scalar expressions, and direct function boundaries. `float`, `long double`, hexadecimal/suffixed/non-finite floating literals, double typedef aliases, arrays, aggregate fields, pointers, and pointer-to-row forms remain unsupported. Complex runtime values, host floating ABI/promotion behavior, general pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
+
 ## v0.29.0 — 2026-08-12
 
 ### Language subset

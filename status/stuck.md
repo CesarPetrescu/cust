@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during direct bounded `double` function-boundary implementation on 2026-08-12. Focused RED/GREEN, the review-driven row-pointer `main` guard, fresh independent `APPROVED` re-review, all 1,594 local/rebuilt-Docker tests, and rebuilt runtime output `10` pass; no implementation, Docker, Git, research, or environment blocker is active.
+None. Last reviewed during bounded v0.30.0 release preparation on 2026-08-12. Focused version RED/GREEN, independent `APPROVED` review, the complete local/rebuilt-Docker canonical gate, runtime/version probes, diff check, and empty local/remote tag preflight pass; no implementation, Docker, Git, research, or environment blocker is active.
 
 ## Blocker template
 
