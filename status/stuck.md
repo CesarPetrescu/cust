@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.30.0 publication on 2026-08-13. Before this status-only evidence update, release commit `86d0d470fc22825e096a3dbca638dde84ca5800b` was exact local `HEAD` and `origin/main`; remote annotated tag object `3aaf5af050ca4867e7e928e86d2516370aae3b61` peels exactly to it. No implementation, Docker, Git, research, or environment blocker is active.
+None. Last reviewed after completing direct one-dimensional `double` arrays on 2026-08-13. Focused interpreter, compiler-oracle, direct GCC/Clang, local canonical, and rebuilt-Docker gates pass; no implementation, Docker, Git, research, or environment blocker is active.
 
 ## Blocker template
 

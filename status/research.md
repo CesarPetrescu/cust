@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-13 — Direct one-dimensional `double` array implementation decisions
+
+- C11 array behavior for this bounded slice reuses Cust's existing scalar-array model: fixed/inferred lengths, positional/designated initialization, zero fill, direct and reverse subscripting, and array/object type queries. The compiler-oracle fixture uses only ABI-independent relationships such as `sizeof(double[N]) == N * sizeof(double)` and `_Alignof(double[N]) == _Alignof(double)`.
+- Cust intentionally does not expose a `double *` runtime value in this slice. Internally constructed array-element pointers may route reverse subscripting and raw-memory validation, but ordinary decay, dereference, address-taking, pointer declarations, and multidimensional double arrays retain exact unsupported diagnostics. Raw-memory intrinsic dispatch must reach its established `does not yet support double object storage` diagnostic rather than being preempted by the language-level pointer boundary.
+- Reverse subscript AST lowering stores the scalar offset as the `ArrayGet.name` and the array expression as `index`; double type classification must therefore consult `scalar_variable_reverse_subscript_pointee_type(...)`, not only `scalar_array_element_type(name)`. Prefix/postfix reverse updates likewise need f64-bit arithmetic before writing back.
+
 ## 2026-08-13 — v0.30.0 publication evidence
 
 - Release commit `86d0d470fc22825e096a3dbca638dde84ca5800b` was exact local `HEAD`, `origin/main`, and remote `refs/heads/main` before this status-only evidence update. Local `v0.30.0` is an annotated tag object (`git cat-file -t` reports `tag`) at `3aaf5af050ca4867e7e928e86d2516370aae3b61`; its peeled target is the release commit.

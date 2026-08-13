@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Extended bounded `double` storage to direct one-dimensional arrays with fixed or initializer-inferred lengths, positional/designated initialization, local/file-global/block-static storage, direct and reverse indexed reads, replacement/compound/prefix/postfix updates, integer/double conversion, `_Generic`, and deterministic object/element/type-name `sizeof` plus `_Alignof` relationships.
+
+### Diagnostics and verification
+
+- Preserved exact const and bounds checks while retaining the unsupported double-pointer/decay and multidimensional-double-array boundaries. Review-driven RED/GREEN closed reverse-subscript result typing and numeric increment, and retained bounded raw-memory intrinsic diagnostic precedence. Focused interpreter/invalid fixtures and a warning-free ABI-independent GCC/Clang compiler oracle cover the slice.
+
 ## v0.30.0 — 2026-08-12
 
 ### Language subset

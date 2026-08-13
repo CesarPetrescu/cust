@@ -10877,12 +10877,6 @@ impl Parser {
         let DeclType::Scalar(ty) = decl_type else {
             unreachable!("void and struct declarations return above")
         };
-        if ty == CType::Double && self.check(&Token::LBracket) {
-            return Err(Self::error_at(
-                "double arrays are not supported".to_string(),
-                self.peek_located(),
-            ));
-        }
         if self.matches(&Token::LBracket) {
             let (len, init) = if self.matches(&Token::RBracket) {
                 if !self.matches(&Token::Assign) {
@@ -10898,6 +10892,12 @@ impl Parser {
                 let len = self.expect_array_len()?;
                 self.expect_closing_bracket_after("array length")?;
                 if self.matches(&Token::LBracket) {
+                    if ty == CType::Double {
+                        return Err(Self::error_at(
+                            "double multidimensional arrays are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
                     let columns = self.expect_array_len()?;
                     self.expect_closing_bracket_after("second array dimension")?;
                     if self.check(&Token::LBracket) {
@@ -11386,12 +11386,6 @@ impl Parser {
         match base_type {
             DeclType::Void => unreachable!("void objects are rejected above"),
             DeclType::Scalar(ty) => {
-                if ty == CType::Double && self.check(&Token::LBracket) {
-                    return Err(Self::error_at(
-                        "double arrays are not supported".to_string(),
-                        self.peek_located(),
-                    ));
-                }
                 if self.matches(&Token::LBracket) {
                     let (len, init) = if self.matches(&Token::RBracket) {
                         if !self.matches(&Token::Assign) {
@@ -11409,6 +11403,12 @@ impl Parser {
                         let len = self.expect_array_len()?;
                         self.expect_closing_bracket_after("array length")?;
                         if self.matches(&Token::LBracket) {
+                            if ty == CType::Double {
+                                return Err(Self::error_at(
+                                    "double multidimensional arrays are not supported".to_string(),
+                                    self.previous(),
+                                ));
+                            }
                             let columns = self.expect_array_len()?;
                             self.expect_closing_bracket_after("second array dimension")?;
                             if self.check(&Token::LBracket) {
@@ -16868,11 +16868,6 @@ impl Parser {
                     }
                     self.reject_function_type_suffix(&format!("function {operator} types"))?;
                     Ok(SizeOfType::Pointer)
-                } else if self.check(&Token::LBracket) && ty == CType::Double {
-                    Err(Self::error_at(
-                        "double arrays are not supported".to_string(),
-                        self.peek_located(),
-                    ))
                 } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
                     self.reject_function_type_suffix(&format!("function {operator} types"))?;
                     Ok(SizeOfType::Array(PointeeType::Scalar(ty), len))
@@ -18600,6 +18595,17 @@ impl Interpreter {
             | Expr::ScalarLiteral { ty, .. }
             | Expr::ScalarLiteralSet { ty, .. }
             | Expr::ScalarLiteralCompoundSet { ty, .. } => *ty == CType::Double,
+            Expr::ArrayGet { name, index }
+            | Expr::ArraySet { name, index, .. }
+            | Expr::ArrayCompoundSet { name, index, .. } => {
+                self.scalar_array_element_type(name)
+                    .is_some_and(|ty| ty == CType::Double)
+                    || self
+                        .scalar_variable_reverse_subscript_pointee_type(name, index)
+                        .is_ok_and(|pointee| {
+                            matches!(pointee, Some(PointeeType::Scalar(CType::Double)))
+                        })
+            }
             Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) => self.expr_is_double_value(inner),
             Expr::Increment { target, .. } => self.expr_is_double_value(target),
             Expr::Binary(
@@ -18659,8 +18665,6 @@ impl Interpreter {
             | Expr::AggregateFieldGet { .. }
             | Expr::AggregateFieldSet { .. }
             | Expr::AggregateFieldCompoundSet { .. }
-            | Expr::ArraySet { .. }
-            | Expr::ArrayCompoundSet { .. }
             | Expr::Array2DSet { .. }
             | Expr::Array2DCompoundSet { .. }
             | Expr::StructArray2DSet { .. }
@@ -18678,7 +18682,6 @@ impl Interpreter {
             | Expr::StructCompoundSet { .. }
             | Expr::StructPtrCompoundSet { .. }
             | Expr::Deref(_)
-            | Expr::ArrayGet { .. }
             | Expr::Array2DGet { .. }
             | Expr::StructArray2DGet { .. }
             | Expr::StringGet { .. }
@@ -18692,16 +18695,31 @@ impl Interpreter {
 
     fn expr_is_unsupported_double_pointer(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::AddressOf(name) => matches!(
-                self.find_variable(name),
+            Expr::AddressOf(name) => match self.find_variable(name) {
                 Some(Value::Scalar {
-                    ty: CType::Double,
-                    ..
-                })
+                    ty: CType::Double, ..
+                }) => true,
+                Some(Value::Array(array)) => array.borrow().elem_type == CType::Double,
+                _ => false,
+            },
+            Expr::AddressOfArray { name, index } => {
+                matches!(
+                    self.find_variable(name),
+                    Some(Value::Array(array)) if array.borrow().elem_type == CType::Double
+                ) || self.expr_is_unsupported_double_pointer(index)
+            }
+            Expr::Var(name) => matches!(
+                self.find_variable(name),
+                Some(Value::Array(array)) if array.borrow().elem_type == CType::Double
             ),
             Expr::AddressOfScalarLiteral {
                 ty: CType::Double, ..
             } => true,
+            Expr::Deref(pointer)
+            | Expr::DerefSet { pointer, .. }
+            | Expr::DerefCompoundSet { pointer, .. } => {
+                self.expr_is_unsupported_double_pointer(pointer)
+            }
             Expr::PointerCast { pointee, expr, .. } => {
                 matches!(pointee, PointeeType::Scalar(CType::Double))
                     || self.expr_is_unsupported_double_pointer(expr)
@@ -35983,7 +36001,19 @@ impl Interpreter {
                     self.scalar_variable_reverse_subscript_pointer(name, index)?
                 {
                     let current = self.deref_pointer(&pointer)?;
-                    let updated = Self::apply_increment_op(current, op);
+                    let updated = if matches!(
+                        self.pointer_value_type(&pointer)?,
+                        Some(PointeeType::Scalar(CType::Double))
+                    ) {
+                        let current_value = f64::from_bits(current as u64);
+                        let updated_value = match op {
+                            IncrementOp::Inc => current_value + 1.0,
+                            IncrementOp::Dec => current_value - 1.0,
+                        };
+                        updated_value.to_bits() as i64
+                    } else {
+                        Self::apply_increment_op(current, op)
+                    };
                     self.ensure_reverse_subscript_pointee_mutable(index)?;
                     self.assign_deref_pointer(&pointer, updated)?;
                     return Ok(Self::increment_result(current, updated, prefix));
@@ -36015,10 +36045,17 @@ impl Interpreter {
                     Some(_) | None => self.checked_array_index(name, index)?,
                 };
                 let current = array.borrow().elements[index];
-                let updated = array
-                    .borrow()
-                    .elem_type
-                    .normalize(Self::apply_increment_op(current, op));
+                let elem_type = array.borrow().elem_type;
+                let updated = if elem_type == CType::Double {
+                    let current_value = f64::from_bits(current as u64);
+                    let updated_value = match op {
+                        IncrementOp::Inc => current_value + 1.0,
+                        IncrementOp::Dec => current_value - 1.0,
+                    };
+                    updated_value.to_bits() as i64
+                } else {
+                    elem_type.normalize(Self::apply_increment_op(current, op))
+                };
                 let mut array = array.borrow_mut();
                 if array.read_only {
                     return Err(CustError::new(format!(
@@ -36278,6 +36315,9 @@ impl Interpreter {
         op: CompoundOp,
         value: &Expr,
     ) -> CustResult<i64> {
+        if self.expr_is_unsupported_double_pointer(pointer) {
+            return Err(CustError::new("double pointers are not supported"));
+        }
         self.ensure_pointer_expr_pointee_mutable(pointer)?;
         let pointee_type = self.pointer_expr_pointee_type(pointer)?;
         let pointer = self.eval_pointer(pointer)?;
@@ -37126,6 +37166,9 @@ impl Interpreter {
                     self.assign_character_pointer_output(pointer, value)?;
                     return Ok(ExecFlow::None);
                 }
+                if self.expr_is_unsupported_double_pointer(pointer) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 if match pointer {
                     Expr::Var(name) => matches!(
                         self.find_variable(name),
@@ -37900,6 +37943,9 @@ impl Interpreter {
                 }
             }
             Expr::DerefSet { pointer, value } => {
+                if self.expr_is_unsupported_double_pointer(pointer) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 self.ensure_pointer_expr_pointee_mutable(pointer)?;
                 let pointee_type = self.pointer_expr_pointee_type(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;
@@ -37936,6 +37982,9 @@ impl Interpreter {
                 value,
             } => self.eval_struct_ptr_compound_set(pointer, fields, *op, value),
             Expr::Deref(pointer) => {
+                if self.expr_is_unsupported_double_pointer(pointer) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 if matches!(
                     self.pointer_expr_pointee_type(pointer)?,
                     Some(PointeeType::Void)

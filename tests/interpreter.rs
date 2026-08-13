@@ -1762,6 +1762,135 @@ fn supports_bounded_double_runtime_values() {
 }
 
 #[test]
+fn direct_double_arrays_support_fixed_initialization_and_indexed_reads() {
+    let program = include_str!("fixtures/valid/direct_double_arrays.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_arrays_support_inferred_storage_and_indexed_updates() {
+    let program = r#"
+double globals[] = {1, [2] = 3.5};
+int main(void) {
+    static double persistent[] = {1.5, 2.5};
+    double values[] = {1.25, 2};
+    double assigned = (values[0] = 3);
+    double compounded = (values[1] += 0.5);
+    double post = values[0]++;
+    double pre = --values[1];
+    int index = 0;
+    double reverse_read = index[values];
+    double reverse_post = index[values]++;
+    double reverse_pre = ++index[values];
+    index[values] += 0.25;
+    globals[1] = 2.25;
+    persistent[0] *= 2;
+    return assigned == 3.0
+            && compounded == 2.5
+            && post == 3.0
+            && reverse_read == 4.0
+            && reverse_post == 4.0
+            && reverse_pre == 6.0
+            && index[values] == 6.25
+            && _Generic(index[values], double: 1, default: 0)
+            && values[0] == 6.25
+            && pre == 1.5
+            && values[1] == 1.5
+            && globals[0] == 1.0
+            && globals[1] == 2.25
+            && globals[2] == 3.5
+            && persistent[0] == 3.0
+            && sizeof(values) == 2 * sizeof(double)
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_arrays_keep_const_bounds_pointer_and_rank_boundaries() {
+    for (program, expected) in [
+        (
+            "int main(void) { const double values[1] = {1.5}; values[0] = 2.0; return 0; }",
+            "cannot modify read-only array 'values'",
+        ),
+        (
+            "int main(void) { double values[1] = {1.5}; return values[1] == 0.0; }",
+            "array 'values' index 1 out of bounds for length 1",
+        ),
+        (
+            "int main(void) { double values[1] = {1.5}; values; return 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[1] = {1.5}; return *values == 1.5; }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[1] = {1.5}; *values = 2.5; return 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[1] = {1.5}; return &values[0] != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[1] = {1.5}; return &0[values] != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[1] = {1.5}; void *slot = &0[values]; return slot != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[1] = {1.5}; double *slot = values; return 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[1] = {1.5}; values[0] %= 1; return 0; }",
+            "integer-only compound assignment used with double value",
+        ),
+        (
+            "int main(void) { double values[1][2] = {{1.0, 2.0}}; return 0; }",
+            "double multidimensional arrays are not supported",
+        ),
+    ] {
+        assert!(
+            interpret(program)
+                .expect_err(program)
+                .to_string()
+                .contains(expected),
+            "expected {expected:?} for {program}"
+        );
+    }
+}
+
+#[test]
+fn double_array_invalid_fixtures_keep_pointer_and_rank_diagnostics() {
+    for (program, expected) in [
+        (
+            include_str!("fixtures/invalid/double_array_decay.c"),
+            "double pointers are not supported",
+        ),
+        (
+            include_str!("fixtures/invalid/double_multidimensional_array.c"),
+            "double multidimensional arrays are not supported",
+        ),
+    ] {
+        assert!(
+            interpret(program)
+                .expect_err(program)
+                .to_string()
+                .contains(expected),
+            "expected {expected:?}"
+        );
+    }
+}
+
+#[test]
 fn double_compound_assignments_and_increments_preserve_numeric_values() {
     let program = r#"
 int main(void) {
@@ -2854,7 +2983,12 @@ fn integer_constant_generic_validation_reaches_double_constraints_inside_calls()
 }
 
 #[test]
-fn rejects_double_pointer_and_array_type_query_forms() {
+fn double_array_type_queries_are_supported_without_enabling_double_pointers() {
+    assert_eq!(
+        interpret("int main(void) { return sizeof(double[2]) == 2 * sizeof(double) && _Alignof(double[2]) == _Alignof(double) ? 0 : 1; }").unwrap(),
+        0
+    );
+
     for (program, expected) in [
         (
             "int main(void) { return sizeof(double *); }",
@@ -2863,14 +2997,6 @@ fn rejects_double_pointer_and_array_type_query_forms() {
         (
             "int main(void) { return _Alignof(double *); }",
             "double pointers are not supported",
-        ),
-        (
-            "int main(void) { return sizeof(double[2]); }",
-            "double arrays are not supported",
-        ),
-        (
-            "int main(void) { return _Alignof(double[2]); }",
-            "double arrays are not supported",
         ),
     ] {
         assert!(
@@ -3026,10 +3152,6 @@ fn rejects_unsupported_floating_point_forms_with_context() {
         (
             "int main(void) {\n    long double value;\n    return 0;\n}",
             "long double types are not supported at line 2, column 5",
-        ),
-        (
-            "int main(void) {\n    double values[2];\n    return 0;\n}",
-            "double arrays are not supported at line 2, column 18",
         ),
         (
             "struct Sample {\n    double value;\n};\nint main(void) { return 0; }",
