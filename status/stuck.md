@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.31.0 independent approval and canonical verification on 2026-08-13. Version and contextual-diagnostic RED/GREEN, executable inventory reconciliation, local/rebuilt-Docker gates, metadata probes, and empty local/remote tag preflight pass; release-commit-first push and annotated-tag publication remain procedural steps, not blockers.
+None. Last reviewed after bounded v0.31.0 release publication on 2026-08-13. Version and contextual-diagnostic RED/GREEN, independent approval, executable inventory reconciliation, local/rebuilt-Docker gates, metadata probes, release-commit-first branch acceptance, annotated-tag publication, and exact remote object/peeled verification pass.
 
 ## Blocker template
 
