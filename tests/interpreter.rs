@@ -2015,9 +2015,9 @@ fn rejects_double_array_compound_literals() {
     let program = "int main(void) { return ((double[1]){1.5})[0] == 1.5; }";
 
     let err = interpret(program).unwrap_err();
-    assert!(
-        err.to_string().contains("double arrays are not supported"),
-        "unexpected error: {err}"
+    assert_eq!(
+        err.to_string(),
+        "double array compound literals are not supported at line 1, column 27"
     );
 }
 
@@ -3110,7 +3110,7 @@ fn double_function_declarations_keep_pointer_and_array_boundaries_source_located
         ),
         (
             "int sum(double values[2]);\nint main(void) { return 0; }",
-            "double arrays are not supported at line 1, column 22",
+            "double array parameters are not supported at line 1, column 22",
         ),
         (
             "double (*make(void))[2];\nint main(void) { return 0; }",

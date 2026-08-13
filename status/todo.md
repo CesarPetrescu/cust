@@ -1002,7 +1002,9 @@ Previous completed correctness slice (2026-07-14): const-qualified pointer views
 358. [x] Prepare and publish bounded v0.29.0 around the completed first `double` runtime-value slice with exact version/docs/inventory consistency, independent approval, canonical local/rebuilt-Docker verification, release-commit-first publication, and exact remote annotated-tag verification; tag object `e86cb26d49c7d3f6f029259f81d9fc5c4f6eebbe` peels to release commit `fc48c670f85e70e2939e9aa6f222e09f6826c8af`.
 359. [x] Extend bounded `double` values through direct function parameter/return declarations and call results with conversion, non-evaluation, recursion/linearity, focused TDD, and warning-free native parity.
 360. [x] Prepare and publish bounded v0.30.0 around the completed direct `double` function-boundary slice with exact version/docs/inventory consistency, independent approval, canonical local/rebuilt-Docker verification, release commit `86d0d470fc22825e096a3dbca638dde84ca5800b` accepted on exact `origin/main` before annotated tag object `3aaf5af050ca4867e7e928e86d2516370aae3b61`, and exact remote peeled-target verification.
-361. [ ] Extend bounded `double` storage to direct one-dimensional arrays with indexed scalar behavior and exact safety boundaries without enabling double pointers.
+361. [x] Extend bounded `double` storage to direct one-dimensional arrays with indexed scalar behavior and exact safety boundaries without enabling double pointers.
+362. [ ] Prepare and publish bounded v0.31.0 around direct one-dimensional `double` arrays with exact version/docs/inventory consistency, independent approval, canonical local/rebuilt-Docker verification, release-commit-first publication, and exact remote annotated-tag verification.
+363. [ ] Extend bounded `double` storage to direct scalar aggregate fields while keeping double pointers, double aggregate-array fields, and multidimensional double storage unsupported.
 
 ## Every-run checklist
 

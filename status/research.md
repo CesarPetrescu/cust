@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-13 — v0.31.0 release consistency
+
+- Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.30.0`, then passed after Cargo/lock and both image tags moved to `0.31.0`. Cargo metadata and the built CLI report `cust 0.31.0`; local and remote annotated-tag preflight found no `v0.31.0` refs.
+- Executable target-by-target listing reconciles 1,598 tests: 1,463 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over direct aggregate `double` fields, shared-storage union bytes, and parser/fuzz expansion because the release is first in both queues and packages reviewed behavior without widening runtime semantics.
+- Publication must retain release-commit-first ordering: independent complete-diff review precedes the canonical gate; exact `origin/main` acceptance precedes annotated-tag creation; and local/remote tag objects plus peeled targets must match. Direct aggregate `double` scalar fields are preserved as the next concrete language package after publication.
+- Independent review initially required explicit zero-fill and compound-literal boundaries, contextual source-located double-array parameter/compound-literal diagnostics, and historical queue wording corrections. Focused regressions went RED on both old generic messages and GREEN on the contextual diagnostics; fresh complete-diff re-review returned `APPROVED`. The canonical gate passed formatting, warning-denied Clippy, all 1,598 local and rebuilt-Docker tests, runtime output `10`, local/Cargo/container version `cust 0.31.0`, and the diff check.
+
 ## 2026-08-13 — Direct one-dimensional `double` array implementation decisions
 
 - C11 array behavior for this bounded slice reuses Cust's existing scalar-array model: fixed/inferred lengths, positional/designated initialization, zero fill, direct and reverse subscripting, and array/object type queries. The compiler-oracle fixture uses only ABI-independent relationships such as `sizeof(double[N]) == N * sizeof(double)` and `_Alignof(double[N]) == _Alignof(double)`.
@@ -28,13 +35,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 - Release commit `86d0d470fc22825e096a3dbca638dde84ca5800b` was exact local `HEAD`, `origin/main`, and remote `refs/heads/main` before this status-only evidence update. Local `v0.30.0` is an annotated tag object (`git cat-file -t` reports `tag`) at `3aaf5af050ca4867e7e928e86d2516370aae3b61`; its peeled target is the release commit.
 - `git ls-remote origin refs/heads/main refs/tags/v0.30.0 'refs/tags/v0.30.0^{}'` independently reports the same branch commit, unpeeled tag object, and peeled release target. This status-only evidence commit does not move or recreate the release tag.
-- Queue decision: publication closure was mandatory because the previous run had already prepared, committed, pushed, and tagged v0.30.0 while authoritative ledgers still described the tag as reserved. Direct one-dimensional double arrays remain the sole next implementation package; shared-storage union bytes and parser/fuzz expansion remain lower-priority alternatives.
+- Queue decision: publication closure was mandatory because the previous run had already prepared, committed, pushed, and tagged v0.30.0 while authoritative ledgers still described the tag as reserved. Direct one-dimensional double arrays became the sole next implementation package at that point; shared-storage union bytes and parser/fuzz expansion remained lower-priority alternatives.
 
 ## 2026-08-12 — v0.30.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.29.0`, then passed after Cargo/lock and both image tags moved to `0.30.0`. Cargo metadata and the built CLI report `cust 0.30.0`; local and remote annotated-tag preflight found no `v0.30.0` refs.
 - Executable target-by-target listing reconciles 1,594 tests: 1,459 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over direct one-dimensional double arrays, shared-storage union bytes, and parser/fuzz expansion because the release was first in both queues at selection time and packages reviewed behavior without widening runtime semantics.
-- Publication follows release-commit-first ordering: independent complete-diff review precedes the canonical gate; exact `origin/main` acceptance precedes annotated-tag creation; and local/remote tag objects plus peeled targets must match. Direct one-dimensional double arrays are preserved as the next concrete language package.
+- Publication followed release-commit-first ordering: independent complete-diff review preceded the canonical gate; exact `origin/main` acceptance preceded annotated-tag creation; and local/remote tag objects plus peeled targets matched. Direct one-dimensional double arrays became the next concrete language package at that point.
 - Independent review first found stale README return wording, two historical present-tense queue claims, and an omitted double-typedef limitation. After those documentation-only fixes, fresh complete-diff re-review returned `APPROVED`. The canonical gate passed formatting, warning-denied Clippy, all 1,594 local and rebuilt-Docker tests, runtime output `10`, and diff/tag checks; corrected supplemental probes report local/Cargo/container version `cust 0.30.0`.
 
 ## 2026-08-12 — v0.29.0 release consistency

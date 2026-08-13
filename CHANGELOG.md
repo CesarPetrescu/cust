@@ -4,13 +4,25 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.31.0 — 2026-08-13
+
 ### Language subset
 
-- Extended bounded `double` storage to direct one-dimensional arrays with fixed or initializer-inferred lengths, positional/designated initialization, local/file-global/block-static storage, direct and reverse indexed reads, replacement/compound/prefix/postfix updates, integer/double conversion, `_Generic`, and deterministic object/element/type-name `sizeof` plus `_Alignof` relationships.
+- Extended bounded `double` storage to direct one-dimensional arrays with fixed or initializer-inferred lengths, positional/designated initialization and zero fill, local/file-global/block-static storage, direct and reverse indexed reads, replacement/compound/prefix/postfix updates, integer/double conversion, `_Generic`, and deterministic object/element/type-name `sizeof` plus `_Alignof` relationships.
 
 ### Diagnostics and verification
 
-- Preserved exact const and bounds checks while retaining the unsupported double-pointer/decay and multidimensional-double-array boundaries. Review-driven RED/GREEN closed reverse-subscript result typing and numeric increment, and retained bounded raw-memory intrinsic diagnostic precedence. Focused interpreter/invalid fixtures and a warning-free ABI-independent GCC/Clang compiler oracle cover the slice.
+- Preserved exact const and bounds checks while retaining the unsupported double-pointer/decay, double-array-parameter, double-array-compound-literal, and multidimensional-double-array boundaries. Review-driven RED/GREEN closed reverse-subscript result typing and numeric increment, retained bounded raw-memory intrinsic diagnostic precedence, and sharpened source-located parameter/compound-literal diagnostics. Focused interpreter/invalid fixtures and a warning-free ABI-independent GCC/Clang compiler oracle cover the slice.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.31.0`.
+- Reconciled an executable inventory of 1,598 tests: 1,463 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- The bounded `double` slice supports direct scalar storage, expressions, function boundaries, and direct one-dimensional arrays. `float`, `long double`, hexadecimal/suffixed/non-finite floating literals, double typedef aliases, aggregate fields, double pointers and ordinary array decay, address-taking or dereference, double-array parameters and compound literals, and multidimensional double arrays remain unsupported. Raw-memory intrinsics still reject double object storage. Complex runtime values, host floating ABI/promotion behavior, general pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
 
 ## v0.30.0 — 2026-08-12
 

@@ -9580,7 +9580,7 @@ impl Parser {
             if matches!(decl_type, DeclType::Scalar(CType::Double)) && self.check(&Token::LBracket)
             {
                 return Err(Self::error_at(
-                    "double arrays are not supported".to_string(),
+                    "double array parameters are not supported".to_string(),
                     self.peek_located(),
                 ));
             }
@@ -16367,7 +16367,7 @@ impl Parser {
         if self.matches(&Token::LBracket) {
             if ty == CType::Double {
                 return Err(Self::error_at(
-                    "double arrays are not supported".to_string(),
+                    "double array compound literals are not supported".to_string(),
                     &type_token,
                 ));
             }
