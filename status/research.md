@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-14 — v0.32.0 release consistency
+
+- Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.31.0`, then passed after Cargo/lock and both image tags moved to `0.32.0`. Cargo metadata and the built CLI report `cust 0.32.0`; local and remote annotated-tag preflight found no `v0.32.0` refs.
+- Executable target-by-target listing reconciles 1,642 tests: 1,507 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over aggregate-field double arrays, direct double pointers, and parser/property expansion because the release is first in both queues and packages reviewed behavior without widening runtime semantics.
+- Publication must retain release-commit-first ordering: complete-diff independent review precedes the canonical gate; exact `origin/main` acceptance precedes annotated-tag creation; and local/remote tag objects plus peeled targets must match. Direct one-dimensional double arrays in supported aggregate fields are the next concrete language package after publication.
+
 ## 2026-08-14 — Direct scalar `double` aggregate-field decisions
 
 - The bounded slice reuses Cust's deterministic eight-byte `double` bit representation inside scalar aggregate fields. Supported scalar-only unions share those bits with `int`/`char` fields; unions combining double storage with array, pointer-backed aggregate, or other non-scalar field layouts remain rejected because the existing shared-storage model cannot represent those layouts safely.
@@ -29,7 +35,7 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.30.0`, then passed after Cargo/lock and both image tags moved to `0.31.0`. Cargo metadata and the built CLI report `cust 0.31.0`; local and remote annotated-tag preflight found no `v0.31.0` refs.
 - Executable target-by-target listing reconciles 1,598 tests: 1,463 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over direct aggregate `double` fields, shared-storage union bytes, and parser/fuzz expansion because the release was first in both queues at selection time and packaged reviewed behavior without widening runtime semantics.
-- Publication retained release-commit-first ordering: independent complete-diff review preceded the canonical gate; exact `origin/main` acceptance preceded annotated-tag creation; release commit `0444d2a0a95f5eed325922bd33e2eedc953cd25a`, annotated tag object `e7ca94cebaec359463b79e310acd50b674fce0f2`, and local/remote peeled targets agree. Direct aggregate `double` scalar fields are now the next concrete language package.
+- Publication retained release-commit-first ordering: independent complete-diff review preceded the canonical gate; exact `origin/main` acceptance preceded annotated-tag creation; release commit `0444d2a0a95f5eed325922bd33e2eedc953cd25a`, annotated tag object `e7ca94cebaec359463b79e310acd50b674fce0f2`, and local/remote peeled targets agree. Direct aggregate `double` scalar fields became the next concrete language package at that point.
 - Independent review initially required explicit zero-fill and compound-literal boundaries, contextual source-located double-array parameter/compound-literal diagnostics, and historical queue wording corrections. Focused regressions went RED on both old generic messages and GREEN on the contextual diagnostics; fresh complete-diff re-review returned `APPROVED`. The canonical gate passed formatting, warning-denied Clippy, all 1,598 local and rebuilt-Docker tests, runtime output `10`, local/Cargo/container version `cust 0.31.0`, and the diff check.
 
 ## 2026-08-13 — Direct one-dimensional `double` array implementation decisions

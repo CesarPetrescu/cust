@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.32.0 — 2026-08-14
+
+### Language subset
+
+- Extended bounded `double` storage to direct scalar fields in supported structs and unions. Positional/designated initialization, direct/indexed/arrow/nested reads, replacement/compound/prefix/postfix updates, aggregate copies and function boundaries, deterministic field `sizeof`, recursive const protection, and shared scalar-union bits preserve Cust's deterministic double representation.
+
+### Diagnostics and verification
+
+- Retained the unsupported direct-double-pointer, one-dimensional-double-array aggregate-field, multidimensional-double-array, raw-memory-view, and mixed non-scalar-union boundaries. Review-driven RED/GREEN completed aggregate expression routing for nested fields reached through indexed and arrow expressions. Focused interpreter/invalid fixtures and a warning-free ABI-independent GCC/Clang compiler oracle cover the slice.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.32.0`.
+- Reconciled an executable inventory of 1,642 tests: 1,507 interpreter tests, 99 deterministic fuzz-safety tests, 32 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- The bounded `double` slice supports direct scalar storage, expressions and function boundaries, direct one-dimensional arrays, and direct scalar aggregate fields. `float`, `long double`, hexadecimal/suffixed/non-finite floating literals, double typedef aliases, double pointers and ordinary array decay, address-taking or dereference, double-array parameters and compound literals, multidimensional or aggregate-field double arrays, raw-memory operations over double storage, and unions mixing double storage with non-scalar layouts remain unsupported. Complex runtime values, host floating ABI/promotion behavior, general pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
+
 ## v0.31.0 — 2026-08-13
 
 ### Language subset
