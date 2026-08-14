@@ -851,6 +851,26 @@ enum ArrayInitializer {
 type Array2DInitializer = Vec<Vec<ArrayInitializer>>;
 
 impl StructFieldType {
+    fn contains_double_storage(&self, struct_types: &HashMap<String, StructTypeDef>) -> bool {
+        match self {
+            StructFieldType::Scalar(CType::Double)
+            | StructFieldType::Array(CType::Double, _)
+            | StructFieldType::Array2D(CType::Double, _, _) => true,
+            StructFieldType::Struct(type_name) | StructFieldType::StructArray(type_name, _) => {
+                struct_types.get(type_name).is_some_and(|aggregate| {
+                    aggregate
+                        .fields
+                        .iter()
+                        .any(|field| field.ty.contains_double_storage(struct_types))
+                })
+            }
+            StructFieldType::Scalar(_)
+            | StructFieldType::Array(_, _)
+            | StructFieldType::Array2D(_, _, _)
+            | StructFieldType::Pointer(_) => false,
+        }
+    }
+
     fn size(&self, struct_types: &HashMap<String, StructTypeDef>) -> CustResult<i64> {
         match self {
             StructFieldType::Scalar(ty) => Ok(ty.size()),
@@ -12583,8 +12603,8 @@ impl Parser {
                 _ => false,
             };
             let leading_const = leading_const || alias_const;
-            let field_type_token = self.peek_located().clone();
-            let decl_type = if matches!(self.peek(), Token::Struct | Token::Union) {
+            let (embedded_const, decl_type) = if matches!(self.peek(), Token::Struct | Token::Union)
+            {
                 if matches!(self.peek_next(), Token::LBrace)
                     || matches!(
                         self.tokens.get(self.pos + 2).map(|token| &token.kind),
@@ -12593,7 +12613,7 @@ impl Parser {
                 {
                     let (field_internal_type_name, _, _) =
                         self.parse_aggregate_definition_body(false, true)?;
-                    DeclType::Struct(field_internal_type_name)
+                    (false, DeclType::Struct(field_internal_type_name))
                 } else {
                     let field_kind = match self.advance().kind {
                         Token::Struct => AggregateKind::Struct,
@@ -12610,17 +12630,13 @@ impl Parser {
                             "undefined {field_keyword} type '{field_type_name}'"
                         )));
                     };
-                    DeclType::Struct(field_internal_type_name)
+                    (false, DeclType::Struct(field_internal_type_name))
                 }
             } else {
-                self.parse_decl_type(&format!("{keyword} field type"))?
+                self.parse_decl_type_with_embedded_qualifiers(&format!("{keyword} field type"))?
             };
-            if matches!(decl_type, DeclType::Scalar(CType::Double)) {
-                return Err(Self::error_at(
-                    "double aggregate fields are not supported".to_string(),
-                    &field_type_token,
-                ));
-            }
+            let leading_const = leading_const || embedded_const;
+            let is_double_field_base = matches!(decl_type, DeclType::Scalar(CType::Double));
             loop {
                 let has_explicit_star = self.matches(&Token::Star);
                 let post_star_const = has_explicit_star && self.consume_type_qualifiers();
@@ -12631,6 +12647,12 @@ impl Parser {
                     ));
                 }
                 let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer { .. });
+                if is_double_field_base && is_pointer {
+                    return Err(Self::error_at(
+                        "double pointers are not supported".to_string(),
+                        self.previous(),
+                    ));
+                }
                 let (is_const, points_to_const) = if is_pointer {
                     if has_explicit_star {
                         (post_star_const, leading_const)
@@ -12711,6 +12733,12 @@ impl Parser {
                     ));
                 }
                 let ty = if self.matches(&Token::LBracket) {
+                    if is_double_field_base {
+                        return Err(Self::error_at(
+                            "double aggregate array fields are not supported".to_string(),
+                            self.previous(),
+                        ));
+                    }
                     if self.check(&Token::RBracket) {
                         return Err(Self::error_at(
                             "flexible array aggregate fields are not supported".to_string(),
@@ -12780,6 +12808,19 @@ impl Parser {
             self.expect_semicolon_after("struct field declaration")?;
         }
         self.expect(Token::RBrace)?;
+        if kind == AggregateKind::Union
+            && fields.len() > 1
+            && fields
+                .iter()
+                .any(|field| field.ty.contains_double_storage(&self.struct_types))
+            && fields
+                .iter()
+                .any(|field| !matches!(field.ty, StructFieldType::Scalar(_)))
+        {
+            return Err(CustError::new(
+                "unions with double storage and non-scalar fields are not supported",
+            ));
+        }
         if require_semicolon {
             self.expect_semicolon_after(&format!("{keyword} declaration"))?;
         }
@@ -18210,6 +18251,21 @@ impl StructFieldValue {
         }
     }
 
+    fn contains_const(&self) -> bool {
+        self.is_const()
+            || match self {
+                StructFieldValue::Struct { fields, .. } => {
+                    fields.values().any(StructFieldValue::contains_const)
+                }
+                StructFieldValue::StructArray { elements, .. } => elements
+                    .iter()
+                    .any(|fields| fields.values().any(StructFieldValue::contains_const)),
+                StructFieldValue::Scalar { .. }
+                | StructFieldValue::Array { .. }
+                | StructFieldValue::Pointer { .. } => false,
+            }
+    }
+
     fn mark_embedded_arrays_read_only(fields: &mut HashMap<String, StructFieldValue>) {
         for field in fields.values_mut() {
             match field {
@@ -18606,6 +18662,82 @@ impl Interpreter {
                             matches!(pointee, Some(PointeeType::Scalar(CType::Double)))
                         })
             }
+            Expr::StructGet { name, fields }
+            | Expr::StructSet { name, fields, .. }
+            | Expr::StructCompoundSet { name, fields, .. } => match self.find_variable(name) {
+                Some(Value::Struct { type_name, .. })
+                | Some(Value::StructArray { type_name, .. }) => self
+                    .generic_aggregate_field_type(type_name, fields)
+                    .is_ok_and(|field_type| matches!(field_type, DeclType::Scalar(CType::Double))),
+                _ => false,
+            },
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            }
+            | Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructElementCompoundSet {
+                name,
+                index,
+                fields,
+                ..
+            } => self
+                .struct_element_expr_scalar_field_type(name, index, fields)
+                .is_ok_and(|ty| ty == Some(CType::Double)),
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            }
+            | Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructFieldArrayElementCompoundSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            } => self
+                .struct_field_array_element_field_metadata(name, array_fields, index, fields)
+                .is_ok_and(|metadata| {
+                    metadata.is_some_and(|(field_type, _, _)| {
+                        matches!(field_type, StructFieldType::Scalar(CType::Double))
+                    })
+                }),
+            Expr::StructPtrGet { pointer, fields }
+            | Expr::StructPtrSet {
+                pointer, fields, ..
+            }
+            | Expr::StructPtrCompoundSet {
+                pointer, fields, ..
+            } => match self.pointer_expr_pointee_type(pointer) {
+                Ok(Some(PointeeType::Struct(type_name))) => self
+                    .generic_aggregate_field_type(&type_name, fields)
+                    .is_ok_and(|field_type| matches!(field_type, DeclType::Scalar(CType::Double))),
+                _ => false,
+            },
+            Expr::AggregateFieldGet { aggregate, fields }
+            | Expr::AggregateFieldSet {
+                aggregate, fields, ..
+            }
+            | Expr::AggregateFieldCompoundSet {
+                aggregate, fields, ..
+            } => self
+                .aggregate_expr_type_name(aggregate)
+                .and_then(|type_name| self.generic_aggregate_field_type(&type_name, fields))
+                .is_ok_and(|field_type| matches!(field_type, DeclType::Scalar(CType::Double))),
             Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) => self.expr_is_double_value(inner),
             Expr::Increment { target, .. } => self.expr_is_double_value(target),
             Expr::Binary(
@@ -18653,34 +18785,19 @@ impl Interpreter {
             | Expr::ArrayLiteral { .. }
             | Expr::AggregateArrayLiteral { .. }
             | Expr::PointerCast { .. }
-            | Expr::StructGet { .. }
             | Expr::StructArrayGet { .. }
-            | Expr::StructFieldArrayElementGet { .. }
-            | Expr::StructFieldArrayElementSet { .. }
-            | Expr::StructFieldArrayElementCompoundSet { .. }
-            | Expr::StructElementGet { .. }
             | Expr::StructElementArrayGet { .. }
             | Expr::StructPtrArrayGet { .. }
-            | Expr::StructPtrGet { .. }
-            | Expr::AggregateFieldGet { .. }
-            | Expr::AggregateFieldSet { .. }
-            | Expr::AggregateFieldCompoundSet { .. }
             | Expr::Array2DSet { .. }
             | Expr::Array2DCompoundSet { .. }
             | Expr::StructArray2DSet { .. }
             | Expr::StructArray2DCompoundSet { .. }
             | Expr::StructArraySet { .. }
             | Expr::StructArrayCompoundSet { .. }
-            | Expr::StructElementSet { .. }
             | Expr::StructElementArraySet { .. }
-            | Expr::StructElementCompoundSet { .. }
             | Expr::StructElementArrayCompoundSet { .. }
             | Expr::DerefSet { .. }
             | Expr::DerefCompoundSet { .. }
-            | Expr::StructSet { .. }
-            | Expr::StructPtrSet { .. }
-            | Expr::StructCompoundSet { .. }
-            | Expr::StructPtrCompoundSet { .. }
             | Expr::Deref(_)
             | Expr::Array2DGet { .. }
             | Expr::StructArray2DGet { .. }
@@ -18715,6 +18832,31 @@ impl Interpreter {
             Expr::AddressOfScalarLiteral {
                 ty: CType::Double, ..
             } => true,
+            Expr::AddressOfStructField { name, fields } => match self.find_variable(name) {
+                Some(Value::Struct { type_name, .. })
+                | Some(Value::StructArray { type_name, .. }) => self
+                    .generic_aggregate_field_type(type_name, fields)
+                    .is_ok_and(|field_type| matches!(field_type, DeclType::Scalar(CType::Double))),
+                _ => false,
+            },
+            Expr::AddressOfStructElementField {
+                name,
+                index,
+                fields,
+            } => self
+                .struct_element_expr_scalar_field_type(name, index, fields)
+                .is_ok_and(|ty| ty == Some(CType::Double)),
+            Expr::AddressOfStructPtrField { pointer, fields } => self
+                .struct_pointer_expr_field_metadata(pointer, fields)
+                .is_ok_and(|metadata| {
+                    metadata.is_some_and(|(field_type, _, _)| {
+                        matches!(field_type, StructFieldType::Scalar(CType::Double))
+                    })
+                }),
+            Expr::AddressOfAggregateField { aggregate, fields } => self
+                .aggregate_expr_type_name(aggregate)
+                .and_then(|type_name| self.generic_aggregate_field_type(&type_name, fields))
+                .is_ok_and(|field_type| matches!(field_type, DeclType::Scalar(CType::Double))),
             Expr::Deref(pointer)
             | Expr::DerefSet { pointer, .. }
             | Expr::DerefCompoundSet { pointer, .. } => {
@@ -21028,6 +21170,11 @@ impl Interpreter {
                         "function '{name}' does not yet support pointer fields in whole-struct object storage for argument {argument}"
                     )));
                 }
+                StructFieldType::Scalar(CType::Double) => {
+                    return Err(CustError::new(format!(
+                        "function '{name}' does not yet support double object storage for argument {argument}"
+                    )));
+                }
                 StructFieldType::Scalar(_)
                 | StructFieldType::Array(_, _)
                 | StructFieldType::Array2D(_, _, _) => {}
@@ -21059,6 +21206,11 @@ impl Interpreter {
                 StructFieldType::Pointer(_) => {
                     return Err(CustError::new(
                         "character pointer casts do not support pointer fields in whole-struct object storage",
+                    ));
+                }
+                StructFieldType::Scalar(CType::Double) => {
+                    return Err(CustError::new(
+                        "character pointer casts do not support double object storage",
                     ));
                 }
                 StructFieldType::Scalar(_)
@@ -22564,7 +22716,7 @@ impl Interpreter {
                 args.len()
             )));
         }
-        for argument in &args[..2] {
+        for (index, argument) in args[..2].iter().enumerate() {
             if !self.expr_is_pointer_value(argument)
                 && !self.generic_expr_is_null_pointer_constant(argument)
             {
@@ -22572,6 +22724,7 @@ impl Interpreter {
                     "function '{name}' requires pointer input arguments"
                 )));
             }
+            self.validate_non_evaluating_memory_double_storage(name, index + 1, argument)?;
             self.sizeof_expr(argument)?;
         }
         if self.expr_is_pointer_value(&args[2])
@@ -22600,6 +22753,7 @@ impl Interpreter {
                 "function '{name}' requires a pointer input argument"
             )));
         }
+        self.validate_non_evaluating_memory_double_storage(name, 1, &args[0])?;
         self.sizeof_expr(&args[0])?;
         if self.expr_is_pointer_value(&args[1])
             || self.aggregate_expr_type_name(&args[1]).is_ok()
@@ -22629,7 +22783,7 @@ impl Interpreter {
                 args.len()
             )));
         }
-        for argument in &args[..2] {
+        for (index, argument) in args[..2].iter().enumerate() {
             if !self.expr_is_pointer_value(argument)
                 && !self.generic_expr_is_null_pointer_constant(argument)
             {
@@ -22637,6 +22791,7 @@ impl Interpreter {
                     "function '{name}' requires pointer destination and source arguments"
                 )));
             }
+            self.validate_non_evaluating_memory_double_storage(name, index + 1, argument)?;
             self.sizeof_expr(argument)?;
         }
         if !self.generic_expr_is_null_pointer_constant(&args[0])
@@ -22672,6 +22827,7 @@ impl Interpreter {
                 "function '{name}' requires a pointer destination argument"
             )));
         }
+        self.validate_non_evaluating_memory_double_storage(name, 1, &args[0])?;
         self.sizeof_expr(&args[0])?;
         if !self.generic_expr_is_null_pointer_constant(&args[0])
             && self.pointer_expr_points_to_const(&args[0])
@@ -22699,6 +22855,35 @@ impl Interpreter {
         }
         self.sizeof_expr(&args[2])?;
         Ok(POINTER_SIZE)
+    }
+
+    fn validate_non_evaluating_memory_double_storage(
+        &self,
+        name: &str,
+        argument: usize,
+        expr: &Expr,
+    ) -> CustResult<()> {
+        if let Expr::PointerCast { expr, .. } = expr {
+            return self.validate_non_evaluating_memory_double_storage(name, argument, expr);
+        }
+        let has_double_storage = self.expr_is_unsupported_double_pointer(expr)
+            || match self.pointer_expr_pointee_type(expr)? {
+                Some(PointeeType::Struct(type_name)) => {
+                    self.struct_types.get(&type_name).is_some_and(|aggregate| {
+                        aggregate
+                            .fields
+                            .iter()
+                            .any(|field| field.ty.contains_double_storage(&self.struct_types))
+                    })
+                }
+                Some(PointeeType::Void | PointeeType::Scalar(_)) | None => false,
+            };
+        if has_double_storage {
+            return Err(CustError::new(format!(
+                "function '{name}' does not yet support double object storage for argument {argument}"
+            )));
+        }
+        Ok(())
     }
 
     fn unsupported_string_copy_declaration_error(name: &str) -> CustError {
@@ -23889,7 +24074,9 @@ impl Interpreter {
             | Expr::DerefSet { .. }
             | Expr::Assign { .. }
             | Expr::StructSet { .. }
+            | Expr::StructPtrGet { .. }
             | Expr::StructPtrSet { .. }
+            | Expr::StructElementGet { .. }
             | Expr::ArraySet { .. }
             | Expr::StructArraySet { .. }
             | Expr::StructElementArrayGet { .. }
@@ -24624,17 +24811,21 @@ impl Interpreter {
         aggregate: &Expr,
         path: &[String],
     ) -> CustResult<Option<(StructFieldType, bool, bool)>> {
-        let Expr::AggregateLiteral {
-            type_name,
-            read_only,
-            ..
-        } = aggregate
-        else {
-            return Ok(None);
+        if matches!(aggregate, Expr::GenericSelection { .. }) {
+            return self.aggregate_literal_field_metadata(
+                self.selected_generic_association(aggregate)?,
+                path,
+            );
+        }
+        let mut path_is_const = match aggregate {
+            Expr::AggregateLiteral { read_only, .. } => *read_only,
+            Expr::Var(name) => self.is_const_variable(name),
+            Expr::Call { .. } => false,
+            _ => return Ok(None),
         };
-        let mut current_type_name = type_name;
+        let mut current_type_name = self.aggregate_expr_type_name(aggregate)?;
         for (index, field_name) in path.iter().enumerate() {
-            let Some(struct_type) = self.struct_types.get(current_type_name) else {
+            let Some(struct_type) = self.struct_types.get(&current_type_name) else {
                 return Err(CustError::new(format!(
                     "undefined struct type '{current_type_name}'"
                 )));
@@ -24646,15 +24837,16 @@ impl Interpreter {
             else {
                 return Ok(None);
             };
+            path_is_const |= field.is_const;
             if index + 1 == path.len() {
                 return Ok(Some((
                     field.ty.clone(),
-                    field.is_const || *read_only,
+                    path_is_const,
                     field.points_to_const,
                 )));
             }
             match &field.ty {
-                StructFieldType::Struct(nested_type) => current_type_name = nested_type,
+                StructFieldType::Struct(nested_type) => current_type_name = nested_type.clone(),
                 _ => return Ok(None),
             }
         }
@@ -24858,7 +25050,7 @@ impl Interpreter {
                 match expr {
                     Expr::AddressOfStructPtrArrayField { index, .. }
                     | Expr::StructPtrArrayGet { index, .. } => {
-                        self.validate_array_subscript(index)?;
+                        self.validate_struct_pointer_array_subscript(pointer, fields, index)?;
                     }
                     _ => {}
                 }
@@ -26663,10 +26855,18 @@ impl Interpreter {
         type_name: &str,
         path: &[String],
     ) -> Option<String> {
+        Self::const_aggregate_field_label_for_path_in(&self.struct_types, type_name, path)
+    }
+
+    fn const_aggregate_field_label_for_path_in(
+        struct_types: &HashMap<String, StructTypeDef>,
+        type_name: &str,
+        path: &[String],
+    ) -> Option<String> {
         let mut current_type = type_name;
         let mut traversed = Vec::new();
         for field_name in path {
-            let struct_type = self.struct_types.get(current_type)?;
+            let struct_type = struct_types.get(current_type)?;
             let field = struct_type
                 .fields
                 .iter()
@@ -26685,6 +26885,23 @@ impl Interpreter {
             }
         }
         None
+    }
+
+    fn aggregate_literal_const_field_label(&self, aggregate: &Expr, path: &[String]) -> String {
+        match aggregate {
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(aggregate)
+                .map(|selected| self.aggregate_literal_const_field_label(selected, path))
+                .unwrap_or_else(|_| Self::field_path_label(path).to_string()),
+            Expr::AggregateLiteral {
+                type_name,
+                read_only: false,
+                ..
+            } => self
+                .const_aggregate_field_label_for_path(type_name, path)
+                .unwrap_or_else(|| Self::field_path_label(path).to_string()),
+            _ => Self::field_path_label(path).to_string(),
+        }
     }
 
     fn ensure_struct_pointer_target_mutable(&self, pointer: &PointerValue) -> CustResult<()> {
@@ -28043,6 +28260,31 @@ impl Interpreter {
         self.aggregate_type_field_metadata(type_name, path)
     }
 
+    fn struct_element_expr_scalar_field_type(
+        &self,
+        name: &str,
+        index: &Expr,
+        path: &[String],
+    ) -> CustResult<Option<CType>> {
+        if let Some(pointee) = self.scalar_variable_reverse_subscript_pointee_type(name, index)? {
+            return match pointee {
+                PointeeType::Struct(type_name) => {
+                    match self.generic_aggregate_field_type(&type_name, path)? {
+                        DeclType::Scalar(ty) => Ok(Some(ty)),
+                        _ => Ok(None),
+                    }
+                }
+                PointeeType::Scalar(_) | PointeeType::Void => Ok(None),
+            };
+        }
+        Ok(self
+            .struct_element_field_metadata(name, path)?
+            .and_then(|(field_type, _, _)| match field_type {
+                StructFieldType::Scalar(ty) => Some(ty),
+                _ => None,
+            }))
+    }
+
     fn struct_pointer_field_decays_to_pointer(&self, pointer: &Expr, path: &[String]) -> bool {
         let Ok(Some(PointeeType::Struct(mut current_type_name))) =
             self.pointer_expr_pointee_type(pointer)
@@ -28988,6 +29230,26 @@ impl Interpreter {
                 CustError::new(format!("variable '{name}' is not a struct pointer"))
             });
         }
+        if matches!(self.find_variable(name), Some(Value::Scalar { .. })) {
+            let pointer = self
+                .indexed_struct_pointer(name, index)?
+                .ok_or_else(|| CustError::new("subscript pointer does not reference a struct"))?;
+            if let Expr::Var(pointer_name) = index
+                && matches!(
+                    self.find_variable(pointer_name),
+                    Some(Value::StructArray {
+                        read_only: true,
+                        ..
+                    })
+                )
+            {
+                return Err(CustError::new(format!(
+                    "cannot assign to const variable '{pointer_name}'"
+                )));
+            }
+            self.ensure_reverse_subscript_pointee_mutable(index)?;
+            return Ok(pointer);
+        }
         self.ensure_variable_mutable(name)?;
         self.find_struct_element_pointer(name, index)
     }
@@ -29408,18 +29670,20 @@ impl Interpreter {
         if self.struct_field_points_to_const(scope_id, name, element_index, fields)? {
             return Err(CustError::new("cannot assign through pointer to const"));
         }
-        match self.struct_field_by_scope_mut(scope_id, name, element_index, fields)? {
-            StructFieldValue::Scalar {
-                value: slot, ty, ..
-            } => {
-                *slot = ty.normalize(value);
-                Ok(())
-            }
-            _ => Err(CustError::new(format!(
-                "struct field '{}' used as non-scalar pointer target",
-                Self::field_path_label(fields)
-            ))),
-        }
+        let root = match element_index {
+            Some(index) => PointerValue::StructElement {
+                scope_id,
+                name: name.to_string(),
+                index,
+            },
+            None => PointerValue::Struct {
+                scope_id,
+                name: name.to_string(),
+            },
+        };
+        let struct_types = self.struct_types.clone();
+        let (type_name, root_fields) = self.find_struct_pointer_fields_mut(&root)?;
+        Self::assign_scalar_field_in_map(&struct_types, &type_name, root_fields, fields, value)
     }
 
     fn assign_struct_field_element_field_pointer(
@@ -29474,71 +29738,6 @@ impl Interpreter {
                         Self::field_path_label(path)
                     ))),
                 }
-            }
-            Some(_) => Err(CustError::new(format!(
-                "variable '{name}' is not a struct array"
-            ))),
-            None => Err(CustError::new(format!("undefined variable '{name}'"))),
-        }
-    }
-
-    fn assign_struct_element_field(
-        &mut self,
-        name: &str,
-        index: &Expr,
-        path: &[String],
-        value: i64,
-    ) -> CustResult<()> {
-        if let Some(pointer) = self.indexed_struct_pointer(name, index)? {
-            if matches!(self.find_variable(name), Some(Value::Scalar { .. })) {
-                let direct_const_array = match index {
-                    Expr::Var(pointer_name)
-                        if matches!(
-                            self.find_variable(pointer_name),
-                            Some(Value::StructArray {
-                                read_only: true,
-                                ..
-                            })
-                        ) =>
-                    {
-                        Some(pointer_name)
-                    }
-                    _ => None,
-                };
-                if let Some(pointer_name) = direct_const_array {
-                    return Err(CustError::new(format!(
-                        "cannot assign to const variable '{pointer_name}'"
-                    )));
-                }
-                if self.pointer_expr_points_to_const(index) {
-                    return Err(CustError::new("cannot assign through pointer to const"));
-                }
-            } else if self.pointer_variable_points_to_const(name) {
-                return Err(CustError::new("cannot assign through pointer to const"));
-            }
-            return self.assign_struct_pointer_field(&pointer, path, value);
-        }
-        self.ensure_variable_mutable(name)?;
-        let index = self.checked_struct_element_index(name, index)?;
-        let struct_types = self.struct_types.clone();
-        match self.find_variable_mut(name) {
-            Some(Value::StructArray {
-                type_name,
-                elements,
-                read_only,
-            }) => {
-                if *read_only {
-                    return Err(CustError::new(format!(
-                        "cannot assign to const variable '{name}'"
-                    )));
-                }
-                Self::assign_scalar_field_in_map(
-                    &struct_types,
-                    type_name,
-                    &mut elements[index],
-                    path,
-                    value,
-                )
             }
             Some(_) => Err(CustError::new(format!(
                 "variable '{name}' is not a struct array"
@@ -30158,7 +30357,7 @@ impl Interpreter {
         let struct_types = self.struct_types.clone();
         match self.find_variable_mut(name) {
             Some(Value::Struct { type_name, fields }) if *type_name == rhs_type => {
-                if fields.values().any(StructFieldValue::is_const) {
+                if fields.values().any(StructFieldValue::contains_const) {
                     return Err(CustError::new(format!(
                         "cannot assign to struct '{type_name}' with const fields"
                     )));
@@ -30187,6 +30386,13 @@ impl Interpreter {
         rhs_type: String,
         rhs_fields: HashMap<String, StructFieldValue>,
     ) -> CustResult<ReturnValue> {
+        if let Some(field) =
+            Self::const_aggregate_field_label_for_path_in(struct_types, root_type_name, path)
+        {
+            return Err(CustError::new(format!(
+                "cannot assign to const struct field '{field}'"
+            )));
+        }
         let (_, target) = Self::nested_field_value_mut(root_type_name, fields, path)?;
         match target {
             StructFieldValue::Struct {
@@ -30200,7 +30406,7 @@ impl Interpreter {
                         Self::field_path_label(path)
                     )));
                 }
-                if fields.values().any(StructFieldValue::is_const) {
+                if fields.values().any(StructFieldValue::contains_const) {
                     return Err(CustError::new(format!(
                         "cannot assign to struct '{type_name}' with const fields"
                     )));
@@ -30318,7 +30524,7 @@ impl Interpreter {
                     Self::aggregate_label_from(&struct_types, &target_type)
                 )));
             }
-            if target_fields.values().any(StructFieldValue::is_const) {
+            if target_fields.values().any(StructFieldValue::contains_const) {
                 return Err(CustError::new(format!(
                     "cannot assign to struct '{target_type}' with const fields"
                 )));
@@ -30344,7 +30550,10 @@ impl Interpreter {
                         "cannot modify read-only struct array '{name}'"
                     )));
                 }
-                if elements[index].values().any(StructFieldValue::is_const) {
+                if elements[index]
+                    .values()
+                    .any(StructFieldValue::contains_const)
+                {
                     return Err(CustError::new(format!(
                         "cannot assign to struct '{type_name}' with const fields"
                     )));
@@ -30382,6 +30591,13 @@ impl Interpreter {
         };
 
         self.ensure_variable_mutable(name)?;
+        if let Some(Value::Struct { type_name, .. }) = self.find_variable(name)
+            && let Some(field) = self.const_aggregate_field_label_for_path(type_name, fields)
+        {
+            return Err(CustError::new(format!(
+                "cannot assign to const struct field '{field}'"
+            )));
+        }
         let scope_id = self
             .find_variable_scope_id(name)
             .ok_or_else(|| CustError::new(format!("undefined variable '{name}'")))?;
@@ -30412,7 +30628,7 @@ impl Interpreter {
                 Self::aggregate_label_from(&struct_types, &target_type)
             )));
         }
-        if target_fields.values().any(StructFieldValue::is_const) {
+        if target_fields.values().any(StructFieldValue::contains_const) {
             return Err(CustError::new(format!(
                 "cannot assign to struct '{target_type}' with const fields"
             )));
@@ -30453,7 +30669,7 @@ impl Interpreter {
                 Self::aggregate_label_from(&struct_types, &target_type)
             )));
         }
-        if target_fields.values().any(StructFieldValue::is_const) {
+        if target_fields.values().any(StructFieldValue::contains_const) {
             return Err(CustError::new(format!(
                 "cannot assign to struct '{target_type}' with const fields"
             )));
@@ -30843,7 +31059,7 @@ impl Interpreter {
                 if is_const {
                     return Err(CustError::new(format!(
                         "cannot assign to const struct field '{}'",
-                        Self::field_path_label(fields)
+                        self.aggregate_literal_const_field_label(aggregate, fields)
                     )));
                 }
                 self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
@@ -30863,7 +31079,7 @@ impl Interpreter {
                 if is_const {
                     return Err(CustError::new(format!(
                         "cannot assign to const struct field '{}'",
-                        Self::field_path_label(fields)
+                        self.aggregate_literal_const_field_label(aggregate, fields)
                     )));
                 }
                 let offset = self.eval_pointer_offset(value)?;
@@ -32097,6 +32313,11 @@ impl Interpreter {
                 type_name,
                 fields: field_map,
             }) => match Self::nested_field_value(type_name, field_map, fields)?.1 {
+                StructFieldValue::Scalar {
+                    ty: CType::Double, ..
+                } => {
+                    return Err(CustError::new("array subscript requires an integer value"));
+                }
                 StructFieldValue::Scalar { value, .. } => *value,
                 StructFieldValue::Array { .. }
                 | StructFieldValue::Struct { .. }
@@ -32264,6 +32485,21 @@ impl Interpreter {
         }
         self.sizeof_expr(index)?;
         Ok(())
+    }
+
+    fn validate_struct_pointer_array_subscript(
+        &self,
+        pointer: &Expr,
+        fields: &[String],
+        index: &Expr,
+    ) -> CustResult<()> {
+        if matches!(
+            self.struct_pointer_expr_field_metadata(pointer, fields)?,
+            Some((StructFieldType::Scalar(CType::Double), _, _))
+        ) {
+            return Err(CustError::new("array subscript requires an integer value"));
+        }
+        self.validate_array_subscript(index)
     }
 
     fn eval_pointer_offset(&mut self, value: &Expr) -> CustResult<i64> {
@@ -33936,6 +34172,19 @@ impl Interpreter {
         }
     }
 
+    fn apply_typed_increment_op(current: i64, ty: CType, op: IncrementOp) -> i64 {
+        if ty == CType::Double {
+            let current = f64::from_bits(current as u64);
+            match op {
+                IncrementOp::Inc => current + 1.0,
+                IncrementOp::Dec => current - 1.0,
+            }
+            .to_bits() as i64
+        } else {
+            ty.normalize(Self::apply_increment_op(current, op))
+        }
+    }
+
     fn increment_result(current: i64, updated: i64, prefix: bool) -> i64 {
         if prefix { updated } else { current }
     }
@@ -33945,6 +34194,9 @@ impl Interpreter {
         aggregate: &Expr,
         path: &[String],
     ) -> CustResult<(i64, CType, bool)> {
+        let aggregate_field_is_const = self
+            .aggregate_literal_field_metadata(aggregate, path)?
+            .is_some_and(|(_, is_const, _)| is_const);
         match self.eval_struct_expr(aggregate)? {
             ReturnValue::Struct { type_name, fields } => {
                 let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
@@ -33953,7 +34205,7 @@ impl Interpreter {
                         value,
                         ty,
                         is_const,
-                    } => Ok((*value, *ty, *is_const)),
+                    } => Ok((*value, *ty, *is_const || aggregate_field_is_const)),
                     StructFieldValue::Array { .. }
                     | StructFieldValue::Struct { .. }
                     | StructFieldValue::StructArray { .. }
@@ -34124,18 +34376,22 @@ impl Interpreter {
         fields: &[String],
         pointer_expr: &Expr,
     ) -> CustResult<Option<PointeeType>> {
-        let is_scalar_field = match self.find_variable(name) {
+        let scalar_field_type = match self.find_variable(name) {
             Some(Value::Struct {
                 type_name,
                 fields: field_map,
-            }) => matches!(
-                Self::nested_field_value(type_name, field_map, fields)?.1,
-                StructFieldValue::Scalar { .. }
-            ),
-            Some(_) | None => false,
+            }) => match Self::nested_field_value(type_name, field_map, fields)?.1 {
+                StructFieldValue::Scalar { ty, .. } => Some(*ty),
+                _ => None,
+            },
+            Some(_) | None => None,
         };
-        if !is_scalar_field {
-            return Ok(None);
+        match scalar_field_type {
+            Some(CType::Double) => {
+                return Err(CustError::new("array subscript requires an integer value"));
+            }
+            Some(_) => {}
+            None => return Ok(None),
         }
         self.reverse_subscript_pointee_type(pointer_expr).map(Some)
     }
@@ -34245,6 +34501,193 @@ impl Interpreter {
         Ok(())
     }
 
+    fn validate_non_evaluating_aggregate_lvalue_mutable(&self, target: &Expr) -> CustResult<()> {
+        let validate_path = |type_name: &str, fields: &[String]| {
+            if let Some(field) = self.const_aggregate_field_label_for_path(type_name, fields) {
+                return Err(CustError::new(format!(
+                    "cannot assign to const struct field '{field}'"
+                )));
+            }
+            Ok(())
+        };
+        match target {
+            Expr::StructGet { name, fields }
+            | Expr::StructSet { name, fields, .. }
+            | Expr::StructCompoundSet { name, fields, .. } => {
+                self.ensure_variable_mutable(name)?;
+                if let Some(Value::Struct { type_name, .. }) = self.find_variable(name) {
+                    validate_path(type_name, fields)?;
+                }
+            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            }
+            | Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructElementCompoundSet {
+                name,
+                index,
+                fields,
+                ..
+            } => {
+                let type_name = match self.find_variable(name) {
+                    Some(Value::StructArray {
+                        type_name,
+                        read_only,
+                        ..
+                    }) => {
+                        if *read_only || self.is_const_variable(name) {
+                            return Err(CustError::new(format!(
+                                "cannot assign to const variable '{name}'"
+                            )));
+                        }
+                        Some(type_name.clone())
+                    }
+                    Some(Value::Pointer {
+                        ty: PointeeType::Struct(type_name),
+                        points_to_const,
+                        ..
+                    }) => {
+                        if *points_to_const {
+                            return Err(CustError::new("cannot assign through pointer to const"));
+                        }
+                        Some(type_name.clone())
+                    }
+                    Some(Value::Scalar { .. }) => {
+                        if let Expr::Var(pointer_name) = index.as_ref()
+                            && matches!(
+                                self.find_variable(pointer_name),
+                                Some(Value::StructArray {
+                                    read_only: true,
+                                    ..
+                                })
+                            )
+                        {
+                            return Err(CustError::new(format!(
+                                "cannot assign to const variable '{pointer_name}'"
+                            )));
+                        }
+                        self.ensure_reverse_subscript_pointee_mutable(index)?;
+                        match self.scalar_variable_reverse_subscript_pointee_type(name, index)? {
+                            Some(PointeeType::Struct(type_name)) => Some(type_name),
+                            Some(PointeeType::Scalar(_) | PointeeType::Void) | None => None,
+                        }
+                    }
+                    Some(Value::Pointer { .. } | Value::Struct { .. } | Value::Array(_)) | None => {
+                        None
+                    }
+                };
+                if let Some(type_name) = type_name {
+                    validate_path(&type_name, fields)?;
+                }
+            }
+            Expr::StructPtrGet { pointer, fields }
+            | Expr::StructPtrSet {
+                pointer, fields, ..
+            }
+            | Expr::StructPtrCompoundSet {
+                pointer, fields, ..
+            } => {
+                self.ensure_pointer_expr_pointee_mutable(pointer)?;
+                if let Some(PointeeType::Struct(type_name)) =
+                    self.pointer_expr_pointee_type(pointer)?
+                {
+                    validate_path(&type_name, fields)?;
+                }
+            }
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            }
+            | Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructFieldArrayElementCompoundSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            } => {
+                if let Some(PointeeType::Struct(type_name)) =
+                    self.scalar_field_reverse_subscript_pointee_type(name, array_fields, index)?
+                {
+                    self.ensure_reverse_subscript_pointee_mutable(index)?;
+                    validate_path(&type_name, fields)?;
+                } else if self.struct_field_is_pointer(name, array_fields) {
+                    if self.struct_pointer_field_points_to_const(name, array_fields) {
+                        return Err(CustError::new("cannot assign through pointer to const"));
+                    }
+                } else {
+                    self.ensure_variable_mutable(name)?;
+                    if let Some(Value::Struct { type_name, .. }) = self.find_variable(name) {
+                        validate_path(type_name, array_fields)?;
+                        if let Some((StructFieldType::StructArray(element_type, _), _, _)) =
+                            self.aggregate_type_field_metadata(type_name, array_fields)?
+                        {
+                            validate_path(&element_type, fields)?;
+                        }
+                    }
+                }
+            }
+            Expr::AggregateFieldGet { aggregate, fields }
+            | Expr::AggregateFieldSet {
+                aggregate, fields, ..
+            }
+            | Expr::AggregateFieldCompoundSet {
+                aggregate, fields, ..
+            } => {
+                if self
+                    .aggregate_literal_field_metadata(aggregate, fields)?
+                    .is_some_and(|(_, is_const, _)| is_const)
+                {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{}'",
+                        self.aggregate_literal_const_field_label(aggregate, fields)
+                    )));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn validate_non_evaluating_double_assignment(
+        &self,
+        target: &Expr,
+        value: &Expr,
+        op: Option<CompoundOp>,
+    ) -> CustResult<()> {
+        if self.expr_is_double_value(target) {
+            if self.expr_is_pointer_value(value) {
+                return Err(CustError::new(if op.is_some() {
+                    "cannot use pointer expression in double compound assignment"
+                } else {
+                    "cannot assign pointer expression to double value"
+                }));
+            }
+            if let Ok(type_name) = self.aggregate_expr_type_name(value) {
+                return Err(CustError::new(format!(
+                    "{} value used as scalar",
+                    self.aggregate_kind_label(&type_name)
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn validate_non_evaluating_array_initializers(
         &self,
         initializers: &[ArrayInitializer],
@@ -34306,12 +34749,82 @@ impl Interpreter {
         Ok(())
     }
 
+    fn validate_non_evaluating_struct_initializer_conversions(
+        &self,
+        type_name: &str,
+        initializers: &[StructInitializer],
+    ) -> CustResult<()> {
+        let fields = self
+            .struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        for initializer in initializers {
+            let StructInitializer::Designated { field, value } = initializer else {
+                continue;
+            };
+            let field = fields
+                .fields
+                .iter()
+                .find(|candidate| candidate.name == *field)
+                .ok_or_else(|| {
+                    CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+                })?;
+            match (&field.ty, value.as_ref()) {
+                (StructFieldType::Scalar(CType::Double), StructInitializer::Expr(expr)) => {
+                    if self.expr_is_pointer_value(expr) {
+                        return Err(CustError::new(
+                            "cannot assign pointer expression to double value",
+                        ));
+                    }
+                    if let Ok(type_name) = self.aggregate_expr_type_name(expr) {
+                        return Err(CustError::new(format!(
+                            "{} value used as scalar",
+                            self.aggregate_kind_label(&type_name)
+                        )));
+                    }
+                }
+                (StructFieldType::Struct(nested), StructInitializer::Struct(values)) => {
+                    self.validate_non_evaluating_struct_initializer_conversions(nested, values)?;
+                }
+                (
+                    StructFieldType::StructArray(nested, _),
+                    StructInitializer::StructArray(values),
+                ) => {
+                    for value in values {
+                        let values = match value {
+                            StructArrayInitializer::Element(values)
+                            | StructArrayInitializer::Designated { value: values, .. } => values,
+                        };
+                        self.validate_non_evaluating_struct_initializer_conversions(
+                            nested, values,
+                        )?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     fn sizeof_expr(&self, expr: &Expr) -> CustResult<i64> {
         let depth = self.sizeof_validation_depth.get();
         self.sizeof_validation_depth.set(depth + 1);
         let result = (|| {
             if depth == 0 {
                 self.validate_nested_string_intrinsic_calls(expr)?;
+            }
+            if matches!(
+                expr,
+                Expr::AddressOf(_)
+                    | Expr::AddressOfArray { .. }
+                    | Expr::AddressOfStructField { .. }
+                    | Expr::AddressOfStructElementField { .. }
+                    | Expr::AddressOfStructPtrField { .. }
+                    | Expr::AddressOfScalarLiteral { .. }
+                    | Expr::AddressOfAggregateField { .. }
+            ) && self.expr_is_unsupported_double_pointer(expr)
+            {
+                return Err(CustError::new("double pointers are not supported"));
             }
             match expr {
                 Expr::GenericSelection { .. } => {
@@ -34337,6 +34850,15 @@ impl Interpreter {
                     ..
                 } => {
                     self.validate_non_evaluating_struct_array_initializers(init)?;
+                    for initializer in init {
+                        let values = match initializer {
+                            StructArrayInitializer::Element(values)
+                            | StructArrayInitializer::Designated { value: values, .. } => values,
+                        };
+                        self.validate_non_evaluating_struct_initializer_conversions(
+                            type_name, values,
+                        )?;
+                    }
                     let len = len.unwrap_or_else(|| Self::infer_struct_array_initializer_len(init));
                     let element_size = self
                         .struct_types
@@ -34398,6 +34920,8 @@ impl Interpreter {
                 } => {
                     self.validate_array_subscript(index)?;
                     self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.validate_non_evaluating_double_assignment(expr, value, None)?;
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
                     match self.sizeof_scalar_field_reverse_subscript_field(
                         name,
                         array_fields,
@@ -34420,6 +34944,11 @@ impl Interpreter {
                 } => {
                     self.validate_array_subscript(index)?;
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
+                    if self.expr_is_double_value(expr) {
+                        Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                    }
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
                     match self.sizeof_scalar_field_reverse_subscript_field(
                         name,
                         array_fields,
@@ -34463,7 +34992,7 @@ impl Interpreter {
                     fields,
                     index,
                 } => {
-                    self.validate_array_subscript(index)?;
+                    self.validate_struct_pointer_array_subscript(pointer, fields, index)?;
                     let pointee = self.pointer_expr_pointee_type(&Expr::StructPtrGet {
                         pointer: pointer.clone(),
                         fields: fields.clone(),
@@ -34593,8 +35122,11 @@ impl Interpreter {
                     self.sizeof_expr(init)?;
                     Ok(POINTER_SIZE)
                 }
-                Expr::AddressOfAggregateLiteral { init, .. } => {
+                Expr::AddressOfAggregateLiteral {
+                    type_name, init, ..
+                } => {
                     self.validate_non_evaluating_struct_initializers(init)?;
+                    self.validate_non_evaluating_struct_initializer_conversions(type_name, init)?;
                     Ok(POINTER_SIZE)
                 }
                 Expr::AddressOfArray { index, .. }
@@ -34610,9 +35142,13 @@ impl Interpreter {
                     self.validate_array_subscript(array_index)?;
                     Ok(POINTER_SIZE)
                 }
-                Expr::AddressOfStructPtrArrayField { pointer, index, .. } => {
+                Expr::AddressOfStructPtrArrayField {
+                    pointer,
+                    fields,
+                    index,
+                } => {
                     self.sizeof_expr(pointer)?;
-                    self.validate_array_subscript(index)?;
+                    self.validate_struct_pointer_array_subscript(pointer, fields, index)?;
                     Ok(POINTER_SIZE)
                 }
                 Expr::AddressOfStructPtrField { pointer, .. } => {
@@ -34624,6 +35160,19 @@ impl Interpreter {
                 }
                 Expr::PointerCast { expr: inner, .. } if self.expr_is_double_value(inner) => {
                     Err(CustError::new("expected pointer expression"))
+                }
+                Expr::PointerCast {
+                    pointee: PointeeType::Scalar(CType::Char),
+                    expr: inner,
+                    ..
+                } => {
+                    self.sizeof_expr(inner)?;
+                    if let Some(PointeeType::Struct(type_name)) =
+                        self.pointer_expr_pointee_type(inner)?
+                    {
+                        self.validate_whole_struct_character_pointer_layout(&type_name)?;
+                    }
+                    Ok(POINTER_SIZE)
                 }
                 Expr::AddressOf(_)
                 | Expr::AddressOfStructField { .. }
@@ -34762,6 +35311,8 @@ impl Interpreter {
                     value,
                 } => {
                     self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.validate_non_evaluating_double_assignment(expr, value, None)?;
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
                     self.sizeof_struct_field(name, fields)
                 }
                 Expr::StructCompoundSet {
@@ -34771,6 +35322,11 @@ impl Interpreter {
                     value,
                 } => {
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
+                    if self.expr_is_double_value(expr) {
+                        Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                    }
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
                     self.sizeof_struct_field(name, fields)
                 }
                 Expr::StructArraySet {
@@ -34808,6 +35364,8 @@ impl Interpreter {
                 } => {
                     self.validate_array_subscript(index)?;
                     self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.validate_non_evaluating_double_assignment(expr, value, None)?;
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
                     match self
                         .sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?
                     {
@@ -34824,6 +35382,11 @@ impl Interpreter {
                 } => {
                     self.validate_array_subscript(index)?;
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
+                    if self.expr_is_double_value(expr) {
+                        Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                    }
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
                     match self
                         .sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?
                     {
@@ -34862,6 +35425,8 @@ impl Interpreter {
                     value,
                 } => {
                     self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.validate_non_evaluating_double_assignment(expr, value, None)?;
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
                     self.sizeof_struct_pointer_field(pointer, fields)
                 }
                 Expr::StructPtrCompoundSet {
@@ -34871,6 +35436,11 @@ impl Interpreter {
                     value,
                 } => {
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
+                    if self.expr_is_double_value(expr) {
+                        Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                    }
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
                     self.sizeof_struct_pointer_field(pointer, fields)
                 }
                 Expr::Increment { target, .. } => {
@@ -34889,7 +35459,9 @@ impl Interpreter {
                             "pointer to void arithmetic is not supported",
                         ));
                     }
-                    self.sizeof_expr(target)
+                    let size = self.sizeof_expr(target)?;
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(target)?;
+                    Ok(size)
                 }
                 Expr::VoidCast(_) => Err(CustError::new("void expression used as scalar")),
                 Expr::Cast {
@@ -34929,6 +35501,7 @@ impl Interpreter {
                     type_name, init, ..
                 } => {
                     self.validate_non_evaluating_struct_initializers(init)?;
+                    self.validate_non_evaluating_struct_initializer_conversions(type_name, init)?;
                     self.struct_types
                         .get(type_name)
                         .map(|struct_type| struct_type.size(&self.struct_types))
@@ -34947,7 +35520,10 @@ impl Interpreter {
                     fields,
                     value,
                 } => {
+                    self.sizeof_expr(aggregate)?;
                     self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.validate_non_evaluating_double_assignment(expr, value, None)?;
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
                     let type_name = self.aggregate_expr_type_name(aggregate)?;
                     self.sizeof_aggregate_field_type(&type_name, fields)
                 }
@@ -34957,7 +35533,13 @@ impl Interpreter {
                     op,
                     value,
                 } => {
+                    self.sizeof_expr(aggregate)?;
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
+                    if self.expr_is_double_value(expr) {
+                        Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                    }
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
                     let type_name = self.aggregate_expr_type_name(aggregate)?;
                     self.sizeof_aggregate_field_type(&type_name, fields)
                 }
@@ -35456,7 +36038,14 @@ impl Interpreter {
                     None => Err(CustError::new(format!("undefined variable '{name}'"))),
                 }
             }
-            Expr::StructPtrSet {
+            Expr::StructElementGet { name, fields, .. } => {
+                match self.struct_element_field_metadata(name, fields)? {
+                    Some((StructFieldType::Struct(type_name), _, _)) => Ok(type_name),
+                    _ => Err(CustError::new("expected struct expression")),
+                }
+            }
+            Expr::StructPtrGet { pointer, fields }
+            | Expr::StructPtrSet {
                 pointer, fields, ..
             } => match self.pointer_expr_pointee_type(pointer)? {
                 Some(PointeeType::Struct(type_name)) => {
@@ -36142,7 +36731,14 @@ impl Interpreter {
                 let pointer =
                     self.struct_field_array_element_assignment_pointer(name, array_fields, index)?;
                 let current = self.read_struct_pointer_field(&pointer, fields)?;
-                let updated = Self::apply_increment_op(current, op);
+                let ty = self
+                    .struct_field_array_element_field_metadata(name, array_fields, index, fields)?
+                    .and_then(|(field_type, _, _)| match field_type {
+                        StructFieldType::Scalar(ty) => Some(ty),
+                        _ => None,
+                    })
+                    .unwrap_or(CType::Int);
+                let updated = Self::apply_typed_increment_op(current, ty, op);
                 self.assign_struct_pointer_field(&pointer, fields, updated)?;
                 let updated = self.read_struct_pointer_field(&pointer, fields)?;
                 Ok(Self::increment_result(current, updated, prefix))
@@ -36152,10 +36748,14 @@ impl Interpreter {
                 index,
                 fields,
             } => {
-                let current = self.read_struct_element_field(name, index, fields)?;
-                let updated = Self::apply_increment_op(current, op);
-                self.assign_struct_element_field(name, index, fields, updated)?;
-                let updated = self.read_struct_element_field(name, index, fields)?;
+                let pointer = self.find_struct_element_assignment_pointer(name, index)?;
+                let current = self.read_struct_pointer_field(&pointer, fields)?;
+                let ty = self
+                    .struct_pointer_scalar_field_type(&pointer, fields)?
+                    .unwrap_or(CType::Int);
+                let updated = Self::apply_typed_increment_op(current, ty, op);
+                self.assign_struct_pointer_field(&pointer, fields, updated)?;
+                let updated = self.read_struct_pointer_field(&pointer, fields)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
             Expr::StructElementArrayGet {
@@ -36199,7 +36799,17 @@ impl Interpreter {
             }
             Expr::StructGet { name, fields } => {
                 let current = self.read_struct_field(name, fields)?;
-                let updated = Self::apply_increment_op(current, op);
+                let ty = match self.find_variable(name) {
+                    Some(Value::Struct { type_name, .. }) => self
+                        .aggregate_type_field_metadata(type_name, fields)?
+                        .and_then(|(field_type, _, _)| match field_type {
+                            StructFieldType::Scalar(ty) => Some(ty),
+                            _ => None,
+                        })
+                        .unwrap_or(CType::Int),
+                    _ => CType::Int,
+                };
+                let updated = Self::apply_typed_increment_op(current, ty, op);
                 self.assign_struct_field(name, fields, updated)?;
                 let updated = self.read_struct_field(name, fields)?;
                 Ok(Self::increment_result(current, updated, prefix))
@@ -36208,7 +36818,10 @@ impl Interpreter {
                 self.ensure_pointer_expr_pointee_mutable(pointer)?;
                 let pointer = self.eval_pointer(pointer)?;
                 let current = self.read_struct_pointer_field(&pointer, fields)?;
-                let updated = Self::apply_increment_op(current, op);
+                let ty = self
+                    .struct_pointer_scalar_field_type(&pointer, fields)?
+                    .unwrap_or(CType::Int);
+                let updated = Self::apply_typed_increment_op(current, ty, op);
                 self.assign_struct_pointer_field(&pointer, fields, updated)?;
                 let updated = self.read_struct_pointer_field(&pointer, fields)?;
                 Ok(Self::increment_result(current, updated, prefix))
@@ -36242,10 +36855,10 @@ impl Interpreter {
                 if is_const {
                     return Err(CustError::new(format!(
                         "cannot assign to const struct field '{}'",
-                        Self::field_path_label(fields)
+                        self.aggregate_literal_const_field_label(aggregate, fields)
                     )));
                 }
-                let updated = ty.normalize(Self::apply_increment_op(current, op));
+                let updated = Self::apply_typed_increment_op(current, ty, op);
                 Ok(Self::increment_result(current, updated, prefix))
             }
             _ => Err(CustError::new("invalid increment/decrement target")),
@@ -36587,6 +37200,74 @@ impl Interpreter {
                 Some(_) => Err(CustError::new(format!("variable '{name}' is not a struct"))),
                 None => Err(CustError::new(format!("undefined variable '{name}'"))),
             },
+            Expr::StructElementGet {
+                name,
+                index,
+                fields: path,
+            } => {
+                let (type_name, fields) =
+                    if let Some(pointer) = self.indexed_struct_pointer(name, index)? {
+                        let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
+                        (type_name, StructFieldValue::deep_clone_fields(fields))
+                    } else {
+                        let index = self.checked_struct_element_index(name, index)?;
+                        match self.find_variable(name).cloned() {
+                            Some(Value::StructArray {
+                                type_name,
+                                elements,
+                                ..
+                            }) => (
+                                type_name,
+                                StructFieldValue::deep_clone_fields(&elements[index]),
+                            ),
+                            Some(_) => {
+                                return Err(CustError::new(format!(
+                                    "variable '{name}' is not a struct array"
+                                )));
+                            }
+                            None => {
+                                return Err(CustError::new(format!("undefined variable '{name}'")));
+                            }
+                        }
+                    };
+                let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
+                match field_value {
+                    StructFieldValue::Struct {
+                        type_name, fields, ..
+                    } => Ok(ReturnValue::Struct {
+                        type_name: type_name.clone(),
+                        fields: StructFieldValue::deep_clone_fields(fields),
+                    }),
+                    StructFieldValue::Scalar { .. }
+                    | StructFieldValue::Array { .. }
+                    | StructFieldValue::StructArray { .. }
+                    | StructFieldValue::Pointer { .. } => {
+                        Err(CustError::new("expected struct expression"))
+                    }
+                }
+            }
+            Expr::StructPtrGet {
+                pointer,
+                fields: path,
+            } => {
+                let pointer = self.eval_pointer(pointer)?;
+                let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
+                let (_, field_value) = Self::nested_field_value(&type_name, fields, path)?;
+                match field_value {
+                    StructFieldValue::Struct {
+                        type_name, fields, ..
+                    } => Ok(ReturnValue::Struct {
+                        type_name: type_name.clone(),
+                        fields: StructFieldValue::deep_clone_fields(fields),
+                    }),
+                    StructFieldValue::Scalar { .. }
+                    | StructFieldValue::Array { .. }
+                    | StructFieldValue::StructArray { .. }
+                    | StructFieldValue::Pointer { .. } => {
+                        Err(CustError::new("expected struct expression"))
+                    }
+                }
+            }
             Expr::ArrayGet { name, index } => {
                 if let Some((type_name, fields)) = self.indexed_struct_pointer_value(name, index)? {
                     Ok(ReturnValue::Struct { type_name, fields })
@@ -37260,6 +37941,14 @@ impl Interpreter {
                     }
                     let pointer = self.eval_pointer(value)?;
                     self.assign_direct_struct_pointer_field(name, fields, pointer)?;
+                } else if match self.find_variable(name) {
+                    Some(Value::Struct { type_name, .. }) => matches!(
+                        self.aggregate_type_field_metadata(type_name, fields)?,
+                        Some((StructFieldType::Struct(_), _, _))
+                    ),
+                    _ => false,
+                } {
+                    self.eval_struct_field_assignment_expr(name, fields, value)?;
                 } else {
                     let ty = match self.find_variable(name) {
                         Some(Value::Struct { type_name, .. }) => self
@@ -37639,7 +38328,7 @@ impl Interpreter {
                 if is_const {
                     return Err(CustError::new(format!(
                         "cannot assign to const struct field '{}'",
-                        Self::field_path_label(fields)
+                        self.aggregate_literal_const_field_label(aggregate, fields)
                     )));
                 }
                 self.eval_scalar_conversion(ty, value)
@@ -37655,7 +38344,7 @@ impl Interpreter {
                 if is_const {
                     return Err(CustError::new(format!(
                         "cannot assign to const struct field '{}'",
-                        Self::field_path_label(fields)
+                        self.aggregate_literal_const_field_label(aggregate, fields)
                     )));
                 }
                 self.eval_scalar_compound_result(current, ty, *op, value)
@@ -37811,18 +38500,14 @@ impl Interpreter {
                 fields,
                 value,
             } => {
-                let ty = self.struct_element_field_metadata(name, fields)?.and_then(
-                    |(field_type, _, _)| match field_type {
-                        StructFieldType::Scalar(ty) => Some(ty),
-                        _ => None,
-                    },
-                );
+                let ty = self.struct_element_expr_scalar_field_type(name, index, fields)?;
                 let value = match ty {
                     Some(ty) => self.eval_scalar_conversion(ty, value)?,
                     None => self.eval(value)?,
                 };
-                self.assign_struct_element_field(name, index, fields, value)?;
-                self.read_struct_element_field(name, index, fields)
+                let pointer = self.find_struct_element_assignment_pointer(name, index)?;
+                self.assign_struct_pointer_field(&pointer, fields, value)?;
+                self.read_struct_pointer_field(&pointer, fields)
             }
             Expr::StructElementArraySet {
                 name,
@@ -37883,17 +38568,14 @@ impl Interpreter {
                 op,
                 value,
             } => {
-                let current = self.read_struct_element_field(name, index, fields)?;
+                let pointer = self.find_struct_element_assignment_pointer(name, index)?;
+                let current = self.read_struct_pointer_field(&pointer, fields)?;
                 let ty = self
-                    .struct_element_field_metadata(name, fields)?
-                    .and_then(|(field_type, _, _)| match field_type {
-                        StructFieldType::Scalar(ty) => Some(ty),
-                        _ => None,
-                    })
+                    .struct_pointer_scalar_field_type(&pointer, fields)?
                     .unwrap_or(CType::Int);
                 let result = self.eval_scalar_compound_result(current, ty, *op, value)?;
-                self.assign_struct_element_field(name, index, fields, result)?;
-                self.read_struct_element_field(name, index, fields)
+                self.assign_struct_pointer_field(&pointer, fields, result)?;
+                self.read_struct_pointer_field(&pointer, fields)
             }
             Expr::StructElementArrayCompoundSet {
                 name,

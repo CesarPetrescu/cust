@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.31.0 release publication on 2026-08-13. Version and contextual-diagnostic RED/GREEN, independent approval, executable inventory reconciliation, local/rebuilt-Docker gates, metadata probes, release-commit-first branch acceptance, annotated-tag publication, and exact remote object/peeled verification pass.
+None. Last reviewed after direct scalar `double` aggregate-field completion on 2026-08-14. Review-driven aggregate function-boundary RED/GREEN, fresh independent approval, focused/native-oracle checks, the 1,642-test local/rebuilt-Docker gates, runtime output `10`, and `git diff --check` pass.
 
 ## Blocker template
 

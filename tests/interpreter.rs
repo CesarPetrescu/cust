@@ -1762,6 +1762,884 @@ fn supports_bounded_double_runtime_values() {
 }
 
 #[test]
+fn direct_double_struct_fields_support_initialization_and_reads() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample sample = {1.25};
+    return sample.reading == 1.25 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_field_fixture_exercises_direct_pointer_nested_and_union_routes() {
+    let program = include_str!("fixtures/valid/direct_double_aggregate_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_fields_support_array_and_compound_literal_reads() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample samples[1] = {{1.25}};
+    double from_array = samples[0].reading;
+    double from_literal = ((struct Sample){2.5}).reading;
+    samples[0].reading += 0.5;
+    return from_array == 1.25
+            && from_literal == 2.5
+            && samples[0].reading == 1.75
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_struct_fields_support_assignment_compound_and_increment_updates() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample sample = {1.25};
+    double assigned = (sample.reading = 2);
+    double compounded = (sample.reading += 0.5);
+    double post = sample.reading++;
+    double pre = --sample.reading;
+    if (assigned != 2.0) return 1;
+    if (compounded != 2.5) return 2;
+    if (post != 2.5) return 3;
+    if (pre != 2.5) return 4;
+    if (sample.reading != 2.5) return 5;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_struct_pointer_fields_support_reads_and_updates() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample sample = {1.25};
+    struct Sample *slot = &sample;
+    double assigned = (slot->reading = 2);
+    double compounded = (slot->reading += 0.5);
+    double post = slot->reading++;
+    double pre = --slot->reading;
+    if (assigned != 2.0) return 1;
+    if (compounded != 2.5) return 2;
+    if (post != 2.5) return 3;
+    if (pre != 2.5) return 4;
+    if (slot->reading != 2.5) return 5;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_struct_field_increment_changes_numeric_value_by_one() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample direct = {1.25};
+    struct Sample indirect = {4.75};
+    struct Sample *slot = &indirect;
+    direct.reading++;
+    --slot->reading;
+    return direct.reading == 2.25 && indirect.reading == 3.75 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_field_increment_routes_use_numeric_values() {
+    let program = r#"
+struct Sample { double reading; };
+struct Box { struct Sample samples[1]; };
+int main(void) {
+    struct Sample samples[1] = {{1.25}};
+    struct Box box = {{{4.75}}};
+    double array_post = samples[0].reading++;
+    double embedded_pre = --box.samples[0].reading;
+    double literal_post = ((struct Sample){2.5}).reading++;
+    if (array_post != 1.25 || samples[0].reading != 2.25) return 1;
+    if (embedded_pre != 3.75) return 2;
+    if (box.samples[0].reading != 3.75) return 3;
+    if (literal_post != 2.5) return 4;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_field_addresses_preserve_pointer_boundary_on_all_routes() {
+    for program in [
+        "struct Sample { double reading; }; int main(void) { struct Sample samples[1] = {{1.25}}; return &samples[0].reading != 0; }",
+        "struct Sample { double reading; }; int main(void) { return &((struct Sample){1.25}).reading != 0; }",
+        "struct Sample { double reading; }; struct Box { struct Sample samples[1]; }; int main(void) { struct Box box = {{{1.25}}}; return &box.samples[0].reading != 0; }",
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_struct_fields_preserve_pointer_array_and_const_boundaries() {
+    for (program, expected) in [
+        (
+            "struct Sample { double *reading; }; int main(void) { return 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "struct Sample { double readings[2]; }; int main(void) { return 0; }",
+            "double aggregate array fields are not supported",
+        ),
+        (
+            "struct Sample { double reading; }; int main(void) { struct Sample sample = {1.25}; return &sample.reading != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "struct Sample { const double reading; }; int main(void) { struct Sample sample = {1.25}; sample.reading = 2.0; return 0; }",
+            "cannot assign to const struct field 'reading'",
+        ),
+    ] {
+        let error = interpret(program).expect_err(program);
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected:?}, got {error} for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_mixed_scalar_union_preserves_shared_storage() {
+    let program = r#"
+union Number { double real; int integer; char byte; };
+int main(void) {
+    union Number number = {.real = 1.25};
+    number.integer = 0;
+    if (number.real != 0.0) return 1;
+    number.real = 2.5;
+    int *slot = &number.integer;
+    *slot = 0;
+    return number.real == 0.0 ? 0 : 2;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_mixed_scalar_union_preserves_nonzero_bit_patterns() {
+    let program = r#"
+union Number { double real; int integer; };
+int main(void) {
+    union Number number = {.real = 1.25};
+    if (number.integer != 0x3ff4000000000000) return 1;
+    number.integer = 0x4004000000000000;
+    return number.real == 2.5 ? 0 : 2;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_sizeof_rejects_all_const_aggregate_field_lvalue_routes() {
+    for (program, expected) in [
+        (
+            "struct S { double d; }; int main(void) { const struct S s = {1.0}; return sizeof(s.d = 2.0); }",
+            "cannot assign to const variable 's'",
+        ),
+        (
+            "struct S { const double d; }; int main(void) { struct S s = {1.0}; return sizeof(s.d++); }",
+            "cannot assign to const struct field 'd'",
+        ),
+        (
+            "struct S { double d; }; int main(void) { const struct S values[1] = {{1.0}}; return sizeof(values[0].d += 2.0); }",
+            "cannot assign to const variable 'values'",
+        ),
+        (
+            "struct S { double d; }; int main(void) { const struct S s = {1.0}; const struct S *p = &s; return sizeof(p->d = 2.0); }",
+            "cannot assign through pointer to const",
+        ),
+        (
+            "struct S { double d; }; struct Box { const struct S values[1]; }; int main(void) { struct Box box = {{{1.0}}}; return sizeof(box.values[0].d++); }",
+            "cannot assign to const struct field 'values'",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            expected,
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_sizeof_rejects_aggregate_values_in_scalar_field_conversions() {
+    for program in [
+        "struct T { int value; }; struct S { double d; }; int main(void) { struct S s = {1.0}; return sizeof(s.d = (struct T){1}); }",
+        "struct T { int value; }; struct S { double d; }; int main(void) { return sizeof((struct S){(struct T){1}}); }",
+        "struct T { int value; }; struct Holder { struct T value; }; struct S { double d; }; int main(void) { struct Holder holder = {{1}}; struct Holder *slot = &holder; struct S s = {1.0}; return sizeof(s.d = slot->value); }",
+    ] {
+        let error = interpret(program).unwrap_err();
+        assert!(
+            error.to_string().contains("struct") && error.to_string().contains("scalar"),
+            "unexpected diagnostic {error} for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_sizeof_rejects_whole_aggregate_raw_memory_intrinsics() {
+    for (declaration, call, expected) in [
+        (
+            "void *memcpy(void *, const void *, unsigned long int);",
+            "memcpy(&destination, &source, sizeof(destination))",
+            "function 'memcpy' does not yet support double object storage for argument 1",
+        ),
+        (
+            "void *memmove(void *, const void *, unsigned long int);",
+            "memmove(&destination, &source, sizeof(destination))",
+            "function 'memmove' does not yet support double object storage for argument 1",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int);",
+            "memcmp(&destination, &source, sizeof(destination))",
+            "function 'memcmp' does not yet support double object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int);",
+            "memset(&destination, 0, sizeof(destination))",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int);",
+            "memchr(&destination, 0, sizeof(destination))",
+            "function 'memchr' does not yet support double object storage for argument 1",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int);",
+            "memcpy((void *)&destination, &source, sizeof(destination))",
+            "function 'memcpy' does not yet support double object storage for argument 1",
+        ),
+        (
+            "void *memmove(void *, const void *, unsigned long int);",
+            "memmove((void *)&destination, &source, sizeof(destination))",
+            "function 'memmove' does not yet support double object storage for argument 1",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int);",
+            "memcmp((const void *)&destination, &source, sizeof(destination))",
+            "function 'memcmp' does not yet support double object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int);",
+            "memset((void *)&destination, 0, sizeof(destination))",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int);",
+            "memchr((const void *)&destination, 0, sizeof(destination))",
+            "function 'memchr' does not yet support double object storage for argument 1",
+        ),
+    ] {
+        let program = format!(
+            "{declaration} struct S {{ double d; }}; int main(void) {{ struct S destination = {{1.0}}; struct S source = {{2.0}}; return sizeof({call}); }}"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            expected,
+            "unexpected diagnostic for {call}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_generic_aggregate_results_preserve_const_fields() {
+    for expression in [
+        "(_Generic(0, int: (const struct S){1.0}, default: (struct S){2.0})).d = 3.0",
+        "sizeof((_Generic(0, int: (const struct S){1.0}, default: (struct S){2.0})).d = 3.0)",
+    ] {
+        let program =
+            format!("struct S {{ double d; }}; int main(void) {{ return {expression}; }}");
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot assign to const struct field 'd'"
+        );
+    }
+
+    let selected_const_variable = r#"
+struct S { double d; };
+int main(void) {
+    const struct S value = {1.0};
+    return sizeof((_Generic(0, int: value)).d = 3.0);
+}
+"#;
+    assert_eq!(
+        interpret(selected_const_variable).unwrap_err().to_string(),
+        "cannot assign to const struct field 'd'"
+    );
+
+    let const_call_result = r#"
+struct S { const double d; };
+struct S make(void) { return (struct S){1.0}; }
+int main(void) { return sizeof(make().d = 2.0); }
+"#;
+    assert_eq!(
+        interpret(const_call_result).unwrap_err().to_string(),
+        "cannot assign to const struct field 'd'"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_copy_rejects_const_ancestor_field() {
+    let program = r#"
+struct Leaf { double value; };
+struct Mid { struct Leaf leaf; };
+struct Outer { const struct Mid mid; };
+int main(void) {
+    struct Outer outer = {{{1.0}}};
+    struct Leaf replacement = {2.0};
+    outer.mid.leaf = replacement;
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const struct field 'mid'"
+    );
+
+    let aggregate_array = r#"
+struct Leaf { double value; };
+struct Mid { struct Leaf leaves[1]; };
+struct Outer { const struct Mid mid; };
+int main(void) {
+    struct Outer outer = {{{{1.0}}}};
+    struct Leaf replacement = {2.0};
+    outer.mid.leaves[0] = replacement;
+    return 0;
+}
+"#;
+    assert_eq!(
+        interpret(aggregate_array).unwrap_err().to_string(),
+        "cannot assign to const struct field 'mid'"
+    );
+}
+
+#[test]
+fn direct_double_union_rejects_nested_aggregate_alias_storage() {
+    for program in [
+        r#"
+struct Cell { double value; };
+union Alias { struct Cell first; struct Cell second; };
+int main(void) { return 0; }
+"#,
+        "union Alias { double value; int words[2]; }; int main(void) { return 0; }",
+        "struct Marker { int value; }; union Alias { double value; struct Marker marker; }; int main(void) { return 0; }",
+    ] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "unions with double storage and non-scalar fields are not supported"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_review_preserves_adjusted_parameter_field_types() {
+    let program = r#"
+struct Sample { double reading; };
+double first(struct Sample samples[]) { return samples[0].reading; }
+int main(void) {
+    struct Sample samples[1] = {{1.25}};
+    return first(samples) == 1.25 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_nested_aggregate_fields_cross_function_boundaries_on_indexed_and_arrow_routes() {
+    let program = r#"
+struct Sample { double reading; };
+struct Box { struct Sample sample; };
+
+double read(struct Sample value) { return value.reading; }
+struct Sample select(struct Box *box) { return box->sample; }
+
+int main(void) {
+    struct Box boxes[1] = {{{1.25}}};
+    struct Box direct = {{2.5}};
+    struct Box *slot = &direct;
+    struct Sample returned = select(slot);
+
+    if (read(boxes[0].sample) != 1.25) return 1;
+    if (read(slot->sample) != 2.5) return 2;
+    return returned.reading == 2.5 ? 0 : 3;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_field_reverse_subscript_updates_preserve_numeric_types() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample samples[1] = {{1.25}};
+    int index = 0;
+    double assigned = (index[samples].reading = 2);
+    double compounded = (index[samples].reading += 0.5);
+    double post = index[samples].reading++;
+    double pre = --index[samples].reading;
+    if (assigned != 2.0 || compounded != 2.5) return 1;
+    if (post != 2.5 || pre != 2.5) return 2;
+    return samples[0].reading == 2.5 ? 0 : 3;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_field_reverse_subscript_rejects_double_index() {
+    let program = r#"
+struct Index { double value; };
+int main(void) {
+    struct Index index = {0.0};
+    int values[1] = {7};
+    return index.value[values];
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array subscript requires an integer value"
+    );
+}
+
+#[test]
+fn direct_double_struct_pointer_field_subscript_rejects_double_index_under_sizeof() {
+    for expression in [
+        "sizeof(slot->value[values])",
+        "sizeof(slot->value[values] = 2)",
+    ] {
+        let program = format!(
+            r#"
+struct Index {{ double value; }};
+int main(void) {{
+    struct Index index = {{0.0}};
+    struct Index *slot = &index;
+    int values[1] = {{7}};
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "array subscript requires an integer value"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_reverse_subscript_rejects_double_index_under_sizeof() {
+    let program = r#"
+struct Index { double value; };
+int main(void) {
+    struct Index index = {0.0};
+    int values[1] = {7};
+    return sizeof(index.value[values]);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array subscript requires an integer value"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_array_field_lvalues_evaluate_index_once() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample assigned[4] = {{1.0}, {2.0}, {3.0}, {4.0}};
+    struct Sample compounded[4] = {{1.0}, {2.0}, {3.0}, {4.0}};
+    struct Sample incremented[4] = {{1.0}, {2.0}, {3.0}, {4.0}};
+    int assigned_index = 0;
+    int compounded_index = 0;
+    int incremented_index = 0;
+
+    assigned[assigned_index++].reading = 9.0;
+    compounded[compounded_index++].reading += 2.0;
+    incremented[incremented_index++].reading++;
+
+    if (assigned_index != 1 || assigned[0].reading != 9.0) return 1;
+    if (compounded_index != 1 || compounded[0].reading != 3.0) return 2;
+    if (incremented_index != 1 || incremented[0].reading != 2.0) return 3;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_field_review_rejects_reverse_subscript_addresses() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample samples[1] = {{1.25}};
+    int index = 0;
+    return &index[samples].reading != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_field_review_validates_addresses_under_sizeof() {
+    for program in [
+        "struct Sample { double reading; }; int main(void) { struct Sample sample = {1.25}; return sizeof(&sample.reading); }",
+        "struct Sample { double reading; }; int main(void) { struct Sample samples[1] = {{1.25}}; return sizeof(&samples[0].reading); }",
+        "struct Sample { double reading; }; int main(void) { return sizeof(&((struct Sample){1.25}).reading); }",
+    ] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_review_preserves_postfix_const() {
+    let program = r#"
+struct Sample { double const reading; };
+int main(void) {
+    struct Sample sample = {1.25};
+    sample.reading = 2.0;
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const struct field 'reading'"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_field_review_preserves_const_compound_literal_fields() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    return ((const struct Sample){1.25}).reading = 2.5;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const struct field 'reading'"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_field_rejects_updates_through_const_embedded_literal() {
+    for program in [
+        "struct Inner { double value; }; struct Outer { const struct Inner inner; }; int main(void) { return ((struct Outer){{1.0}}).inner.value = 2.0; }",
+        "struct Inner { double value; }; struct Outer { const struct Inner inner; }; int main(void) { return ((struct Outer){{1.0}}).inner.value += 2.0; }",
+        "struct Inner { double value; }; struct Outer { const struct Inner inner; }; int main(void) { return ((struct Outer){{1.0}}).inner.value++; }",
+    ] {
+        let error = interpret(program).expect_err(program);
+        assert_eq!(
+            error.to_string(),
+            "cannot assign to const struct field 'inner'"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_assignment_rejects_nested_const_field() {
+    let program = r#"
+struct Inner { const double value; };
+struct Outer { struct Inner inner; };
+int main(void) {
+    struct Outer destination = {{1.0}};
+    struct Outer source = {{2.0}};
+    destination = source;
+    return destination.inner.value == 1.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to struct 'Outer' with const fields"
+    );
+}
+
+#[test]
+fn direct_double_sizeof_rejects_const_field_assignment() {
+    let program = r#"
+struct Sample { const double reading; };
+int main(void) {
+    struct Sample sample = {1.0};
+    return sizeof(sample.reading = 2.0);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const struct field 'reading'"
+    );
+}
+
+#[test]
+fn direct_double_sizeof_rejects_nested_const_field_assignment() {
+    let program = r#"
+struct Inner { double reading; };
+struct Outer { const struct Inner inner; };
+int main(void) {
+    struct Outer outer = {{1.0}};
+    return sizeof(outer.inner.reading = 2.0);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const struct field 'inner'"
+    );
+}
+
+#[test]
+fn direct_double_sizeof_rejects_const_embedded_literal_field_assignment() {
+    let program = r#"
+struct Inner { double value; };
+struct Outer { const struct Inner inner; };
+int main(void) {
+    return sizeof(((struct Outer){{1.0}}).inner.value = 2.0);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const struct field 'inner'"
+    );
+}
+
+#[test]
+fn direct_double_sizeof_rejects_pointer_assignment_to_field() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample sample = {1.0};
+    int value = 2;
+    return sizeof(sample.reading = &value);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign pointer expression to double value"
+    );
+}
+
+#[test]
+fn direct_double_sizeof_validates_aggregate_compound_literal_initializers() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    int value = 2;
+    return sizeof((struct Sample){&value});
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign pointer expression to double value"
+    );
+}
+
+#[test]
+fn direct_double_sizeof_validates_aggregate_array_compound_literal_initializers() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    int value = 2;
+    return sizeof((struct Sample[1]){{&value}});
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign pointer expression to double value"
+    );
+}
+
+#[test]
+fn direct_double_sizeof_validates_initializer_inside_field_assignment() {
+    for operator in ["=", "+="] {
+        let program = format!(
+            "struct Sample {{ double reading; }}; int main(void) {{ return sizeof(((struct Sample){{1.0 % 2.0}}).reading {operator} 3.0); }}"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "remainder on double values is not supported"
+        );
+    }
+}
+
+#[test]
+fn direct_double_sizeof_rejects_integer_only_embedded_array_field_compounds() {
+    for operator in ["%=", "<<="] {
+        let program = format!(
+            "struct Sample {{ double reading; }}; struct Box {{ struct Sample samples[1]; }}; int main(void) {{ struct Box box = {{{{{{1.0}}}}}}; return sizeof(box.samples[0].reading {operator} 2); }}"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "integer-only compound assignment used with double value"
+        );
+    }
+}
+
+#[test]
+fn direct_double_sizeof_rejects_character_cast_of_aggregate_storage() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample sample = {1.0};
+    return sizeof((char *)&sample);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "character pointer casts do not support double object storage"
+    );
+}
+
+#[test]
+fn direct_double_sizeof_rejects_generic_aggregate_expression_field_address() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample first = {1.0};
+    struct Sample second = {2.0};
+    return sizeof(&(_Generic(0, int: first, default: second)).reading);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_field_review_validates_compound_ops_under_sizeof() {
+    let program = r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample sample = {1.25};
+    return sizeof(sample.reading %= 2);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "integer-only compound assignment used with double value"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_field_address_fixture_preserves_pointer_boundary() {
+    let program = include_str!("fixtures/invalid/direct_double_aggregate_field_address.c");
+    let error = interpret(program).unwrap_err();
+
+    assert_eq!(error.to_string(), "double pointers are not supported");
+}
+
+#[test]
+fn direct_double_aggregate_fields_preserve_raw_memory_boundaries() {
+    let programs = [
+        r#"
+void *memset(void *, int, unsigned long);
+struct Sample { double reading; };
+int main(void) {
+    struct Sample sample = {1.25};
+    memset(&sample, 0, sizeof(sample));
+    return 0;
+}
+"#,
+        r#"
+struct Sample { double reading; };
+int main(void) {
+    struct Sample sample = {1.25};
+    char *bytes = (char *)&sample;
+    return bytes[0];
+}
+"#,
+    ];
+
+    for program in programs {
+        let error = interpret(program).expect_err(program);
+        assert!(
+            error.to_string().contains("double object storage"),
+            "unexpected error: {error}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_memset_uses_intrinsic_diagnostic() {
+    for call in [
+        "memset(&sample.reading, 0, sizeof(sample.reading)); return 0;",
+        "return sizeof(memset(&sample.reading, 0, sizeof(sample.reading)));",
+    ] {
+        let program = format!(
+            r#"
+void *memset(void *, int, unsigned long int);
+struct Sample {{ double reading; }};
+int main(void) {{
+    struct Sample sample = {{1.0}};
+    {call}
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "function 'memset' does not yet support double object storage for argument 1"
+        );
+    }
+}
+
+#[test]
 fn direct_double_arrays_support_fixed_initialization_and_indexed_reads() {
     let program = include_str!("fixtures/valid/direct_double_arrays.c");
 
@@ -3152,10 +4030,6 @@ fn rejects_unsupported_floating_point_forms_with_context() {
         (
             "int main(void) {\n    long double value;\n    return 0;\n}",
             "long double types are not supported at line 2, column 5",
-        ),
-        (
-            "struct Sample {\n    double value;\n};\nint main(void) { return 0; }",
-            "double aggregate fields are not supported at line 2, column 5",
         ),
         (
             "int main(void) {\n    double *pointer;\n    return 0;\n}",

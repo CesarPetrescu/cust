@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-14 — Direct scalar `double` aggregate-field decisions
+
+- The bounded slice reuses Cust's deterministic eight-byte `double` bit representation inside scalar aggregate fields. Supported scalar-only unions share those bits with `int`/`char` fields; unions combining double storage with array, pointer-backed aggregate, or other non-scalar field layouts remain rejected because the existing shared-storage model cannot represent those layouts safely.
+- Aggregate copies and function calls must classify/evaluate the complete expression shape, not only the final scalar field. In particular, parser lowering produces `StructElementGet` for `array[i].nested` and `StructPtrGet` for `pointer->nested`; both must participate in `aggregate_expr_type_name`, `eval_struct_argument`, and `eval_struct_expr`. The review regression documents this fan-out.
+- Raw-memory/character views remain outside this double slice. Runtime and non-evaluating intrinsic validation recursively detect double storage and preserve the contextual `function '<name>' does not yet support double object storage for argument N` boundary rather than exposing host ABI or host addresses. Native fixtures use numeric/value and `sizeof(field) == sizeof(double)` relationships only.
+- Candidate evaluation selected recovery and completion of the inherited queue-leading feature over v0.32.0 release closure, broader double storage, and parser/property expansion. The original inherited feature RED is unavailable; only the review-discovered aggregate function-boundary RED/GREEN is claimed.
+
 ## 2026-08-13 — v0.31.0 release consistency
 
 - Exact CLI and Compose expectations first failed while Cargo and image metadata remained at `0.30.0`, then passed after Cargo/lock and both image tags moved to `0.31.0`. Cargo metadata and the built CLI report `cust 0.31.0`; local and remote annotated-tag preflight found no `v0.31.0` refs.
