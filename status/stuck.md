@@ -4,7 +4,13 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.32.0 publication on 2026-08-14. Focused version RED/GREEN, exact 1,642-test inventory reconciliation, independent release approval, the full local/rebuilt-Docker gate, runtime output `10`, and local/Cargo/container version probes pass. Release commit `97442a8ed589f167abc7691d190de574154267e0` reached exact `origin/main` before annotated tag object `04358d2ca26243b88e717c45234639fe031c57a5`; local and remote refs peel exactly to that commit. Direct one-dimensional double arrays in supported aggregate fields are next, with no active blocker.
+### 2026-08-15 — Aggregate `double` array review closure exhausted
+
+- Task attempted: finish the inherited direct one-dimensional `double` aggregate-field package.
+- What failed: after the allowed review/fix/reverify cycles, final independent review found a remaining const-integrity bypass, so the package is not safe to commit or push.
+- Evidence: with either `const struct Item items[1]` or `const struct Item *items`, `(1 ? index[items].values : index[items].values)[0] = 3.0`, `(0, index[items].values)[0] += 2.0`, and `_Generic(0, int: index[items].values, default: index[items].values)[0]++` currently succeed. Their `sizeof(...)` forms return `8` instead of rejecting the mutation. Independent probes confirmed all six direct const-root mutations and the earlier reverse pointer-boundary/non-evaluating scalar defects are now closed; the wrapper-specific qualification loss is distinct.
+- What was tried: focused RED/GREEN added direct reverse const-root, reverse address/pointer escape, wrapped reverse read, and non-evaluating condition/unary/cast regressions; all 83 `direct_double_` tests, four focused reverse tests, the focused scalar-operator test, and the actual compiler oracle are GREEN. Review traced the remaining gap to contextual reverse `StructElementGet` qualification in `pointer_expr_points_to_const` and the evaluated/non-evaluating wrapped-base mutability traversal.
+- Next safe step: add an evaluated plus `sizeof` matrix for conditional/comma/`_Generic` reverse bases across assignment/compound/increment and const-array/pointer-to-const roots; preserve the contextual owner/index through shared qualification and mutability helpers; then obtain fresh independent approval before the canonical gate.
 
 ## Blocker template
 

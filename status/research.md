@@ -18,6 +18,13 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-15 — Aggregate `double` array contextual validation
+
+- C array-to-pointer conversion is context-sensitive for this bounded slice: a direct array operand of `sizeof` remains an array object, while arrays used as conditional/comma operands decay. Cust therefore keeps direct `sizeof(field_array)` sizing but rejects conditional/comma results that would expose unsupported `double *` values.
+- A valid discarded `void` call in `(side(), aggregate.double_array)[index]` and an unselected `void` `_Generic` association must be semantically validated without being forced through scalar `sizeof` classification. The existing non-evaluating discard validator is the correct route.
+- Reverse aggregate subscripts need owner/index metadata parity with direct subscripts for pointee type, double-pointer rejection, qualification, and mutation. Contextual type and pointer-boundary routing now pass; qualification must also survive conditional/comma/`_Generic` wrappers.
+- Final review demonstrated that direct reverse const-root checks are insufficient: wrapped array-field bases route through pointer-style lvalues, so both evaluated writes and `sizeof` mutation validation must trace the contextual aggregate owner/index through every selected wrapper before deciding mutability.
+
 ## 2026-08-14 — v0.32.0 release consistency
 
 - Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.31.0`, then passed after Cargo/lock and both image tags moved to `0.32.0`. Cargo metadata and the built CLI report `cust 0.32.0`; local and remote annotated-tag preflight found no `v0.32.0` refs.
