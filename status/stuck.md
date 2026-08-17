@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None.
+None. Last reviewed during bounded v0.33.0 release preparation on 2026-08-17. Focused version RED/GREEN, exact 1,715-test inventory reconciliation, local/Cargo version probes, and empty local/remote tag preflight pass; independent release review, the canonical gate, release-commit push, and tag publication remain procedural work, not blockers.
 
 ## Resolved this run
 

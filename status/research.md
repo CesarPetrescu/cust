@@ -18,6 +18,12 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-17 — v0.33.0 release consistency
+
+- Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.32.0`, then passed after Cargo/lock and both image tags moved to `0.33.0`. Cargo metadata and the built CLI report `cust 0.33.0`; local and remote annotated-tag preflight found no `v0.33.0` refs.
+- Executable target-by-target listing reconciles 1,715 tests: 1,580 interpreter, 99 deterministic fuzz-safety, 32 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over direct `double *` support, shared-storage union bytes, and parser/property expansion because release closure was the sole unchecked authoritative item at selection time and packages reviewed behavior without widening runtime semantics.
+- Publication must retain release-commit-first ordering: complete-diff independent review precedes the canonical gate; exact `origin/main` acceptance precedes annotated-tag creation; and local/remote tag objects plus peeled targets must match. A safe one-level direct `double *` slice over interpreter-owned scalar and one-dimensional-array storage is the next concrete language package after publication.
+
 ## 2026-08-16 — Aggregate pointer-field subscripting must separate pointee qualification from owner constness
 
 - Native `cc -std=c11` confirms that a `struct Item *` field may be subscripted at zero even when it points to a standalone object: `holder.items[0].values[0]` is valid and mutable when the pointee is mutable.
