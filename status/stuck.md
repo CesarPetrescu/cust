@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during bounded v0.33.0 release preparation on 2026-08-17. Focused version RED/GREEN, exact 1,715-test inventory reconciliation, local/Cargo version probes, and empty local/remote tag preflight pass; independent release review, the canonical gate, release-commit push, and tag publication remain procedural work, not blockers.
+None. Last reviewed after bounded v0.33.0 publication on 2026-08-17. Fresh independent review returned `APPROVED`; the canonical local/rebuilt-Docker gate passed; release commit `6ebaba1503d7b2d0f95b06c3102438ad7feb63b6` reached exact `origin/main` before annotated tag object `297be74ebe81982627fd9230284393f043cb49ad` was published and verified to peel exactly to that commit.
 
 ## Resolved this run
 
