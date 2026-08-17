@@ -1782,6 +1782,1555 @@ fn direct_double_aggregate_field_fixture_exercises_direct_pointer_nested_and_uni
 }
 
 #[test]
+fn direct_double_aggregate_array_field_fixture_exercises_complete_value_routes() {
+    let program = include_str!("fixtures/valid/direct_double_aggregate_array_fields.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_arrays_nested_in_aggregate_array_elements_preserve_numeric_types() {
+    let program = r#"
+struct Item { double values[2]; };
+struct Box { struct Item items[1]; };
+int main(void) {
+    struct Box box = {{{{1.5, 2.5}}}};
+    double read = box.items[0].values[0];
+    return read == 1.5 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_array_fields_on_aggregate_values_support_indexed_reads() {
+    let program = r#"
+struct Sample { double values[2]; };
+struct Sample make(void) { return (struct Sample){{2.5, 3.5}}; }
+int main(void) {
+    double literal = ((struct Sample){{1.5, 2.5}}).values[0];
+    double returned = make().values[1];
+    return literal == 1.5 && returned == 3.5 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_array_fields_through_struct_pointers_support_increment_results() {
+    let program = r#"
+struct Sample { double values[2]; };
+int main(void) {
+    struct Sample sample = {{1.5, 3.5}};
+    struct Sample *slot = &sample;
+    double post = slot->values[0]++;
+    double pre = --slot->values[1];
+    return post == 1.5 && pre == 2.5
+            && sample.values[0] == 2.5 && sample.values[1] == 2.5
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn nested_direct_double_array_field_assignment_evaluates_indexes_once() {
+    let program = r#"
+struct Item { double values[2]; };
+struct Box { struct Item items[2]; };
+int marker = 0;
+int next(void) { return marker++; }
+int main(void) {
+    struct Box box = {{{{1.5, 2.5}}, {{3.5, 4.5}}}};
+    double assigned = (box.items[next()].values[1] = 6.5);
+    double compound = (box.items[next()].values[0] += 1.0);
+    marker = 0;
+    double post = box.items[next()].values[0]++;
+    return marker == 1 && assigned == 6.5 && compound == 4.5 && post == 1.5
+            && box.items[0].values[0] == 2.5
+            && box.items[0].values[1] == 6.5
+            && box.items[1].values[0] == 4.5
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn wrapped_nested_direct_double_array_fields_support_indexed_reads() {
+    let program = r#"
+struct Item { double values[2]; };
+struct Box { struct Item items[2]; };
+int main(void) {
+    struct Box box = {{{{1.5, 2.5}}, {{3.5, 4.5}}}};
+    double selected = (1 ? box.items[0].values : box.items[1].values)[1];
+    double sequenced = (0, box.items[1].values)[0];
+    return selected == 2.5 && sequenced == 3.5 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_array_indexes_support_reverse_and_wrapped_bases_once() {
+    let program = r#"
+struct Sample { double values[2]; };
+int trace = 0;
+int reverse_calls = 0;
+int comma_base_calls = 0;
+int comma_index_calls = 0;
+int condition_calls = 0;
+int condition_index_calls = 0;
+int next(void) { reverse_calls++; trace = trace * 10 + 1; return 1; }
+int mark_base(void) { comma_base_calls++; trace = trace * 10 + 2; return 0; }
+int comma_index(void) { comma_index_calls++; trace = trace * 10 + 3; return 0; }
+int condition(void) { condition_calls++; trace = trace * 10 + 4; return 1; }
+int condition_index(void) { condition_index_calls++; trace = trace * 10 + 5; return 1; }
+int main(void) {
+    struct Sample sample = {{1.5, 2.5}};
+    struct Sample samples[1] = {{{3.5, 4.5}}};
+    struct Sample *slot = &sample;
+
+    double reversed = next()[sample.values];
+    if (reversed != 2.5 || reverse_calls != 1 || trace != 1) return 1;
+
+    trace = 0;
+    double sequenced = (mark_base(), samples[0].values)[comma_index()];
+    if (sequenced != 3.5 || comma_base_calls != 1 || comma_index_calls != 1 || trace != 23)
+        return 2;
+
+    trace = 0;
+    double selected = (condition() ? slot->values : slot->values)[condition_index()];
+    if (selected != 2.5 || condition_calls != 1 || condition_index_calls != 1 || trace != 45)
+        return 3;
+    return 0;
+}
+"#;
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    for expression in ["sample.values", "sample.values + 0"] {
+        let program = format!(
+            "struct Sample {{ double values[2]; }}; int main(void) {{ struct Sample sample = {{{{1.0, 2.0}}}}; {expression}; return 0; }}"
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported"
+        );
+    }
+}
+
+#[test]
+fn double_array_field_on_comma_aggregate_evaluates_left_operand_once() {
+    let program = r#"
+struct Sample { double values[2]; };
+int calls = 0;
+int mark(void) { calls++; return 0; }
+int main(void) {
+    double selected = (mark(), (struct Sample){{1.5, 2.5}}).values[1];
+    return selected == 2.5 ? calls : 99;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn wrapped_reverse_aggregate_double_array_fields_preserve_const_roots() {
+    let wrappers = [
+        "(1 ? index[items].values : index[items].values)[0]",
+        "(0, index[items].values)[0]",
+        "_Generic(0, int: index[items].values, default: index[items].values)[0]",
+    ];
+    let mutations = ["{target} = 3.0", "{target} += 2.0", "{target}++"];
+    let roots = [
+        (
+            "const struct Item items[1] = {{{1.0}}};",
+            "cannot assign to const variable 'items'",
+        ),
+        (
+            "const struct Item storage[1] = {{{1.0}}}; const struct Item *items = storage;",
+            "cannot assign through pointer to const",
+        ),
+    ];
+
+    for wrapper in wrappers {
+        for mutation in mutations {
+            let mutation = mutation.replace("{target}", wrapper);
+            for (root, expected) in roots {
+                for expression in [mutation.clone(), format!("sizeof({mutation})")] {
+                    let program = format!(
+                        r#"
+struct Item {{ double values[1]; }};
+int main(void) {{
+    {root}
+    int index = 0;
+    return {expression};
+}}
+"#
+                    );
+                    assert_eq!(
+                        interpret(&program).expect_err(&expression).to_string(),
+                        expected,
+                        "unexpected diagnostic for {expression} with {root}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn non_evaluating_pointer_fields_reject_double_array_decay() {
+    for expression in [
+        "sizeof(holder.slot = sample.values)",
+        "_Generic((holder.slot = sample.values), int *: 0, default: 1)",
+        "sizeof((struct Holder){.slot = sample.values})",
+        "_Generic((struct Holder){.slot = sample.values}, struct Holder: 0, default: 1)",
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double values[1]; }};
+struct Holder {{ int *slot; }};
+int main(void) {{
+    struct Sample sample = {{{{1.0}}}};
+    struct Holder holder = {{0}};
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_array_field_explicit_pointer_arithmetic_stays_unsupported() {
+    for expression in [
+        "*(sample.values + 1)",
+        "*((1 ? sample.values : sample.values) + 1)",
+        "*((0, sample.values) + 1)",
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double values[2]; }};
+int main(void) {{
+    struct Sample sample = {{{{1.5, 2.5}}}};
+    return {expression} == 2.5 ? 0 : 1;
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_generic_selection_bases_support_marked_subscripts() {
+    let program = r#"
+struct Sample { double values[2]; };
+int main(void) {
+    struct Sample sample = {{1.0, 2.0}};
+    int forward = _Generic(0, int: sample.values, default: sample.values)[1] == 2.0;
+    int reverse = 1[_Generic(0, int: sample.values, default: sample.values)] == 2.0;
+    return forward && reverse ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_generic_selected_aggregate_lvalues_preserve_original_storage() {
+    let program = r#"
+struct Sample { double values[2]; };
+int main(void) {
+    struct Sample sample = {{1.0, 2.0}};
+    double assigned = ((_Generic(0, int: sample)).values[0] = 5.0);
+    double compounded = ((_Generic(0, int: sample)).values[1] += 1.5);
+    double post = (_Generic(0, int: sample)).values[0]++;
+    return assigned == 5.0 && compounded == 3.5 && post == 5.0
+            && sample.values[0] == 6.0 && sample.values[1] == 3.5
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_generic_selected_aggregate_lvalue_routes_preserve_original_storage() {
+    let program = r#"
+struct Item { double values[2]; };
+struct Outer { struct Item inner; };
+int main(void) {
+    struct Item items[1] = {{{1.0, 2.0}}};
+    struct Outer direct = {{{3.0, 4.0}}};
+    struct Outer indirect = {{{5.0, 6.0}}};
+    struct Outer *outer_pointer = &indirect;
+    struct Item pointee = {{7.0, 8.0}};
+    struct Item *item_pointer = &pointee;
+
+    (_Generic(0, int: items[0])).values[0] = 11.0;
+    (_Generic(0, int: direct.inner)).values[0] += 12.0;
+    (_Generic(0, int: outer_pointer->inner)).values[0]++;
+    (_Generic(0, int: *item_pointer)).values[0] = 14.0;
+
+    return items[0].values[0] == 11.0 && direct.inner.values[0] == 15.0
+            && indirect.inner.values[0] == 6.0 && pointee.values[0] == 14.0
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_generic_selected_pointer_and_embedded_array_lvalues_preserve_original_storage() {
+    let program = r#"
+struct Item { double scalar; double values[2]; };
+struct Box { struct Item items[2]; };
+int main(void) {
+    struct Item roots[2] = {{1.0, {2.0, 3.0}}, {4.0, {5.0, 6.0}}};
+    struct Item *pointer = roots;
+    struct Box direct = {{{7.0, {8.0, 9.0}}, {10.0, {11.0, 12.0}}}};
+    struct Box boxes[1] = {{{{13.0, {14.0, 15.0}}, {16.0, {17.0, 18.0}}}}};
+    struct Box indirect = {{{19.0, {20.0, 21.0}}, {22.0, {23.0, 24.0}}}};
+    struct Box *box_pointer = &indirect;
+
+    (_Generic(0, int: pointer[1])).values[0] = 31.0;
+    (_Generic(0, int: direct.items[1])).values[0] = 32.0;
+    (_Generic(0, int: boxes[0].items[1])).values[0] = 33.0;
+    (_Generic(0, int: box_pointer->items[0])).values[0] = 34.0;
+
+    return roots[1].values[0] == 31.0 && direct.items[1].values[0] == 32.0
+            && boxes[0].items[1].values[0] == 33.0
+            && indirect.items[0].values[0] == 34.0
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_generic_selected_aggregate_lvalue_scalar_fields_preserve_original_storage() {
+    let program = r#"
+struct Item { double value; };
+struct Outer { struct Item inner; };
+int main(void) {
+    struct Item items[1] = {{1.0}};
+    struct Outer direct = {{2.0}};
+    struct Outer indirect = {{3.0}};
+    struct Outer *outer_pointer = &indirect;
+    struct Item pointee = {4.0};
+    struct Item *item_pointer = &pointee;
+
+    (_Generic(0, int: items[0])).value = 11.0;
+    (_Generic(0, int: direct.inner)).value += 12.0;
+    (_Generic(0, int: outer_pointer->inner)).value++;
+    (_Generic(0, int: *item_pointer)).value = 14.0;
+
+    return items[0].value == 11.0 && direct.inner.value == 14.0
+            && indirect.inner.value == 4.0 && pointee.value == 14.0
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_generic_selected_aggregate_lvalue_routes_preserve_const_roots() {
+    let programs = [
+        (
+            r#"
+struct Item { double values[2]; };
+int main(void) {
+    const struct Item items[1] = {{{1.0, 2.0}}};
+    (_Generic(0, int: items[0])).values[0] = 11.0;
+    return 0;
+}
+"#,
+            "cannot assign through pointer to const",
+        ),
+        (
+            r#"
+struct Item { double values[2]; };
+struct Outer { const struct Item inner; };
+int main(void) {
+    struct Outer direct = {{{3.0, 4.0}}};
+    (_Generic(0, int: direct.inner)).values[0] += 12.0;
+    return 0;
+}
+"#,
+            "cannot assign through pointer to const",
+        ),
+        (
+            r#"
+struct Item { double values[2]; };
+struct Outer { struct Item inner; };
+int main(void) {
+    const struct Outer indirect = {{{5.0, 6.0}}};
+    const struct Outer *outer_pointer = &indirect;
+    (_Generic(0, int: outer_pointer->inner)).values[0]++;
+    return 0;
+}
+"#,
+            "cannot assign through pointer to const",
+        ),
+        (
+            r#"
+struct Item { double values[2]; };
+int main(void) {
+    const struct Item pointee = {{7.0, 8.0}};
+    const struct Item *item_pointer = &pointee;
+    return sizeof((_Generic(0, int: *item_pointer)).values[0] = 14.0);
+}
+"#,
+            "cannot assign to const struct field 'values'",
+        ),
+    ];
+
+    for (program, expected) in programs {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn direct_double_aggregate_expression_wrappers_preserve_array_field_metadata() {
+    let program = r#"
+struct Sample { double values[2]; };
+int main(void) {
+    struct Sample first = {{1.0, 2.0}};
+    struct Sample second = {{3.0, 4.0}};
+    double conditional = (1 ? first : second).values[1];
+    double comma = (0, (struct Sample){{5.0, 6.0}}).values[1];
+    double assigned = (first = second).values[0];
+    if (conditional != 2.0) return 1;
+    if (comma != 6.0) return 2;
+    if (assigned != 3.0 || first.values[0] != 3.0) return 3;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_assignment_results_preserve_array_element_types() {
+    let program = r#"
+struct Item { double values[2]; };
+struct Outer { struct Item inner; };
+int main(void) {
+    struct Item items[1] = {{{1.0, 2.0}}};
+    struct Item replacement = {{3.0, 4.0}};
+    struct Item *pointer = &items[0];
+    struct Outer outer = {{{5.0, 6.0}}};
+    struct Outer *outer_pointer = &outer;
+
+    double array_result = (items[0] = replacement).values[1];
+    double field_result = (outer.inner = replacement).values[0];
+    double arrow_result = (outer_pointer->inner = replacement).values[1];
+    double deref_result = (*pointer = replacement).values[0];
+
+    return array_result == 4.0 && field_result == 3.0
+            && arrow_result == 4.0 && deref_result == 3.0
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_assignment_results_preserve_array_pointer_boundaries() {
+    for expression in [
+        "(items[0] = replacement).values",
+        "(outer.inner = replacement).values",
+        "(outer_pointer->inner = replacement).values",
+        "(*pointer = replacement).values",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[2]; }};
+struct Outer {{ struct Item inner; }};
+int main(void) {{
+    struct Item items[1] = {{{{{{1.0, 2.0}}}}}};
+    struct Item replacement = {{{{3.0, 4.0}}}};
+    struct Item *pointer = &items[0];
+    struct Outer outer = {{{{{{5.0, 6.0}}}}}};
+    struct Outer *outer_pointer = &outer;
+    void *sink = {expression};
+    return sink != 0;
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn nested_direct_double_array_fields_retain_pointer_boundaries() {
+    let raw_decay = r#"
+struct Item { double values[2]; };
+struct Box { struct Item items[1]; };
+int main(void) {
+    struct Box box = {{{{1.5, 2.5}}}};
+    box.items[0].values;
+    return 0;
+}
+"#;
+    let address = r#"
+struct Item { double values[2]; };
+struct Box { struct Item items[1]; };
+int main(void) {
+    struct Box box = {{{{1.5, 2.5}}}};
+    (void)&box.items[0].values[0];
+    return 0;
+}
+"#;
+
+    let raw_error = interpret(raw_decay).unwrap_err();
+    assert_eq!(raw_error.to_string(), "double pointers are not supported");
+    let address_error = interpret(address).unwrap_err();
+    assert_eq!(
+        address_error.to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_array_field_addresses_under_sizeof_retain_pointer_boundary() {
+    for expression in [
+        "&sample.values[0]",
+        "&samples[0].values[0]",
+        "&slot->values[0]",
+        "&box.items[0].values[0]",
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double values[2]; }};
+struct Box {{ struct Sample items[1]; }};
+int main(void) {{
+    struct Sample sample = {{{{1.0, 2.0}}}};
+    struct Sample samples[1] = {{{{{{3.0, 4.0}}}}}};
+    struct Sample *slot = &sample;
+    struct Box box = {{{{{{{{5.0, 6.0}}}}}}}};
+    return sizeof({expression});
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_array_field_addresses_under_generic_retain_pointer_boundary() {
+    for expression in [
+        "&sample.values[0]",
+        "&samples[0].values[0]",
+        "&slot->values[0]",
+        "&box.items[0].values[0]",
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double values[2]; }};
+struct Box {{ struct Sample items[1]; }};
+int main(void) {{
+    struct Sample sample = {{{{1.0, 2.0}}}};
+    struct Sample samples[1] = {{{{{{3.0, 4.0}}}}}};
+    struct Sample *slot = &sample;
+    struct Box box = {{{{{{{{5.0, 6.0}}}}}}}};
+    return _Generic(({expression}), default: 0);
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_whole_aggregate_array_field_addresses_retain_pointer_boundary() {
+    let routes = [
+        ("", "&sample.values"),
+        ("", "&samples[0].values"),
+        ("", "&box.sample.values"),
+        ("", "&slot->values"),
+        ("", "&((struct Sample){{7.0, 8.0}}).values"),
+        (
+            "union Buffer buffer = {.values = {9.0, 10.0}};",
+            "&buffer.values",
+        ),
+    ];
+
+    for (extra, address) in routes {
+        for expression in [
+            format!("{address} != 0"),
+            format!("sizeof({address})"),
+            format!("_Generic(({address}), default: 0)"),
+        ] {
+            let program = format!(
+                r#"
+struct Sample {{ double values[2]; }};
+struct Box {{ struct Sample sample; }};
+union Buffer {{ double values[2]; }};
+int main(void) {{
+    struct Sample sample = {{{{1.0, 2.0}}}};
+    struct Sample samples[1] = {{{{{{3.0, 4.0}}}}}};
+    struct Box box = {{{{{{5.0, 6.0}}}}}};
+    struct Sample *slot = &sample;
+    {extra}
+    return {expression};
+}}
+"#
+            );
+            assert_eq!(
+                interpret(&program).expect_err(&expression).to_string(),
+                "double pointers are not supported",
+                "unexpected diagnostic for {expression}"
+            );
+        }
+    }
+
+    let type_pun = r#"
+struct Sample { double values[2]; };
+int main(void) {
+    struct Sample sample = {{1.0, 2.0}};
+    *((int *)&sample.values) = 0;
+    return 0;
+}
+"#;
+    assert_eq!(
+        interpret(type_pun).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_array_pointer_escapes_reject_in_non_evaluating_routes() {
+    let routes = [
+        ("", "sample.values"),
+        ("", "samples[0].values"),
+        ("", "box.sample.values"),
+        ("", "slot->values"),
+        ("", "((struct Sample){{7.0, 8.0}}).values"),
+        (
+            "union Buffer buffer = {.values = {9.0, 10.0}};",
+            "buffer.values",
+        ),
+    ];
+
+    for (extra, base) in routes {
+        for expression in [
+            format!("sizeof(({base}) + 0)"),
+            format!("sizeof(({base}) == 0)"),
+            format!("sizeof(sink = {base})"),
+            format!("sizeof(take({base}))"),
+            format!("_Generic(({base}), default: 0)"),
+            format!("_Generic((({base}), 0), int: 0, default: 1)"),
+            format!("sizeof(&{base})"),
+        ] {
+            let program = format!(
+                r#"
+int take(void *value) {{ return value != 0; }}
+struct Sample {{ double values[2]; }};
+struct Box {{ struct Sample sample; }};
+union Buffer {{ double values[2]; }};
+int main(void) {{
+    struct Sample sample = {{{{1.0, 2.0}}}};
+    struct Sample samples[1] = {{{{{{3.0, 4.0}}}}}};
+    struct Box box = {{{{{{5.0, 6.0}}}}}};
+    struct Sample *slot = &sample;
+    void *sink = 0;
+    {extra}
+    return {expression};
+}}
+"#
+            );
+            assert_eq!(
+                interpret(&program).expect_err(&expression).to_string(),
+                "double pointers are not supported",
+                "unexpected diagnostic for {expression}"
+            );
+        }
+    }
+}
+
+#[test]
+fn direct_double_aggregate_array_field_assignments_under_sizeof_validate_pointer_rhs() {
+    for target in [
+        "sample.values[0]",
+        "samples[0].values[0]",
+        "slot->values[0]",
+        "box.items[0].values[0]",
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double values[2]; }};
+struct Box {{ struct Sample items[1]; }};
+int main(void) {{
+    struct Sample sample = {{{{1.0, 2.0}}}};
+    struct Sample samples[1] = {{{{{{3.0, 4.0}}}}}};
+    struct Sample *slot = &sample;
+    struct Box box = {{{{{{{{5.0, 6.0}}}}}}}};
+    int value = 7;
+    return sizeof({target} = &value);
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(target).to_string(),
+            "cannot assign pointer expression to double value",
+            "unexpected diagnostic for {target}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_struct_pointer_array_element_addresses_cannot_round_trip() {
+    for expression in [
+        "*(&slot->values[0]) = 3.0",
+        "*(&slot->values[0]) += 1.0",
+        "++*(&slot->values[0])",
+        "*(&slot->values[0])",
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double values[2]; }};
+int main(void) {{
+    struct Sample sample = {{{{1.0, 2.0}}}};
+    struct Sample *slot = &sample;
+    {expression};
+    return 0;
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_nested_array_element_addresses_cannot_round_trip() {
+    let program = r#"
+struct Item { double values[1]; };
+struct Box { struct Item items[1]; };
+int main(void) {
+    struct Box box = {{{{1.0}}}};
+    *(&box.items[0].values[0]) += 1.0;
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn reverse_aggregate_double_array_element_addresses_cannot_round_trip() {
+    let program = r#"
+struct Item { double values[1]; };
+int main(void) {
+    struct Item items[1] = {{{1.0}}};
+    int index = 0;
+    *(&index[items].values[0]) = 3.0;
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn direct_double_explicit_array_element_addresses_stay_rejected_under_sizeof() {
+    let program = r#"
+struct Sample { double values[1]; };
+int main(void) {
+    struct Sample sample = {{1.0}};
+    struct Sample *slot = &sample;
+    return sizeof(*(&slot->values[0]) = 3.0);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn wrapped_direct_double_array_field_bases_validate_all_types() {
+    let invalid_generic = r#"
+struct Sample { double values[1]; };
+int main(void) {
+    struct Sample sample = {{1.0}};
+    return _Generic(0, int: sample.values, default: (1, missing()))[0] == 1.0
+        ? 0 : 1;
+}
+"#;
+    assert_eq!(
+        interpret(invalid_generic).unwrap_err().to_string(),
+        "undefined function 'missing'"
+    );
+
+    let incompatible_conditional = r#"
+struct Doubles { double values[1]; };
+struct Ints { int values[1]; };
+int main(void) {
+    struct Doubles doubles = {{1.0}};
+    struct Ints ints = {{2}};
+    return (1 ? doubles.values : ints.values)[0] == 1.0 ? 0 : 1;
+}
+"#;
+    assert_eq!(
+        interpret(incompatible_conditional).unwrap_err().to_string(),
+        "conditional branches have incompatible expression types"
+    );
+}
+
+#[test]
+fn wrapped_direct_double_array_field_bases_work_in_non_evaluating_contexts() {
+    let program = r#"
+struct Sample { double values[1]; };
+void side(void) {}
+int main(void) {
+    struct Sample sample = {{1.0}};
+    if (sizeof(_Generic(0, int: sample.values, default: sample.values)[0])
+            != sizeof(double)) return 1;
+    if (sizeof(_Generic(0, int: sample.values, default: sample.values)[0] = 2.0)
+            != sizeof(double)) return 2;
+    if (sizeof(_Generic(0, int: sample.values, default: sample.values)[0] += 2.0)
+            != sizeof(double)) return 3;
+    if (sizeof(_Generic(0, int: sample.values, default: sample.values)[0]++)
+            != sizeof(double)) return 4;
+    if (!_Generic(_Generic(0, int: sample.values, default: sample.values)[0],
+            double: 1, default: 0)) return 5;
+    if (sizeof((side(), sample.values)[0]) != sizeof(double)) return 6;
+    if (sizeof(_Generic(0, int: sample.values, default: side())[0])
+            != sizeof(double)) return 7;
+    return sample.values[0] == 1.0 ? 0 : 8;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn wrapped_direct_double_array_field_bases_validate_discarded_contexts() {
+    let invalid_condition = r#"
+struct Sample { double values[1]; };
+int main(void) {
+    struct Sample sample = {{1.0}};
+    return sizeof((sample ? sample.values : sample.values)[0]);
+}
+"#;
+    assert_eq!(
+        interpret(invalid_condition).unwrap_err().to_string(),
+        "struct value used as scalar expression"
+    );
+
+    let invalid_double_array_condition = r#"
+struct Sample { double values[1]; };
+int main(void) {
+    struct Sample sample = {{1.0}};
+    return sizeof((sample.values ? sample.values : sample.values)[0]);
+}
+"#;
+    assert_eq!(
+        interpret(invalid_double_array_condition)
+            .unwrap_err()
+            .to_string(),
+        "double pointers are not supported"
+    );
+
+    let invalid_discard = r#"
+struct Sample { double values[1]; };
+int main(void) {
+    struct Sample sample = {{1.0}};
+    return sizeof(((sample.values), sample.values)[0]);
+}
+"#;
+    assert_eq!(
+        interpret(invalid_discard).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn wrapped_direct_double_array_field_pointer_results_stay_rejected_under_sizeof() {
+    for expression in [
+        "sizeof(1 ? sample.values : sample.values)",
+        "sizeof((0, sample.values))",
+    ] {
+        let program = format!(
+            "struct Sample {{ double values[4]; }}; int main(void) {{ struct Sample sample = {{{{1.0}}}}; return {expression}; }}"
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_struct_pointer_array_element_mutations_validate_without_evaluation() {
+    let program = r#"
+struct Sample { double values[2]; };
+int rhs_calls = 0;
+double rhs(void) { rhs_calls++; return 3.0; }
+int main(void) {
+    struct Sample sample = {{1.0, 2.0}};
+    struct Sample *slot = &sample;
+    if (sizeof(slot->values[0] = rhs()) != sizeof(double)) return 1;
+    if (sizeof(slot->values[0] += rhs()) != sizeof(double)) return 2;
+    if (!_Generic((slot->values[0] = rhs()), double: 1, default: 0)) return 3;
+    if (!_Generic((slot->values[0] += rhs()), double: 1, default: 0)) return 4;
+    if (rhs_calls != 0) return 5;
+    return sample.values[0] == 1.0 ? 0 : 6;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn reverse_double_array_field_sizeof_preserves_element_types_without_evaluation() {
+    let program = r#"
+struct Item { double values[2]; };
+int main(void) {
+    struct Item items[1] = {{{1.0, 2.0}}};
+    int index = 0;
+    int marker = 0;
+    int total = sizeof(index[items].values[marker++]);
+    total += sizeof(index[items].values[marker++] = 3.0);
+    total += sizeof(index[items].values[marker++] += 2.0);
+    total += sizeof(index[items].values[marker++]++);
+    return total + marker;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 32);
+}
+
+#[test]
+fn wrapped_reverse_double_array_field_sizeof_preserves_const_ancestors() {
+    let wrappers = [
+        "(1 ? index[items].inner.values : index[items].inner.values)[0]",
+        "(0, index[items].inner.values)[0]",
+        "_Generic(0, int: index[items].inner.values, default: index[items].inner.values)[0]",
+    ];
+    let mutations = ["{target} = 3.0", "{target} += 2.0", "{target}++"];
+
+    for wrapper in wrappers {
+        for mutation in mutations {
+            let mutation = mutation.replace("{target}", wrapper);
+            let program = format!(
+                r#"
+struct Inner {{ double values[2]; }};
+struct Item {{ const struct Inner inner; }};
+int main(void) {{
+    struct Item items[1] = {{{{{{{{1.0, 2.0}}}}}}}};
+    int index = 0;
+    return sizeof({mutation});
+}}
+"#
+            );
+            assert_eq!(
+                interpret(&program).expect_err(&mutation).to_string(),
+                "cannot assign to const struct field 'inner'",
+                "unexpected diagnostic for {mutation}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wrapped_reverse_double_array_field_mutations_preserve_const_roots() {
+    let wrappers = [
+        "(1 ? index[items].values : index[items].values)[0]",
+        "(0, index[items].values)[0]",
+        "_Generic(0, int: index[items].values, default: index[items].values)[0]",
+    ];
+    let mutations = ["{target} = 3.0", "{target} += 2.0", "{target}++"];
+    let roots = [
+        (
+            "const struct Item items[1] = {{{1.0, 2.0}}};",
+            "cannot assign to const variable 'items'",
+        ),
+        (
+            "const struct Item storage[1] = {{{1.0, 2.0}}}; const struct Item *items = storage;",
+            "cannot assign through pointer to const",
+        ),
+    ];
+
+    for wrapper in wrappers {
+        for mutation in mutations {
+            let mutation = mutation.replace("{target}", wrapper);
+            for (declarations, expected) in roots {
+                for expression in [mutation.clone(), format!("sizeof({mutation})")] {
+                    let program = format!(
+                        r#"
+struct Item {{ double values[2]; }};
+int main(void) {{
+    {declarations}
+    int index = 0;
+    return {expression};
+}}
+"#
+                    );
+                    assert_eq!(
+                        interpret(&program).expect_err(&expression).to_string(),
+                        expected,
+                        "unexpected diagnostic for {expression} with {declarations}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn wrapped_reverse_double_array_field_mutations_reject_const_before_base_side_effects() {
+    let wrappers = [
+        "(fail() ? {base} : {base})",
+        "(abort(), {base})",
+        "_Generic(0, int: (abort(), {base}), default: {base})",
+    ];
+    let mutations = ["{target} = 3.0", "{target} += 2.0", "{target}++"];
+    let roots = [
+        (
+            "const struct Item data = {{1.0, 2.0}};",
+            "data.values",
+            "cannot assign to const variable 'data'",
+        ),
+        (
+            "const struct Item items[1] = {{{1.0, 2.0}}};",
+            "items[0].values",
+            "cannot assign to const variable 'items'",
+        ),
+        (
+            "const struct Item data = {{1.0, 2.0}}; const struct Item *slot = &data;",
+            "slot->values",
+            "cannot assign through pointer to const",
+        ),
+    ];
+
+    for wrapper in wrappers {
+        for mutation in mutations {
+            for (declarations, base, expected) in roots {
+                let target = format!("selector.index[{}]", wrapper.replace("{base}", base));
+                let expression = mutation.replace("{target}", &target);
+                let program = format!(
+                    r#"
+void abort(void);
+struct Selector {{ int index; }};
+struct Item {{ double values[2]; }};
+int fail(void) {{ abort(); return 1; }}
+int main(void) {{
+    struct Selector selector = {{0}};
+    {declarations}
+    return {expression};
+}}
+"#
+                );
+                assert_eq!(
+                    interpret(&program).expect_err(&expression).to_string(),
+                    expected,
+                    "unexpected diagnostic for {expression} with {declarations}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn wrapped_reverse_aggregate_double_array_field_mutations_preserve_const_roots() {
+    let wrappers = [
+        "(1 ? {base} : {base})",
+        "(0, {base})",
+        "_Generic(0, int: {base}, default: {base})",
+    ];
+    let mutations = ["{target} = 3.0", "{target} += 2.0", "{target}++"];
+    let roots = [
+        (
+            "const struct Item items[1] = {{{1.0, 2.0}}};",
+            "cannot assign to const variable 'items'",
+        ),
+        (
+            "const struct Item item = {{1.0, 2.0}}; const struct Item *items = &item;",
+            "cannot assign through pointer to const",
+        ),
+    ];
+
+    for wrapper in wrappers {
+        for mutation in mutations {
+            for (declarations, expected) in roots {
+                let base = "index[items].values";
+                let target = format!("{}[0]", wrapper.replace("{base}", base));
+                let mutation = mutation.replace("{target}", &target);
+                for expression in [mutation.clone(), format!("sizeof({mutation})")] {
+                    let program = format!(
+                        r#"
+struct Item {{ double values[2]; }};
+int main(void) {{
+    int index = 0;
+    {declarations}
+    return {expression};
+}}
+"#
+                    );
+                    assert_eq!(
+                        interpret(&program).expect_err(&expression).to_string(),
+                        expected,
+                        "unexpected diagnostic for {expression} with {declarations}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn wrapped_reverse_aggregate_lvalues_attribute_const_to_pointer_roots() {
+    for expression in [
+        "(1 ? index[items] : index[items]).values[0] = 2.0".to_string(),
+        "sizeof((1 ? index[items] : index[items]).values[0] = 2.0)".to_string(),
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+int main(void) {{
+    const struct Item object = {{{{1.0}}}};
+    const struct Item *items = &object;
+    int index = 0;
+    return {expression};
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(&expression).to_string(),
+            "cannot assign through pointer to const",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_aggregate_array_element_double_field_mutations_reject_const_roots() {
+    for expression in [
+        "items[0].values[0] = 2.0",
+        "items[0].values[0] += 1.0",
+        "items[0].values[0]++",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+int main(void) {{
+    const struct Item items[1] = {{{{{{1.0}}}}}};
+    {expression};
+    return 0;
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "cannot assign to const variable 'items'",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn wrapped_scalar_field_reverse_aggregate_lvalues_preserve_aggregate_types() {
+    let program = r#"
+struct Offset { int value; };
+struct Item { double values[1]; };
+int main(void) {
+    struct Offset offset = {0};
+    struct Item items[1] = {{{1.0}}};
+    (_Generic(0, int: offset.value[items])).values[0] = 2.0;
+    return items[0].values[0] == 2.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn wrapped_reverse_aggregate_embedded_array_lvalues_preserve_aggregate_types() {
+    let program = r#"
+struct Item { double values[1]; };
+struct Box { struct Item items[1]; };
+int main(void) {
+    int index = 0;
+    struct Box boxes[1] = {{{{{1.0}}}}};
+    (_Generic(0, int: index[boxes].items[0])).values[0] = 2.0;
+    return boxes[0].items[0].values[0] == 2.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn wrapped_direct_pointer_field_aggregate_element_lvalues_preserve_aggregate_types() {
+    let program = r#"
+struct Item { double values[1]; };
+struct Holder { struct Item *items; };
+int main(void) {
+    struct Item item = {{1.0}};
+    struct Holder holder = {&item};
+    (_Generic(0, int: holder.items[0])).values[0] = 2.0;
+    return item.values[0] == 2.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn wrapped_struct_array_pointer_field_aggregate_element_lvalues_preserve_aggregate_types() {
+    let program = r#"
+struct Item { double values[1]; };
+struct Holder { struct Item *items; };
+int main(void) {
+    struct Item item = {{1.0}};
+    struct Holder holders[1] = {{&item}};
+    (_Generic(0, int: holders[0].items[0])).values[0] = 2.0;
+    return item.values[0] == 2.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_field_aggregate_elements_preserve_type_and_index_metadata() {
+    let program = r#"
+struct Item { double values[2]; };
+struct Holder { struct Item *items; };
+int main(void) {
+    struct Item direct = {{1.0, 2.0}};
+    struct Item indirect = {{3.0, 4.0}};
+    struct Holder holder = {&direct};
+    struct Holder holders[1] = {{&indirect}};
+    int direct_index = 0;
+    int wrapped_index = 0;
+    double first = holder.items[direct_index++].values[0];
+    double second = holders[0].items[wrapped_index++].values[1];
+    if (first != 1.0 || second != 4.0 || direct_index != 1 || wrapped_index != 1) return 1;
+    if (!_Generic(holder.items[0].values[0], double: 1, default: 0)) return 2;
+    if (sizeof(holder.items[direct_index++].values[0]) != sizeof(double)) return 3;
+    if (sizeof(holders[0].items[wrapped_index++].values[1]) != sizeof(double)) return 4;
+    if (direct_index != 1 || wrapped_index != 1) return 5;
+    holder.items[0].values[0] = 5.0;
+    holders[0].items[0].values[1] += 2.0;
+    return direct.values[0] == 5.0 && indirect.values[1] == 6.0 ? 0 : 6;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_field_aggregate_elements_preserve_pointee_constness() {
+    let bases = [
+        "holder.items[0]",
+        "holders[0].items[0]",
+        "index[holders].items[0]",
+    ];
+    let wrappers = [
+        "{base}",
+        "(1 ? {base} : {base})",
+        "(0, {base})",
+        "_Generic(0, int: {base}, default: {base})",
+    ];
+    let mutations = [
+        "{target}.values[0] = 2.0",
+        "{target}.values[0] += 1.0",
+        "{target}.values[0]++",
+    ];
+
+    for base in bases {
+        for wrapper in wrappers {
+            let target = wrapper.replace("{base}", base);
+            for mutation in mutations {
+                let mutation = mutation.replace("{target}", &target);
+                for expression in [mutation.clone(), format!("sizeof({mutation})")] {
+                    let program = format!(
+                        r#"
+struct Item {{ double values[1]; }};
+struct Holder {{ const struct Item *items; }};
+int main(void) {{
+    struct Item item = {{{{1.0}}}};
+    struct Holder holder = {{&item}};
+    struct Holder holders[1] = {{{{&item}}}};
+    int index = 0;
+    return {expression};
+}}
+"#
+                    );
+                    assert_eq!(
+                        interpret(&program).expect_err(&expression).to_string(),
+                        "cannot assign through pointer to const",
+                        "unexpected diagnostic for {expression}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn direct_double_pointer_field_aggregate_elements_preserve_const_field_ancestry() {
+    let cases = [
+        (
+            "struct Item { const double values[1]; };",
+            "struct Item item = {{1.0}};",
+            "holder.items[0].values[0]",
+            "cannot assign through pointer to const",
+            "cannot assign to const struct field 'values'",
+        ),
+        (
+            "struct Inner { double values[1]; }; struct Item { const struct Inner inner; };",
+            "struct Item item = {{{1.0}}};",
+            "holder.items[0].inner.values[0]",
+            "cannot modify read-only array 'values'",
+            "cannot assign to const struct field 'inner'",
+        ),
+    ];
+    let mutations = ["{target} = 2.0", "{target} += 1.0", "{target}++"];
+
+    for (types, item, target, evaluated_error, sizeof_error) in cases {
+        for mutation in mutations {
+            let mutation = mutation.replace("{target}", target);
+            for (expression, expected) in [
+                (mutation.clone(), evaluated_error),
+                (format!("sizeof({mutation})"), sizeof_error),
+            ] {
+                let program = format!(
+                    r#"
+{types}
+struct Holder {{ struct Item *items; }};
+int main(void) {{
+    {item}
+    struct Holder holder = {{&item}};
+    return {expression};
+}}
+"#
+                );
+
+                assert_eq!(
+                    interpret(&program).expect_err(&expression).to_string(),
+                    expected,
+                    "unexpected diagnostic for {expression}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn direct_double_pointer_field_aggregate_elements_do_not_inherit_owner_constness() {
+    let program = r#"
+struct Item { double values[2]; };
+struct Holder { struct Item *items; };
+int main(void) {
+    struct Item item = {{1.0, 2.0}};
+    const struct Holder holder = {&item};
+    int direct_index = 0;
+    int wrapped_index = 0;
+    holder.items[direct_index++].values[0] = 3.0;
+    (_Generic(0, int: holder.items[wrapped_index++])).values[1] += 2.0;
+    if (sizeof((1 ? holder.items[direct_index++] : holder.items[wrapped_index++]).values[0]++) != sizeof(double)) return 1;
+    if (direct_index != 1 || wrapped_index != 1) return 2;
+    return item.values[0] == 3.0 && item.values[1] == 4.0 ? 0 : 3;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_arrow_pointer_field_aggregate_elements_preserve_type_and_index_metadata() {
+    let program = r#"
+struct Item { double values[2]; };
+struct Holder { struct Item *items; };
+int main(void) {
+    struct Item item = {{1.0, 2.0}};
+    struct Holder holder = {&item};
+    struct Holder *slot = &holder;
+    int index = 0;
+    double first = slot->items[index++].values[0];
+    if (first != 1.0 || index != 1) return 1;
+    if (!_Generic(slot->items[0], struct Item: 1, default: 0)) return 2;
+    (_Generic(0, int: slot->items[0])).values[1] = 4.0;
+    if (sizeof(slot->items[index++].values[0]) != sizeof(double)) return 3;
+    return item.values[1] == 4.0 && index == 1 ? 0 : 4;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_arrow_pointer_field_aggregate_elements_preserve_pointee_constness() {
+    for expression in [
+        "slot->items[0].values[0] = 2.0",
+        "(_Generic(0, int: slot->items[0])).values[0] += 1.0",
+        "sizeof(slot->items[0].values[0]++)",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+struct Holder {{ const struct Item *items; }};
+int main(void) {{
+    struct Item item = {{{{1.0}}}};
+    struct Holder holder = {{&item}};
+    struct Holder *slot = &holder;
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "cannot assign through pointer to const",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_arrow_pointer_field_aggregate_elements_do_not_inherit_owner_constness() {
+    let program = r#"
+struct Item { double values[2]; };
+struct Holder { struct Item *items; };
+int main(void) {
+    struct Item item = {{1.0, 2.0}};
+    const struct Holder holder = {&item};
+    const struct Holder *slot = &holder;
+    int index = 0;
+    slot->items[index++].values[0] = 3.0;
+    (_Generic(0, int: slot->items[0])).values[1] += 2.0;
+    if (sizeof(slot->items[index++].values[0]++) != sizeof(double)) return 1;
+    return item.values[0] == 3.0 && item.values[1] == 4.0 && index == 1 ? 0 : 2;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn reverse_aggregate_array_assignment_results_preserve_aggregate_types() {
+    let program = r#"
+struct Item { double values[1]; };
+int main(void) {
+    struct Item items[1] = {{{1.0}}};
+    struct Item replacement = {{3.0}};
+    int index = 0;
+    double result = (index[items] = replacement).values[0];
+    return result == 3.0 && items[0].values[0] == 3.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn reverse_embedded_aggregate_array_assignment_results_preserve_aggregate_types() {
+    let program = r#"
+struct Item { double values[1]; };
+struct Box { struct Item items[1]; };
+int main(void) {
+    struct Box boxes[1] = {{{{{1.0}}}}};
+    struct Item replacement = {{3.0}};
+    int index = 0;
+    double result = (index[boxes].items[0] = replacement).values[0];
+    return result == 3.0 && boxes[0].items[0].values[0] == 3.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_array_field_mutations_under_sizeof_preserve_const_safety() {
+    for (declarations, expression, expected) in [
+        (
+            "const struct Sample sample = {{1.0, 2.0}};",
+            "sample.values[0] = 3.0",
+            "cannot assign to const variable 'sample'",
+        ),
+        (
+            "const struct Sample samples[1] = {{{1.0, 2.0}}};",
+            "samples[0].values[0] += 2.0",
+            "cannot assign to const variable 'samples'",
+        ),
+        (
+            "const struct Sample sample = {{1.0, 2.0}}; const struct Sample *slot = &sample;",
+            "slot->values[0]++",
+            "cannot assign through pointer to const",
+        ),
+        (
+            "struct Box box = {{{{1.0, 2.0}}}};",
+            "box.items[0].values[0] = 3.0",
+            "cannot assign to const struct field 'items'",
+        ),
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double values[2]; }};
+struct Box {{ const struct Sample items[1]; }};
+int main(void) {{
+    {declarations}
+    return sizeof({expression});
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            expected,
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
 fn direct_double_aggregate_fields_support_array_and_compound_literal_reads() {
     let program = r#"
 struct Sample { double reading; };
@@ -1908,8 +3457,8 @@ fn direct_double_struct_fields_preserve_pointer_array_and_const_boundaries() {
             "double pointers are not supported",
         ),
         (
-            "struct Sample { double readings[2]; }; int main(void) { return 0; }",
-            "double aggregate array fields are not supported",
+            "struct Sample { double readings[2][3]; }; int main(void) { return 0; }",
+            "double multidimensional aggregate array fields are not supported",
         ),
         (
             "struct Sample { double reading; }; int main(void) { struct Sample sample = {1.25}; return &sample.reading != 0; }",
@@ -1924,6 +3473,223 @@ fn direct_double_struct_fields_preserve_pointer_array_and_const_boundaries() {
         assert!(
             error.to_string().contains(expected),
             "expected {expected:?}, got {error} for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_array_fields_preserve_typedef_rank_boundaries() {
+    for program in [
+        "typedef double Matrix[2][3]; struct Sample { Matrix values; }; int main(void) { return 0; }",
+        "typedef double Row[2]; struct Sample { Row values[3]; }; int main(void) { return 0; }",
+    ] {
+        assert!(
+            interpret(program)
+                .expect_err(program)
+                .to_string()
+                .starts_with("double typedef aliases are not supported"),
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_array_fields_preserve_const_pointer_and_memory_boundaries() {
+    for (program, expected) in [
+        (
+            "struct Sample { const double readings[2]; }; int main(void) { struct Sample sample = {{1.0, 2.0}}; sample.readings[0] = 3.0; return 0; }",
+            "cannot modify read-only array 'readings'",
+        ),
+        (
+            "struct Sample { double readings[2]; }; int main(void) { const struct Sample sample = {{1.0, 2.0}}; sample.readings[0]++; return 0; }",
+            "cannot assign to const variable 'sample'",
+        ),
+        (
+            "struct Inner { double readings[2]; }; struct Outer { const struct Inner inner; }; int main(void) { struct Outer outer = {{{1.0, 2.0}}}; outer.inner.readings[0] += 1.0; return 0; }",
+            "cannot modify read-only array 'readings'",
+        ),
+        (
+            "struct Sample { double readings[2]; }; int main(void) { struct Sample sample = {{1.0, 2.0}}; sample.readings; return 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "struct Sample { double readings[2]; }; int main(void) { struct Sample sample = {{1.0, 2.0}}; return &sample.readings[0] != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Sample { double readings[2]; }; int main(void) { struct Sample sample = {{1.0, 2.0}}; memset(sample.readings, 0, sizeof(sample.readings)); return 0; }",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_struct_pointer_array_elements_preserve_const_ancestry() {
+    for expression in [
+        "slot->inner.values[0] = side()",
+        "slot->inner.values[0] += side()",
+        "slot->inner.values[0]++",
+    ] {
+        for wrapped in [
+            expression.to_string(),
+            format!("sizeof({expression})"),
+            format!("_Generic(({expression}), default: 0)"),
+        ] {
+            let program = format!(
+                r#"
+struct Inner {{ double values[2]; }};
+struct Outer {{ const struct Inner inner; }};
+int rhs_calls = 0;
+double side(void) {{ rhs_calls++; return 1.0 % 2.0; }}
+int main(void) {{
+    struct Outer outer = {{{{{{1.0, 2.0}}}}}};
+    struct Outer *slot = &outer;
+    return {wrapped};
+}}
+"#
+            );
+            assert_eq!(
+                interpret(&program).expect_err(&wrapped).to_string(),
+                "cannot assign to const struct field 'inner'",
+                "unexpected diagnostic for {wrapped}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wrapped_direct_double_struct_pointer_bases_preserve_const_ancestry_before_indexes() {
+    for expression in [
+        "(1 ? slot->inner.values : slot->inner.values)[bad()] = 3.0",
+        "(0, slot->inner.values)[bad()] += 1.0",
+        "(1 ? slot->inner.values : slot->inner.values)[bad()]++",
+    ] {
+        for wrapped in [expression.to_string(), format!("sizeof({expression})")] {
+            let program = format!(
+                r#"
+struct Inner {{ double values[2]; }};
+struct Outer {{ const struct Inner inner; }};
+int bad(void) {{ return (int)(1.0 % 2.0); }}
+int main(void) {{
+    struct Outer outer = {{{{{{1.0, 2.0}}}}}};
+    struct Outer *slot = &outer;
+    return {wrapped};
+}}
+"#
+            );
+            assert_eq!(
+                interpret(&program).expect_err(&wrapped).to_string(),
+                "cannot assign to const struct field 'inner'",
+                "unexpected diagnostic for {wrapped}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wrapped_direct_double_struct_pointer_bases_preserve_pointer_to_const_in_type_queries() {
+    for mutation in [
+        "(1 ? slot->values : slot->values)[0] = 3.0",
+        "(0, slot->values)[0] += 1.0",
+        "(1 ? slot->values : slot->values)[0]++",
+    ] {
+        for expression in [
+            format!("sizeof({mutation})"),
+            format!("_Generic(({mutation}), double: 0, default: 1)"),
+        ] {
+            let program = format!(
+                r#"
+struct Sample {{ double values[2]; }};
+int main(void) {{
+    const struct Sample sample = {{{{1.0, 2.0}}}};
+    const struct Sample *slot = &sample;
+    return {expression};
+}}
+"#
+            );
+            assert_eq!(
+                interpret(&program).expect_err(&expression).to_string(),
+                "cannot assign through pointer to const",
+                "unexpected diagnostic for {expression}"
+            );
+        }
+    }
+}
+
+#[test]
+fn direct_double_direct_and_struct_array_mutations_check_const_before_operands() {
+    for expression in [
+        "outer.inner.values[bad_inner()] = bad_rhs()",
+        "outer.inner.values[bad_inner()] += bad_rhs()",
+        "outer.inner.values[bad_inner()]++",
+        "outers[bad_outer()].inner.values[bad_inner()] = bad_rhs()",
+        "outers[bad_outer()].inner.values[bad_inner()] += bad_rhs()",
+        "outers[bad_outer()].inner.values[bad_inner()]++",
+    ] {
+        let program = format!(
+            r#"
+struct Inner {{ double values[2]; }};
+struct Outer {{ const struct Inner inner; }};
+int bad_outer(void) {{ return (int)(1.0 % 2.0); }}
+int bad_inner(void) {{ return (int)(1.0 % 2.0); }}
+double bad_rhs(void) {{ return 1.0 % 2.0; }}
+int main(void) {{
+    struct Outer outer = {{{{{{1.0, 2.0}}}}}};
+    struct Outer outers[1] = {{{{{{{{3.0, 4.0}}}}}}}};
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "cannot modify read-only array 'values'",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_array_storage_rejects_whole_object_raw_memory_paths() {
+    for (body, expected) in [
+        (
+            "memset(&sample, 0, sizeof(sample)); return 0;",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+        (
+            "return sizeof(memset(&sample, 0, sizeof(sample)));",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+        (
+            "char *bytes = (char *)&sample; return bytes[0];",
+            "character pointer casts do not support double object storage",
+        ),
+        (
+            "char *bytes = (char *)&outer; return bytes[0];",
+            "character pointer casts do not support double object storage",
+        ),
+    ] {
+        let program = format!(
+            r#"
+void *memset(void *, int, unsigned long int);
+struct Sample {{ double readings[2]; }};
+struct Outer {{ struct Sample sample; }};
+int main(void) {{
+    struct Sample sample = {{{{1.0, 2.0}}}};
+    struct Outer outer = {{{{{{3.0, 4.0}}}}}};
+    {body}
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(body).to_string(),
+            expected,
+            "unexpected diagnostic for {body}"
         );
     }
 }
@@ -2281,6 +4047,60 @@ int main(void) {
 }
 
 #[test]
+fn reverse_aggregate_subscripts_preserve_double_array_field_types() {
+    let program = r#"
+struct Sample { double values[2]; };
+int main(void) {
+    struct Sample samples[1] = {{{1.5, 2.5}}};
+    int index = 0;
+    double read = index[samples].values[1];
+    double assigned = (index[samples].values[0] = 3.5);
+    double compounded = (index[samples].values[1] += 1.0);
+    return read == 2.5 && assigned == 3.5 && compounded == 3.5
+            && samples[0].values[0] == 3.5 && samples[0].values[1] == 3.5
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_scalar_field_reverse_subscript_uses_effective_element_type() {
+    let value = r#"
+struct Sample { int index; double values[2]; };
+int main(void) {
+    struct Sample sample = {1, {2.5, 3.5}};
+    double selected = sample.index[sample.values];
+    if (selected != 3.5) return 1;
+    return _Generic(sample.index[sample.values], double: 0, default: 2);
+}
+"#;
+    assert_eq!(interpret(value).unwrap(), 0);
+
+    for expression in [
+        "&sample.index[sample.values] != 0",
+        "sizeof(&sample.index[sample.values])",
+        "_Generic((&sample.index[sample.values]), default: 0)",
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ int index; double values[2]; }};
+int main(void) {{
+    struct Sample sample = {{1, {{2.5, 3.5}}}};
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
 fn direct_double_aggregate_array_field_lvalues_evaluate_index_once() {
     let program = r#"
 struct Sample { double reading; };
@@ -2487,6 +4307,29 @@ int main(void) {
 }
 
 #[test]
+fn direct_double_type_queries_validate_aggregate_double_array_field_initializers() {
+    for expression in [
+        "sizeof((struct Sample){{&value}})",
+        "_Generic((struct Sample){{&value}}, struct Sample: 0, default: 1)",
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double readings[1]; }};
+int main(void) {{
+    int value = 2;
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot assign pointer expression to double value",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
 fn direct_double_sizeof_validates_aggregate_array_compound_literal_initializers() {
     let program = r#"
 struct Sample { double reading; };
@@ -2612,6 +4455,193 @@ int main(void) {
         assert!(
             error.to_string().contains("double object storage"),
             "unexpected error: {error}"
+        );
+    }
+}
+
+#[test]
+fn reverse_aggregate_double_array_field_mutations_preserve_const_roots() {
+    for mutation in [
+        "index[items].values[0] = 3.0;",
+        "index[items].values[0] += 2.0;",
+        "index[items].values[0]++;",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+int main(void) {{
+    const struct Item items[1] = {{{{{{1.0}}}}}};
+    int index = 0;
+    {mutation}
+    return 0;
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot assign to const variable 'items'"
+        );
+    }
+
+    for mutation in [
+        "index[items].values[0] = 3.0;",
+        "index[items].values[0] += 2.0;",
+        "index[items].values[0]++;",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+int main(void) {{
+    struct Item storage[1] = {{{{{{1.0}}}}}};
+    const struct Item *items = storage;
+    int index = 0;
+    {mutation}
+    return 0;
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot assign through pointer to const"
+        );
+    }
+}
+
+#[test]
+fn reverse_aggregate_double_array_field_addresses_do_not_escape_pointer_boundary() {
+    for expression in [
+        "(&index[items].values[0])[0] = 3.0",
+        "(&index[items].values[0])[0] += 2.0",
+        "(&index[items].values[0])[0]++",
+        "&index[items].values != 0",
+        "sizeof(&index[items].values)",
+        "0[&index[items].values[0]]",
+        "*(&index[items].values[0] + 0)",
+        "*(&index[items].values[0] - 0)",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+int main(void) {{
+    struct Item items[1] = {{{{{{1.0}}}}}};
+    int index = 0;
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "double pointers are not supported",
+            "unexpected result for {expression}"
+        );
+    }
+}
+
+#[test]
+fn wrapped_reverse_aggregate_double_array_field_bases_support_indexing() {
+    let program = r#"
+struct Item { double values[2]; };
+int main(void) {
+    struct Item items[1] = {{{1.25, 2.5}}};
+    int index = 0;
+    if ((1 ? index[items].values : index[items].values)[1] != 2.5) return 1;
+    if ((0, index[items].values)[0] != 1.25) return 2;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn wrapped_reverse_aggregate_lvalues_preserve_double_array_fields() {
+    let program = r#"
+struct Item { double values[2]; };
+struct Outer { struct Item inner; };
+int main(void) {
+    struct Item items[1] = {{{1.25, 2.5}}};
+    struct Outer outers[1] = {{{{3.5, 4.5}}}};
+    int index = 0;
+    (_Generic(0, int: index[items])).values[0] = 5.0;
+    if (items[0].values[0] != 5.0) return 1;
+    (0, index[items]).values[1] += 0.5;
+    if (items[0].values[1] != 3.0) return 2;
+    (1 ? index[items] : index[items]).values[0]++;
+    if (items[0].values[0] != 6.0) return 3;
+    (_Generic(0, int: index[outers].inner)).values[0] = 7.0;
+    if (outers[0].inner.values[0] != 7.0) return 4;
+    (0, index[outers].inner).values[1] += 0.5;
+    if (outers[0].inner.values[1] != 5.0) return 5;
+    (1 ? index[outers].inner : index[outers].inner).values[0]++;
+    return outers[0].inner.values[0] == 8.0 ? 0 : 6;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn reverse_aggregate_double_array_mutations_reject_const_ancestor_before_operands() {
+    let bases = [
+        "index[items].inner.values",
+        "(1 ? index[items].inner.values : index[items].inner.values)",
+        "(0, index[items].inner.values)",
+        "_Generic(0, int: index[items].inner.values, default: index[items].inner.values)",
+    ];
+    let mutations = [
+        "{base}[bad()] = rhs()",
+        "{base}[bad()] += rhs()",
+        "{base}[bad()]++",
+    ];
+
+    for base in bases {
+        for mutation in mutations {
+            let expression = mutation.replace("{base}", base);
+            let program = format!(
+                r#"
+struct Inner {{ double values[2]; }};
+struct Item {{ const struct Inner inner; }};
+int bad(void) {{ return (int)(1.0 % 2.0); }}
+double rhs(void) {{ return 1.0 % 2.0; }}
+int main(void) {{
+    struct Item items[1] = {{{{{{{{1.0, 2.0}}}}}}}};
+    int index = 0;
+    {expression};
+    return 0;
+}}
+"#
+            );
+            assert_eq!(
+                interpret(&program).expect_err(&expression).to_string(),
+                "cannot assign to const struct field 'inner'",
+                "unexpected diagnostic for {expression}"
+            );
+        }
+    }
+}
+
+#[test]
+fn non_evaluating_scalar_operators_reject_aggregate_double_array_decay() {
+    for expression in [
+        "sizeof(sample.values ? 1 : 2)",
+        "_Generic((sample.values ? 1 : 2), int: 0, default: 1)",
+        "sizeof(!sample.values)",
+        "sizeof(+sample.values)",
+        "sizeof((int)sample.values)",
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double values[1]; }};
+int main(void) {{
+    struct Sample sample = {{{{1.0}}}};
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "double pointers are not supported",
+            "unexpected result for {expression}"
         );
     }
 }
@@ -17693,6 +19723,24 @@ fn character_pointer_object_arithmetic_is_rejected_in_evaluated_and_sizeof_conte
         let err = interpret(&program).unwrap_err();
         assert_eq!(
             err.to_string(),
+            "character pointer output arithmetic is not supported",
+            "expression: {expr}"
+        );
+    }
+}
+
+#[test]
+fn character_pointer_output_subscripts_remain_rejected_in_non_evaluating_contexts() {
+    for expr in [
+        "sizeof(&(1 ? output : output)[0])",
+        "_Generic((&(1 ? output : output)[0]), default: 0)",
+        "sizeof(&(0, output)[0])",
+    ] {
+        let program =
+            format!("int main(void) {{ char *slot = 0; char **output = &slot; return {expr}; }}\n");
+
+        assert_eq!(
+            interpret(&program).expect_err(expr).to_string(),
             "character pointer output arithmetic is not supported",
             "expression: {expr}"
         );

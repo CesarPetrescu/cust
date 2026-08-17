@@ -18,6 +18,15 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
 
+## 2026-08-16 — Aggregate pointer-field subscripting must separate pointee qualification from owner constness
+
+- Native `cc -std=c11` confirms that a `struct Item *` field may be subscripted at zero even when it points to a standalone object: `holder.items[0].values[0]` is valid and mutable when the pointee is mutable.
+- A field declared `const struct Item *items` makes `items[0]` a const aggregate lvalue; direct or wrapped writes must be rejected, including non-evaluating `sizeof(write)` validation.
+- A const containing aggregate does not make the object reached through a mutable pointer-valued field const. `const struct Holder holder = {&item}; holder.items[0].values[0] = 2.0;` is valid C because top-level const qualifies the pointer slot/owner, not the pointee.
+- Implementation decision: aggregate-element metadata for `Pointer(Struct)` fields must carry pointee type and `points_to_const` independently from the owner/field-slot const bit. Conditional/comma/`_Generic` wrappers must merge those channels without converting owner constness into pointee constness or dropping pointee qualification. See `references/cust-direct-double-aggregate-pointer-field-review-closure.md`.
+- Reverse subscript syntax swaps the parser's stored `name` and `index` roles: in `i[holders].items[0].values[0]`, `name` is scalar `i` and `index` is aggregate-valued `holders`. Any type/qualification classifier for `StructElementArrayGet` must therefore use `struct_element_expr_field_metadata(name, index, fields)`, not `struct_element_field_metadata(name, fields)`. The latter silently loses pointer-field `points_to_const` even when runtime reads succeed.
+- Non-evaluating mutability validation must not stop after proving an aggregate pointer field itself points to a mutable object. For `struct Item *items`, the pointee can still contain `const double values[N]` or a `const struct Inner` ancestor. Resolve the pointer-field pointee type, then validate the remaining selected field path so `sizeof(items[0].values[0] = value)` enforces the same C const ancestry as evaluated assignment without evaluating indexes or RHS expressions.
+
 ## 2026-08-15 — Aggregate `double` array contextual validation
 
 - C array-to-pointer conversion is context-sensitive for this bounded slice: a direct array operand of `sizeof` remains an array object, while arrays used as conditional/comma operands decay. Cust therefore keeps direct `sizeof(field_array)` sizing but rejects conditional/comma results that would expose unsupported `double *` values.
