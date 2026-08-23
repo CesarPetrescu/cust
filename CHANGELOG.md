@@ -4,6 +4,8 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.34.0 — 2026-08-23
+
 ### Language subset
 
 - Added a safe first one-level direct `double *` slice over interpreter-owned scalar and one-dimensional-array storage. Local/global/static objects, scalar addresses, array decay/indexing/arithmetic/equality/truthiness, pointer fields, function parameters/returns, qualification-preserving `void *` conversion, and non-evaluating `sizeof`/`_Alignof`/`_Generic` queries preserve Cust owner, lifetime, and const metadata.
@@ -11,6 +13,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Diagnostics and verification
 
 - Retained exact deeper-pointer, pointer-to-row/multidimensional, aggregate-field-address/decay, typedef-double, and raw-memory double-storage boundaries. Focused valid/invalid regressions and a registered warning-free compiler-oracle fixture cover the slice.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.34.0`.
+- Reconciled an executable inventory of 1,977 tests: 1,841 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- The bounded `double` slice supports direct scalar/function/one-dimensional-array/aggregate-field storage plus one-level pointers to standalone scalar and one-dimensional-array storage. `float`, `long double`, hexadecimal/suffixed/non-finite floating literals, double typedef aliases, deeper double pointers, aggregate-field double addresses/decay, double-array parameters and compound literals, multidimensional double arrays, raw-memory operations over double storage, and unions mixing double storage with non-scalar layouts remain unsupported. Complex runtime values, host floating ABI/promotion behavior, general pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
 
 ## v0.33.0 — 2026-08-17
 

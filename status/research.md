@@ -2,6 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-23 — v0.34.0 release consistency
+
+- Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.33.0`, then passed after Cargo/lock and both image tags moved to `0.34.0`. Cargo metadata and the built CLI report `cust 0.34.0`; local and remote annotated-tag preflight found no `v0.34.0` refs.
+- Executable target-by-target listing reconciles 1,977 tests: 1,841 interpreter, 99 deterministic fuzz-safety, 33 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over aggregate-field double address/decay support, shared-storage union bytes, and parser/property expansion because release closure was the sole unchecked authoritative item at selection time and packages reviewed behavior without widening semantics.
+- Publication must retain release-commit-first ordering: independent complete-diff review precedes the canonical gate; exact `origin/main` acceptance precedes annotated-tag creation; and local/remote tag objects plus peeled targets must match. Aggregate-field double address/decay support is the next concrete language package after publication.
+- Initial release review found that the README support lead and central limitation inventory omitted the exact unsupported pointer-to-row double form. Adding explicit `double (*)[N]` wording closed the only finding; fresh complete-diff re-review returned `APPROVED`. The canonical local/no-cache-rebuilt-Docker gate then passed all 1,977 tests, runtime output `10`, exact local/Cargo/Compose/direct-image version probes, diff checks, and the release-diff secret scan.
+- No external semantic research was required; executable version tests, Cargo metadata, Compose metadata, repository feature notes, and the loaded release-closure checklist establish the consistency surface.
+
 ## 2026-08-23 — Aggregate dereference snapshots and analyzer depth
 
 - Aggregate by-value dereference needs both selected-field facts and embedded aggregate-pointer targets from the pointed storage. Treating `Expr::Deref` as an unknown aggregate launders a double-backed pointer through copies, calls, and returns.
