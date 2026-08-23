@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during bounded v0.34.0 release preparation on 2026-08-23. Version-first CLI and Compose expectations failed against `0.33.0` and pass after package/lock/image metadata moved to `0.34.0`; Cargo metadata and the built CLI agree, the exact 1,977-test inventory reconciles, local/remote `v0.34.0` tag preflight is empty, fresh complete-diff review is `APPROVED`, and the canonical local/no-cache-rebuilt-Docker gate passes. Release-commit-first push, tag publication, and exact remote peeled-target verification remain ordinary required steps rather than blockers.
+None. Last reviewed after bounded v0.34.0 publication on 2026-08-23. Version-first CLI and Compose expectations failed against `0.33.0` and pass after package/lock/image metadata moved to `0.34.0`; Cargo metadata and the built CLI agree, the exact 1,977-test inventory reconciles, fresh complete-diff review is `APPROVED`, and the canonical local/no-cache-rebuilt-Docker gate passes. Release commit `4793b13c9a700eec804a8f32221bf37a8eb041e5` reached exact `origin/main` before annotated tag object `0ccc3a011b082f288df0213b5315ccc733f1b872`; local/remote tag objects match and peel exactly to the release commit. There are no active blockers.
 
 ## Resolved this run
 
