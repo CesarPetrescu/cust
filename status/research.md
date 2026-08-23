@@ -2,6 +2,30 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-23 — Aggregate dereference snapshots and analyzer depth
+
+- Aggregate by-value dereference needs both selected-field facts and embedded aggregate-pointer targets from the pointed storage. Treating `Expr::Deref` as an unknown aggregate launders a double-backed pointer through copies, calls, and returns.
+- `*(pointer++)` copies the aggregate at the pre-increment target. Value-snapshot recursion must unwrap `Expr::Deref` before classifying the aggregate, while prefix updates continue to use post-effect aliases.
+- Bounding only the ordinary non-evaluating AST validator does not protect the separate callee-summary effect walker. Apply a dedicated depth state at every recursive `update_double_storage_aliases_from_expr()` edge and restore the `Cell` after both success and ordinary error results. Do not share the validator's 32-level state: valid nested intrinsic tests compose both walkers and require the established 128-level expression allowance.
+- A host-abort regression must execute the Cust CLI as a subprocess and put the deep comma expression inside a user-function return reached through `sizeof(memset(call,...))`; a direct `sizeof((comma,...))` probe does not cover callee-summary recursion.
+- No external research was required; independent minimized reproducers and the repository's existing deterministic depth-limit pattern established the implementation.
+
+## 2026-08-22 — Call-argument value snapshots and side effects
+
+- Source-order call analysis needs two states per argument: the aliases before evaluating the argument and the aliases after its side effects. The parameter value selects between them according to C expression value semantics.
+- Postfix increment and nested call-like values retain the pre-effect snapshot for value classification; prefix increment uses the updated target. Assignment/comma/generic/conditional wrappers reuse the existing recursive `double_storage_value_uses_pre_effect_aliases()` classifier.
+- Apply the same selection in `analyze_double_storage_call_from_source_order()` and the `Expr::Call` effect visitor. Updating only one route leaves direct non-evaluating call classification and nested effect replay inconsistent.
+- Whole-expression pre/post states are insufficient for sequenced subexpressions. In `(pointer = &target, pointer++)`, the value is captured after the comma-left assignment but before the postfix increment. Reconstruct that intermediate state by replaying the left operand on the pre-effect snapshot before classifying the right operand.
+- Every value consumer needs the same snapshot, not only calls and pointer lvalue writes. Resolve return values, pointer declarations, statement/expression assignments, `StructPtrSet`, expression `DerefSet`, and statement `DerefAssign` from the helper's intermediate aliases. Plain aggregate-target recursion must also unwrap assignment/comma wrappers.
+- No external research was required; the paired prefix/postfix regressions and existing source-order call tests establish the repository's intended semantics.
+
+## 2026-08-20 — Direct-pointer independent review closure
+
+- Keep runtime execution depth and recursive non-evaluating summary depth separate. Lowering the shared runtime ceiling to protect host stack use in the analyzer silently contracted documented recursion behavior.
+- Pointer-returning call provenance must use source-order per-argument snapshots; resolving against aliases after all arguments run can redirect a result that selected an earlier argument.
+- Non-evaluating aggregate provenance must update direct aggregate pointer fields under pointer `+=`/`-=`, and lexical `_Generic` control typing must validate const writes and scalar-double assignment compatibility despite not evaluating the control expression.
+- Scope-owned compound-literal metadata is limited to the new direct `double[]` pointer path. Broadening it to character arrays would silently expand the `strtok` tracked-lifetime acceptance boundary.
+
 ## Useful documentation targets
 
 - Rust Book: https://doc.rust-lang.org/book/
@@ -17,6 +41,51 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Add the date, URL or `man <page>`, and concise finding.
 - If a researched detail affects implementation, mention the file/function changed.
 - Keep notes short; link out instead of copying large docs.
+
+## 2026-08-20 — Recursive effects and lexical generic-control types
+
+- Recursive non-evaluating call fallback must conservatively summarize one bounded body pass, not only the declared return shape. A temporary recursion sentinel terminates the next edge while the ordinary parameter, nested-target, and global effect extraction records writes from the current pass; the approximation is not retained as a reusable completed-call cache entry.
+- Aggregate values need two independent summaries: double-storage field paths and embedded aggregate-pointer target paths. Returned aggregate literals/calls and nested aggregate-valued field expressions now preserve both maps through caller initialization and later field mutation.
+- C `_Generic` controlling expressions apply lvalue, array, and function conversions. A local `struct T items[N]` therefore contributes `struct T *`, including pointee qualification, to lexical selection rather than the aggregate element value type.
+- Binary generic controls must derive result types entirely from lexical operand facts in non-evaluating analysis. The supported arithmetic, remainder, shift/bitwise, equality, ordering, and logical families now return the same scalar/pointer result categories and diagnostics as Cust's ordinary expression model without runtime lookup.
+- No new external documentation was required: the repository's existing generic-selection implementation and a warning-denied native `_Static_assert` probe established the conversion/type rules. Four focused regressions document the exact prior failures.
+
+## 2026-08-20 — Aggregate parameter summary index coordinates
+
+- Aggregate-array targets in Cust's non-evaluating call analyzer use root-absolute element indexes, not indexes relative to the callee parameter. Keeping the caller-selected absolute index lets a callee safely move backward as well as forward; rebasing to zero loses valid `(parameter - 1)` provenance because the current target representation uses `usize`.
+- Callee element-fact maps therefore stay root-absolute from parameter seeding through return/effect summarization and caller replay. Applying a summary must replace the complete absolute map exactly once rather than add the caller base a second time.
+- Nested aggregate pointer fields must preserve the original target shape: direct standalone objects remain `Direct`, while aggregate-array elements remain `Element` with the same absolute index so callee arithmetic updates the selected root precisely.
+- No external documentation was required; these decisions follow the repository's existing negative-offset regression and interpreter-owned aggregate target representation. The focused 91-test non-evaluating-memory filter proves the coordinate model alongside the three new review regressions.
+
+## 2026-08-19 — Non-evaluating aggregate provenance review closure
+
+- A non-evaluating safety analyzer must never use unchecked host `usize` arithmetic even though the guest expression is not executed. Aggregate pointer-target index composition now uses `checked_add`; overflow degrades to an unknown index so conservative wildcard field facts apply without panicking the host.
+- Aggregate pointer parameters need both declared pointee type and caller-derived field provenance. Parameterized call summaries now carry returned aggregate field facts and changed pointer-parameter fields, with cache keys derived from the relevant input facts; call-expression analysis applies callee field effects back to caller aggregate targets. Track writes independently of final-vs-initial field-set equality, because unioned conditional inputs can hide a real callee write. Conditional pointer arguments require a target set: dangerous effects are merged into every possible target, while safe overwrites cannot clear an object that may be unselected.
+- Aggregate-valued call results need field-fact summaries rather than a scalar “may return double storage” bit. This is required for `make_box().pointer`-style postfix field access beneath non-evaluating raw-memory validation.
+- Control-flow summaries distinguish “may return double storage,” “always returns,” and “always stops this statement sequence.” A `do` body contributes its post-body state directly because it executes at least once; returning branches do not taint fallthrough state; and statements after `return`, `break`, or `continue` are unreachable in their sequence. Break and continue alias states must remain separate from fallthrough so later statements cannot overwrite them before the enclosing loop consumes them.
+- Runtime pointer-index composition needs checked signed addition just as metadata-only aggregate index composition needs checked unsigned addition; guest `INT64_MAX` offsets must become deterministic `CustError`s rather than debug-build host panics.
+- Function summaries must retain target identity, alias relationships, and write order. Struct-array adjustment preserves the caller's selected element target; assignment and `_Generic` forwarding replace the selected target; two aliased pointer parameters require ordered writes and alias-sensitive cache keys.
+- Non-evaluating effect visitors must traverse every supported setter/update operand even when the setter's own result type is irrelevant. Array-set indexes and lvalue/value operands can mutate pointer aliases through comma/assignment expressions.
+- Whole-program non-evaluating analysis needs lexical global facts and exported global writes, not only parameter scopes. Static pointer initializers may reference static-duration storage but must reject automatic-storage owners at initialization time even if the pointer is never used.
+- A `switch` with a `default` and no reachable break/fallthrough exit can preserve `always_returns`/`always_stops_sequence`; clearing those flags unconditionally pollutes continuation facts with unreachable entry state.
+- `while`, `for`, and `do-while` need the same monotone alias fixed point. `do-while` still excludes the zero-iteration exit, while `for` retains its initializer scope and zero-iteration path.
+- Function arguments need an alias snapshot immediately after each source-ordered argument. Those snapshots seed the corresponding parameter and identify the caller target when replaying effects; the final post-argument state remains the call's global entry state.
+- A struct-pointer parameter that targets a global should retain that global target in the callee. Global-name writes and parameter writes then update one fact in source order instead of producing conflicting summaries whose replay order can reverse the program.
+- Return snapshots retain nested block scopes, so parameter effects must read the fixed parameter scope rather than reverse-searching a same-named inner local.
+- Current-storage validation for a dynamic aggregate index must conservatively inspect every stored element without evaluating the index. This prevents a globals-only lexical fallback from misclassifying a shadowing local aggregate.
+- Lexical `_Generic` typing must combine conditional branch types with the same rules as ordinary generic typing while obtaining both branch types from lexical facts; falling back to runtime lookup cannot resolve callee locals beneath `sizeof`.
+- No external research was needed for the second review-fix cycle. Existing call-summary, lexical type, and return-type metadata established the narrow fixes: carry a returned aggregate target through a call before applying a field write; derive `+`, `-`, `~`, and `!` generic-control types lexically with existing promotions/diagnostics; and treat recursive fallback as double-capable only for scalar `double`, `void *`, `double *`, aggregate pointers, and double row pointers.
+- Second-cycle blocker 1 was outside Cust's supported syntax and was removed without edits. The prior `StructPtrGet`/`void *` aggregate-field finding was also invalid because aggregate `void *` fields are rejected and supported substitute spellings already stop earlier; neither is a production fix.
+- Direct aggregate-pointer `+=`/`-=` and `++`/`--` mutations must offset the lexical `DoubleStorageAggregateTarget`, not merely traverse the operand. Runtime pointer movement without the matching metadata update can make later non-evaluating raw-memory validation inspect the wrong aggregate-array element.
+- Exact executable commands now pass 76 `non_evaluating_memory_` tests, 59 `direct_double_pointer` tests, and one `c_compat` test after `cargo fmt`; the canonical and Docker gates were intentionally not run during this focused closure.
+- Independent review and RED/GREEN evidence are recorded in `references/cust-direct-double-pointers.md`.
+
+## 2026-08-17 — Safe direct one-level `double *` boundary
+
+- The direct pointer slice reuses Cust's existing interpreter-owned scalar/array pointer targets rather than host addresses. Direct double scalar addresses and one-dimensional array decay preserve owner, lexical lifetime, const qualification, bounds, and pointer identity through arithmetic, indexing, equality, function forwarding, and compatible `void *` conversions.
+- Aggregate-owned scalar/array double addresses remain outside this slice because the pre-existing double aggregate-field boundary helper identifies those AST routes explicitly. Deeper `double **`, pointer-to-row and multidimensional double storage, typedef-double forms, and raw-memory double object bytes remain separate work.
+- Non-evaluating `_Generic` control classification internally uses `sizeof_expr`; once direct `&double_object` became a supported pointer value, the obsolete address-specific double-pointer rejection in `sizeof_expr` had to be removed while aggregate-derived rejection remained in the shared boundary classifier.
+- Work-package alternatives were bounded v0.34.0 release closure, shared-storage union bytes, and broader parser/property work. Recovery priority and queue order selected the inherited direct-pointer implementation; release closure is now first.
 
 ## 2026-08-17 — v0.33.0 release consistency
 

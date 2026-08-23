@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added a safe first one-level direct `double *` slice over interpreter-owned scalar and one-dimensional-array storage. Local/global/static objects, scalar addresses, array decay/indexing/arithmetic/equality/truthiness, pointer fields, function parameters/returns, qualification-preserving `void *` conversion, and non-evaluating `sizeof`/`_Alignof`/`_Generic` queries preserve Cust owner, lifetime, and const metadata.
+
+### Diagnostics and verification
+
+- Retained exact deeper-pointer, pointer-to-row/multidimensional, aggregate-field-address/decay, typedef-double, and raw-memory double-storage boundaries. Focused valid/invalid regressions and a registered warning-free compiler-oracle fixture cover the slice.
+
 ## v0.33.0 — 2026-08-17
 
 ### Language subset

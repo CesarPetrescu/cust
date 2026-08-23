@@ -1,5 +1,39 @@
 use cust::{format_tokens, interpret};
 
+#[cfg(unix)]
+#[test]
+fn interpreter_errors_ignore_undocumented_trace_environment_variables() {
+    const CHILD_ENV: &str = "CUST_TRACE_ERROR_TEST_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let _ = interpret("int main(void) { return missing; }");
+        return;
+    }
+
+    let stderr = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/full")
+        .expect("/dev/full should be writable on Unix");
+    let status = std::process::Command::new(
+        std::env::current_exe().expect("current integration-test executable should exist"),
+    )
+    .args([
+        "--exact",
+        "interpreter_errors_ignore_undocumented_trace_environment_variables",
+        "--nocapture",
+    ])
+    .env(CHILD_ENV, "1")
+    .env("CUST_TRACE_ERROR", "1")
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::from(stderr))
+    .status()
+    .expect("child integration test should run");
+
+    assert!(
+        status.success(),
+        "interpreter error handling must not panic when stderr is unwritable"
+    );
+}
+
 #[test]
 fn runs_integer_arithmetic_and_return() {
     let program = r#"
@@ -3040,6 +3074,21 @@ int main(void) {
 }
 
 #[test]
+fn direct_double_pointer_fields_nested_in_aggregate_arrays_remain_pointer_values() {
+    let program = r#"
+struct Slot { double *pointer; };
+struct Holder { struct Slot slots[1]; };
+int main(void) {
+    double value = 1.0;
+    struct Holder holder = {{{&value}}};
+    return holder.slots[0].pointer == &value ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn direct_double_pointer_field_aggregate_elements_preserve_type_and_index_metadata() {
     let program = r#"
 struct Item { double values[2]; };
@@ -3065,6 +3114,29 @@ int main(void) {
 "#;
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_postfix_const_casts_preserve_pointee_constness() {
+    let mutation = r#"
+double value;
+int main(void) {
+    (*(double const *)&value)++;
+    return 0;
+}
+"#;
+    assert_eq!(
+        interpret(mutation).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+
+    let generic = r#"
+double value;
+int main(void) {
+    return _Generic((double const *)&value, double const *: 0, default: 1);
+}
+"#;
+    assert_eq!(interpret(generic), Ok(0));
 }
 
 #[test]
@@ -3453,10 +3525,6 @@ fn direct_double_aggregate_field_addresses_preserve_pointer_boundary_on_all_rout
 fn direct_double_struct_fields_preserve_pointer_array_and_const_boundaries() {
     for (program, expected) in [
         (
-            "struct Sample { double *reading; }; int main(void) { return 0; }",
-            "double pointers are not supported",
-        ),
-        (
             "struct Sample { double readings[2][3]; }; int main(void) { return 0; }",
             "double multidimensional aggregate array fields are not supported",
         ),
@@ -3687,7 +3755,7 @@ int main(void) {{
 "#
         );
         assert_eq!(
-            interpret(&program).expect_err(body).to_string(),
+            interpret(&program).unwrap_err().to_string(),
             expected,
             "unexpected diagnostic for {body}"
         );
@@ -4730,34 +4798,6 @@ fn direct_double_arrays_keep_const_bounds_pointer_and_rank_boundaries() {
             "array 'values' index 1 out of bounds for length 1",
         ),
         (
-            "int main(void) { double values[1] = {1.5}; values; return 0; }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { double values[1] = {1.5}; return *values == 1.5; }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { double values[1] = {1.5}; *values = 2.5; return 0; }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { double values[1] = {1.5}; return &values[0] != 0; }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { double values[1] = {1.5}; return &0[values] != 0; }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { double values[1] = {1.5}; void *slot = &0[values]; return slot != 0; }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { double values[1] = {1.5}; double *slot = values; return 0; }",
-            "double pointers are not supported",
-        ),
-        (
             "int main(void) { double values[1] = {1.5}; values[0] %= 1; return 0; }",
             "integer-only compound assignment used with double value",
         ),
@@ -4777,25 +4817,16 @@ fn direct_double_arrays_keep_const_bounds_pointer_and_rank_boundaries() {
 }
 
 #[test]
-fn double_array_invalid_fixtures_keep_pointer_and_rank_diagnostics() {
-    for (program, expected) in [
-        (
-            include_str!("fixtures/invalid/double_array_decay.c"),
-            "double pointers are not supported",
-        ),
-        (
-            include_str!("fixtures/invalid/double_multidimensional_array.c"),
-            "double multidimensional arrays are not supported",
-        ),
-    ] {
-        assert!(
-            interpret(program)
-                .expect_err(program)
-                .to_string()
-                .contains(expected),
-            "expected {expected:?}"
-        );
-    }
+fn double_array_invalid_fixture_keeps_rank_diagnostic() {
+    let program = include_str!("fixtures/invalid/double_multidimensional_array.c");
+    let expected = "double multidimensional arrays are not supported";
+    assert!(
+        interpret(program)
+            .expect_err(program)
+            .to_string()
+            .contains(expected),
+        "expected {expected:?}"
+    );
 }
 
 #[test]
@@ -5024,28 +5055,2761 @@ fn rejects_double_pointer_arithmetic_offsets() {
 }
 
 #[test]
-fn rejects_double_pointer_expressions_outside_the_bounded_slice() {
-    for program in [
-        "int main(void) { double value = 1.5; &value; return 0; }",
-        "int main(void) { double value = 1.5; return *(&value) == 1.5; }",
-        "int main(void) { double value = 1.5; return &value == &value; }",
-        "int main(void) { double left = 1.5; double right = 2.5; return &left < &right; }",
-        "int main(void) { double value = 1.5; return &value ? 0 : 1; }",
-        "int main(void) { double value = 1.5; return (_Bool)&value ? 0 : 1; }",
-        "int main(void) { double value = 1.5; void *pointer = &value; return pointer != 0; }",
-        "int main(void) { double value = 1.5; return sizeof((void *)&value); }",
-        "int main(void) { double value = 1.5; return _Generic((void *)&value, void *: 0, default: 1); }",
-        "int main(void) { return (double *)0 == 0; }",
-        "int main(void) { double value = 1.5; return sizeof(&value); }",
-        "int main(void) { return sizeof(&(double){1.5}); }",
-        "double (*global_row)[2]; int main(void) { return 0; }",
-        "int main(void) { double (*local_row)[2]; return 0; }",
+fn bounded_memory_intrinsics_reject_double_object_storage_in_non_evaluating_contexts() {
+    for function_body in [
+        "return &global_value;",
+        "double *alias = &global_value; return alias;",
+        "void *alias = &global_value; return alias;",
     ] {
-        let err = interpret(program).expect_err(program);
-        assert!(
-            err.to_string()
-                .contains("double pointers are not supported"),
-            "unexpected error for {program}: {err}"
+        let program = format!(
+            r#"
+void *memset(void *destination, int byte, unsigned long int count);
+double global_value = 1.0;
+void *hidden_double_pointer(void) {{
+    {function_body}
+}}
+int main(void) {{
+    return sizeof(memset(hidden_double_pointer(), 0, sizeof(global_value)));
+}}
+"#,
+        );
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+            "{function_body}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_rejects_prototype_double_pointer_results() {
+    let program = r#"
+double *external(void);
+void *memset(void *destination, int byte, unsigned long count);
+int main(void) {
+    return sizeof(memset(external(), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "function 'memset' does not yet support double object storage for argument 1"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_function_static_double_storage_results() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+double *persistent(void) {
+    static double value = 1.5;
+    return &value;
+}
+int main(void) {
+    return sizeof(memset(persistent(), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_merges_possible_double_aliases_from_if_branches() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *select_storage(int choose) {
+    void *result = &safe;
+    if (choose) {
+        result = &dangerous;
+    }
+    return result;
+}
+int main(void) {
+    return sizeof(memset(select_storage(1), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_merges_possible_double_aliases_from_loops() {
+    for loop_statement in [
+        "while (choose) { result = &dangerous; choose = 0; }",
+        "do { result = &dangerous; } while (0);",
+        "for (int index = 0; index < choose; ++index) { result = &dangerous; }",
+    ] {
+        let program = format!(
+            r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *select_storage(int choose) {{
+    void *result = &safe;
+    {loop_statement}
+    return result;
+}}
+int main(void) {{
+    return sizeof(memset(select_storage(1), 0, sizeof(dangerous)));
+}}
+"#,
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+            "{loop_statement}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_inspects_pointer_assignment_result_rhs() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *select_storage(void) {
+    void *result = &safe;
+    return result = &dangerous;
+}
+int main(void) {
+    return sizeof(memset(select_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_uses_current_runtime_pointer_facts() {
+    let local_shadow = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *pointer = &safe;
+void *identity(void *value) {
+    return value;
+}
+int inspect(void *pointer) {
+    return sizeof(memset(identity(pointer), 0, sizeof(dangerous)));
+}
+int main(void) {
+    return inspect(&dangerous);
+}
+"#;
+    assert_eq!(
+        interpret(local_shadow).expect_err(local_shadow).to_string(),
+        "function 'memset' does not yet support double object storage for argument 1"
+    );
+
+    let reassigned_global = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *pointer = &dangerous;
+void *identity(void *value) {
+    return value;
+}
+int main(void) {
+    pointer = &safe;
+    return sizeof(memset(identity(pointer), 0, sizeof(safe)));
+}
+"#;
+    assert_eq!(interpret(reassigned_global).unwrap(), 8);
+}
+
+#[test]
+fn non_evaluating_memory_tracks_pointer_aliases_in_scalar_initializers() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *select_storage(void) {
+    void *result = &safe;
+    int ignored = (result = &dangerous, 0);
+    return result;
+}
+int main(void) {
+    return sizeof(memset(select_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_merges_pointer_aliases_across_switch_sections() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *select_storage(int which) {
+    void *result = &safe;
+    switch (which) {
+        case 0: result = &dangerous;
+        default: break;
+    }
+    return result;
+}
+int main(void) {
+    return sizeof(memset(select_storage(0), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_does_not_taint_safe_returns_from_double_arguments() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *safe_storage(double *ignored) {
+    return &safe;
+}
+int main(void) {
+    return sizeof(memset(safe_storage(&dangerous), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_tracks_double_storage_through_by_value_aggregate_parameters() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+void *unwrap(struct Box box) { return box.pointer; }
+void *hidden_storage(void) {
+    double *direct = &dangerous;
+    struct Box box = {(void *)direct};
+    return unwrap(box);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_preserves_short_circuit_alias_paths() {
+    for (left, operator) in [("0", "&&"), ("1", "||")] {
+        let program = format!(
+            r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *hidden_storage(void) {{
+    void *pointer = &dangerous;
+    {left} {operator} (pointer = &safe);
+    return pointer;
+}}
+int main(void) {{
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}}
+"#,
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+            "{left} {operator}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_preserves_aggregate_assignment_provenance() {
+    let programs = [
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+struct Outer { struct Box inner; };
+void *hidden_storage(void) {
+    struct Box source = {(void *)&dangerous};
+    struct Outer target = {{0}};
+    target.inner = source;
+    return target.inner.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box source = {(void *)&dangerous};
+    struct Box boxes[1] = {{0}};
+    boxes[0] = source;
+    return boxes[0].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box source = {(void *)&dangerous};
+    struct Box target = {0};
+    struct Box *pointer = &target;
+    *pointer = source;
+    return pointer->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_preserves_all_aggregate_assignment_routes() {
+    let dangerous_programs = [
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Outer { struct Box inner; };
+void *hidden_storage(void) {
+    struct Box source = {(char *)&dangerous};
+    struct Outer target = {{(char *)&safe}};
+    struct Outer *pointer = &target;
+    pointer->inner = source;
+    return pointer->inner.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box source = {(char *)&dangerous};
+    struct Box target = {(char *)&safe};
+    struct Box *pointer = &target;
+    return (*pointer = source, pointer->pointer);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box source = {(char *)&dangerous};
+    struct Box boxes[1] = {{(char *)&safe}};
+    return (boxes[0] = source).pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+    ];
+
+    for program in dangerous_programs {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+
+    let safe_overwrite = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Outer { struct Box inner; };
+void *safe_storage(void) {
+    struct Box clean = {(char *)&safe};
+    struct Outer target = {{(char *)&dangerous}};
+    target.inner = clean;
+    return target.inner.pointer;
+}
+int main(void) {
+    return sizeof(memset(safe_storage(), 0, sizeof(safe)));
+}
+"#;
+    assert_eq!(interpret(safe_overwrite), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_handles_recursive_taint_edges_conservatively() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *recursive_storage(int depth, void *pointer) {
+    if (depth) {
+        return recursive_storage(depth - 1, &dangerous);
+    }
+    return pointer;
+}
+int main(void) {
+    return sizeof(memset(recursive_storage(1, &safe), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_recursive_int_pointer_fallback_stays_type_compatible() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int *forward(int *pointer, int remaining) {
+    return remaining ? forward(pointer, remaining - 1) : pointer;
+}
+int main(void) {
+    int value = 0;
+    return sizeof(memset(forward(&value, 1), 0, sizeof value));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_iterates_loop_aliases_to_a_fixed_point() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *loop_storage(int count) {
+    void *current = &safe;
+    void *next = &safe;
+    while (count) {
+        current = next;
+        next = &dangerous;
+        count--;
+    }
+    return current;
+}
+int main(void) {
+    return sizeof(memset(loop_storage(2), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_iterates_for_and_do_while_aliases_to_a_fixed_point() {
+    let results = [
+        "for (int n = 2; n; n--) { current = next; next = &dangerous; }",
+        "int n = 2; do { current = next; next = &dangerous; n--; } while (n);",
+    ]
+    .map(|loop_statement| {
+        let program = format!(
+            r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *hidden(void) {{
+    void *current = &safe;
+    void *next = &safe;
+    {loop_statement}
+    return current;
+}}
+int main(void) {{
+    return sizeof(memset(hidden(), 0, sizeof(double)));
+}}
+"#,
+        );
+        interpret(&program).map_err(|error| error.to_string())
+    });
+
+    assert_eq!(
+        results,
+        [
+            Err(
+                "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+                    .to_string()
+            ),
+            Err(
+                "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+                    .to_string()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn non_evaluating_memory_final_review_widens_moving_aggregate_pointer_loop_targets() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(int count) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Box *selected = boxes;
+    while (count) {
+        selected++;
+        count--;
+    }
+    return selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(1), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_final_review_preserves_aggregate_pointer_targets_through_copies() {
+    let programs = [
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void poison(struct Holder holder) {
+    holder.selected->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    struct Holder holder = {&box};
+    poison(holder);
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    struct Holder source = {&box};
+    struct Holder copy = source;
+    copy.selected->pointer = (char *)&dangerous;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    struct Holder source = {&box};
+    struct Holder copy = {0};
+    copy = source;
+    copy.selected->pointer = (char *)&dangerous;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_final_review_keys_summaries_by_aggregate_pointer_targets() {
+    let programs = [
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void poison(struct Holder *holder) {
+    holder->selected->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&safe}};
+    struct Holder holder = {boxes};
+    poison(&holder);
+    holder.selected = boxes + 1;
+    poison(&holder);
+    return boxes[1].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+struct Box boxes[2] = {{0}, {0}};
+struct Holder holder = {boxes};
+void poison(void) {
+    holder.selected->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    poison();
+    holder.selected = boxes + 1;
+    poison();
+    return boxes[1].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_final_review_keys_returned_targets_by_argument_identity() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Box *identity(struct Box *box) { return box; }
+void *hidden_storage(void) {
+    struct Box first = {(char *)&safe};
+    struct Box second = {(char *)&safe};
+    identity(&first);
+    identity(&second)->pointer = (char *)&dangerous;
+    return second.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_remaps_returned_targets_from_argument_snapshots() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Box *select(struct Box *selected, struct Box *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    struct Box first = {(char *)&safe};
+    struct Box second = {(char *)&safe};
+    struct Box *selected = &first;
+    select(selected, selected = &second)->pointer = (char *)&dangerous;
+    return first.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_field_reads_from_source_order_call_snapshots() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Box *select(struct Box *selected, struct Box *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    struct Box safe_box = {(char *)&safe};
+    struct Box dangerous_box = {(char *)&dangerous};
+    struct Box *selected = &dangerous_box;
+    return select(selected, selected = &safe_box)->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_aggregate_pointer_field_compound_assignment_targets() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Holder holder = {boxes};
+    holder.selected += 1;
+    return holder.selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_updates_nested_postfix_lvalues_on_the_pre_increment_owner() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+char safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{&safe}, {(char *)&dangerous}};
+    struct Holder holders[2] = {{boxes}, {boxes}};
+    struct Holder *cursor = holders;
+    ((cursor++)->selected)++;
+    return holders[0].selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_updates_nested_compound_lvalues_on_the_prefix_increment_owner() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Holder holders[2] = {{boxes}, {boxes}};
+    struct Holder *cursor = holders;
+    (++cursor)->selected += 1;
+    return holders[1].selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_updates_nested_increment_lvalues_on_the_prefix_increment_owner() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Holder holders[2] = {{boxes}, {boxes}};
+    struct Holder *cursor = holders;
+    ((++cursor)->selected)++;
+    return holders[1].selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_writes_indexed_aggregate_pointer_fields_to_backing_storage() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[1] = {{(char *)&safe}};
+    struct Box *selected = boxes;
+    selected[0].pointer = (char *)&dangerous;
+    return boxes[0].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_writes_indexed_aggregate_pointer_values_to_backing_storage() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[1] = {{(char *)&safe}};
+    struct Box replacement = {(char *)&dangerous};
+    struct Box *selected = boxes;
+    selected[0] = replacement;
+    return boxes[0].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_uses_condition_effects_for_conditional_branch_values() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Holder holders[2] = {{boxes}, {boxes + 1}};
+    struct Holder *cursor = holders;
+    return ((++cursor, 1) ? cursor++ : cursor++)->selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_nested_aggregate_pointer_field_compound_assignment_targets() {
+    let programs = [
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Holder holder = {boxes};
+    struct Holder *cursor = &holder;
+    cursor->selected += 1;
+    return cursor->selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Holder holders[1] = {{boxes}};
+    holders[0].selected += 1;
+    return holders[0].selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#,
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_validates_const_deref_assignments_in_generic_controls() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *selected(const double *pointer) {
+    return _Generic((*pointer = 2.0), double: &safe, default: &dangerous);
+}
+int main(void) {
+    double value = 1.0;
+    return sizeof(memset(selected(&value), 0, sizeof(value)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "cannot assign through pointer to const"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_validates_deref_assignment_types_in_generic_controls() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *selected(double *pointer, int *invalid) {
+    return _Generic((*pointer = invalid), double: &safe, default: &dangerous);
+}
+int main(void) {
+    double value = 1.0;
+    int invalid = 0;
+    return sizeof(memset(selected(&value, &invalid), 0, sizeof(value)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "cannot assign pointer expression to double value"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_latest_review_rejects_pointer_to_scalar_generic_assignment() {
+    for assignment in ["value = invalid", "(int){0} = invalid"] {
+        let program = format!(
+            r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *selected(int value, int *invalid) {{
+    return _Generic(({assignment}), int: &safe, default: &dangerous);
+}}
+int main(void) {{
+    int invalid = 0;
+    return sizeof(memset(selected(0, &invalid), 0, sizeof(safe)));
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(assignment).to_string(),
+            "scalar assignment requires a scalar value",
+            "unexpected diagnostic for {assignment}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_latest_review_rejects_pointer_to_dereferenced_scalar_assignment() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *selected(int *pointer, int *invalid) {
+    return _Generic((*pointer = invalid), int: &safe, default: &dangerous);
+}
+int main(void) {
+    int value = 0;
+    int invalid = 0;
+    return sizeof(memset(selected(&value, &invalid), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "scalar assignment requires a scalar value"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_latest_review_preserves_const_pointer_slots() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *selected(void) {
+    int value = 0;
+    int * const pointer = &value;
+    return _Generic(++pointer, int *: &safe, default: &dangerous);
+}
+int main(void) {
+    return sizeof(memset(selected(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "cannot assign to const variable 'pointer'"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_latest_review_retargets_nested_aggregate_array_fields() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+char safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+struct Outer { struct Holder holders[1]; };
+void *hidden_storage(void) {
+    struct Box left = {&safe};
+    struct Box right = {(char *)&dangerous};
+    struct Outer outer = {.holders = {[0] = {.selected = &left}}};
+    outer.holders[0].selected = &right;
+    return outer.holders[0].selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn direct_double_pointer_sizeof_rejects_pointer_subscripts() {
+    for expression in ["sizeof(pointer[pointer])", "sizeof((pointer)[(pointer)])"] {
+        let program = format!(
+            r#"
+int main(void) {{
+    double values[1] = {{1.0}};
+    double *pointer = values;
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "array subscript requires an integer value",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn static_aggregate_pointer_initializers_reject_array_compound_literals() {
+    for initializer in ["(int[]){1}", "(const int[]){1}"] {
+        let program = format!(
+            r#"
+struct Sample {{ const int *pointer; }};
+int value(void) {{
+    static struct Sample sample = {{{initializer}}};
+    return sample.pointer[0];
+}}
+int main(void) {{ return value() - 1; }}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(initializer).to_string(),
+            "static pointer initializer requires static storage duration",
+            "unexpected diagnostic for {initializer}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_uses_declared_aggregate_double_layouts() {
+    let programs = [
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+struct Sample { double value; };
+struct Sample sample = {1.0};
+void *sample_storage(void) { return &sample; }
+int main(void) {
+    return sizeof(memset(sample_storage(), 0, sizeof(sample)));
+}
+"#,
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+struct Sample { double value; };
+void *sample_storage(void) {
+    static struct Sample sample = {1.0};
+    return &sample;
+}
+int main(void) {
+    return sizeof(memset(sample_storage(), 0, sizeof(struct Sample)));
+}
+"#,
+        r#"
+void *memset(void *destination, int byte, unsigned long count);
+struct Sample { double value; };
+struct Sample samples[2] = {{1.0}, {2.0}};
+void *sample_storage(void) { return &samples[1]; }
+int main(void) {
+    return sizeof(memset(sample_storage(), 0, sizeof(samples[1])));
+}
+"#,
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_preserves_shadowed_aggregate_target_identity() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    struct Box *pointer = &box;
+    {
+        struct Box box = {(char *)&safe};
+        pointer->pointer = (char *)&dangerous;
+        box.pointer = (char *)&safe;
+    }
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_preserves_struct_pointer_return_fields() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+struct Box *get_box(void) {
+    static struct Box box = {(void *)&dangerous};
+    return &box;
+}
+void *hidden_storage(void) {
+    return get_box()->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_preserves_nested_by_value_aggregate_fields() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+struct Outer { struct Box box; };
+void *unwrap(struct Box box) { return box.pointer; }
+void *hidden_storage(void) {
+    struct Outer outer = {{(char *)&dangerous}};
+    return unwrap(outer.box);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_analyzes_generic_parameter_arithmetic_lexically() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+void *selected(double *pointer) {
+    return _Generic(pointer + 0, double *: pointer, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected(&dangerous), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "function 'memset' does not yet support double object storage for argument 1"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_analyzes_unary_generic_controls_lexically() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected(int marker) {
+    return _Generic(+marker, int: (void *)&safe);
+}
+int main(void) {
+    return sizeof(memset(selected(0), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_analyzes_conditional_generic_types_lexically() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+int choose;
+void *selected(void) {
+    void *left = &safe;
+    void *right = &safe;
+    return _Generic(choose ? left : right, void *: left);
+}
+int main(void) {
+    return sizeof(memset(selected(), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_binary_types_fall_back_for_live_aggregate_array_fields() {
+    let program = r#"
+struct Record { int values[2]; };
+int main(void) {
+    struct Record record = {{1, 2}};
+    return (record.values[0] == 1 || record.values[1] == 2) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn non_evaluating_memory_binary_types_classify_live_row_pointer_elements() {
+    let program = r#"
+int main(void) {
+    char values[1][2] = {{'a', 'b'}};
+    char (*row)[2] = values;
+    return ((*row)[0] == 'a' || (*row)[1] == 'b') ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn non_evaluating_memory_binary_types_classify_live_reverse_subscripts() {
+    let program = r#"
+int main(void) {
+    double values[1] = {1.25};
+    int index = 0;
+    return (1 && index[values] == 1.25) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_preserves_dynamic_aggregate_element_writes() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+int choose;
+double dangerous;
+struct Box { char *pointer; };
+struct Outer { struct Box boxes[2]; };
+void *hidden_storage(void) {
+    struct Outer outer = {{{(char *)&safe}, {(char *)&safe}}};
+    outer.boxes[choose].pointer = (char *)&dangerous;
+    return outer.boxes[0].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_dynamic_safe_writes_preserve_other_possible_elements() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Outer { struct Box boxes[2]; };
+void *hidden_storage(int first, int second) {
+    struct Outer outer = {{{(char *)&safe}, {(char *)&safe}}};
+    outer.boxes[first].pointer = (char *)&dangerous;
+    outer.boxes[second].pointer = (char *)&safe;
+    return outer.boxes[0].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(0, 1), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_stored_aggregate_pointer_targets_conservatively() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    struct Holder holder = {&box};
+    holder.selected->pointer = (char *)&dangerous;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("stored aggregate-pointer target must preserve the write")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_assignment_result_aggregate_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box left = {(char *)&safe};
+    struct Box right = {(char *)&safe};
+    struct Box *selected = &right;
+    (selected = &left)->pointer = (char *)&dangerous;
+    return left.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("assignment-result target must preserve the write")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_review_followup_preserves_aggregate_pointer_arithmetic_targets() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+void *previous_pointer(struct Box *boxes) {
+    return (boxes - 1)->pointer;
+}
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&dangerous}, {0}};
+    return previous_pointer(boxes + 1);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_aggregate_pointer_compound_assignment_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Box *selected = boxes;
+    selected += 1;
+    return selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("compound pointer assignment must update the aggregate target")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_aggregate_pointer_increment_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Box *selected = boxes;
+    selected++;
+    return selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("pointer increment must update the aggregate target")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_latest_review_blocker_tracks_pointer_field_increment_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Holder holder = {boxes};
+    holder.selected++;
+    return holder.selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_indexed_aggregate_pointer_reads() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Box *selected = boxes;
+    return selected[1].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("indexed pointer reads must retain the selected aggregate target")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_indexed_aggregate_pointer_callee_writes() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *selected) {
+    selected->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&safe}};
+    struct Box *selected = boxes;
+    poison(&selected[1]);
+    return boxes[1].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("callee writes must retain an indexed aggregate pointer target")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_dynamic_aggregate_pointer_callee_writes() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+int selected_index;
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *selected) {
+    selected->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&safe}};
+    poison(&boxes[selected_index]);
+    return boxes[0].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("dynamic callee targets must conservatively preserve possible writes")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rebases_nonzero_aggregate_pointer_parameter_reads() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *next_pointer(struct Box *selected) {
+    return selected[1].pointer;
+}
+void *hidden_storage(void) {
+    struct Box boxes[3] = {{(char *)&safe}, {(char *)&safe}, {(char *)&dangerous}};
+    return next_pointer(&boxes[1]);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("callee indexes must be relative to a nonzero caller element")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_composes_returned_aggregate_pointer_parameter_offsets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Box *identity(struct Box *selected) {
+    return selected;
+}
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&safe}};
+    identity(&boxes[1])->pointer = (char *)&dangerous;
+    return boxes[1].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("returned pointer offsets must compose with the caller element")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_relative_arithmetic_on_parameter_pointer_fields() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *next_pointer(struct Holder *holder) {
+    return (holder->selected + 1)->pointer;
+}
+void *hidden_storage(void) {
+    struct Box boxes[3] = {{(char *)&safe}, {(char *)&safe}, {(char *)&dangerous}};
+    struct Holder holder = {&boxes[1]};
+    return next_pointer(&holder);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("forwarded pointer fields must preserve relative arithmetic")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_aggregate_pointer_field_targets() {
+    let dangerous_program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Holder holder = {boxes + 1};
+    return holder.selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(dangerous_program)
+            .expect_err("pointer-valued aggregate fields must retain their exact target")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_nested_aggregate_array_pointer_field_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+struct Outer { struct Holder holders[1]; };
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    struct Outer outer = {.holders = {[0] = {.selected = &box}}};
+    outer.holders[0].selected->pointer = (char *)&dangerous;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("nested aggregate-array pointer fields must retain their exact target")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_root_aggregate_array_pointer_field_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    struct Holder holders[1] = {{&box}};
+    holders[0].selected->pointer = (char *)&dangerous;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("root aggregate-array pointer fields must retain their exact target")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_conservatively_joins_dynamic_aggregate_array_pointer_field_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(int index) {
+    struct Box left = {(char *)&safe};
+    struct Box right = {(char *)&safe};
+    struct Holder holders[2] = {{&left}, {&right}};
+    holders[index].selected->pointer = (char *)&dangerous;
+    return right.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(1), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("dynamic aggregate-array indexes must conservatively join pointer targets")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_retargets_assigned_aggregate_pointer_fields() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box left = {(char *)&safe};
+    struct Box right = {(char *)&safe};
+    struct Holder holder = {&left};
+    holder.selected = &right;
+    holder.selected->pointer = (char *)&dangerous;
+    return right.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("aggregate pointer-field assignments must retarget later writes")
+            .to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+    );
+}
+
+#[test]
+fn non_evaluating_memory_does_not_merge_unrelated_aggregate_pointer_field_targets() {
+    let safe_program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box safe_box = {(char *)&safe};
+    struct Box dangerous_box = {(char *)&dangerous};
+    struct Holder holder = {&safe_box};
+    return holder.selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(safe_program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_tracks_double_storage_through_aggregate_value_forms() {
+    let compound_literal = r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+void *unwrap(struct Box box) { return box.pointer; }
+void *hidden_storage(void) { return unwrap((struct Box){(void *)&dangerous}); }
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+    let conditional = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int choose;
+double dangerous;
+struct Box { char *pointer; };
+void *unwrap(struct Box box) { return box.pointer; }
+void *hidden_storage(void) {
+    struct Box safe = {0};
+    return unwrap(choose ? (struct Box){(void *)&dangerous} : safe);
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+    let copy_assignment = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *unwrap(struct Box box) { return box.pointer; }
+void *hidden_storage(void) {
+    double *direct = &dangerous;
+    struct Box source = {(void *)direct};
+    struct Box copy = {(void *)&safe};
+    copy = source;
+    return unwrap(copy);
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+
+    for program in [compound_literal, conditional, copy_assignment] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_tracks_pointer_field_assignment_results() {
+    let assignment_result = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    double *direct = &dangerous;
+    struct Box box = {(void *)&safe};
+    return (box.pointer = (void *)direct);
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+    let later_read = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    double *direct = &dangerous;
+    struct Box box = {(void *)&safe};
+    (box.pointer = (void *)direct);
+    return box.pointer;
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+
+    for program in [assignment_result, later_read] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_tracks_aggregate_array_pointer_fields() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[1] = {{(void *)&dangerous}};
+    return boxes[0].pointer;
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_aggregate_array_element_field_assignments() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[1] = {{(void *)&safe}};
+    boxes[0].pointer = (void *)&dangerous;
+    return boxes[0].pointer;
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_aggregate_pointer_field_assignments() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[1] = {{(void *)&safe}};
+    struct Box *slot = boxes;
+    slot->pointer = (void *)&dangerous;
+    return slot->pointer;
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_nested_aggregate_array_element_field_assignments() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Shelf { struct Box boxes[2]; };
+void *hidden_storage(void) {
+    struct Shelf shelf = {{{(void *)&safe}, {(void *)&safe}}};
+    shelf.boxes[0].pointer = (void *)&dangerous;
+    return shelf.boxes[0].pointer;
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_nested_aggregate_array_initializer_paths() {
+    for body in [
+        r#"
+    struct Shelf shelf = {{{(char *)&dangerous}}};
+    return shelf.boxes[0].pointer;
+"#,
+        r#"
+    struct Shelf shelf = (struct Shelf){{{(char *)&dangerous}}};
+    return shelf.boxes[0].pointer;
+"#,
+    ] {
+        let program = format!(
+            r#"
+void *memset(void *destination, int value, unsigned long count);
+double dangerous;
+struct Box {{ char *pointer; }};
+struct Shelf {{ struct Box boxes[1]; }};
+void *hidden_storage(void) {{
+    {body}
+}}
+int main(void) {{
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}}
+"#,
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(body).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_keeps_nested_aggregate_array_element_taint_index_specific() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Shelf { struct Box boxes[2]; };
+void *safe_storage(void) {
+    struct Shelf shelf = {{{(void *)&safe}, {(void *)&safe}}};
+    shelf.boxes[0].pointer = (void *)&dangerous;
+    return shelf.boxes[1].pointer;
+}
+int main(void) {
+    return sizeof(memset(safe_storage(), 0, sizeof(safe))) == sizeof(void *) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn non_evaluating_memory_preserves_aggregate_array_element_taint_through_value_parameters() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *extract(struct Box box) { return box.pointer; }
+void *hidden_storage(void) {
+    struct Box boxes[1] = {{(void *)&dangerous}};
+    return extract(boxes[0]);
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_keeps_aggregate_array_element_taint_index_specific() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *safe_storage(void) {
+    struct Box boxes[2] = {{(void *)&dangerous}, {(void *)&safe}};
+    return boxes[1].pointer;
+}
+int main(void) {
+    return sizeof(memset(safe_storage(), 0, sizeof(safe))) == sizeof(void *) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn non_evaluating_memory_converts_cast_array_indexes() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[3] = {
+        {(char *)&safe},
+        {(char *)&dangerous},
+        {(char *)&safe}
+    };
+    return boxes[(_Bool)2].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_branch_join_drops_overwritten_double_storage() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *always_safe(int choose) {
+    void *pointer = &dangerous;
+    if (choose) {
+        pointer = &safe;
+    } else {
+        pointer = &safe;
+    }
+    return pointer;
+}
+int main(void) {
+    return sizeof(memset(always_safe(1), 0, sizeof(safe))) == sizeof(void *) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn non_evaluating_memory_aggregate_pointer_parameters_preserve_field_storage() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *extract(struct Box *box) { return box->pointer; }
+void *hidden_storage(void) {
+    struct Box box = {(void *)&dangerous};
+    return extract(&box);
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_aggregate_returns_preserve_field_storage() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Box make_box(void) {
+    struct Box box = {(void *)&dangerous};
+    return box;
+}
+void *hidden_storage(void) { return make_box().pointer; }
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_callee_mutations_preserve_field_storage() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *box) { box->pointer = (void *)&dangerous; }
+void *hidden_storage(void) {
+    struct Box box = {(void *)&safe};
+    poison(&box);
+    return box.pointer;
+}
+int main(void) { return sizeof(memset(hidden_storage(), 0, sizeof(dangerous))); }
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_aggregate_pointer_index_overflow_does_not_panic() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+struct Box { char *pointer; };
+void *safe_storage(void) {
+    struct Box boxes[1] = {{(void *)&safe}};
+    struct Box *cursor = boxes;
+    return (cursor + 9223372036854775807 + 9223372036854775807 + 9223372036854775807)->pointer;
+}
+int main(void) { return sizeof(memset(safe_storage(), 0, sizeof(safe))); }
+"#;
+
+    let result = std::panic::catch_unwind(|| interpret(program));
+    assert!(result.is_ok(), "non-evaluating analysis panicked");
+    assert_eq!(result.unwrap(), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_do_while_keeps_guaranteed_overwrites() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *safe_storage(void) {
+    void *pointer = &dangerous;
+    do { pointer = &safe; } while (0);
+    return pointer;
+}
+int main(void) { return sizeof(memset(safe_storage(), 0, sizeof(safe))); }
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_for_initializers_keep_guaranteed_overwrites() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *safe_storage(void) {
+    void *result = &dangerous;
+    for (result = &safe; 0; ) { }
+    return result;
+}
+int main(void) {
+    return sizeof(memset(safe_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_ignores_unreachable_returns() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *safe_storage(void) {
+    return &safe;
+    return &dangerous;
+}
+int main(void) { return sizeof(memset(safe_storage(), 0, sizeof(safe))); }
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_control_transfer_does_not_launder_storage() {
+    for transfer in ["break", "continue"] {
+        let program = format!(
+            r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *select(int condition) {{
+    void *pointer = &safe;
+    while (condition) {{
+        pointer = &dangerous;
+        {transfer};
+        pointer = &safe;
+    }}
+    return pointer;
+}}
+int main(void) {{
+    return sizeof(memset(select(1), 0, sizeof(double)));
+}}
+"#,
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_returning_branches_do_not_taint_continuations() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *select(int condition) {
+    void *pointer = &safe;
+    if (condition) {
+        pointer = &dangerous;
+        return &safe;
+    }
+    return pointer;
+}
+int main(void) {
+    return sizeof(memset(select(0), 0, sizeof(int)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_conditional_aggregate_pointer_arguments_preserve_effects() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *box) {
+    box->pointer = (void *)&dangerous;
+}
+void *select(int choose) {
+    struct Box left = {(void *)&safe};
+    struct Box right = {(void *)&safe};
+    poison(choose ? &left : &right);
+    return left.pointer;
+}
+int main(void) {
+    return sizeof(memset(select(1), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_conditional_control_transfer_preserves_stopped_paths() {
+    for transfer in ["break", "continue"] {
+        let program = format!(
+            r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+void *select(int condition) {{
+    void *pointer = &safe;
+    while (condition) {{
+        if (condition) {{
+            pointer = &dangerous;
+            {transfer};
+        }}
+        pointer = &safe;
+    }}
+    return pointer;
+}}
+int main(void) {{
+    return sizeof(memset(select(1), 0, sizeof(double)));
+}}
+"#,
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_conditional_callee_writes_are_not_hidden_by_input_union() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *box) {
+    box->pointer = (void *)&dangerous;
+}
+void *select(int choose) {
+    struct Box left = {(void *)&safe};
+    struct Box right = {(void *)&dangerous};
+    poison(choose ? &left : &right);
+    return left.pointer;
+}
+int main(void) {
+    return sizeof(memset(select(1), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_returning_callee_branches_preserve_writes() {
+    let program = r#"
+void *memset(void *destination, int byte, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void choose(struct Box *box, int condition) {
+    if (condition) {
+        box->pointer = (void *)&dangerous;
+        return;
+    }
+    box->pointer = (void *)&safe;
+}
+void *select(void) {
+    struct Box box = {(void *)&safe};
+    choose(&box, 1);
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(select(), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_stopped_control_paths_preserve_safe_fallthrough() {
+    let programs = [
+        r#"
+void *memset(void *, int, unsigned long);
+int safe;
+double dangerous;
+void *select(int condition) {
+    void *pointer = &safe;
+    while (condition) {
+        pointer = &dangerous;
+        return &safe;
+    }
+    return pointer;
+}
+int main(void) { return sizeof(memset(select(0), 0, sizeof(int))); }
+"#,
+        r#"
+void *memset(void *, int, unsigned long);
+int safe;
+double dangerous;
+void *select(void) {
+    void *pointer = &safe;
+    do { break; } while ((pointer = &dangerous) != 0);
+    return pointer;
+}
+int main(void) { return sizeof(memset(select(), 0, sizeof(int))); }
+"#,
+        r#"
+void *memset(void *, int, unsigned long);
+int safe;
+double dangerous;
+void *select(int condition) {
+    void *pointer = &safe;
+    for (; condition; pointer = &dangerous) { break; }
+    return pointer;
+}
+int main(void) { return sizeof(memset(select(0), 0, sizeof(int))); }
+"#,
+        r#"
+void *memset(void *, int, unsigned long);
+int safe;
+double dangerous;
+void *select(int choice) {
+    void *pointer = &safe;
+    switch (choice) {
+        case 0: pointer = &dangerous;
+        default: pointer = &safe; break;
+    }
+    return pointer;
+}
+int main(void) { return sizeof(memset(select(0), 0, sizeof(int))); }
+"#,
+    ];
+
+    for program in programs {
+        assert_eq!(interpret(program), Ok(8), "program: {program}");
+    }
+}
+
+#[test]
+fn non_evaluating_memory_return_storage_analysis_scales_linearly() {
+    fn run(depth: usize) -> std::time::Duration {
+        let mut program = String::from(
+            "void *memset(void *, int, unsigned long); int safe; int choose;\n\
+             void *step_0(void) { return &safe; }\n",
+        );
+        for level in 1..=depth {
+            program.push_str(&format!(
+                "void *step_{level}(void) {{ return choose ? step_{}() : step_{}(); }}\n",
+                level - 1,
+                level - 1
+            ));
+        }
+        program.push_str(&format!(
+            "int main(void) {{ return sizeof(memset(step_{depth}(), 0, sizeof(safe))) == sizeof(void *) ? 0 : 1; }}"
+        ));
+
+        let started = std::time::Instant::now();
+        assert_eq!(interpret(&program).expect(&program), 0);
+        started.elapsed()
+    }
+
+    let shallow = run(6);
+    let deep = run(12);
+    let allowed = (shallow * 8).max(std::time::Duration::from_millis(100));
+    assert!(
+        deep < allowed,
+        "non-evaluating return-storage analysis scaled nonlinearly: {shallow:?} at depth 6 and {deep:?} at depth 12"
+    );
+}
+
+#[test]
+fn non_evaluating_parameterized_return_storage_analysis_scales_linearly() {
+    fn run(depth: usize) -> std::time::Duration {
+        let mut program = String::from(
+            "void *memset(void *, int, unsigned long); int safe; double dangerous; int choose;\n\
+             void *step_0(void *ignored) { return &safe; }\n",
+        );
+        for level in 1..=depth {
+            program.push_str(&format!(
+                "void *step_{level}(void *pointer) {{ return choose ? step_{}(pointer) : step_{}(pointer); }}\n",
+                level - 1,
+                level - 1
+            ));
+        }
+        program.push_str(&format!(
+            "int main(void) {{ return sizeof(memset(step_{depth}(&dangerous), 0, sizeof(safe))) == sizeof(void *) ? 0 : 1; }}"
+        ));
+
+        let started = std::time::Instant::now();
+        assert_eq!(interpret(&program).expect(&program), 0);
+        started.elapsed()
+    }
+
+    let shallow = run(6);
+    let deep = run(12);
+    let allowed = (shallow * 8).max(std::time::Duration::from_millis(100));
+    assert!(
+        deep < allowed,
+        "parameterized non-evaluating return-storage analysis scaled nonlinearly: {shallow:?} at depth 6 and {deep:?} at depth 12"
+    );
+}
+
+#[test]
+fn non_evaluating_return_storage_analysis_enforces_call_depth_limit() {
+    let mut program = String::from(
+        "void *memset(void *, int, unsigned long); int safe;\n\
+         void *step_0(void) { return &safe; }\n",
+    );
+    for level in 1..=32 {
+        program.push_str(&format!(
+            "void *step_{level}(void) {{ return step_{}(); }}\n",
+            level - 1
+        ));
+    }
+    program.push_str("int main(void) { return sizeof(memset(step_32(), 0, sizeof(safe))); }");
+
+    assert_eq!(
+        interpret(&program).expect_err(&program).to_string(),
+        "function call depth limit exceeded while analyzing 'step_16'"
+    );
+}
+
+#[test]
+fn direct_double_pointers_retain_deeper_and_row_pointer_boundaries() {
+    for (program, expected) in [
+        (
+            "int main(void) { double **pointer; return 0; }",
+            "pointer-to-pointer declarations are not supported at line 1, column 26",
+        ),
+        (
+            "double (*global_row)[2]; int main(void) { return 0; }",
+            "double pointers are not supported at line 1, column 9",
+        ),
+        (
+            "int main(void) { double (*local_row)[2]; return 0; }",
+            "double pointers are not supported at line 1, column 26",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_non_evaluating_boundaries_remain_exact() {
+    let err = interpret(
+        r#"
+        void *memset(void *destination, int value, unsigned long count);
+
+        int main(void) {
+            double value = 1.0;
+            return sizeof(memset(&value, 0, sizeof(value)));
+        }
+        "#,
+    )
+    .expect_err("raw-memory access to double storage must remain unsupported under sizeof");
+    assert_eq!(
+        err.to_string(),
+        "function 'memset' does not yet support double object storage for argument 1"
+    );
+
+    let err = interpret(
+        r#"
+        int main(void) {
+            double value = 1.0;
+            double *pointer = &value;
+            return sizeof(&pointer);
+        }
+        "#,
+    )
+    .expect_err("taking the address of a double pointer must not expose double **");
+    assert_eq!(err.to_string(), "double pointers are not supported");
+}
+
+#[test]
+fn direct_double_pointer_sizeof_rejects_addition_of_two_pointers() {
+    let program = r#"
+int main(void) {
+    double value = 1.0;
+    double *pointer = &value;
+    return sizeof(pointer + pointer);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "cannot add two pointers"
+    );
+}
+
+#[test]
+fn direct_double_pointer_non_evaluating_source_boundaries_remain_exact() {
+    for (name, return_type, destination_type) in [
+        ("memcpy", "void *", "void *"),
+        ("memmove", "void *", "void *"),
+        ("memcmp", "int", "const void *"),
+    ] {
+        let program = format!(
+            r#"
+{return_type} {name}({destination_type} destination, const void *source, unsigned long count);
+int main(void) {{
+    int destination = 0;
+    double source = 1.0;
+    return sizeof({name}(&destination, &source, sizeof(source)));
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            format!("function '{name}' does not yet support double object storage for argument 2")
         );
     }
 }
@@ -5642,54 +8406,59 @@ fn unevaluated_double_constraints_are_validated_inside_literal_and_pointer_wrapp
 }
 
 #[test]
-fn double_addresses_cannot_cross_supported_pointer_assignment_call_or_return_boundaries() {
-    let programs = [
+fn direct_double_addresses_cross_void_pointer_boundaries_safely() {
+    for program in [
         r#"
             int main(void) {
                 void *slot = 0;
                 double value = 1.0;
                 slot = &value;
-                return slot != 0;
+                return slot != 0 ? 0 : 1;
             }
         "#,
         r#"
             int main(void) {
                 void *slot = 0;
                 double value = 1.0;
-                return (slot = &value) != 0;
-            }
-        "#,
-        r#"
-            struct Box { int *slot; };
-            int main(void) {
-                struct Box box = {0};
-                double value = 1.0;
-                box.slot = &value;
-                return box.slot != 0;
+                return (slot = &value) != 0 ? 0 : 1;
             }
         "#,
         r#"
             int inspect(void *slot) { return slot != 0; }
             int main(void) {
                 double value = 1.0;
-                return inspect(&value);
+                return inspect(&value) ? 0 : 1;
             }
         "#,
-        r#"
+    ] {
+        assert_eq!(interpret(program).unwrap(), 0, "{program}");
+    }
+
+    let incompatible = r#"
+        struct Box { int *slot; };
+        int main(void) {
+            struct Box box = {0};
+            double value = 1.0;
+            box.slot = &value;
+            return box.slot != 0;
+        }
+    "#;
+    assert_eq!(
+        interpret(incompatible).unwrap_err().to_string(),
+        "cannot convert pointer to double to pointer to int"
+    );
+
+    let expired = r#"
             void *select(void) {
                 double value = 1.0;
                 return &value;
             }
-            int main(void) { return select() != 0; }
-        "#,
-    ];
-
-    for program in programs {
-        assert_eq!(
-            interpret(program).unwrap_err().to_string(),
-            "double pointers are not supported"
-        );
-    }
+            int main(void) { return *(double *)select() == 1.0 ? 0 : 1; }
+        "#;
+    assert_eq!(
+        interpret(expired).unwrap_err().to_string(),
+        "pointer to out-of-scope variable 'value'"
+    );
 }
 
 #[test]
@@ -5891,40 +8660,2435 @@ fn integer_constant_generic_validation_reaches_double_constraints_inside_calls()
 }
 
 #[test]
-fn double_array_type_queries_are_supported_without_enabling_double_pointers() {
-    assert_eq!(
-        interpret("int main(void) { return sizeof(double[2]) == 2 * sizeof(double) && _Alignof(double[2]) == _Alignof(double) ? 0 : 1; }").unwrap(),
-        0
-    );
+fn direct_double_pointers_support_scalar_addresses_and_dereference() {
+    let program = r#"
+int main(void) {
+    double value = 1.5;
+    double *pointer = &value;
+    *pointer = *pointer + 0.75;
+    return value == 2.25 ? 0 : 1;
+}
+"#;
 
-    for (program, expected) in [
-        (
-            "int main(void) { return sizeof(double *); }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { return _Alignof(double *); }",
-            "double pointers are not supported",
-        ),
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_field_subscripts_preserve_double_values() {
+    let program = r#"
+struct Box { double *positive; double *zero; };
+int main(void) {
+    double positive[1] = {1.25};
+    double zero[1] = {-0.0};
+    struct Box box = {positive, zero};
+    return box.positive[0] == 1.25 && !box.zero[0] ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_arrow_field_subscripts_preserve_double_values() {
+    let program = r#"
+struct Box { double *positive; double *zero; };
+int main(void) {
+    double positive[1] = {1.25};
+    double zero[1] = {-0.0};
+    struct Box box = {positive, zero};
+    struct Box *view = &box;
+    return view->positive[0] == 1.25 && !view->zero[0] ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_aggregate_element_field_subscripts_preserve_double_values() {
+    let program = r#"
+struct Box { double *positive; double *zero; };
+int main(void) {
+    double positive[1] = {1.25};
+    double zero[1] = {-0.0};
+    struct Box boxes[1] = {{positive, zero}};
+    return boxes[0].positive[0] == 1.25 && !boxes[0].zero[0] ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_field_subscripts_support_assignment() {
+    let program = r#"
+struct Box { double *pointer; };
+int main(void) {
+    double values[1] = {1.25};
+    struct Box box = {values};
+    box.pointer[0] = 2.0;
+    return values[0] == 2.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_field_subscripts_support_compound_assignment() {
+    let program = r#"
+struct Box { double *pointer; };
+int main(void) {
+    double values[1] = {1.25};
+    struct Box box = {values};
+    box.pointer[0] += 0.5;
+    return values[0] == 1.75 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_field_subscripts_support_increment() {
+    let program = r#"
+struct Box { double *pointer; };
+int main(void) {
+    double values[1] = {1.25};
+    struct Box box = {values};
+    box.pointer[0]++;
+    return values[0] == 2.25 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_field_subscript_increment_preserves_pointee_constness() {
+    let program = r#"
+struct Box { const double *pointer; };
+int main(void) {
+    double values[1] = {1.25};
+    struct Box box = {values};
+    box.pointer[0]++;
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+}
+
+#[test]
+fn direct_double_pointers_support_array_decay_indexing_and_arithmetic() {
+    let program = r#"
+int main(void) {
+    double values[3] = {1.0, 2.0, 3.0};
+    double *pointer = values;
+    pointer += 1;
+    pointer[1] = *(pointer - 1) + 3.5;
+    return values[1] == 2.0 && values[2] == 4.5 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointers_support_parameters_and_returns() {
+    let program = r#"
+double *advance(double *pointer) {
+    return pointer + 1;
+}
+
+void increase(double *pointer) {
+    *pointer += 0.5;
+}
+
+int main(void) {
+    double values[2] = {1.0, 2.0};
+    double *pointer = advance(values);
+    increase(pointer);
+    return values[1] == 2.5 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointers_support_null_equality_and_truthiness() {
+    let program = r#"
+int main(void) {
+    double values[1] = {1.0};
+    double *null_pointer = 0;
+    double *pointer = values;
+    return null_pointer == 0 && !null_pointer && pointer &&
+           pointer == values && pointer != null_pointer ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_conditionals_validate_both_branch_types() {
+    for program in [
+        "int main(void) { double value = 1.0; int other = 2; double *pointer = 1 ? &value : &other; return *pointer == 1.0 ? 0 : 1; }",
+        "int main(void) { double value = 1.0; double *pointer = 1 ? &value : 1; return *pointer == 1.0 ? 0 : 1; }",
+        "int main(void) { double value = 1.0; int other = 2; return sizeof(1 ? &value : &other); }",
+        "int main(void) { double value = 1.0; return sizeof(1 ? &value : 1); }",
+        "int main(void) { double value = 1.0; double *pointer = 1 ? (void *)&value : 1; return *pointer == 1.0 ? 0 : 1; }",
+        "int main(void) { double value = 1.0; return sizeof(1 ? (void *)&value : 1); }",
     ] {
-        assert!(
-            interpret(program)
-                .unwrap_err()
-                .to_string()
-                .contains(expected),
-            "expected {expected:?} for {program}"
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "conditional branches have incompatible expression types",
+            "unexpected diagnostic for {program}"
         );
     }
 }
 
 #[test]
-fn rejects_double_pointer_generic_associations() {
-    let program = "int main(void) { return _Generic(0, int: 0, double *: 1); }";
+fn direct_double_pointer_review_rejects_aggregate_owned_scalar_addresses() {
+    for program in [
+        r#"
+struct DoubleValue { double value; };
+struct PointerBox { double *value; };
+int main(void) {
+    struct DoubleValue object = {1.0};
+    struct PointerBox box = {&object.value};
+    return *box.value == 1.0;
+}
+"#,
+        r#"
+struct DoubleValue { double value; };
+struct PointerBox { double *value; };
+int main(void) {
+    struct DoubleValue object = {1.0};
+    struct PointerBox box = {0};
+    return *(box.value = &object.value) == 1.0;
+}
+"#,
+        r#"
+struct DoubleValues { double values[1]; };
+struct PointerBox { double *value; };
+int main(void) {
+    struct DoubleValues object = {{1.0}};
+    struct PointerBox box = {0};
+    struct PointerBox *view = &box;
+    return *(view->value = object.values) == 1.0;
+}
+"#,
+        r#"
+struct DoubleValue { double value; };
+struct PointerBox { double *value; };
+int main(void) {
+    struct DoubleValue object = {1.0};
+    struct PointerBox boxes[1] = {{0}};
+    return *(boxes[0].value = &object.value) == 1.0;
+}
+"#,
+        r#"
+struct DoubleValue { double value; };
+struct PointerBox { double *value; };
+struct Holder { struct PointerBox boxes[1]; };
+int main(void) {
+    struct DoubleValue object = {1.0};
+    struct Holder holder = {{{0}}};
+    return *(holder.boxes[0].value = &object.value) == 1.0;
+}
+"#,
+        r#"
+struct DoubleValue { double value; };
+struct PointerBox { double *value; };
+int main(void) {
+    struct DoubleValue object = {1.0};
+    return *((struct PointerBox){0}.value = &object.value) == 1.0;
+}
+"#,
+    ] {
+        let error = interpret(program).unwrap_err().to_string();
+        assert!(
+            error.contains("double pointers are not supported"),
+            "unexpected error: {error}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_automatic_storage_static_initializers() {
+    let program = r#"
+void remember(void) {
+    double values[1] = {1.0};
+    static double *saved = values;
+}
+int main(void) {
+    remember();
+    return 0;
+}
+"#;
 
     assert_eq!(
         interpret(program).unwrap_err().to_string(),
-        "double pointers are not supported at line 1, column 52"
+        "static pointer initializer requires static storage duration"
     );
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_automatic_storage_static_aggregate_initializers() {
+    let program = r#"
+struct Slot { double *pointer; };
+int remember(void) {
+    double value = 1.0;
+    static struct Slot slot = {&value};
+    return slot.pointer == &value;
+}
+int main(void) {
+    return remember() ? 0 : 1;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "static pointer initializer requires static storage duration"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_automatic_storage_nested_static_aggregate_initializers() {
+    let program = r#"
+struct Slot { double *pointer; };
+struct Holder { struct Slot direct; struct Slot array[1]; };
+int remember(void) {
+    double value = 1.0;
+    static struct Holder holder = {{&value}, {{&value}}};
+    return holder.direct.pointer == &value;
+}
+int main(void) {
+    return remember() ? 0 : 1;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "static pointer initializer requires static storage duration"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_automatic_storage_static_aggregate_array_initializers() {
+    let program = r#"
+struct Slot { double *pointer; };
+int remember(void) {
+    double value = 1.0;
+    static struct Slot slots[1] = {{&value}};
+    return slots[0].pointer == &value;
+}
+int main(void) {
+    return remember() ? 0 : 1;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "static pointer initializer requires static storage duration"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_block_array_literals_in_static_initializers() {
+    let program = r#"
+void remember(void) {
+    static int *saved = (int[]){1};
+}
+int main(void) {
+    remember();
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "static pointer initializer requires static storage duration"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_tracks_alias_assignments_in_array_initializers() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *hidden_storage(void) {
+    void *result = &safe;
+    int ignored[1] = {(result = &dangerous, 0)};
+    return result;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_alias_assignments_in_array_set_indices() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *hidden_storage(void) {
+    void *result = &safe;
+    int values[1] = {0};
+    return (values[(result = &dangerous, 0)] = 1, result);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_alias_assignments_in_array_assignment_indices() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *hidden_storage(void) {
+    void *result = &safe;
+    int values[1] = {0};
+    values[(result = &dangerous, 0)] = 1;
+    return result;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_updates_aggregate_targets_after_pointer_assignment() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box first = {(void *)&safe};
+    struct Box second = {(void *)&dangerous};
+    struct Box *pointer = &first;
+    pointer = &second;
+    return pointer->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_joins_different_aggregate_targets_conservatively() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *selected_storage(int choice) {
+    struct Box safe_box = {(char *)&safe};
+    struct Box dangerous_box = {(char *)&dangerous};
+    struct Box *selected = &safe_box;
+    if (choice) {
+        selected = &safe_box;
+    } else {
+        selected = &dangerous_box;
+    }
+    return selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(selected_storage(1), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_forwarded_addresses_of_null_double_pointer_slots() {
+    let global_pointer = r#"
+void *memset(void *destination, int value, unsigned long count);
+double *global_pointer = 0;
+void *hidden_storage(void) { return &global_pointer; }
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(global_pointer)));
+}
+"#;
+    let direct_field = r#"
+void *memset(void *destination, int value, unsigned long count);
+struct Box { double *pointer; };
+struct Box box = {0};
+void *hidden_storage(void) { return &box.pointer; }
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(box.pointer)));
+}
+"#;
+    let indexed_field = r#"
+void *memset(void *destination, int value, unsigned long count);
+struct Box { double *pointer; };
+struct Box boxes[1] = {{0}};
+void *hidden_storage(void) { return &boxes[0].pointer; }
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(boxes[0].pointer)));
+}
+"#;
+    let arrow_field = r#"
+void *memset(void *destination, int value, unsigned long count);
+struct Box { double *pointer; };
+struct Box box = {0};
+struct Box *box_pointer = &box;
+void *hidden_storage(void) { return &box_pointer->pointer; }
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(box.pointer)));
+}
+"#;
+
+    let local_direct_field = r#"
+void *memset(void *destination, int value, unsigned long count);
+struct Box { double *pointer; };
+void *hidden_storage(void) {
+    struct Box box = {0};
+    return &box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(double *)));
+}
+"#;
+    let local_indexed_field = r#"
+void *memset(void *destination, int value, unsigned long count);
+struct Box { double *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[1] = {{0}};
+    return &boxes[0].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(double *)));
+}
+"#;
+    let local_arrow_field = r#"
+void *memset(void *destination, int value, unsigned long count);
+struct Box { double *pointer; };
+void *hidden_storage(void) {
+    struct Box box = {0};
+    struct Box *box_pointer = &box;
+    return &box_pointer->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(double *)));
+}
+"#;
+
+    for program in [
+        global_pointer,
+        direct_field,
+        indexed_field,
+        arrow_field,
+        local_direct_field,
+        local_indexed_field,
+        local_arrow_field,
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+            "unexpected result for {program}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_possible_aggregate_target_writes_preserve_unselected_storage() {
+    let field_write = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *selected_storage(int choice) {
+    struct Box left = {(char *)&dangerous};
+    struct Box right = {(char *)&safe};
+    struct Box *selected = choice ? &left : &right;
+    selected->pointer = (char *)&safe;
+    return left.pointer;
+}
+int main(void) {
+    return sizeof(memset(selected_storage(0), 0, sizeof(dangerous)));
+}
+"#;
+    let aggregate_write = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *selected_storage(int choice) {
+    struct Box left = {(char *)&dangerous};
+    struct Box right = {(char *)&safe};
+    struct Box replacement = {(char *)&safe};
+    *(choice ? &left : &right) = replacement;
+    return left.pointer;
+}
+int main(void) {
+    return sizeof(memset(selected_storage(0), 0, sizeof(dangerous)));
+}
+"#;
+
+    for program in [field_write, aggregate_write] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_preserves_fields_through_aggregate_assignment_expressions() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Box dangerous_box(void) {
+    struct Box box = {(char *)&dangerous};
+    return box;
+}
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    return (box = dangerous_box()).pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_propagates_pointer_targets_through_aggregate_array_assignment() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *hidden_storage(void) {
+    struct Box box = {&safe};
+    struct Holder holders[1] = {{0}};
+    holders[0] = (struct Holder){&box};
+    holders[0].selected->pointer = &dangerous;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_propagates_pointer_targets_through_adjacent_aggregate_writes() {
+    let expression_write = |route: &str| {
+        r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+struct Outer { struct Holder holder; };
+void *hidden_storage(void) {
+    struct Box box = {&safe};
+    ROUTE
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#
+        .replace("ROUTE", route)
+    };
+    let call_effect = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void select(struct Holder *holder, struct Box *box) {
+    *holder = (struct Holder){box};
+}
+void *hidden_storage(void) {
+    struct Box box = {&safe};
+    struct Holder holder = {0};
+    select(&holder, &box);
+    holder.selected->pointer = &dangerous;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    let programs = [
+        expression_write(
+            "struct Holder holders[1] = {{0}}; (holders[0] = (struct Holder){&box}); holders[0].selected->pointer = &dangerous;",
+        ),
+        expression_write(
+            "struct Outer outers[1] = {{{0}}}; (outers[0].holder = (struct Holder){&box}); outers[0].holder.selected->pointer = &dangerous;",
+        ),
+        expression_write(
+            "struct Outer outer = {{0}}; struct Outer *pointer = &outer; (pointer->holder = (struct Holder){&box}); pointer->holder.selected->pointer = &dangerous;",
+        ),
+        expression_write(
+            "struct Holder holder = {0}; struct Holder *pointer = &holder; (*pointer = (struct Holder){&box}); pointer->selected->pointer = &dangerous;",
+        ),
+        call_effect.to_string(),
+    ];
+    for program in programs {
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_updates_aggregate_targets_through_generic_selection() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box box = {(void *)&safe};
+    struct Box *pointer = &box;
+    _Generic(pointer, struct Box *: pointer)->pointer = &dangerous;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_aliased_parameter_write_order() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void overwrite(struct Box *first, struct Box *second) {
+    second->pointer = (char *)&dangerous;
+    first->pointer = (char *)&safe;
+}
+void *safe_storage(void) {
+    struct Box box = {(char *)&safe};
+    overwrite(&box, &box);
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(safe_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_preserves_aliased_parameter_write_order_after_distinct_cache_prime() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void overwrite(struct Box *first, struct Box *second) {
+    second->pointer = (char *)&dangerous;
+    first->pointer = (char *)&safe;
+}
+void *safe_storage(void) {
+    struct Box first = {(char *)&safe};
+    struct Box second = {(char *)&safe};
+    overwrite(&first, &second);
+    overwrite(&first, &first);
+    return first.pointer;
+}
+int main(void) {
+    return sizeof(memset(safe_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_snapshots_prefix_call_arguments_after_effects() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *selected_storage(struct Box *box) {
+    return box->pointer;
+}
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    struct Box *selected = boxes;
+    return selected_storage(++selected);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_snapshots_postfix_call_arguments_before_effects() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+char safe;
+double dangerous;
+struct Box { char *pointer; };
+void *selected_storage(struct Box *box) {
+    return box->pointer;
+}
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&dangerous}, {&safe}};
+    struct Box *selected = boxes;
+    return selected_storage(selected++);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_captures_parameter_targets_in_source_order() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *box, struct Box *ignored) {
+    box->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    struct Box first = {(char *)&safe};
+    struct Box second = {(char *)&safe};
+    struct Box *selected = &first;
+    poison(selected, selected = &second);
+    return first.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_global_and_parameter_alias_write_order() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+char safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Box global = {&safe};
+void overwrite(struct Box *box) {
+    global.pointer = (char *)&safe;
+    box->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    global.pointer = (char *)&dangerous;
+    overwrite(&global);
+    return global.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_return_effects_ignore_same_named_block_locals() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+char safe;
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *box) {
+    box->pointer = (char *)&dangerous;
+    {
+        struct Box box = {&safe};
+        return;
+    }
+}
+void *hidden_storage(void) {
+    struct Box box = {&safe};
+    poison(&box);
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_adjusted_struct_array_parameter_elements_on_read() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *second_pointer(struct Box boxes[]) {
+    return (boxes + 1)->pointer;
+}
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&dangerous}};
+    return second_pointer(boxes);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_adjusted_struct_array_parameter_elements_on_mutation() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void poison_second(struct Box boxes[]) {
+    (boxes + 1)->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&safe}, {(char *)&safe}};
+    poison_second(boxes);
+    return boxes[1].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_global_aggregate_field_returns() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+char safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Box global_box = {&safe};
+void *hidden_storage(void) {
+    global_box.pointer = (char *)&dangerous;
+    return global_box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_applies_global_slot_mutations_from_callees() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *global_slot = &safe;
+void poison_global(void) {
+    global_slot = &dangerous;
+}
+void *hidden_storage(void) {
+    poison_global();
+    return global_slot;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_review_blockers_preserve_static_call_state() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+void *state(int poison) {
+    static double dangerous;
+    static void *stored;
+    void *previous = stored;
+    stored = poison ? &dangerous : 0;
+    return previous;
+}
+void *hidden_storage(void) {
+    state(1);
+    return state(0);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_fully_returning_switch_preserves_safe_overwrite() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *safe_storage(int choice) {
+    void *result = &dangerous;
+    switch (choice) {
+        case 0:
+            result = &safe;
+            return result;
+        default:
+            result = &safe;
+            return result;
+    }
+    return &dangerous;
+}
+int main(void) {
+    return sizeof(memset(safe_storage(0), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_final_review_recursive_fallback_preserves_effects() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *selected, int recurse, struct Box *next) {
+    if (recurse) {
+        poison(next, recurse - 1, next);
+    }
+    selected->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    struct Box selected = {(char *)&safe};
+    struct Box next = {(char *)&safe};
+    poison(&selected, 1, &next);
+    return next.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_final_review_preserves_aggregate_value_pointer_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+struct Holder select(struct Box *box) {
+    return (struct Holder){box};
+}
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    struct Holder holder = select(&box);
+    holder.selected->pointer = (char *)&dangerous;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_final_review_struct_arrays_decay_for_generic_selection() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *selected_storage(void) {
+    struct Box boxes[1] = {{(char *)&safe}};
+    return _Generic(boxes, struct Box *: &dangerous, default: &safe);
+}
+int main(void) {
+    return sizeof(memset(selected_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_final_review_types_binary_generic_controls_lexically() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *selected_storage(int *pointer) {
+    return _Generic(pointer != (int *)0, int: &safe, default: &dangerous);
+}
+int main(void) {
+    return sizeof(memset(selected_storage(&safe), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_types_two_dimensional_aggregate_field_elements_lexically() {
+    let program = r#"
+struct Grid { int cells[1][2]; };
+int verify(struct Grid *pointer) {
+    return pointer->cells[0][1] == 2;
+}
+int main(void) {
+    struct Grid direct = {{{0, 1}}};
+    struct Grid pointed = {{{0, 2}}};
+    struct Grid rows[1] = {{{{3, 0}}}};
+    return direct.cells[0][1] == 1 && rows[0].cells[0][0] == 3 && verify(&pointed) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn non_evaluating_memory_final_review_validates_assignment_generic_control_rhs() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int isalpha(int value);
+int safe;
+void *selected_storage(int *pointer) {
+    return _Generic(pointer = (isalpha(1, 2), pointer), int *: &safe, default: 0);
+}
+int main(void) {
+    int value = 0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "function 'isalpha' expected 1 arguments, got 2"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_validates_assignment_generic_control_constraints() {
+    let programs = [
+        (
+            r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(int *pointer) {
+    return _Generic(pointer = 1.0, int *: &safe, default: 0);
+}
+int main(void) {
+    int value = 0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#,
+            "expected pointer expression",
+        ),
+        (
+            r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(int *pointer) {
+    return _Generic(pointer += 1.0, int *: &safe, default: 0);
+}
+int main(void) {
+    int value = 0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#,
+            "pointer arithmetic requires an integer offset",
+        ),
+    ];
+
+    for (program, expected) in programs {
+        assert_eq!(interpret(program).expect_err(program).to_string(), expected);
+    }
+}
+
+#[test]
+fn non_evaluating_memory_types_increment_generic_controls_lexically() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(int *pointer) {
+    return _Generic(++pointer, int *: &safe, default: 0);
+}
+int main(void) {
+    int value = 0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_types_supported_increment_lvalues_lexically() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+struct Item { int value; };
+void *selected_storage(int *pointer, struct Item items[]) {
+    return _Generic(++*pointer, int:
+        _Generic(++pointer[0], int:
+            _Generic(++items[0].value, int: &safe, default: 0),
+            default: 0),
+        default: 0);
+}
+int main(void) {
+    int value = 0;
+    struct Item items[1] = {{0}};
+    return sizeof(memset(selected_storage(&value, items), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_review_blockers_type_lexical_field_addresses() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { int value; };
+void *selected_storage(void) {
+    struct Box box = {0};
+    return _Generic(&box.value, int *: &safe, default: &dangerous);
+}
+int main(void) {
+    return sizeof(memset(selected_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_latest_review_blocker_types_pointer_field_addresses_lexically() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Item { const char value; int count; };
+void *selected_storage(struct Item *item, const struct Item *frozen) {
+    return _Generic(&item->value, const char *:
+        _Generic(&frozen->count, const int *: &safe, default: &dangerous),
+        default: &dangerous);
+}
+int main(void) {
+    struct Item item = {'a', 0};
+    return sizeof(memset(selected_storage(&item, &item), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_review_blockers_type_lexical_deref_compound_assignments() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *selected_storage(int *pointer) {
+    return _Generic(*pointer += 1, int: &safe, default: &dangerous);
+}
+int main(void) {
+    int value = 0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_latest_review_blocker_validates_deref_compound_operators_lexically() {
+    let invalid = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *selected_storage(double *pointer) {
+    return _Generic(*pointer %= 2, double: &safe, default: &dangerous);
+}
+int main(void) {
+    return sizeof(memset(selected_storage((double *)0), 0, sizeof(safe)));
+}
+"#;
+    let valid = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *selected_storage(double *pointer) {
+    return _Generic(*pointer += 1, double: &safe, default: &dangerous);
+}
+int main(void) {
+    return sizeof(memset(selected_storage((double *)0), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(invalid).unwrap_err().to_string(),
+        "integer-only compound assignment used with double value"
+    );
+    assert_eq!(interpret(valid), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_validates_unselected_generic_associations() {
+    let program = r#"
+int isalpha(int value);
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(void) {
+    return _Generic(0, int: &safe, default: isalpha(1, 2));
+}
+int main(void) {
+    return sizeof(memset(selected_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'isalpha' expected 1 arguments, got 2"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_review_blockers_validate_cast_wrapped_generic_controls() {
+    let program = r#"
+int isalpha(int value);
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(void) {
+    return _Generic((int)isalpha(1, 2), int: &safe, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'isalpha' expected 1 arguments, got 2"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_review_blockers_validate_nested_generic_controls() {
+    let mut controlling = "0".to_string();
+    for _ in 0..33 {
+        controlling = format!("_Generic({controlling}, int: 0, default: 1)");
+    }
+    let program = format!(
+        r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(void) {{
+    return _Generic({controlling}, int: &safe, default: 0);
+}}
+int main(void) {{
+    return sizeof(memset(selected_storage(), 0, sizeof(safe)));
+}}
+"#
+    );
+
+    assert_eq!(
+        interpret(&program).unwrap_err().to_string(),
+        "generic selection validation nesting limit of 32 exceeded"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_validates_conditional_generic_control_conditions() {
+    let program = r#"
+int isalpha(int value);
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(int *pointer) {
+    return _Generic(isalpha(1, 2) ? pointer : pointer, int *: &safe, default: 0);
+}
+int main(void) {
+    int value = 0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'isalpha' expected 1 arguments, got 2"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_nonzero_pointer_generic_equality() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(int *pointer) {
+    return _Generic(pointer != 1, int: &safe, default: 0);
+}
+int main(void) {
+    int value = 0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot compare pointer with nonzero integer"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_incompatible_pointer_generic_binary_constraints() {
+    let subtraction = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(int *left, double *right) {
+    return _Generic(left - right, int: &safe, default: 0);
+}
+int main(void) {
+    int left = 0;
+    double right = 0.0;
+    return sizeof(memset(selected_storage(&left, &right), 0, sizeof(safe)));
+}
+"#;
+    let ordering = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(int *left, double *right) {
+    return _Generic(left < right, int: &safe, default: 0);
+}
+int main(void) {
+    int left = 0;
+    double right = 0.0;
+    return sizeof(memset(selected_storage(&left, &right), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(subtraction).unwrap_err().to_string(),
+        "cannot subtract pointer to double from pointer to int"
+    );
+    assert_eq!(
+        interpret(ordering).unwrap_err().to_string(),
+        "cannot compare pointer to int with pointer to double"
+    );
+}
+
+#[test]
+fn non_evaluating_sizeof_rejects_incompatible_pointer_binary_constraints() {
+    for (expression, expected) in [
+        (
+            "&left - &right",
+            "cannot subtract pointer to double from pointer to int",
+        ),
+        ("1 - &right", "pointer value used as scalar"),
+        (
+            "&left < &right",
+            "cannot compare pointer to int with pointer to double",
+        ),
+    ] {
+        let program = format!(
+            "int main(void) {{ int left = 0; double right = 0.0; return sizeof({expression}); }}"
+        );
+
+        assert_eq!(interpret(&program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn non_evaluating_sizeof_rejects_every_invalid_pointer_binary_family() {
+    for expression in [
+        "pointer != 1",
+        "pointer % 1",
+        "pointer << 1",
+        "pointer + pair",
+    ] {
+        let evaluated = format!(
+            "struct Pair {{ int value; }}; int main(void) {{ int value = 0; int *pointer = &value; struct Pair pair = {{0}}; return {expression}; }}"
+        );
+        let unevaluated = format!(
+            "struct Pair {{ int value; }}; int main(void) {{ int value = 0; int *pointer = &value; struct Pair pair = {{0}}; return sizeof({expression}); }}"
+        );
+        let evaluated_error = interpret(&evaluated).unwrap_err().to_string();
+        let unevaluated_error = interpret(&unevaluated).unwrap_err().to_string();
+        assert!(
+            !evaluated_error.is_empty(),
+            "missing evaluated diagnostic for {expression}"
+        );
+        assert!(
+            !unevaluated_error.is_empty(),
+            "missing sizeof diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_sizeof_binary_validation_has_a_deterministic_depth_limit() {
+    let mut expression = "pointer".to_string();
+    for _ in 0..256 {
+        expression = format!("{expression} + 0");
+    }
+    let program = format!(
+        "int main(void) {{ int value = 0; int *pointer = &value; return sizeof({expression}); }}"
+    );
+
+    assert_eq!(
+        interpret(&program).unwrap_err().to_string(),
+        "sizeof expression nesting limit of 128 exceeded"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_character_views() {
+    for program in [
+        r#"
+int main(void) {
+    double value = 1.0;
+    return *(char *)&value;
+}
+"#,
+        r#"
+int main(void) {
+    double value = 1.0;
+    void *hidden = &value;
+    return *(char *)hidden;
+}
+"#,
+    ] {
+        let error = interpret(program).unwrap_err().to_string();
+        assert!(
+            error.contains("double pointers are not supported"),
+            "unexpected error: {error}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_raw_memory_through_void_pointers() {
+    for call in [
+        "memset(hidden, 0, sizeof(value)); return 0;",
+        "return sizeof(memset(hidden, 0, sizeof(value)));",
+    ] {
+        let program = format!(
+            r#"
+void *memset(void *destination, int value, unsigned long count);
+int main(void) {{
+    double value = 1.0;
+    void *hidden = &value;
+    {call}
+}}
+"#,
+        );
+        let error = interpret(&program).unwrap_err().to_string();
+        assert!(
+            error.contains(
+                "function 'memset' does not yet support double object storage for argument 1"
+            ),
+            "unexpected error: {error}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_review_uses_current_storage_for_raw_memory_validation() {
+    for program in [
+        r#"
+void *memset(void *destination, int value, unsigned long count);
+double dangerous;
+struct Box { double *pointer; };
+int main(void) {
+    struct Box box = {&dangerous};
+    return sizeof(memset(box.pointer, 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *global_slot = &safe;
+int main(void) {
+    global_slot = &dangerous;
+    return sizeof(memset(global_slot, 0, sizeof(dangerous)));
+}
+"#,
+    ] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "function 'memset' does not yet support double object storage for argument 1"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_review_uses_current_storage_for_dynamic_aggregate_indices() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+char safe;
+double dangerous;
+struct SafeBox { char *pointer; };
+struct SafeBox boxes[1] = {{&safe}};
+struct Box { double *pointer; };
+int main(void) {
+    int index = 0;
+    struct Box boxes[1] = {{&dangerous}};
+    return sizeof(memset(boxes[index].pointer, 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memset' does not yet support double object storage for argument 1"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_raw_memory_through_call_results() {
+    for call in [
+        "memcpy(identity(&value), source, 1); return 0;",
+        "return sizeof(memcpy(identity(&value), source, 1));",
+    ] {
+        let program = format!(
+            r#"
+void *memcpy(void *destination, const void *source, unsigned long count);
+void *identity(void *pointer) {{ return pointer; }}
+int main(void) {{
+    double value = 1.0;
+    char source[1] = {{0}};
+    {call}
+}}
+"#,
+        );
+        let error = interpret(&program).unwrap_err().to_string();
+        assert!(
+            error.contains(
+                "function 'memcpy' does not yet support double object storage for argument 1"
+            ),
+            "unexpected error: {error}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_raw_memory_through_nested_forwarding_calls() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+void *identity(void *pointer) { return pointer; }
+void *forward(void *pointer) { return identity(pointer); }
+int main(void) {
+    double value = 1.0;
+    return sizeof(memset(forward(&value), 0, sizeof(value)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memset' does not yet support double object storage for argument 1"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_tracks_aggregate_call_result_field_assignments() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Box *identity(struct Box *pointer) { return pointer; }
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    identity(&box)->pointer = (char *)&dangerous;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_raw_memory_through_returned_pointer_fields() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+double value;
+struct Box { double *pointer; };
+void *hidden_storage(void) {
+    struct Box box = {&value};
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(value)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_analyzes_generic_selected_parameter_returns_lexically() {
+    let safe = r#"
+void *memset(void *destination, int value, unsigned long count);
+int value;
+void *selected(int *pointer) {
+    return _Generic(pointer, int *: pointer, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected(&value), 0, sizeof(value)));
+}
+"#;
+    assert_eq!(interpret(safe).unwrap(), 8);
+
+    let dangerous = r#"
+void *memset(void *destination, int value, unsigned long count);
+double value;
+void *selected(double *pointer) {
+    return _Generic(pointer, double *: pointer, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected(&value), 0, sizeof(value)));
+}
+"#;
+    assert_eq!(
+        interpret(dangerous).unwrap_err().to_string(),
+        "function 'memset' does not yet support double object storage for argument 1"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_tracks_local_double_array_element_addresses() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+void *hidden_storage(void) {
+    static double values[1] = {1.0};
+    double *pointer = &values[0];
+    return (void *)pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_selects_generic_local_address_types_without_runtime_lookup() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *selected(void) {
+    int local = 0;
+    return _Generic(&local, int *: &safe, double *: &dangerous);
+}
+int main(void) {
+    return sizeof(memset(selected(), 0, sizeof(int)));
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn direct_double_pointer_review_preserves_const_for_generic_local_address_types() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *hidden_storage(void) {
+    const int local = 0;
+    return _Generic(&local, const int *: &dangerous, default: &safe);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_selects_generic_local_array_element_address_types() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *hidden_storage(void) {
+    int local[1] = {0};
+    return _Generic(&local[0], int *: &safe, default: &dangerous);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn direct_double_pointer_review_tracks_retyped_pointer_field_initializers() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+double value;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    double *direct = &value;
+    struct Box box = {(void *)direct};
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(value)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_tracks_retyped_pointer_field_assignments() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    double *direct = &dangerous;
+    struct Box box = {(void *)&safe};
+    box.pointer = (void *)direct;
+    return box.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_does_not_taint_safe_retyped_pointer_field_siblings() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *dangerous_pointer; char *safe_pointer; };
+void *safe_storage(void) {
+    struct Box box = {(void *)&dangerous, (void *)&safe};
+    return box.safe_pointer;
+}
+int main(void) {
+    return sizeof(memset(safe_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn direct_double_pointer_review_tracks_alias_assignments_in_scalar_compound_literals() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *hidden_storage(void) {
+    double *direct = &dangerous;
+    void *result = &safe;
+    int ignored = (int){(result = direct, 0)};
+    return result;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_tracks_raw_memory_aliases_from_control_expressions() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double value;
+void *select_storage(void) {
+    void *result = &safe;
+    if (result = &value) { }
+    return result;
+}
+int main(void) {
+    return sizeof(memset(select_storage(), 0, sizeof(value)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'memset' does not yet support double object storage for argument 1"
+    );
+}
+
+#[test]
+fn direct_double_pointer_review_resolves_shadowed_local_storage_types() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+double value;
+void *local_storage(void) {
+    int value = 0;
+    return &value;
+}
+int main(void) {
+    return sizeof(memset(local_storage(), 0, sizeof(int)));
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn direct_double_pointer_review_resolves_shadowed_local_aggregate_field_types() {
+    for expression in ["slot.pointer[0]", "cursor->pointer[0]"] {
+        let program = format!(
+            r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct IntSlot {{ int *pointer; }};
+struct DoubleSlot {{ double *pointer; }};
+struct IntSlot slot = {{&safe}};
+void *hidden_storage(void) {{
+    struct DoubleSlot slot = {{&dangerous}};
+    struct DoubleSlot *cursor = &slot;
+    return _Generic({expression}, double: (void *)slot.pointer, default: (void *)&safe);
+}}
+int main(void) {{
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_review_keeps_block_local_aliases_lexically_scoped() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double value;
+void *outer_storage(void) {
+    void *result = &safe;
+    {
+        void *result = &value;
+    }
+    return result;
+}
+int main(void) {
+    return sizeof(memset(outer_storage(), 0, sizeof(int)));
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn direct_double_pointer_review_rejects_addresses_of_double_pointer_fields() {
+    for expression in [
+        "&box.value",
+        "&boxes[0].value",
+        "&box_pointer->value",
+        "&((struct PointerBox){&value}).value",
+    ] {
+        let program = format!(
+            r#"
+struct PointerBox {{ double *value; }};
+int main(void) {{
+    double value = 1.0;
+    struct PointerBox box = {{&value}};
+    struct PointerBox boxes[1] = {{{{&value}}}};
+    struct PointerBox *box_pointer = &box;
+    return sizeof({expression});
+}}
+"#,
+        );
+        let result = interpret(&program);
+        assert!(
+            result.is_err(),
+            "expected an error for {expression}, got {result:?}"
+        );
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("double pointers are not supported"),
+            "unexpected error for {expression}: {error}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_review_supports_comma_separated_declarators() {
+    let result = interpret(
+        r#"
+int main(void) {
+    double first = 1.0;
+    double second = 2.0;
+    double *left = &first, *right = &second;
+    return *left == 1.0 && *right == 2.0 ? 0 : 1;
+}
+"#,
+    )
+    .unwrap();
+    assert_eq!(result, 0);
+}
+
+#[test]
+fn direct_double_pointer_aggregate_fields_are_supported() {
+    let program = r#"
+struct Box { double *value; };
+int main(void) {
+    double value = 1.25;
+    double *pointer = &value;
+    struct Box box = {.value = pointer};
+    *box.value += 0.75;
+    return value == 2.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_casts_and_compound_literal_addresses_are_supported() {
+    let program = r#"
+int main(void) {
+    double value = 1.5;
+    double *pointer = (double *)&value;
+    double *literal = &(double){2.0};
+    *pointer += *literal;
+    *literal += 0.5;
+    return value == 3.5 && *literal == 2.5 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_casts_reject_non_double_storage() {
+    for program in [
+        "int main(void) { int value = 7; return *((double *)&value) == 7.0; }",
+        "int main(void) { int value = 7; *((double *)&value) = 2.0; return value; }",
+        "int main(void) { int value = 7; ++*((double *)&value); return value; }",
+        "int main(void) { int values[2] = {1, 2}; return ((double *)values)[1] == 2.0; }",
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "cannot convert pointer to int to pointer to double",
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointers_support_sizeof_alignof_and_generic_selection() {
+    let program = r#"
+int main(void) {
+    double value = 1.0;
+    double *pointer = &value;
+    int selected = _Generic(pointer, double *: 1, default: 0);
+    int pointer_size = sizeof(pointer);
+    int pointer_expr_size = sizeof(pointer + 0);
+    int value_size = sizeof(*pointer);
+    return selected && pointer_size == sizeof(double *) &&
+           pointer_expr_size == sizeof(double *) &&
+           value_size == sizeof(double) &&
+           _Alignof(double *) == _Alignof(int *) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointers_support_global_and_static_storage() {
+    let program = r#"
+double global_value = 1.25;
+double global_values[2] = {2.0, 3.0};
+double *global_pointer = &global_value;
+
+double *persistent(void) {
+    static double value = 4.0;
+    return &value;
+}
+
+int main(void) {
+    static double values[2] = {5.0, 6.0};
+    double *array_pointer = global_values + 1;
+    double *static_pointer = values;
+    *global_pointer += 0.75;
+    *array_pointer += 0.5;
+    static_pointer[1] += 0.25;
+    *persistent() += 0.5;
+    return global_value == 2.0 && global_values[1] == 3.5 &&
+           values[1] == 6.25 && *persistent() == 4.5 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointer_fixture_matches_supported_routes() {
+    let program = include_str!("fixtures/valid/direct_double_pointers.c");
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_pointers_preserve_const_and_lifetime_safety() {
+    let valid = r#"
+int main(void) {
+    const double fixed = 1.5;
+    double value = 2.5;
+    const double *fixed_view = &fixed;
+    const double *mutable_view = &value;
+    return *fixed_view == 1.5 && *mutable_view == 2.5 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(valid).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "int main(void) { const double value = 1.0; double *pointer = &value; return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "int main(void) { double value = 1.0; const double *pointer = &value; *pointer = 2.0; return 0; }",
+            "cannot assign through pointer to const",
+        ),
+        (
+            "double *escaped(void) { double value = 1.0; return &value; } int main(void) { return *escaped() == 1.0; }",
+            "pointer to out-of-scope variable 'value'",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_truthiness_and_equality_reject_expired_storage() {
+    for observation in ["escaped() != 0", "!escaped()", "escaped() == escaped()"] {
+        let program = format!(
+            r#"
+double *escaped(void) {{
+    double value = 1.0;
+    return &value;
+}}
+int main(void) {{
+    return {observation};
+}}
+"#,
+        );
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            "pointer to out-of-scope variable 'value'",
+            "unexpected diagnostic for {observation}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_bool_conversions_reject_expired_storage() {
+    for observation in [
+        "_Bool observed = escaped(); return observed;",
+        "return (_Bool)escaped();",
+        "return consume(escaped());",
+    ] {
+        let program = format!(
+            r#"
+double *escaped(void) {{
+    double values[1] = {{1.0}};
+    return values;
+}}
+
+int consume(_Bool value) {{ return value; }}
+
+int main(void) {{
+    {observation}
+}}
+"#,
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "pointer to out-of-scope variable 'values'",
+            "{observation}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_difference_and_ordering_reject_expired_storage() {
+    for observation in ["pointer - pointer", "pointer < pointer"] {
+        let program = format!(
+            r#"
+int main(void) {{
+    double *pointer = 0;
+    {{
+        double values[2] = {{1.0, 2.0}};
+        pointer = values;
+    }}
+    return {observation};
+}}
+"#,
+        );
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            "pointer to out-of-scope variable 'values'",
+            "unexpected diagnostic for {observation}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_equality_rejects_incompatible_object_pointer_types() {
+    for expression in [
+        "&double_value == &int_value",
+        "sizeof(&double_value == &int_value)",
+    ] {
+        let program = format!(
+            "int main(void) {{ double double_value = 1.0; int int_value = 1; return {expression}; }}"
+        );
+        assert_eq!(
+            interpret(&program).expect_err(&program).to_string(),
+            "cannot compare pointer to double with pointer to int",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_arithmetic_preserves_array_identity_and_bounds() {
+    let valid = r#"
+int main(void) {
+    double values[3] = {1.0, 2.0, 3.0};
+    double *first = values;
+    double *last = values + 2;
+    return last - first == 2 && first < last && last > first &&
+           first + 2 == last && 2 + first == last ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(valid).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "int main(void) { double left[1] = {1.0}; double right[1] = {2.0}; return left - right; }",
+            "cannot subtract pointers to different arrays",
+        ),
+        (
+            "int main(void) { double left[1] = {1.0}; double right[1] = {2.0}; return left < right; }",
+            "cannot compare pointers to different arrays",
+        ),
+        (
+            "int main(void) { double values[1] = {1.0}; return *(values + 2) == 0.0; }",
+            "array pointer index 2 out of bounds for length 1",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_index_overflow_does_not_panic() {
+    let program = r#"
+int main(void) {
+    double values[2] = {1.0, 2.0};
+    double *pointer = values + 1;
+    return pointer[9223372036854775807] == 0.0;
+}
+"#;
+
+    let result = std::panic::catch_unwind(|| interpret(program));
+    assert!(result.is_ok(), "pointer indexing panicked");
+    assert_eq!(
+        result.unwrap().unwrap_err().to_string(),
+        "array pointer index overflow during pointer arithmetic"
+    );
+}
+
+#[test]
+fn double_array_and_pointer_type_queries_are_supported() {
+    assert_eq!(
+        interpret("int main(void) { return sizeof(double[2]) == 2 * sizeof(double) && _Alignof(double[2]) == _Alignof(double) ? 0 : 1; }").unwrap(),
+        0
+    );
+
+    assert_eq!(
+        interpret("int main(void) { return sizeof(double *) == sizeof(int *) && _Alignof(double *) == _Alignof(int *) ? 0 : 1; }").unwrap(),
+        0
+    );
+}
+
+#[test]
+fn supports_double_pointer_generic_associations() {
+    let program =
+        "int main(void) { double value = 1.0; return _Generic(&value, double *: 0, default: 1); }";
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]
@@ -6009,14 +11173,6 @@ int main(void) {
 fn double_function_declarations_keep_pointer_and_array_boundaries_source_located() {
     let cases = [
         (
-            "int read(double *value);\nint main(void) { return 0; }",
-            "double pointers are not supported at line 1, column 17",
-        ),
-        (
-            "double *make(void);\nint main(void) { return 0; }",
-            "double pointers are not supported at line 1, column 8",
-        ),
-        (
             "int sum(double values[2]);\nint main(void) { return 0; }",
             "double array parameters are not supported at line 1, column 22",
         ),
@@ -6060,10 +11216,6 @@ fn rejects_unsupported_floating_point_forms_with_context() {
         (
             "int main(void) {\n    long double value;\n    return 0;\n}",
             "long double types are not supported at line 2, column 5",
-        ),
-        (
-            "int main(void) {\n    double *pointer;\n    return 0;\n}",
-            "double pointers are not supported at line 2, column 12",
         ),
         (
             "typedef double Real;\nint main(void) { return 0; }",
@@ -28986,4 +34138,1481 @@ fn rejects_redeclaration_only_in_the_same_block_scope() {
         err.to_string(),
         "variable 'x' already declared in this scope"
     );
+}
+
+#[test]
+fn non_evaluating_memory_global_initializers_preserve_runtime_call_depth_limit() {
+    let program = r#"
+int f0(void) { return 1; }
+int f1(void) { return f0(); }
+int f2(void) { return f1(); }
+int f3(void) { return f2(); }
+int f4(void) { return f3(); }
+int f5(void) { return f4(); }
+int f6(void) { return f5(); }
+int f7(void) { return f6(); }
+int f8(void) { return f7(); }
+int f9(void) { return f8(); }
+int f10(void) { return f9(); }
+int f11(void) { return f10(); }
+int f12(void) { return f11(); }
+int f13(void) { return f12(); }
+int f14(void) { return f13(); }
+int f15(void) { return f14(); }
+int f16(void) { return f15(); }
+int value = f16();
+int main(void) { return value - 1; }
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn non_evaluating_memory_pointer_global_initializers_preserve_runtime_call_depth_limit() {
+    let program = r#"
+int value;
+void *f0(void) { return &value; }
+void *f1(void) { return f0(); }
+void *f2(void) { return f1(); }
+void *f3(void) { return f2(); }
+void *f4(void) { return f3(); }
+void *f5(void) { return f4(); }
+void *f6(void) { return f5(); }
+void *f7(void) { return f6(); }
+void *f8(void) { return f7(); }
+void *f9(void) { return f8(); }
+void *f10(void) { return f9(); }
+void *f11(void) { return f10(); }
+void *f12(void) { return f11(); }
+void *f13(void) { return f12(); }
+void *f14(void) { return f13(); }
+void *f15(void) { return f14(); }
+void *f16(void) { return f15(); }
+void *pointer = f16();
+int main(void) { return pointer == &value ? 0 : 1; }
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn non_evaluating_memory_rejects_const_double_deref_compound_generic_controls() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(const double *pointer) {
+    return _Generic((*pointer += 1.0), double: &safe, default: 0);
+}
+int main(void) {
+    double value = 0.0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_const_double_deref_increment_generic_controls() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(const double *pointer) {
+    return _Generic((++*pointer), double: &safe, default: 0);
+}
+int main(void) {
+    double value = 0.0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_const_source_cast_writes_in_nested_generic_controls() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(const double *pointer) {
+    return _Generic((*((double *)pointer) = 1.0), double: &safe, default: 0);
+}
+int main(void) {
+    double value = 0.0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_const_double_assignment_generic_controls() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(void) {
+    const double value = 0.0;
+    return _Generic((value = 1.0), double: &safe, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const variable 'value'"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_const_double_pointer_compound_generic_controls() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(double * const pointer) {
+    return _Generic((pointer += 1), double *: &safe, default: 0);
+}
+int main(void) {
+    double value = 0.0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const variable 'pointer'"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_const_double_pointer_increment_generic_controls() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(double * const pointer) {
+    return _Generic((++pointer), double *: &safe, default: 0);
+}
+int main(void) {
+    double value = 0.0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const variable 'pointer'"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_types_double_array_assignment_generic_controls_lexically() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(double *pointer) {
+    return _Generic((pointer[0] = 1.0), double: &safe, default: 0);
+}
+int main(void) {
+    double value = 0.0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_types_double_struct_field_assignment_generic_controls_lexically() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+struct Sample { double value; };
+int safe;
+void *selected_storage(void) {
+    struct Sample sample = {0.0};
+    return _Generic((sample.value = 1.0), double: &safe, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_validates_struct_field_assignment_generic_control_rhs() {
+    let program = r#"
+struct Sample { double value; };
+int main(void) {
+    int value = 0;
+    struct Sample sample = {1.0};
+    return _Generic((sample.value = &value), double: 0, default: 1);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign pointer expression to double value"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_types_double_struct_field_compound_generic_controls_lexically() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+struct Sample { double value; };
+int safe;
+void *selected_storage(void) {
+    struct Sample sample = {0.0};
+    return _Generic((sample.value += 1.0), double: &safe, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_types_struct_pointer_set_generic_controls_lexically() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Slot { double *pointer; };
+void *selected(struct Slot *slot, double *pointer) {
+    return _Generic((slot->pointer = pointer),
+        double *: &safe, default: &dangerous);
+}
+int main(void) {
+    double value = 0.0;
+    struct Slot slot = {&value};
+    return sizeof(memset(selected(&slot, &value), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_types_aggregate_field_mutation_generic_controls_lexically() {
+    let programs = [
+        r#"
+void *memset(void *, int, unsigned long);
+int safe; double dangerous;
+struct Slot { double *pointer; };
+void *selected(struct Slot *slot) {
+    return _Generic((slot->pointer += 0), double *: &safe, default: &dangerous);
+}
+int main(void) {
+    double value = 0.0; struct Slot slot = {&value};
+    return sizeof(memset(selected(&slot), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *, int, unsigned long);
+int safe; double dangerous;
+struct Slot { double *pointer; };
+void *selected(struct Slot slots[1], double *pointer) {
+    return _Generic((slots[0].pointer = pointer), double *: &safe, default: &dangerous);
+}
+int main(void) {
+    double value = 0.0; struct Slot slots[1] = {{&value}};
+    return sizeof(memset(selected(slots, &value), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *, int, unsigned long);
+int safe; double dangerous;
+struct Slot { double *pointer; };
+void *selected(struct Slot slots[1]) {
+    return _Generic((slots[0].pointer += 0), double *: &safe, default: &dangerous);
+}
+int main(void) {
+    double value = 0.0; struct Slot slots[1] = {{&value}};
+    return sizeof(memset(selected(slots), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *, int, unsigned long);
+int safe; double dangerous;
+struct Slot { double *pointer; };
+struct Holder { struct Slot slots[1]; };
+void *selected(struct Holder holder, double *pointer) {
+    return _Generic((holder.slots[0].pointer = pointer), double *: &safe, default: &dangerous);
+}
+int main(void) {
+    double value = 0.0; struct Holder holder = {{{&value}}};
+    return sizeof(memset(selected(holder, &value), 0, sizeof(dangerous)));
+}
+"#,
+        r#"
+void *memset(void *, int, unsigned long);
+int safe; double dangerous;
+struct Slot { double *pointer; };
+struct Holder { struct Slot slots[1]; };
+void *selected(struct Holder holder) {
+    return _Generic((holder.slots[0].pointer += 0), double *: &safe, default: &dangerous);
+}
+int main(void) {
+    double value = 0.0; struct Holder holder = {{{&value}}};
+    return sizeof(memset(selected(holder), 0, sizeof(dangerous)));
+}
+"#,
+    ];
+
+    for program in programs {
+        assert_eq!(interpret(program), Ok(8), "unexpected result for {program}");
+    }
+}
+
+#[test]
+fn non_evaluating_memory_validates_aggregate_field_mutation_generic_controls_lexically() {
+    let programs = [
+        (
+            r#"
+void *memset(void *, int, unsigned long);
+int safe; struct Slot { double value; };
+void *selected(struct Slot *slot) {
+    return _Generic((slot->value = &safe), double: &safe, default: 0);
+}
+int main(void) { struct Slot slot = {0.0}; return sizeof(memset(selected(&slot), 0, sizeof(safe))); }
+"#,
+            "cannot assign pointer expression to double value",
+        ),
+        (
+            r#"
+void *memset(void *, int, unsigned long);
+int safe; struct Slot { double *pointer; };
+void *selected(const struct Slot *slot, double *pointer) {
+    return _Generic((slot->pointer = pointer), double *: &safe, default: 0);
+}
+int main(void) { double value = 0.0; struct Slot slot = {&value}; return sizeof(memset(selected(&slot, &value), 0, sizeof(safe))); }
+"#,
+            "cannot assign through pointer to const",
+        ),
+        (
+            r#"
+void *memset(void *, int, unsigned long);
+int safe; struct Slot { double *pointer; };
+void *selected(struct Slot slots[1], double *pointer) {
+    return _Generic((slots[1.0].pointer = pointer), double *: &safe, default: 0);
+}
+int main(void) { double value = 0.0; struct Slot slots[1] = {{&value}}; return sizeof(memset(selected(slots, &value), 0, sizeof(safe))); }
+"#,
+            "array subscript requires an integer value",
+        ),
+        (
+            r#"
+void *memset(void *, int, unsigned long);
+int safe; struct Slot { double *pointer; };
+void *selected(struct Slot *slot) {
+    return _Generic((slot->pointer *= 1), double *: &safe, default: 0);
+}
+int main(void) { double value = 0.0; struct Slot slot = {&value}; return sizeof(memset(selected(&slot), 0, sizeof(safe))); }
+"#,
+            "pointer arithmetic is not supported",
+        ),
+    ];
+
+    for (program, expected) in programs {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_rejects_pointer_valued_generic_subscripts() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected(int *pointer) {
+    return _Generic(pointer[pointer], int: &safe, default: 0);
+}
+int main(void) {
+    int value = 0;
+    return sizeof(memset(selected(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "array subscript requires an integer value"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_pointer_casts_from_double_generic_controls() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected(void) {
+    return _Generic((double *)1.0, double *: &safe, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "expected pointer expression"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_validates_aggregate_generic_initializers() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+struct Slot { double value; };
+void *selected(void) {
+    return _Generic((struct Slot){&safe}, struct Slot: &safe, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign pointer expression to double value"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_const_aggregate_pointer_generic_increments() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+struct Slot { int value; };
+void *selected(const struct Slot *slot) {
+    return _Generic(++slot->value, int: &safe, default: 0);
+}
+int main(void) {
+    const struct Slot slot = {0};
+    return sizeof(memset(selected(&slot), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_rejects_const_aggregate_array_generic_increments() {
+    let programs = [
+        (
+            r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+struct Slot { int value; };
+void *selected(void) {
+    const struct Slot slots[1] = {{0}};
+    return _Generic(++slots[0].value, int: &safe, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected(), 0, sizeof(safe)));
+}
+"#,
+            "cannot assign to const variable 'slots'",
+        ),
+        (
+            r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+struct Slot { int value; };
+struct Holder { const struct Slot slots[1]; };
+void *selected(void) {
+    struct Holder holder = {{{0}}};
+    return _Generic(++holder.slots[0].value, int: &safe, default: 0);
+}
+int main(void) {
+    return sizeof(memset(selected(), 0, sizeof(safe)));
+}
+"#,
+            "cannot assign to const struct field 'value'",
+        ),
+    ];
+
+    for (program, expected) in programs {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "unexpected diagnostic for {program}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_preserves_nested_pointer_fields_for_possible_parameter_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void poison(struct Holder *holder) {
+    holder->selected->pointer = (char *)&dangerous;
+}
+void *hidden_storage(int choice) {
+    struct Box first = {(char *)&safe};
+    struct Box second = {(char *)&safe};
+    struct Holder left = {&first};
+    struct Holder right = {&second};
+    poison(choice ? &left : &right);
+    return first.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(0), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_aggregate_by_value_dereference_provenance() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box box = {(char *)&dangerous};
+    struct Box *selected = &box;
+    struct Box result = *selected;
+    return result.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_aggregate_dereference_uses_postfix_pointer_value_before_increment() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {{(char *)&dangerous}, {(char *)&safe}};
+    struct Box *selected = boxes;
+    struct Box result = *(selected++);
+    return result.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+
+    let inverse = program.replace(
+        "{{(char *)&dangerous}, {(char *)&safe}}",
+        "{{(char *)&safe}, {(char *)&dangerous}}",
+    );
+    assert_eq!(interpret(&inverse), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_types_array_compound_assignment_generic_controls_lexically() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(double *pointer) {
+    return _Generic((pointer[0] += 1.0), double: &safe, default: 0);
+}
+int main(void) {
+    double value = 0.0;
+    return sizeof(memset(selected_storage(&value), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn non_evaluating_memory_classifies_comma_wrapped_returned_calls_from_source_order_argument_snapshots()
+ {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *select(void *selected, void *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    void *selected = &dangerous;
+    return (0, select(selected, selected = &safe));
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_classifies_cast_wrapped_returned_calls_from_source_order_argument_snapshots()
+ {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *select(void *selected, void *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    void *selected = &dangerous;
+    return (void *)select(selected, selected = &safe);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_classifies_assigned_call_results_from_source_order_argument_snapshots() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *select(void *selected, void *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    void *selected = &dangerous;
+    void *result = &safe;
+    result = select(selected, selected = &safe);
+    return result;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_classifies_stored_call_results_from_source_order_argument_snapshots() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *select(void *selected, void *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    void *selected = &dangerous;
+    void *result = select(selected, selected = &safe);
+    return result;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_classifies_returned_calls_from_source_order_argument_snapshots() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *select(void *selected, void *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    void *selected = &dangerous;
+    return select(selected, selected = &safe);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_classifies_generic_wrapped_returned_calls_from_source_order_argument_snapshots()
+ {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *select(void *selected, void *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    void *selected = &dangerous;
+    return _Generic(0, int: select(selected, selected = &safe), default: &safe);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_classifies_assignment_wrapped_returned_calls_from_source_order_argument_snapshots()
+ {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *select(void *selected, void *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    void *selected = &dangerous;
+    void *result = &safe;
+    return result = select(selected, selected = &safe);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_updates_deref_assignment_expression_target_from_argument_snapshots() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+struct Holder *select(struct Holder *selected, struct Holder *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    struct Box safe_box = {(char *)&safe};
+    struct Box dangerous_box = {(char *)&dangerous};
+    struct Holder left = {&safe_box};
+    struct Holder right = {&safe_box};
+    struct Holder replacement = {&dangerous_box};
+    struct Holder *selected = &left;
+    return (*select(selected, selected = &right) = replacement,
+            left.selected->pointer);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_updates_deref_call_target_from_source_order_argument_snapshots() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+struct Holder *select(struct Holder *selected, struct Holder *ignored) {
+    return selected;
+}
+void *hidden_storage(void) {
+    struct Box safe_box = {(char *)&safe};
+    struct Box dangerous_box = {(char *)&dangerous};
+    struct Holder left = {&safe_box};
+    struct Holder right = {&safe_box};
+    struct Holder replacement = {&dangerous_box};
+    struct Holder *selected = &left;
+    *select(selected, selected = &right) = replacement;
+    return left.selected->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_classifies_conditional_returned_calls_from_source_order_argument_snapshots()
+ {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+void *select(void *selected, void *ignored) {
+    return selected;
+}
+void *hidden_storage(int choose) {
+    void *p = &dangerous;
+    return choose ? select(p, p = &safe) : (p = &safe);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(1), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_propagates_deeper_recursive_aggregate_effects() {
+    let dangerous_program = r#"
+void *memset(void *destination, int value, unsigned long count);
+char safe[1] = {0};
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *p, int n) {
+    if (n) {
+        poison(p + 1, n - 1);
+        return;
+    }
+    p->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    struct Box boxes[3] = {
+        {safe},
+        {safe},
+        {safe}
+    };
+    poison(boxes, 2);
+    return boxes[2].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(dangerous_program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+
+    let safe_program = dangerous_program.replace(
+        "p->pointer = (char *)&dangerous;",
+        "p->pointer = (char *)safe;",
+    );
+    assert_eq!(interpret(&safe_program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_rejects_const_direct_struct_field_generic_increments() {
+    for increment in ["++slot.value", "slot.value++"] {
+        let program = format!(
+            r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+struct Slot {{ const double value; }};
+void *selected_storage(void) {{
+    struct Slot slot = {{0.0}};
+    return _Generic({increment}, double: &safe, default: 0);
+}}
+int main(void) {{
+    return sizeof(memset(selected_storage(), 0, sizeof(safe)));
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot assign to const struct field 'value'",
+            "{increment}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_preserves_double_storage_for_postfix_pointer_returns() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+void *hidden_storage(void) {
+    static double values[2];
+    char *pointer = (char *)values;
+    return pointer++;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_uses_pre_increment_target_for_postfix_aggregate_pointer_values() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {
+        {(char *)&dangerous},
+        {(char *)&safe}
+    };
+    struct Box *selected = boxes;
+    return (selected++)->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_uses_updated_target_for_prefix_aggregate_pointer_values() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {
+        {(char *)&dangerous},
+        {(char *)&safe}
+    };
+    struct Box *selected = boxes;
+    return (++selected)->pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(safe)));
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn non_evaluating_memory_writes_prefix_struct_pointer_fields_to_updated_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {
+        {(char *)&safe},
+        {(char *)&safe}
+    };
+    struct Box *selected = boxes;
+    (++selected)->pointer = (char *)&dangerous;
+    return boxes[1].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_writes_prefix_dereference_statements_to_updated_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {
+        {(char *)&safe},
+        {(char *)&safe}
+    };
+    struct Box replacement = {(char *)&dangerous};
+    struct Box *selected = boxes;
+    *(++selected) = replacement;
+    return boxes[1].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_writes_prefix_dereference_expressions_to_updated_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {
+        {(char *)&safe},
+        {(char *)&safe}
+    };
+    struct Box replacement = {(char *)&dangerous};
+    struct Box *selected = boxes;
+    struct Box copy = (*(++selected) = replacement);
+    return copy.pointer == boxes[1].pointer ? boxes[1].pointer : (void *)0;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_writes_postfix_struct_pointer_fields_to_previous_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box boxes[2] = {
+        {(char *)&safe},
+        {(char *)&safe}
+    };
+    struct Box *selected = boxes;
+    (selected++)->pointer = (char *)&dangerous;
+    return boxes[0].pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_comma_left_effects_before_postfix_call_values() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *box) {
+    box->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    struct Box decoy = {(char *)&safe};
+    struct Box target = {(char *)&safe};
+    struct Box *selected = &decoy;
+    poison((selected = &target, selected++));
+    return target.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_plain_comma_call_value_effects() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void poison(struct Box *box) {
+    box->pointer = (char *)&dangerous;
+}
+void *hidden_storage(void) {
+    struct Box decoy = {(char *)&safe};
+    struct Box target = {(char *)&safe};
+    struct Box *selected = &decoy;
+    poison((selected = &target, selected));
+    return target.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_comma_postfix_values_in_pointer_declarations() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box decoy = {(char *)&safe};
+    struct Box target = {(char *)&safe};
+    struct Box *selected = &decoy;
+    struct Box *result = (selected = &target, selected++);
+    result->pointer = (char *)&dangerous;
+    return target.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_comma_postfix_values_in_pointer_assignments() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box decoy = {(char *)&safe};
+    struct Box target = {(char *)&safe};
+    struct Box *selected = &decoy;
+    struct Box *result = &decoy;
+    result = (selected = &target, selected++);
+    result->pointer = (char *)&dangerous;
+    return target.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_comma_postfix_values_in_pointer_returns() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Box *select(struct Box *decoy, struct Box *target) {
+    struct Box *selected = decoy;
+    return (selected = target, selected++);
+}
+void *hidden_storage(void) {
+    struct Box decoy = {(char *)&safe};
+    struct Box target = {(char *)&safe};
+    struct Box *result = select(&decoy, &target);
+    result->pointer = (char *)&dangerous;
+    return target.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_resolves_assignment_wrapped_comma_pointer_targets() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+void *hidden_storage(void) {
+    struct Box decoy = {(char *)&safe};
+    struct Box target = {(char *)&safe};
+    struct Box *selected = &decoy;
+    struct Box *result = &decoy;
+    (result = (selected = &target, selected++))->pointer = (char *)&dangerous;
+    return target.pointer;
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn non_evaluating_memory_preserves_plain_comma_values_across_pointer_consumers() {
+    for statement in [
+        "struct Box *result = (selected = &target, selected);",
+        "struct Box *result = &decoy; result = (selected = &target, selected);",
+        "struct Box *result = &decoy; (result = (selected = &target, selected))->pointer = (char *)&dangerous;",
+    ] {
+        let direct_write = statement.contains(")->pointer");
+        let program = format!(
+            r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box {{ char *pointer; }};
+void *hidden_storage(void) {{
+    struct Box decoy = {{(char *)&safe}};
+    struct Box target = {{(char *)&safe}};
+    struct Box *selected = &decoy;
+    {statement}
+    {write}
+    return target.pointer;
+}}
+int main(void) {{
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}}
+"#,
+            write = if direct_write {
+                ""
+            } else {
+                "result->pointer = (char *)&dangerous;"
+            }
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+            "{statement}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_memory_rekeys_nested_aggregate_targets_after_storage_mutation() {
+    let program = r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box { char *pointer; };
+struct Holder { struct Box *selected; };
+void *extract(struct Holder holder) {
+    return holder.selected->pointer;
+}
+void *hidden_storage(void) {
+    struct Box box = {(char *)&safe};
+    struct Holder holder = {&box};
+    extract(holder);
+    box.pointer = (char *)&dangerous;
+    return extract(holder);
+}
+int main(void) {
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+    );
+}
+
+#[test]
+fn scalar_compound_literal_addresses_preserve_const_qualification() {
+    let program = r#"
+int main(void) {
+    return _Generic(&(const double){1.0}, const double *: 0, double *: 1);
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn rejects_const_discard_from_scalar_compound_literal_addresses() {
+    let program = r#"
+int main(void) {
+    double *pointer = &(const double){1.0};
+    return pointer != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn rejects_writes_through_const_scalar_compound_literal_addresses() {
+    let program = r#"
+int main(void) {
+    const double *pointer = &(const double){1.0};
+    *pointer = 2.0;
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+}
+
+#[test]
+fn scalar_compound_literal_addresses_retain_identity_on_repeated_evaluation() {
+    let program = r#"
+int main(void) {
+    double *first = 0;
+    double *current = 0;
+    int iterations = 0;
+    while ((current = &(double){1.0}, iterations++ < 2)) {
+        if (!first) {
+            first = current;
+        } else if (current != first) {
+            return 1;
+        }
+    }
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn non_evaluating_memory_aggregate_field_assignments_preserve_postfix_rhs_values() {
+    let cases = [
+        (
+            "struct Holder holder = {boxes + 1};\n    holder.selected = cursor++;",
+            "holder.selected->pointer",
+        ),
+        (
+            "struct Holder holders[1] = {{boxes + 1}};\n    holders[0].selected = cursor++;",
+            "holders[0].selected->pointer",
+        ),
+        (
+            "struct Holder holder = {boxes + 1};\n    struct Holder *slot = &holder;\n    slot->selected = cursor++;",
+            "slot->selected->pointer",
+        ),
+        (
+            "struct Rack { struct Holder holders[1]; };\n    struct Rack rack = {{{boxes + 1}}};\n    rack.holders[0].selected = cursor++;",
+            "rack.holders[0].selected->pointer",
+        ),
+    ];
+
+    for (assignment, result) in cases {
+        let program = format!(
+            r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+double dangerous;
+struct Box {{ char *pointer; }};
+struct Holder {{ struct Box *selected; }};
+void *hidden_storage(void) {{
+    struct Box boxes[2] = {{{{(char *)&dangerous}}, {{(char *)&safe}}}};
+    struct Box *cursor = boxes;
+    {assignment}
+    return {result};
+}}
+int main(void) {{
+    return sizeof(memset(hidden_storage(), 0, sizeof(dangerous)));
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+            "{assignment}"
+        );
+    }
 }

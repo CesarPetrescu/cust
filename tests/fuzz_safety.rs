@@ -12434,7 +12434,9 @@ fn generated_scalar_only_operand_shape_mismatches_do_not_panic() {
 
     for context in 0..5 {
         for (case_index, (label, expression, scalar_error)) in shapes.iter().enumerate() {
-            let expected = if context == 2 && *label == "pointer" {
+            let expected = if *label == "pointer" && matches!(context, 0 | 1) {
+                "array subscript requires an integer value"
+            } else if *label == "pointer" && context == 2 {
                 "cannot add two pointers"
             } else {
                 scalar_error

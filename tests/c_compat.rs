@@ -185,6 +185,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/bounded_double_runtime_values.c",
     "tests/fixtures/compat/valid/double_function_boundaries.c",
     "tests/fixtures/compat/valid/direct_double_arrays.c",
+    "tests/fixtures/compat/valid/direct_double_pointers.c",
     "tests/fixtures/compat/valid/direct_double_aggregate_fields.c",
     "tests/fixtures/compat/valid/direct_double_aggregate_array_fields.c",
     "tests/fixtures/compat/valid/direct_double_pointer_field_aggregate_elements.c",

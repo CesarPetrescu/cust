@@ -643,21 +643,29 @@ enum Expr {
     ScalarLiteral {
         ty: CType,
         init: Box<Expr>,
+        literal_id: usize,
+        read_only: bool,
     },
     ScalarLiteralSet {
         ty: CType,
         init: Box<Expr>,
+        literal_id: usize,
+        read_only: bool,
         value: Box<Expr>,
     },
     ScalarLiteralCompoundSet {
         ty: CType,
         init: Box<Expr>,
+        literal_id: usize,
+        read_only: bool,
         op: CompoundOp,
         value: Box<Expr>,
     },
     AddressOfScalarLiteral {
         ty: CType,
         init: Box<Expr>,
+        literal_id: usize,
+        read_only: bool,
     },
     AggregateLiteral {
         type_name: String,
@@ -7008,6 +7016,7 @@ struct Parser {
     qualified_pointer_pointee_type_alias_scopes: Vec<HashSet<String>>,
     next_static_local_id: usize,
     next_aggregate_type_id: usize,
+    next_scalar_compound_literal_id: usize,
     last_decl_had_initializer: bool,
     pending_inline_enum_constants: Option<Vec<EnumConstant>>,
     parsing_function_body: bool,
@@ -7028,6 +7037,7 @@ impl Parser {
             qualified_pointer_pointee_type_alias_scopes: vec![HashSet::new()],
             next_static_local_id: 0,
             next_aggregate_type_id: 0,
+            next_scalar_compound_literal_id: 0,
             last_decl_had_initializer: false,
             pending_inline_enum_constants: None,
             parsing_function_body: false,
@@ -9214,12 +9224,6 @@ impl Parser {
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("function return type")?;
         if self.matches(&Token::Star) {
-            if matches!(decl_type, DeclType::Scalar(CType::Double)) {
-                return Err(Self::error_at(
-                    "double pointers are not supported".to_string(),
-                    self.previous(),
-                ));
-            }
             if matches!(decl_type, DeclType::Pointer { .. }) || self.check(&Token::Star) {
                 return Err(Self::error_at(
                     "pointer-to-pointer return types are not supported".to_string(),
@@ -9454,12 +9458,6 @@ impl Parser {
                 explicit_row_pointer_param = Some((name, pointer_is_const));
             }
             let has_explicit_star = self.matches(&Token::Star);
-            if has_explicit_star && matches!(decl_type, DeclType::Scalar(CType::Double)) {
-                return Err(Self::error_at(
-                    "double pointers are not supported".to_string(),
-                    self.previous(),
-                ));
-            }
             let post_star_qualifier = if has_explicit_star {
                 self.leading_type_qualifier_token()
             } else {
@@ -10458,12 +10456,6 @@ impl Parser {
             ));
         }
         let has_explicit_star = self.matches(&Token::Star);
-        if has_explicit_star && matches!(decl_type, DeclType::Scalar(CType::Double)) {
-            return Err(Self::error_at(
-                "double pointers are not supported".to_string(),
-                self.previous(),
-            ));
-        }
         let post_star_qualifier = if has_explicit_star {
             self.leading_type_qualifier_token()
         } else {
@@ -11157,12 +11149,6 @@ impl Parser {
             ));
         }
         let has_explicit_star = self.matches(&Token::Star);
-        if has_explicit_star && matches!(base_type, DeclType::Scalar(CType::Double)) {
-            return Err(Self::error_at(
-                "double pointers are not supported".to_string(),
-                self.previous(),
-            ));
-        }
         let post_star_qualifier = if has_explicit_star {
             self.leading_type_qualifier_token()
         } else {
@@ -12638,7 +12624,6 @@ impl Parser {
                 self.parse_decl_type_with_embedded_qualifiers(&format!("{keyword} field type"))?
             };
             let leading_const = leading_const || embedded_const;
-            let is_double_field_base = matches!(decl_type, DeclType::Scalar(CType::Double));
             loop {
                 let has_explicit_star = self.matches(&Token::Star);
                 let post_star_const = has_explicit_star && self.consume_type_qualifiers();
@@ -12649,12 +12634,6 @@ impl Parser {
                     ));
                 }
                 let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer { .. });
-                if is_double_field_base && is_pointer {
-                    return Err(Self::error_at(
-                        "double pointers are not supported".to_string(),
-                        self.previous(),
-                    ));
-                }
                 let (is_const, points_to_const) = if is_pointer {
                     if has_explicit_star {
                         (post_star_const, leading_const)
@@ -13816,7 +13795,7 @@ impl Parser {
                     _ => Ok(INT_SIZE),
                 }
             }
-            Expr::ScalarLiteral { ty, init } => {
+            Expr::ScalarLiteral { ty, init, .. } => {
                 self.sizeof_integer_constant_expr(init, local_constants)?;
                 Ok(ty.size())
             }
@@ -13832,6 +13811,7 @@ impl Parser {
                 init,
                 op,
                 value,
+                ..
             } => {
                 self.sizeof_integer_constant_expr(init, local_constants)?;
                 self.sizeof_integer_constant_expr(value, local_constants)?;
@@ -15505,9 +15485,16 @@ impl Parser {
                     op,
                     value: Box::new(value),
                 }),
-                Expr::ScalarLiteral { ty, init } => Ok(Expr::ScalarLiteralCompoundSet {
+                Expr::ScalarLiteral {
                     ty,
                     init,
+                    literal_id,
+                    read_only,
+                } => Ok(Expr::ScalarLiteralCompoundSet {
+                    ty,
+                    init,
+                    literal_id,
+                    read_only,
                     op,
                     value: Box::new(value),
                 }),
@@ -15625,9 +15612,16 @@ impl Parser {
                     fields,
                     value: Box::new(value),
                 }),
-                Expr::ScalarLiteral { ty, init } => Ok(Expr::ScalarLiteralSet {
+                Expr::ScalarLiteral {
                     ty,
                     init,
+                    literal_id,
+                    read_only,
+                } => Ok(Expr::ScalarLiteralSet {
+                    ty,
+                    init,
+                    literal_id,
+                    read_only,
                     value: Box::new(value),
                 }),
                 Expr::AggregateFieldGet { aggregate, fields } => Ok(Expr::AggregateFieldSet {
@@ -16260,8 +16254,9 @@ impl Parser {
             Token::Ident(name) => self.type_alias_is_const(name),
             _ => false,
         };
-        let compound_literal_read_only = leading_const || alias_const;
-        let decl_type = self.parse_decl_type("cast type")?;
+        let (embedded_const, decl_type) =
+            self.parse_decl_type_with_embedded_qualifiers("cast type")?;
+        let compound_literal_read_only = leading_const || alias_const || embedded_const;
         self.reject_function_type_suffix("function casts")?;
         if let Some(token) = self.parenthesized_pointer_star_token_at_current() {
             return Err(Self::error_at(
@@ -16270,12 +16265,6 @@ impl Parser {
             ));
         }
         if self.matches(&Token::Star) {
-            if matches!(decl_type, DeclType::Scalar(CType::Double)) {
-                return Err(Self::error_at(
-                    "double pointers are not supported".to_string(),
-                    self.previous(),
-                ));
-            }
             let pointee = match decl_type {
                 DeclType::Void => PointeeType::Void,
                 DeclType::Scalar(ty) => PointeeType::Scalar(ty),
@@ -16311,7 +16300,7 @@ impl Parser {
             self.reject_missing_cast_operand()?;
             return Ok(Expr::PointerCast {
                 pointee,
-                points_to_const: leading_const,
+                points_to_const: leading_const || alias_const || embedded_const,
                 expr: Box::new(self.parse_unary()?),
             });
         }
@@ -16439,9 +16428,13 @@ impl Parser {
         }
         self.expect_closing_paren_after("cast type")?;
         if self.check(&Token::LBrace) {
+            let literal_id = self.next_scalar_compound_literal_id;
+            self.next_scalar_compound_literal_id += 1;
             return Ok(Expr::ScalarLiteral {
                 ty,
                 init: Box::new(self.parse_scalar_initializer_expr("scalar compound literal")?),
+                literal_id,
+                read_only: compound_literal_read_only,
             });
         }
         Ok(Expr::Cast {
@@ -16597,7 +16590,17 @@ impl Parser {
             Expr::StructPtrGet { pointer, fields } => {
                 Ok(Expr::AddressOfStructPtrField { pointer, fields })
             }
-            Expr::ScalarLiteral { ty, init } => Ok(Expr::AddressOfScalarLiteral { ty, init }),
+            Expr::ScalarLiteral {
+                ty,
+                init,
+                literal_id,
+                read_only,
+            } => Ok(Expr::AddressOfScalarLiteral {
+                ty,
+                init,
+                literal_id,
+                read_only,
+            }),
             Expr::AggregateLiteral {
                 type_name,
                 init,
@@ -16902,12 +16905,6 @@ impl Parser {
             DeclType::Void => unreachable!("void sizeof types return above"),
             DeclType::Scalar(ty) => {
                 if self.matches(&Token::Star) {
-                    if ty == CType::Double {
-                        return Err(Self::error_at(
-                            "double pointers are not supported".to_string(),
-                            self.previous(),
-                        ));
-                    }
                     self.consume_type_qualifiers();
                     if self.check(&Token::Star) {
                         return Err(Self::error_at(
@@ -17489,12 +17486,6 @@ impl Parser {
         }
         self.reject_function_type_suffix("function generic associations")?;
         if self.matches(&Token::Star) {
-            if matches!(decl_type, DeclType::Scalar(CType::Double)) {
-                return Err(Self::error_at(
-                    "double pointers are not supported".to_string(),
-                    self.previous(),
-                ));
-            }
             let pointee = match decl_type {
                 DeclType::Void => PointeeType::Void,
                 DeclType::Scalar(ty) => PointeeType::Scalar(ty),
@@ -18122,7 +18113,12 @@ impl Parser {
 // Interpreted calls recurse through Rust; keep deterministic headroom on the
 // test harness's smaller worker-thread stack as interpreter frames evolve.
 const MAX_CALL_DEPTH: usize = 24;
+// Non-evaluating call analysis carries substantially larger provenance frames.
+const MAX_DOUBLE_STORAGE_CALL_DEPTH: usize = 16;
 const MAX_GENERIC_SELECTION_VALIDATION_DEPTH: usize = 32;
+const MAX_SIZEOF_EXPRESSION_DEPTH: usize = 128;
+const MAX_NON_EVALUATING_CALLEE_EXPRESSION_DEPTH: usize = 128;
+const MAX_DOUBLE_STORAGE_EXPRESSION_DEPTH: usize = 128;
 const MAX_INTEGER_STRING_BYTES: usize = 4096;
 const CUST_RAND_MAX: u32 = 32_767;
 const CUST_RAND_DEFAULT_SEED: u32 = 1;
@@ -18148,8 +18144,134 @@ struct Interpreter {
     generic_selection_validation_depth: Cell<usize>,
     generic_selection_evaluation_depth: Cell<usize>,
     nested_intrinsic_validation_depth: Cell<usize>,
+    non_evaluating_callee_expression_depth: Cell<usize>,
+    double_storage_expression_depth: Cell<usize>,
     eval_expression_depth: Cell<usize>,
+    double_storage_analysis_call_depth_limit: Cell<usize>,
     double_expression_type_cache: RefCell<HashMap<usize, bool>>,
+    double_storage_globals: HashMap<String, DoubleStorageFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DoubleStorageFact {
+    has_double_storage: bool,
+    declared_type: Option<DeclType>,
+    object_is_const: bool,
+    double_storage_fields: HashSet<Vec<String>>,
+    double_storage_element_fields: HashMap<usize, HashSet<Vec<String>>>,
+    aggregate_pointer_targets: HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+    aggregate_target: Option<DoubleStorageAggregateTarget>,
+    aggregate_fields_written: bool,
+    static_local_id: Option<usize>,
+}
+
+type DoubleStorageElementFields = HashMap<usize, HashSet<Vec<String>>>;
+type DoubleStorageParameterFields = HashMap<
+    String,
+    (
+        HashSet<Vec<String>>,
+        DoubleStorageElementFields,
+        HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+    ),
+>;
+type DoubleStorageAggregateTargetChanges = Vec<(
+    DoubleStorageAggregateTarget,
+    HashSet<Vec<String>>,
+    DoubleStorageElementFields,
+    HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+)>;
+type DoubleStorageCallParameterScope = (
+    HashMap<String, DoubleStorageFact>,
+    bool,
+    Vec<(DoubleStorageAggregateTarget, String)>,
+    Vec<(DoubleStorageAggregateTarget, DoubleStorageAggregateTarget)>,
+    Vec<(String, Vec<DoubleStorageAggregateTarget>)>,
+);
+
+#[derive(Debug, Clone, Default)]
+struct DoubleStorageAnalysis {
+    returns_double_storage: bool,
+    returned_fields: HashSet<Vec<String>>,
+    returned_targets: Vec<DoubleStorageAggregateTarget>,
+    returned_pointer_targets: HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+    changed_parameter_fields: DoubleStorageParameterFields,
+    widened_parameter_targets: HashSet<String>,
+    changed_aggregate_target_facts: DoubleStorageAggregateTargetChanges,
+    changed_global_facts: Option<HashMap<String, DoubleStorageFact>>,
+    always_returns: bool,
+    always_stops_sequence: bool,
+    break_aliases: Vec<Vec<HashMap<String, DoubleStorageFact>>>,
+    continue_aliases: Vec<Vec<HashMap<String, DoubleStorageFact>>>,
+    return_aliases: Vec<Vec<HashMap<String, DoubleStorageFact>>>,
+}
+
+impl DoubleStorageAnalysis {
+    fn merge(&mut self, mut other: Self) {
+        self.returns_double_storage |= other.returns_double_storage;
+        self.returned_fields.extend(other.returned_fields);
+        for target in other.returned_targets {
+            if !self.returned_targets.contains(&target) {
+                self.returned_targets.push(target);
+            }
+        }
+        Interpreter::merge_aggregate_pointer_targets(
+            &mut self.returned_pointer_targets,
+            &other.returned_pointer_targets,
+        );
+        for (name, (fields, element_fields, pointer_targets)) in other.changed_parameter_fields {
+            let current = self.changed_parameter_fields.entry(name).or_default();
+            current.0.extend(fields);
+            Interpreter::merge_double_storage_element_fields(&mut current.1, &element_fields);
+            Interpreter::merge_aggregate_pointer_targets(&mut current.2, &pointer_targets);
+        }
+        self.widened_parameter_targets
+            .extend(other.widened_parameter_targets);
+        for (target, fields, element_fields, pointer_targets) in
+            other.changed_aggregate_target_facts
+        {
+            if let Some((_, current_fields, current_element_fields, current_pointer_targets)) = self
+                .changed_aggregate_target_facts
+                .iter_mut()
+                .find(|(current_target, _, _, _)| current_target == &target)
+            {
+                current_fields.extend(fields);
+                Interpreter::merge_double_storage_element_fields(
+                    current_element_fields,
+                    &element_fields,
+                );
+                Interpreter::merge_aggregate_pointer_targets(
+                    current_pointer_targets,
+                    &pointer_targets,
+                );
+            } else {
+                self.changed_aggregate_target_facts.push((
+                    target,
+                    fields,
+                    element_fields,
+                    pointer_targets,
+                ));
+            }
+        }
+        self.always_returns |= other.always_returns;
+        self.always_stops_sequence |= other.always_stops_sequence;
+        self.break_aliases.append(&mut other.break_aliases);
+        self.continue_aliases.append(&mut other.continue_aliases);
+        self.return_aliases.append(&mut other.return_aliases);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DoubleStorageAggregateTarget {
+    Direct {
+        name: String,
+        scope_index: usize,
+    },
+    Element {
+        name: String,
+        scope_index: usize,
+        index: Option<usize>,
+    },
+    Possible(Vec<DoubleStorageAggregateTarget>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18537,6 +18659,7 @@ struct ArrayValue {
     elements: Vec<i64>,
     elem_type: CType,
     read_only: bool,
+    has_static_storage: bool,
     dimensions: Option<(usize, usize)>,
 }
 
@@ -18546,6 +18669,7 @@ impl ArrayValue {
             elements: vec![0; len],
             elem_type,
             read_only: false,
+            has_static_storage: false,
             dimensions: None,
         }
     }
@@ -18555,6 +18679,7 @@ impl ArrayValue {
             elements: vec![0; rows * columns],
             elem_type,
             read_only: false,
+            has_static_storage: false,
             dimensions: Some((rows, columns)),
         }
     }
@@ -18564,6 +18689,7 @@ impl ArrayValue {
             elements,
             elem_type: CType::Char,
             read_only: true,
+            has_static_storage: true,
             dimensions: None,
         }
     }
@@ -18592,8 +18718,12 @@ impl Interpreter {
             generic_selection_validation_depth: Cell::new(0),
             generic_selection_evaluation_depth: Cell::new(0),
             nested_intrinsic_validation_depth: Cell::new(0),
+            non_evaluating_callee_expression_depth: Cell::new(0),
+            double_storage_expression_depth: Cell::new(0),
             eval_expression_depth: Cell::new(0),
+            double_storage_analysis_call_depth_limit: Cell::new(MAX_DOUBLE_STORAGE_CALL_DEPTH),
             double_expression_type_cache: RefCell::new(HashMap::new()),
+            double_storage_globals: HashMap::new(),
         }
     }
 
@@ -18610,7 +18740,9 @@ impl Interpreter {
             return Err(CustError::new("double pointers are not supported"));
         }
         if ty == CType::Bool && self.expr_is_pointer_value(expr) {
-            return Ok(i64::from(Self::pointer_truthy(&self.eval_pointer(expr)?)));
+            let pointer = self.eval_pointer(expr)?;
+            self.ensure_pointer_value_live(&pointer)?;
+            return Ok(i64::from(Self::pointer_truthy(&pointer)));
         }
         if ty == CType::Double {
             return Ok(self.eval_numeric_as_f64(expr)?.to_bits() as i64);
@@ -18730,7 +18862,13 @@ impl Interpreter {
                             .aggregate_type_field_metadata(type_name, fields)
                             .is_ok_and(|metadata| {
                                 metadata.is_some_and(|(field_type, _, _)| {
-                                    matches!(field_type, StructFieldType::Array(CType::Double, _))
+                                    matches!(
+                                        field_type,
+                                        StructFieldType::Array(CType::Double, _)
+                                            | StructFieldType::Pointer(PointeeType::Scalar(
+                                                CType::Double,
+                                            ))
+                                    )
                                 })
                             }),
                         _ => false,
@@ -18757,7 +18895,11 @@ impl Interpreter {
                 .struct_element_expr_field_metadata(name, index, fields)
                 .is_ok_and(|metadata| {
                     metadata.is_some_and(|(field_type, _, _)| {
-                        matches!(field_type, StructFieldType::Array(CType::Double, _))
+                        matches!(
+                            field_type,
+                            StructFieldType::Array(CType::Double, _)
+                                | StructFieldType::Pointer(PointeeType::Scalar(CType::Double))
+                        )
                     })
                 }),
             Expr::StructPtrArrayGet {
@@ -18766,7 +18908,11 @@ impl Interpreter {
                 .struct_pointer_expr_field_metadata(pointer, fields)
                 .is_ok_and(|metadata| {
                     metadata.is_some_and(|(field_type, _, _)| {
-                        matches!(field_type, StructFieldType::Array(CType::Double, _))
+                        matches!(
+                            field_type,
+                            StructFieldType::Array(CType::Double, _)
+                                | StructFieldType::Pointer(PointeeType::Scalar(CType::Double))
+                        )
                     })
                 }),
             Expr::Deref(pointer)
@@ -18774,14 +18920,6 @@ impl Interpreter {
             | Expr::DerefCompoundSet { pointer, .. } => self
                 .pointer_expr_pointee_type(pointer)
                 .is_ok_and(|pointee| matches!(pointee, Some(PointeeType::Scalar(CType::Double)))),
-            Expr::StructFieldArrayElementGet { .. }
-                if matches!(
-                    self.pointer_expr_pointee_type(expr),
-                    Ok(Some(PointeeType::Scalar(CType::Double)))
-                ) =>
-            {
-                true
-            }
             Expr::StructFieldArrayElementGet {
                 name,
                 array_fields,
@@ -18899,25 +19037,15 @@ impl Interpreter {
     fn expr_is_unsupported_double_pointer(&self, expr: &Expr) -> bool {
         match expr {
             Expr::AddressOf(name) => match self.find_variable(name) {
-                Some(Value::Scalar {
-                    ty: CType::Double, ..
+                Some(Value::Pointer {
+                    ty: PointeeType::Scalar(CType::Double),
+                    ..
                 }) => true,
                 Some(Value::Array(array)) => array.borrow().elem_type == CType::Double,
                 _ => false,
             },
-            Expr::AddressOfArray { name, index } => {
-                matches!(
-                    self.find_variable(name),
-                    Some(Value::Array(array)) if array.borrow().elem_type == CType::Double
-                ) || self.expr_is_unsupported_double_pointer(index)
-            }
-            Expr::Var(name) => matches!(
-                self.find_variable(name),
-                Some(Value::Array(array)) if array.borrow().elem_type == CType::Double
-            ),
-            Expr::AddressOfScalarLiteral {
-                ty: CType::Double, ..
-            } => true,
+            Expr::Var(_) | Expr::AddressOfScalarLiteral { .. } => false,
+            Expr::AddressOfArray { index, .. } => self.expr_is_unsupported_double_pointer(index),
             Expr::AddressOfStructField { name, fields } => match self.find_variable(name) {
                 Some(Value::Struct { type_name, .. })
                 | Some(Value::StructArray { type_name, .. }) => self
@@ -18928,6 +19056,7 @@ impl Interpreter {
                                 field_type,
                                 StructFieldType::Scalar(CType::Double)
                                     | StructFieldType::Array(CType::Double, _)
+                                    | StructFieldType::Pointer(PointeeType::Scalar(CType::Double,))
                             )
                         })
                     }),
@@ -18976,7 +19105,13 @@ impl Interpreter {
                         .struct_element_expr_field_metadata(name, index, fields)
                         .is_ok_and(|metadata| {
                             metadata.is_some_and(|(field_type, _, _)| {
-                                matches!(field_type, StructFieldType::Array(CType::Double, _))
+                                matches!(
+                                    field_type,
+                                    StructFieldType::Array(CType::Double, _)
+                                        | StructFieldType::Pointer(PointeeType::Scalar(
+                                            CType::Double,
+                                        ))
+                                )
                             })
                         })
             }
@@ -19005,6 +19140,7 @@ impl Interpreter {
                             field_type,
                             StructFieldType::Scalar(CType::Double)
                                 | StructFieldType::Array(CType::Double, _)
+                                | StructFieldType::Pointer(PointeeType::Scalar(CType::Double))
                         )
                     })
                 }),
@@ -19028,6 +19164,7 @@ impl Interpreter {
                             field_type,
                             StructFieldType::Scalar(CType::Double)
                                 | StructFieldType::Array(CType::Double, _)
+                                | StructFieldType::Pointer(PointeeType::Scalar(CType::Double))
                         )
                     })
                 }),
@@ -19063,8 +19200,13 @@ impl Interpreter {
                     && self.expr_is_unsupported_double_pointer(pointer)
             }
             Expr::PointerCast { pointee, expr, .. } => {
-                matches!(pointee, PointeeType::Scalar(CType::Double))
-                    || self.expr_is_unsupported_double_pointer(expr)
+                self.expr_is_unsupported_double_pointer(expr)
+                    || (!matches!(
+                        pointee,
+                        PointeeType::Scalar(CType::Double) | PointeeType::Void
+                    ) && self
+                        .pointer_expr_pointee_type(expr)
+                        .is_ok_and(|ty| ty == Some(PointeeType::Scalar(CType::Double))))
             }
             Expr::Binary(left, BinaryOp::Add | BinaryOp::Subscript | BinaryOp::Sub, right) => {
                 self.expr_is_unsupported_double_pointer(left)
@@ -19117,6 +19259,20 @@ impl Interpreter {
         self.explicit_void_parameter_prototypes =
             program.explicit_void_parameter_prototypes.clone();
         self.struct_types = program.struct_types.clone();
+        let mut global_aliases = vec![HashMap::new()];
+        self.double_storage_analysis_call_depth_limit
+            .set(MAX_CALL_DEPTH);
+        let global_analysis = self.statements_may_return_double_storage_with_aliases(
+            &program.globals,
+            &mut HashSet::new(),
+            &mut HashMap::new(),
+            &mut global_aliases,
+            true,
+        );
+        self.double_storage_analysis_call_depth_limit
+            .set(MAX_DOUBLE_STORAGE_CALL_DEPTH);
+        global_analysis?;
+        self.double_storage_globals = global_aliases.pop().unwrap_or_default();
         self.push_scope();
         let result = (|| {
             for global in &program.globals {
@@ -23065,16 +23221,4337 @@ impl Interpreter {
         Ok(POINTER_SIZE)
     }
 
-    fn validate_non_evaluating_memory_double_storage(
+    fn double_storage_parameter_scope(function: &Function) -> HashMap<String, DoubleStorageFact> {
+        function
+            .params
+            .iter()
+            .map(|param| {
+                let declared_type = match (&param.ty, param.kind) {
+                    (ParamType::Scalar(ty), ParamKind::Scalar) => Some(DeclType::Scalar(*ty)),
+                    (ParamType::Struct(type_name), ParamKind::Struct) => {
+                        Some(DeclType::Struct(type_name.clone()))
+                    }
+                    (ParamType::Void, ParamKind::Pointer) => Some(DeclType::Pointer {
+                        pointee: PointeeType::Void,
+                        points_to_const: param.points_to_const,
+                    }),
+                    (ParamType::Scalar(ty), ParamKind::Pointer) => Some(DeclType::Pointer {
+                        pointee: PointeeType::Scalar(*ty),
+                        points_to_const: param.points_to_const,
+                    }),
+                    (ParamType::Struct(type_name), ParamKind::Pointer) => Some(DeclType::Pointer {
+                        pointee: PointeeType::Struct(type_name.clone()),
+                        points_to_const: param.points_to_const,
+                    }),
+                    (ParamType::Array2D(elem_type, columns), ParamKind::Array2D) => {
+                        Some(DeclType::Array2DPointer {
+                            elem_type: *elem_type,
+                            columns: *columns,
+                            points_to_const: param.points_to_const,
+                        })
+                    }
+                    _ => None,
+                };
+                (
+                    param.name.clone(),
+                    DoubleStorageFact {
+                        has_double_storage: false,
+                        declared_type,
+                        object_is_const: param.is_const,
+                        double_storage_fields: HashSet::new(),
+                        double_storage_element_fields: HashMap::new(),
+                        aggregate_pointer_targets: HashMap::new(),
+                        aggregate_target: None,
+                        aggregate_fields_written: false,
+                        static_local_id: None,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn parameterized_double_storage_cache_key(
+        name: &str,
+        function: &Function,
+        parameter_scope: &HashMap<String, DoubleStorageFact>,
+    ) -> String {
+        let signature = function
+            .params
+            .iter()
+            .map(|param| {
+                let fact = parameter_scope
+                    .get(&param.name)
+                    .expect("function parameters have double storage facts");
+                let mut fields = fact
+                    .double_storage_fields
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                fields.sort();
+                let mut element_fields = fact
+                    .double_storage_element_fields
+                    .iter()
+                    .map(|(index, fields)| {
+                        let mut fields = fields.iter().cloned().collect::<Vec<_>>();
+                        fields.sort();
+                        (*index, fields)
+                    })
+                    .collect::<Vec<_>>();
+                element_fields.sort();
+                let mut aggregate_pointer_targets = fact
+                    .aggregate_pointer_targets
+                    .iter()
+                    .map(|(path, target)| (path.clone(), target.clone()))
+                    .collect::<Vec<_>>();
+                aggregate_pointer_targets.sort_by(|left, right| left.0.cmp(&right.0));
+                (
+                    fact.has_double_storage,
+                    fields,
+                    element_fields,
+                    aggregate_pointer_targets,
+                    fact.aggregate_target.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let parameter_names = function
+            .params
+            .iter()
+            .map(|param| param.name.as_str())
+            .collect::<HashSet<_>>();
+        let mut nested_target_signature = parameter_scope
+            .iter()
+            .filter(|(nested_name, _)| !parameter_names.contains(nested_name.as_str()))
+            .map(|(nested_name, fact)| {
+                let mut fields = fact
+                    .double_storage_fields
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                fields.sort();
+                let mut element_fields = fact
+                    .double_storage_element_fields
+                    .iter()
+                    .map(|(index, fields)| {
+                        let mut fields = fields.iter().cloned().collect::<Vec<_>>();
+                        fields.sort();
+                        (*index, fields)
+                    })
+                    .collect::<Vec<_>>();
+                element_fields.sort();
+                let mut aggregate_pointer_targets = fact
+                    .aggregate_pointer_targets
+                    .iter()
+                    .map(|(path, target)| (path.clone(), target.clone()))
+                    .collect::<Vec<_>>();
+                aggregate_pointer_targets.sort_by(|left, right| left.0.cmp(&right.0));
+                (
+                    nested_name.clone(),
+                    fact.has_double_storage,
+                    fields,
+                    element_fields,
+                    aggregate_pointer_targets,
+                    fact.aggregate_target.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        nested_target_signature.sort_by(|left, right| left.0.cmp(&right.0));
+        format!("{name}\0{signature:?}\0{nested_target_signature:?}")
+    }
+
+    fn double_storage_global_cache_signature(
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> String {
+        let mut signature = aliases
+            .first()
+            .into_iter()
+            .flat_map(|scope| scope.iter())
+            .map(|(name, fact)| {
+                let mut fields = fact
+                    .double_storage_fields
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                fields.sort();
+                let mut element_fields = fact
+                    .double_storage_element_fields
+                    .iter()
+                    .map(|(index, fields)| {
+                        let mut fields = fields.iter().cloned().collect::<Vec<_>>();
+                        fields.sort();
+                        (*index, fields)
+                    })
+                    .collect::<Vec<_>>();
+                element_fields.sort();
+                let mut aggregate_pointer_targets = fact
+                    .aggregate_pointer_targets
+                    .iter()
+                    .map(|(path, target)| (path.clone(), target.clone()))
+                    .collect::<Vec<_>>();
+                aggregate_pointer_targets.sort_by(|left, right| left.0.cmp(&right.0));
+                (
+                    name.clone(),
+                    fact.has_double_storage,
+                    fields,
+                    element_fields,
+                    aggregate_pointer_targets,
+                    fact.aggregate_target.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        signature.sort_by(|left, right| left.0.cmp(&right.0));
+        format!("{signature:?}")
+    }
+
+    fn scoped_double_storage_declared_type<'a>(
+        aliases: &'a [HashMap<String, DoubleStorageFact>],
+        name: &str,
+    ) -> Option<&'a DeclType> {
+        aliases
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name))
+            .and_then(|fact| fact.declared_type.as_ref())
+    }
+
+    fn non_evaluating_indexed_aggregate_field_type(field_type: DeclType) -> CustResult<DeclType> {
+        let pointee = match field_type {
+            DeclType::Pointer { pointee, .. } | DeclType::Array(pointee, _) => pointee,
+            DeclType::Array2DPointer {
+                elem_type,
+                points_to_const,
+                ..
+            } => {
+                return Ok(DeclType::Pointer {
+                    pointee: PointeeType::Scalar(elem_type),
+                    points_to_const,
+                });
+            }
+            DeclType::Array2D(elem_type, _, _) => {
+                return Ok(DeclType::Pointer {
+                    pointee: PointeeType::Scalar(elem_type),
+                    points_to_const: false,
+                });
+            }
+            _ => {
+                return Err(CustError::new(
+                    "indexed aggregate field does not have scalar elements",
+                ));
+            }
+        };
+        match pointee {
+            PointeeType::Scalar(ty) => Ok(DeclType::Scalar(ty)),
+            PointeeType::Struct(type_name) => Ok(DeclType::Struct(type_name)),
+            PointeeType::Void => Err(CustError::new(
+                "indexed aggregate field does not have scalar elements",
+            )),
+        }
+    }
+
+    fn non_evaluating_aggregate_field_type(
+        &self,
+        type_name: &str,
+        fields: &[String],
+    ) -> CustResult<DeclType> {
+        if let Some((StructFieldType::Array2D(elem_type, _, columns), is_const, _)) =
+            self.aggregate_type_field_metadata(type_name, fields)?
+        {
+            return Ok(DeclType::Array2DPointer {
+                elem_type,
+                columns,
+                points_to_const: is_const,
+            });
+        }
+        self.generic_aggregate_field_type(type_name, fields)
+    }
+
+    fn non_evaluating_field_metadata_type(
+        field_type: StructFieldType,
+        is_const: bool,
+        points_to_const: bool,
+    ) -> DeclType {
+        match field_type {
+            StructFieldType::Scalar(ty) => DeclType::Scalar(ty),
+            StructFieldType::Struct(type_name) => DeclType::Struct(type_name),
+            StructFieldType::Pointer(pointee) => DeclType::Pointer {
+                pointee,
+                points_to_const,
+            },
+            StructFieldType::Array(elem_type, _) => DeclType::Pointer {
+                pointee: PointeeType::Scalar(elem_type),
+                points_to_const: is_const,
+            },
+            StructFieldType::StructArray(type_name, _) => DeclType::Pointer {
+                pointee: PointeeType::Struct(type_name),
+                points_to_const: is_const,
+            },
+            StructFieldType::Array2D(elem_type, _, columns) => DeclType::Array2DPointer {
+                elem_type,
+                columns,
+                points_to_const: is_const,
+            },
+        }
+    }
+
+    fn non_evaluating_two_dimensional_struct_field_element_type(
+        &self,
+        target: &Array2DFieldTarget,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<Option<CType>> {
+        let (type_name, fields) = match target {
+            Array2DFieldTarget::Direct { name, fields } => {
+                let type_name = match Self::scoped_double_storage_declared_type(aliases, name) {
+                    Some(DeclType::Struct(type_name)) => type_name.clone(),
+                    Some(_) => return Ok(None),
+                    None => match self.find_variable(name) {
+                        Some(Value::Struct { type_name, .. }) => type_name.clone(),
+                        _ => return Ok(None),
+                    },
+                };
+                (type_name, fields)
+            }
+            Array2DFieldTarget::Element {
+                name,
+                index,
+                fields,
+            } => {
+                if !matches!(
+                    self.non_evaluating_generic_selection_type(index, aliases)?,
+                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                ) {
+                    return Err(CustError::new("array subscript requires an integer value"));
+                }
+                let type_name = match Self::scoped_double_storage_declared_type(aliases, name) {
+                    Some(
+                        DeclType::Pointer {
+                            pointee: PointeeType::Struct(type_name),
+                            ..
+                        }
+                        | DeclType::Array(PointeeType::Struct(type_name), _),
+                    ) => type_name.clone(),
+                    Some(_) => return Ok(None),
+                    None => match self.find_variable(name) {
+                        Some(Value::StructArray { type_name, .. })
+                        | Some(Value::Pointer {
+                            ty: PointeeType::Struct(type_name),
+                            ..
+                        }) => type_name.clone(),
+                        _ => return Ok(None),
+                    },
+                };
+                (type_name, fields)
+            }
+            Array2DFieldTarget::Pointer { pointer, fields } => {
+                let DeclType::Pointer {
+                    pointee: PointeeType::Struct(type_name),
+                    ..
+                } = self.non_evaluating_generic_selection_type(pointer, aliases)?
+                else {
+                    return Ok(None);
+                };
+                (type_name, fields)
+            }
+        };
+        match self.aggregate_type_field_metadata(&type_name, fields)? {
+            Some((StructFieldType::Array2D(elem_type, _, _), _, _)) => Ok(Some(elem_type)),
+            Some(_) => Err(CustError::new("array field is not two-dimensional")),
+            None => Err(CustError::new("undefined two-dimensional array field")),
+        }
+    }
+
+    fn double_storage_static_local_key(id: usize) -> String {
+        format!("\0static-local:{id}")
+    }
+
+    fn sync_double_storage_static_locals(aliases: &mut [HashMap<String, DoubleStorageFact>]) {
+        let facts = aliases
+            .iter()
+            .skip(1)
+            .flat_map(|scope| scope.values())
+            .filter_map(|fact| fact.static_local_id.map(|id| (id, fact.clone())))
+            .collect::<Vec<_>>();
+        let Some(globals) = aliases.first_mut() else {
+            return;
+        };
+        for (id, fact) in facts {
+            globals.insert(Self::double_storage_static_local_key(id), fact);
+        }
+    }
+
+    fn non_evaluating_aggregate_field_expr_type(
+        &self,
+        expr: &Expr,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<Option<DeclType>> {
+        match expr {
+            Expr::StructGet { name, fields }
+            | Expr::StructSet { name, fields, .. }
+            | Expr::StructCompoundSet { name, fields, .. } => {
+                if let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name)) {
+                    let Some(DeclType::Struct(type_name)) = &fact.declared_type else {
+                        return Ok(None);
+                    };
+                    let field_type = self.non_evaluating_aggregate_field_type(type_name, fields)?;
+                    if matches!(
+                        expr,
+                        Expr::StructSet { .. } | Expr::StructCompoundSet { .. }
+                    ) && (fact.object_is_const
+                        || self.aggregate_type_field_path_is_const(type_name, fields))
+                    {
+                        let field = fields.last().map(String::as_str).unwrap_or("");
+                        return Err(CustError::new(format!(
+                            "cannot assign to const struct field '{field}'"
+                        )));
+                    }
+                    match expr {
+                        Expr::StructSet { value, .. } => {
+                            let value_type =
+                                self.non_evaluating_generic_selection_type(value, aliases)?;
+                            self.validate_non_evaluating_assignment_type(
+                                &field_type,
+                                &value_type,
+                                value,
+                            )?;
+                        }
+                        Expr::StructCompoundSet { op, value, .. } => {
+                            let value_type =
+                                self.non_evaluating_generic_selection_type(value, aliases)?;
+                            Self::validate_non_evaluating_compound_assignment_type(
+                                &field_type,
+                                &value_type,
+                                *op,
+                            )?;
+                        }
+                        _ => {}
+                    }
+                    Ok(Some(field_type))
+                } else {
+                    if matches!(expr, Expr::StructGet { .. })
+                        && let Some(Value::Struct { type_name, .. }) = self.find_variable(name)
+                    {
+                        return self
+                            .non_evaluating_aggregate_field_type(type_name, fields)
+                            .map(Some);
+                    }
+                    self.generic_aggregate_field_expr_type(expr)
+                }
+            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            }
+            | Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructElementCompoundSet {
+                name,
+                index,
+                fields,
+                ..
+            } => {
+                if !matches!(
+                    self.non_evaluating_generic_selection_type(index, aliases)?,
+                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                ) {
+                    return Err(CustError::new("array subscript requires an integer value"));
+                }
+                if let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name)) {
+                    let (type_name, base_is_const) = match &fact.declared_type {
+                        Some(DeclType::Pointer {
+                            pointee: PointeeType::Struct(type_name),
+                            points_to_const,
+                        }) => (type_name, *points_to_const),
+                        Some(DeclType::Array(PointeeType::Struct(type_name), _)) => {
+                            (type_name, fact.object_is_const)
+                        }
+                        _ => return Ok(None),
+                    };
+                    let field_type = self.non_evaluating_aggregate_field_type(type_name, fields)?;
+                    if matches!(
+                        expr,
+                        Expr::StructElementSet { .. } | Expr::StructElementCompoundSet { .. }
+                    ) && (base_is_const
+                        || self.aggregate_type_field_path_is_const(type_name, fields))
+                    {
+                        return Err(CustError::new(format!(
+                            "cannot assign to const variable '{name}'"
+                        )));
+                    }
+                    match expr {
+                        Expr::StructElementSet { value, .. } => {
+                            let value_type =
+                                self.non_evaluating_generic_selection_type(value, aliases)?;
+                            self.validate_non_evaluating_assignment_type(
+                                &field_type,
+                                &value_type,
+                                value,
+                            )?;
+                        }
+                        Expr::StructElementCompoundSet { op, value, .. } => {
+                            let value_type =
+                                self.non_evaluating_generic_selection_type(value, aliases)?;
+                            Self::validate_non_evaluating_compound_assignment_type(
+                                &field_type,
+                                &value_type,
+                                *op,
+                            )?;
+                        }
+                        _ => {}
+                    }
+                    Ok(Some(field_type))
+                } else {
+                    if matches!(expr, Expr::StructElementGet { .. })
+                        && let Some((field_type, is_const, points_to_const)) =
+                            self.struct_element_expr_field_metadata(name, index, fields)?
+                    {
+                        return Ok(Some(Self::non_evaluating_field_metadata_type(
+                            field_type,
+                            is_const,
+                            points_to_const,
+                        )));
+                    }
+                    self.generic_aggregate_field_expr_type(expr)
+                }
+            }
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            }
+            | Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructFieldArrayElementCompoundSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            } => {
+                if !matches!(
+                    self.non_evaluating_generic_selection_type(index, aliases)?,
+                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                ) {
+                    return Err(CustError::new("array subscript requires an integer value"));
+                }
+                let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name)) else {
+                    if let Some((field_type, is_const, points_to_const)) = self
+                        .struct_field_array_element_field_metadata(
+                            name,
+                            array_fields,
+                            index,
+                            fields,
+                        )?
+                    {
+                        return Ok(Some(Self::non_evaluating_field_metadata_type(
+                            field_type,
+                            is_const,
+                            points_to_const,
+                        )));
+                    }
+                    return self.generic_aggregate_field_expr_type(expr);
+                };
+                let Some(DeclType::Struct(type_name)) = &fact.declared_type else {
+                    return Ok(None);
+                };
+                let Some((StructFieldType::StructArray(element_type, _), array_is_const, _)) =
+                    self.aggregate_type_field_metadata(type_name, array_fields)?
+                else {
+                    return Ok(None);
+                };
+                let field_type = self.non_evaluating_aggregate_field_type(&element_type, fields)?;
+                if matches!(
+                    expr,
+                    Expr::StructFieldArrayElementSet { .. }
+                        | Expr::StructFieldArrayElementCompoundSet { .. }
+                ) && (fact.object_is_const
+                    || array_is_const
+                    || self.aggregate_type_field_path_is_const(type_name, array_fields)
+                    || self.aggregate_type_field_path_is_const(&element_type, fields))
+                {
+                    let field = fields.last().map(String::as_str).unwrap_or("");
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{field}'"
+                    )));
+                }
+                match expr {
+                    Expr::StructFieldArrayElementSet { value, .. } => {
+                        let value_type =
+                            self.non_evaluating_generic_selection_type(value, aliases)?;
+                        self.validate_non_evaluating_assignment_type(
+                            &field_type,
+                            &value_type,
+                            value,
+                        )?;
+                    }
+                    Expr::StructFieldArrayElementCompoundSet { op, value, .. } => {
+                        let value_type =
+                            self.non_evaluating_generic_selection_type(value, aliases)?;
+                        Self::validate_non_evaluating_compound_assignment_type(
+                            &field_type,
+                            &value_type,
+                            *op,
+                        )?;
+                    }
+                    _ => {}
+                }
+                Ok(Some(field_type))
+            }
+            Expr::StructArrayGet {
+                name,
+                fields,
+                index,
+            } => {
+                let index_type = self.non_evaluating_generic_selection_type(index, aliases)?;
+                let type_name =
+                    if let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name)) {
+                        let Some(DeclType::Struct(type_name)) = &fact.declared_type else {
+                            return Ok(None);
+                        };
+                        type_name.clone()
+                    } else if let Some(Value::Struct { type_name, .. }) = self.find_variable(name) {
+                        type_name.clone()
+                    } else {
+                        return self.generic_aggregate_field_expr_type(expr);
+                    };
+                let field_type = self.non_evaluating_aggregate_field_type(&type_name, fields)?;
+                if !matches!(
+                    &index_type,
+                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                ) {
+                    if !matches!(
+                        &field_type,
+                        DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                    ) {
+                        return Err(CustError::new("array subscript requires an integer value"));
+                    }
+                    return Self::non_evaluating_indexed_aggregate_field_type(index_type).map(Some);
+                }
+                Ok(Some(Self::non_evaluating_indexed_aggregate_field_type(
+                    field_type,
+                )?))
+            }
+            Expr::StructPtrArrayGet {
+                pointer,
+                fields,
+                index,
+            } => {
+                let index_type = self.non_evaluating_generic_selection_type(index, aliases)?;
+                let DeclType::Pointer {
+                    pointee: PointeeType::Struct(type_name),
+                    ..
+                } = self.non_evaluating_generic_selection_type(pointer, aliases)?
+                else {
+                    return Ok(None);
+                };
+                let field_type = self.non_evaluating_aggregate_field_type(&type_name, fields)?;
+                if !matches!(
+                    &index_type,
+                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                ) {
+                    if !matches!(
+                        &field_type,
+                        DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                    ) {
+                        return Err(CustError::new("array subscript requires an integer value"));
+                    }
+                    return Self::non_evaluating_indexed_aggregate_field_type(index_type).map(Some);
+                }
+                Ok(Some(Self::non_evaluating_indexed_aggregate_field_type(
+                    field_type,
+                )?))
+            }
+            Expr::StructPtrGet { pointer, fields }
+            | Expr::StructPtrSet {
+                pointer, fields, ..
+            }
+            | Expr::StructPtrCompoundSet {
+                pointer, fields, ..
+            } => {
+                let DeclType::Pointer {
+                    pointee: PointeeType::Struct(lexical_type_name),
+                    points_to_const,
+                } = self.non_evaluating_generic_selection_type(pointer, aliases)?
+                else {
+                    return Ok(None);
+                };
+                let scoped_type_name = self
+                    .non_evaluating_aggregate_target(pointer, aliases)
+                    .and_then(|target| {
+                        let (scope_index, name) =
+                            Self::double_storage_aggregate_target_name(&target)?;
+                        aliases
+                            .get(scope_index)
+                            .and_then(|scope| scope.get(name))
+                            .and_then(|fact| match fact.declared_type.as_ref() {
+                                Some(DeclType::Struct(type_name))
+                                | Some(DeclType::Pointer {
+                                    pointee: PointeeType::Struct(type_name),
+                                    ..
+                                }) => Some(type_name.clone()),
+                                _ => None,
+                            })
+                    });
+                let type_name = scoped_type_name.unwrap_or(lexical_type_name);
+                let field_type = self.non_evaluating_aggregate_field_type(&type_name, fields)?;
+                if let Expr::StructPtrSet { value, .. } = expr {
+                    if points_to_const
+                        || self.aggregate_type_field_path_is_const(&type_name, fields)
+                    {
+                        return Err(CustError::new("cannot assign through pointer to const"));
+                    }
+                    let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                    self.validate_non_evaluating_assignment_type(&field_type, &value_type, value)?;
+                }
+                if let Expr::StructPtrCompoundSet { op, value, .. } = expr {
+                    if points_to_const
+                        || self.aggregate_type_field_path_is_const(&type_name, fields)
+                    {
+                        return Err(CustError::new("cannot assign through pointer to const"));
+                    }
+                    let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                    Self::validate_non_evaluating_compound_assignment_type(
+                        &field_type,
+                        &value_type,
+                        *op,
+                    )?;
+                }
+                Ok(Some(field_type))
+            }
+            Expr::AggregateFieldGet { aggregate, fields }
+            | Expr::AggregateFieldSet {
+                aggregate, fields, ..
+            }
+            | Expr::AggregateFieldCompoundSet {
+                aggregate, fields, ..
+            } => {
+                let DeclType::Struct(type_name) =
+                    self.non_evaluating_generic_selection_type(aggregate, aliases)?
+                else {
+                    return Ok(None);
+                };
+                let field_type = self.non_evaluating_aggregate_field_type(&type_name, fields)?;
+                if matches!(
+                    expr,
+                    Expr::AggregateFieldSet { .. } | Expr::AggregateFieldCompoundSet { .. }
+                ) && (matches!(
+                    aggregate.as_ref(),
+                    Expr::AggregateLiteral {
+                        read_only: true,
+                        ..
+                    }
+                ) || self.aggregate_type_field_path_is_const(&type_name, fields))
+                {
+                    let field = fields.last().map(String::as_str).unwrap_or("");
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{field}'"
+                    )));
+                }
+                match expr {
+                    Expr::AggregateFieldSet { value, .. } => {
+                        let value_type =
+                            self.non_evaluating_generic_selection_type(value, aliases)?;
+                        self.validate_non_evaluating_assignment_type(
+                            &field_type,
+                            &value_type,
+                            value,
+                        )?;
+                    }
+                    Expr::AggregateFieldCompoundSet { op, value, .. } => {
+                        let value_type =
+                            self.non_evaluating_generic_selection_type(value, aliases)?;
+                        Self::validate_non_evaluating_compound_assignment_type(
+                            &field_type,
+                            &value_type,
+                            *op,
+                        )?;
+                    }
+                    _ => {}
+                }
+                Ok(Some(field_type))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn validate_non_evaluating_assignment_type(
+        &self,
+        target_type: &DeclType,
+        value_type: &DeclType,
+        value: &Expr,
+    ) -> CustResult<()> {
+        match (target_type, value_type) {
+            (
+                DeclType::Pointer {
+                    pointee,
+                    points_to_const,
+                },
+                DeclType::Pointer {
+                    pointee: value_pointee,
+                    points_to_const: value_points_to_const,
+                },
+            ) => {
+                self.ensure_pointer_pointee_types_compatible(pointee, value_pointee, false)?;
+                if *value_points_to_const && !points_to_const {
+                    return Err(CustError::new(
+                        "cannot discard const qualifier from pointer target",
+                    ));
+                }
+                Ok(())
+            }
+            (DeclType::Pointer { .. }, DeclType::Scalar(_)) if matches!(value, Expr::Number(0)) => {
+                Ok(())
+            }
+            (DeclType::Pointer { .. }, _) => Err(CustError::new("expected pointer expression")),
+            (DeclType::Scalar(_), DeclType::Scalar(_)) => Ok(()),
+            (DeclType::Scalar(CType::Double), _) => Err(CustError::new(
+                "cannot assign pointer expression to double value",
+            )),
+            (DeclType::Scalar(_), _) => {
+                Err(CustError::new("scalar assignment requires a scalar value"))
+            }
+            (DeclType::Struct(expected), DeclType::Struct(actual)) if expected == actual => Ok(()),
+            (DeclType::Struct(_), _) => Err(CustError::new("incompatible struct assignment type")),
+            _ => Err(CustError::new("incompatible assignment type")),
+        }
+    }
+
+    fn validate_non_evaluating_compound_assignment_type(
+        target_type: &DeclType,
+        value_type: &DeclType,
+        op: CompoundOp,
+    ) -> CustResult<()> {
+        match (target_type, value_type) {
+            (DeclType::Pointer { .. }, DeclType::Scalar(CType::Double))
+                if matches!(op, CompoundOp::Add | CompoundOp::Sub) =>
+            {
+                Err(CustError::new(
+                    "pointer arithmetic requires an integer offset",
+                ))
+            }
+            (DeclType::Pointer { .. }, DeclType::Scalar(_))
+                if matches!(op, CompoundOp::Add | CompoundOp::Sub) =>
+            {
+                Ok(())
+            }
+            (DeclType::Pointer { .. }, _) => Err(Self::pointer_compound_error(op)),
+            (DeclType::Scalar(target), DeclType::Scalar(value)) => {
+                if *target == CType::Double || *value == CType::Double {
+                    Self::apply_double_compound_op(0.0, op, 1.0)?;
+                }
+                Ok(())
+            }
+            _ => Err(CustError::new(
+                "compound assignment requires scalar operands",
+            )),
+        }
+    }
+
+    fn non_evaluating_addressed_aggregate_field_type(
+        &self,
+        expr: &Expr,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<Option<DeclType>> {
+        let (type_name, fields, base_is_const, indexed, indexes) = match expr {
+            Expr::AddressOfStructField { name, fields }
+            | Expr::AddressOfStructArrayField { name, fields, .. } => {
+                let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name)) else {
+                    return Ok(None);
+                };
+                let Some(DeclType::Struct(type_name)) = &fact.declared_type else {
+                    return Ok(None);
+                };
+                (
+                    type_name.clone(),
+                    fields,
+                    fact.object_is_const,
+                    matches!(expr, Expr::AddressOfStructArrayField { .. }),
+                    match expr {
+                        Expr::AddressOfStructArrayField { index, .. } => vec![index.as_ref()],
+                        _ => Vec::new(),
+                    },
+                )
+            }
+            Expr::AddressOfStructElementField {
+                name,
+                index,
+                fields,
+            }
+            | Expr::AddressOfStructElementArrayField {
+                name,
+                index,
+                fields,
+                ..
+            } => {
+                let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name)) else {
+                    return Ok(None);
+                };
+                let (type_name, base_is_const) = match &fact.declared_type {
+                    Some(DeclType::Pointer {
+                        pointee: PointeeType::Struct(type_name),
+                        points_to_const,
+                    }) => (type_name.clone(), *points_to_const),
+                    Some(DeclType::Array(PointeeType::Struct(type_name), _)) => {
+                        (type_name.clone(), fact.object_is_const)
+                    }
+                    _ => return Ok(None),
+                };
+                let mut indexes = vec![index.as_ref()];
+                if let Expr::AddressOfStructElementArrayField { array_index, .. } = expr {
+                    indexes.push(array_index);
+                }
+                (
+                    type_name,
+                    fields,
+                    base_is_const,
+                    matches!(expr, Expr::AddressOfStructElementArrayField { .. }),
+                    indexes,
+                )
+            }
+            Expr::AddressOfStructPtrField { pointer, fields }
+            | Expr::AddressOfStructPtrArrayField {
+                pointer, fields, ..
+            } => {
+                let DeclType::Pointer {
+                    pointee: PointeeType::Struct(type_name),
+                    points_to_const,
+                } = self.non_evaluating_generic_selection_type(pointer, aliases)?
+                else {
+                    return Ok(None);
+                };
+                (
+                    type_name,
+                    fields,
+                    points_to_const,
+                    matches!(expr, Expr::AddressOfStructPtrArrayField { .. }),
+                    match expr {
+                        Expr::AddressOfStructPtrArrayField { index, .. } => vec![index.as_ref()],
+                        _ => Vec::new(),
+                    },
+                )
+            }
+            Expr::AddressOfAggregateField { aggregate, fields } => {
+                let DeclType::Struct(type_name) =
+                    self.non_evaluating_generic_selection_type(aggregate, aliases)?
+                else {
+                    return Ok(None);
+                };
+                (
+                    type_name,
+                    fields,
+                    matches!(
+                        aggregate.as_ref(),
+                        Expr::AggregateLiteral {
+                            read_only: true,
+                            ..
+                        }
+                    ),
+                    false,
+                    Vec::new(),
+                )
+            }
+            _ => return Ok(None),
+        };
+        for index in indexes {
+            if !matches!(
+                self.non_evaluating_generic_selection_type(index, aliases)?,
+                DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+            ) {
+                return Err(CustError::new("array subscript requires an integer value"));
+            }
+        }
+        let field_type = self.generic_aggregate_field_type(&type_name, fields)?;
+        Ok(match (indexed, field_type) {
+            (
+                true,
+                DeclType::Pointer {
+                    pointee,
+                    points_to_const,
+                },
+            ) => Some(DeclType::Pointer {
+                pointee,
+                points_to_const: base_is_const || points_to_const,
+            }),
+            (false, DeclType::Scalar(ty)) => Some(DeclType::Pointer {
+                pointee: PointeeType::Scalar(ty),
+                points_to_const: base_is_const
+                    || self.aggregate_type_field_path_is_const(&type_name, fields),
+            }),
+            (false, DeclType::Struct(nested_type)) => Some(DeclType::Pointer {
+                pointee: PointeeType::Struct(nested_type),
+                points_to_const: base_is_const
+                    || self.aggregate_type_field_path_is_const(&type_name, fields),
+            }),
+            _ => None,
+        })
+    }
+
+    fn validate_non_evaluating_generic_struct_initializers(
+        &self,
+        type_name: &str,
+        initializers: &[StructInitializer],
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<()> {
+        let aggregate = self
+            .struct_types
+            .get(type_name)
+            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        for initializer in initializers {
+            let StructInitializer::Designated { field, value } = initializer else {
+                continue;
+            };
+            let field = aggregate
+                .fields
+                .iter()
+                .find(|candidate| candidate.name == *field)
+                .ok_or_else(|| {
+                    CustError::new(format!("struct '{type_name}' has no field '{field}'"))
+                })?;
+            match (&field.ty, value.as_ref()) {
+                (StructFieldType::Scalar(ty), StructInitializer::Expr(expr)) => {
+                    let actual = self.non_evaluating_generic_selection_type(expr, aliases)?;
+                    self.validate_non_evaluating_assignment_type(
+                        &DeclType::Scalar(*ty),
+                        &actual,
+                        expr,
+                    )?;
+                }
+                (StructFieldType::Pointer(pointee), StructInitializer::Expr(expr)) => {
+                    let actual = self.non_evaluating_generic_selection_type(expr, aliases)?;
+                    self.validate_non_evaluating_assignment_type(
+                        &DeclType::Pointer {
+                            pointee: pointee.clone(),
+                            points_to_const: field.points_to_const,
+                        },
+                        &actual,
+                        expr,
+                    )?;
+                }
+                (StructFieldType::Array(ty, _), StructInitializer::Array(values)) => {
+                    for value in values {
+                        if let ArrayInitializer::Expr(expr)
+                        | ArrayInitializer::Designated { value: expr, .. } = value
+                        {
+                            let actual =
+                                self.non_evaluating_generic_selection_type(expr, aliases)?;
+                            self.validate_non_evaluating_assignment_type(
+                                &DeclType::Scalar(*ty),
+                                &actual,
+                                expr,
+                            )?;
+                        }
+                    }
+                }
+                (StructFieldType::Array2D(ty, _, _), StructInitializer::Array2D(rows)) => {
+                    for value in rows.iter().flatten() {
+                        if let ArrayInitializer::Expr(expr)
+                        | ArrayInitializer::Designated { value: expr, .. } = value
+                        {
+                            let actual =
+                                self.non_evaluating_generic_selection_type(expr, aliases)?;
+                            self.validate_non_evaluating_assignment_type(
+                                &DeclType::Scalar(*ty),
+                                &actual,
+                                expr,
+                            )?;
+                        }
+                    }
+                }
+                (StructFieldType::Struct(nested), StructInitializer::Struct(values)) => {
+                    self.validate_non_evaluating_generic_struct_initializers(
+                        nested, values, aliases,
+                    )?;
+                }
+                (
+                    StructFieldType::StructArray(nested, _),
+                    StructInitializer::StructArray(values),
+                ) => {
+                    for value in values {
+                        let values = match value {
+                            StructArrayInitializer::Element(values)
+                            | StructArrayInitializer::Designated { value: values, .. } => values,
+                        };
+                        self.validate_non_evaluating_generic_struct_initializers(
+                            nested, values, aliases,
+                        )?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn non_evaluating_generic_selection_type(
+        &self,
+        expr: &Expr,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<DeclType> {
+        match expr {
+            Expr::Var(name) => {
+                if let Some(declared_type) =
+                    Self::scoped_double_storage_declared_type(aliases, name)
+                {
+                    return Ok(declared_type.clone());
+                }
+                let runtime_row = self.array2d_pointer_variable_type(name).or_else(|| {
+                    match self.find_variable(name) {
+                        Some(Value::Array(array)) => array
+                            .borrow()
+                            .dimensions
+                            .map(|(_, columns)| (array.borrow().elem_type, columns)),
+                        Some(Value::Pointer {
+                            pointer: PointerValue::Array2DRow { array, .. },
+                            ..
+                        }) => array
+                            .borrow()
+                            .dimensions
+                            .map(|(_, columns)| (array.borrow().elem_type, columns)),
+                        _ => None,
+                    }
+                });
+                if let Some((elem_type, columns)) = runtime_row {
+                    return Ok(DeclType::Array2DPointer {
+                        elem_type,
+                        columns,
+                        points_to_const: self.pointer_expr_points_to_const(expr),
+                    });
+                }
+            }
+            Expr::Assign { name, value } => {
+                let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                if let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name))
+                    && let Some(declared_type) = &fact.declared_type
+                {
+                    if fact.object_is_const {
+                        return Err(CustError::new(format!(
+                            "cannot assign to const variable '{name}'"
+                        )));
+                    }
+                    self.validate_non_evaluating_assignment_type(
+                        declared_type,
+                        &value_type,
+                        value,
+                    )?;
+                    return Ok(declared_type.clone());
+                }
+            }
+            Expr::CompoundAssign { name, op, value } => {
+                let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                if let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name))
+                    && let Some(declared_type) = &fact.declared_type
+                {
+                    if fact.object_is_const {
+                        return Err(CustError::new(format!(
+                            "cannot assign to const variable '{name}'"
+                        )));
+                    }
+                    match (declared_type, &value_type) {
+                        (DeclType::Pointer { .. }, DeclType::Scalar(CType::Double))
+                            if matches!(op, CompoundOp::Add | CompoundOp::Sub) =>
+                        {
+                            return Err(CustError::new(
+                                "pointer arithmetic requires an integer offset",
+                            ));
+                        }
+                        (DeclType::Pointer { .. }, DeclType::Scalar(_))
+                            if matches!(op, CompoundOp::Add | CompoundOp::Sub) => {}
+                        (DeclType::Pointer { .. }, _) => {
+                            return Err(Self::pointer_compound_error(*op));
+                        }
+                        (DeclType::Scalar(_), DeclType::Scalar(_)) => {}
+                        _ => {
+                            return Err(CustError::new(
+                                "compound assignment requires scalar operands",
+                            ));
+                        }
+                    }
+                    return Ok(declared_type.clone());
+                }
+            }
+            Expr::AddressOf(name) => {
+                if let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name))
+                    && let Some(declared_type) = &fact.declared_type
+                {
+                    return match declared_type {
+                        DeclType::Scalar(ty) => Ok(DeclType::Pointer {
+                            pointee: PointeeType::Scalar(*ty),
+                            points_to_const: fact.object_is_const,
+                        }),
+                        DeclType::Struct(type_name) => Ok(DeclType::Pointer {
+                            pointee: PointeeType::Struct(type_name.clone()),
+                            points_to_const: fact.object_is_const,
+                        }),
+                        _ => self.generic_selection_type(expr),
+                    };
+                }
+                if self.find_variable(name).is_none()
+                    && self.find_character_pointer_output(name).is_none()
+                    && !self.identifier_resolves_to_enum_constant(name)
+                {
+                    return Err(CustError::new(format!("undefined variable '{name}'")));
+                }
+            }
+            Expr::AddressOfStructField { .. }
+            | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfStructArrayField { .. }
+            | Expr::AddressOfStructElementArrayField { .. }
+            | Expr::AddressOfStructPtrField { .. }
+            | Expr::AddressOfStructPtrArrayField { .. }
+            | Expr::AddressOfAggregateField { .. } => {
+                if let Some(declared_type) =
+                    self.non_evaluating_addressed_aggregate_field_type(expr, aliases)?
+                {
+                    return Ok(declared_type);
+                }
+            }
+            Expr::AddressOfArray { name, index } => {
+                if !matches!(
+                    self.non_evaluating_generic_selection_type(index, aliases)?,
+                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                ) {
+                    return Err(CustError::new("array subscript requires an integer value"));
+                }
+                if let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name))
+                    && let Some(DeclType::Pointer {
+                        pointee,
+                        points_to_const,
+                    }) = &fact.declared_type
+                {
+                    return Ok(DeclType::Pointer {
+                        pointee: pointee.clone(),
+                        points_to_const: *points_to_const,
+                    });
+                }
+                match self.find_variable(name) {
+                    Some(Value::Array(array)) if array.borrow().dimensions.is_none() => {
+                        return Ok(DeclType::Pointer {
+                            pointee: PointeeType::Scalar(array.borrow().elem_type),
+                            points_to_const: array.borrow().read_only
+                                || self.is_const_variable(name),
+                        });
+                    }
+                    Some(Value::StructArray {
+                        type_name,
+                        read_only,
+                        ..
+                    }) => {
+                        return Ok(DeclType::Pointer {
+                            pointee: PointeeType::Struct(type_name.clone()),
+                            points_to_const: *read_only || self.is_const_variable(name),
+                        });
+                    }
+                    Some(Value::Pointer {
+                        ty,
+                        points_to_const,
+                        ..
+                    }) => {
+                        return Ok(DeclType::Pointer {
+                            pointee: ty.clone(),
+                            points_to_const: *points_to_const,
+                        });
+                    }
+                    None => {
+                        return Err(CustError::new(format!("undefined variable '{name}'")));
+                    }
+                    Some(Value::Scalar { .. } | Value::Struct { .. } | Value::Array(_)) => {}
+                }
+            }
+            Expr::PointerCast {
+                pointee,
+                points_to_const,
+                expr,
+            } => {
+                let inner_type = self.non_evaluating_generic_selection_type(expr, aliases)?;
+                if !matches!(
+                    inner_type,
+                    DeclType::Pointer { .. }
+                        | DeclType::Array2DPointer { .. }
+                        | DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                ) {
+                    return Err(CustError::new("expected pointer expression"));
+                }
+                let source_points_to_const = match &inner_type {
+                    DeclType::Pointer {
+                        points_to_const, ..
+                    }
+                    | DeclType::Array2DPointer {
+                        points_to_const, ..
+                    } => *points_to_const,
+                    _ => false,
+                };
+                return Ok(DeclType::Pointer {
+                    pointee: pointee.clone(),
+                    points_to_const: *points_to_const || source_points_to_const,
+                });
+            }
+            Expr::Cast { ty, expr } | Expr::ScalarLiteral { ty, init: expr, .. } => {
+                if matches!(
+                    self.non_evaluating_generic_selection_type(expr, aliases)?,
+                    DeclType::Void
+                ) {
+                    self.reject_void_scalar_operand(expr)?;
+                }
+                return Ok(DeclType::Scalar(*ty));
+            }
+            Expr::ScalarLiteralSet {
+                ty, init, value, ..
+            } => {
+                self.non_evaluating_generic_selection_type(init, aliases)?;
+                let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                self.validate_non_evaluating_assignment_type(
+                    &DeclType::Scalar(*ty),
+                    &value_type,
+                    value,
+                )?;
+                return Ok(DeclType::Scalar(*ty));
+            }
+            Expr::ScalarLiteralCompoundSet {
+                ty,
+                init,
+                op,
+                value,
+                ..
+            } => {
+                self.non_evaluating_generic_selection_type(init, aliases)?;
+                let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                Self::validate_non_evaluating_compound_assignment_type(
+                    &DeclType::Scalar(*ty),
+                    &value_type,
+                    *op,
+                )?;
+                return Ok(DeclType::Scalar(*ty));
+            }
+            Expr::AggregateLiteral {
+                type_name, init, ..
+            } => {
+                self.validate_non_evaluating_generic_struct_initializers(type_name, init, aliases)?;
+                return Ok(DeclType::Struct(type_name.clone()));
+            }
+            Expr::GenericSelection { .. } => {
+                return self.non_evaluating_generic_selection_type(
+                    self.non_evaluating_selected_generic_association(expr, aliases)?,
+                    aliases,
+                );
+            }
+            Expr::Call { name, args } => {
+                let signature = self
+                    .functions
+                    .get(name)
+                    .map(FunctionSignature::from_function)
+                    .or_else(|| self.prototypes.get(name).cloned())
+                    .ok_or_else(|| CustError::new(format!("undefined function '{name}'")))?;
+                if signature.params.len() != args.len() {
+                    return Err(CustError::new(format!(
+                        "function '{name}' expected {} arguments, got {}",
+                        signature.params.len(),
+                        args.len()
+                    )));
+                }
+                for (param, argument) in signature.params.iter().zip(args) {
+                    let actual_type =
+                        self.non_evaluating_generic_selection_type(argument, aliases)?;
+                    if matches!(
+                        param.kind,
+                        ParamKind::CharacterPointerOutput | ParamKind::Array2D
+                    ) {
+                        continue;
+                    }
+                    if let (
+                        ParamKind::Pointer,
+                        ParamType::Void,
+                        DeclType::Array2DPointer {
+                            points_to_const, ..
+                        },
+                    ) = (param.kind, &param.ty, &actual_type)
+                    {
+                        if *points_to_const && !param.points_to_const {
+                            return Err(CustError::new(
+                                "cannot discard const qualifier from pointer target",
+                            ));
+                        }
+                        continue;
+                    }
+                    self.validate_function_argument_decl_type(
+                        param.kind,
+                        &param.ty,
+                        param.points_to_const,
+                        actual_type,
+                        argument,
+                    )?;
+                }
+                return match signature.return_type {
+                    ReturnType::Void => Ok(DeclType::Void),
+                    ReturnType::Scalar(ty) => Ok(DeclType::Scalar(ty)),
+                    ReturnType::Pointer {
+                        ty,
+                        points_to_const,
+                    } => Ok(DeclType::Pointer {
+                        pointee: ty,
+                        points_to_const,
+                    }),
+                    ReturnType::Struct(type_name) => Ok(DeclType::Struct(type_name)),
+                    ReturnType::Array2DPointer {
+                        elem_type,
+                        columns,
+                        points_to_const,
+                    } => Ok(DeclType::Array2DPointer {
+                        elem_type,
+                        columns,
+                        points_to_const,
+                    }),
+                };
+            }
+            Expr::VoidCast(inner) => {
+                self.non_evaluating_generic_selection_type(inner, aliases)?;
+                return Ok(DeclType::Void);
+            }
+            Expr::Increment { target, .. } => {
+                if let Expr::Var(name) = target.as_ref()
+                    && aliases
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.get(name))
+                        .is_some_and(|fact| fact.object_is_const)
+                {
+                    return Err(CustError::new(format!(
+                        "cannot assign to const variable '{name}'"
+                    )));
+                }
+                if let Expr::Deref(pointer) = target.as_ref()
+                    && matches!(
+                        self.non_evaluating_generic_selection_type(pointer, aliases)?,
+                        DeclType::Pointer {
+                            points_to_const: true,
+                            ..
+                        }
+                    )
+                {
+                    return Err(CustError::new("cannot assign through pointer to const"));
+                }
+                if let Expr::StructGet { name, fields } = target.as_ref()
+                    && let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name))
+                    && let Some(DeclType::Struct(type_name)) = &fact.declared_type
+                    && (fact.object_is_const
+                        || self.aggregate_type_field_path_is_const(type_name, fields))
+                {
+                    let field = fields.last().map(String::as_str).unwrap_or("");
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{field}'"
+                    )));
+                }
+                if let Expr::StructPtrGet { pointer, fields } = target.as_ref()
+                    && let DeclType::Pointer {
+                        pointee: PointeeType::Struct(type_name),
+                        points_to_const,
+                    } = self.non_evaluating_generic_selection_type(pointer, aliases)?
+                    && (points_to_const
+                        || self.aggregate_type_field_path_is_const(&type_name, fields))
+                {
+                    return Err(CustError::new("cannot assign through pointer to const"));
+                }
+                if let Expr::StructElementGet { name, fields, .. } = target.as_ref()
+                    && let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name))
+                {
+                    let base = match &fact.declared_type {
+                        Some(DeclType::Pointer {
+                            pointee: PointeeType::Struct(type_name),
+                            points_to_const,
+                        }) => Some((type_name, *points_to_const)),
+                        Some(DeclType::Array(PointeeType::Struct(type_name), _)) => {
+                            Some((type_name, fact.object_is_const))
+                        }
+                        _ => None,
+                    };
+                    if let Some((type_name, base_is_const)) = base
+                        && (base_is_const
+                            || self.aggregate_type_field_path_is_const(type_name, fields))
+                    {
+                        return Err(CustError::new(format!(
+                            "cannot assign to const variable '{name}'"
+                        )));
+                    }
+                }
+                if let Expr::StructFieldArrayElementGet {
+                    name,
+                    array_fields,
+                    fields,
+                    ..
+                } = target.as_ref()
+                    && let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name))
+                    && let Some(DeclType::Struct(type_name)) = &fact.declared_type
+                    && let Some((StructFieldType::StructArray(element_type, _), array_is_const, _)) =
+                        self.aggregate_type_field_metadata(type_name, array_fields)?
+                    && (fact.object_is_const
+                        || array_is_const
+                        || self.aggregate_type_field_path_is_const(type_name, array_fields)
+                        || self.aggregate_type_field_path_is_const(&element_type, fields))
+                {
+                    let field = fields.last().map(String::as_str).unwrap_or("");
+                    return Err(CustError::new(format!(
+                        "cannot assign to const struct field '{field}'"
+                    )));
+                }
+                return self.non_evaluating_generic_selection_type(target, aliases);
+            }
+            Expr::Deref(pointer) => {
+                if self.expr_is_character_pointer_output_value(pointer) {
+                    return Ok(DeclType::Pointer {
+                        pointee: PointeeType::Scalar(CType::Char),
+                        points_to_const: false,
+                    });
+                }
+                let declared_row = if let Expr::Var(name) = pointer.as_ref() {
+                    aliases
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.get(name))
+                        .and_then(|fact| match &fact.declared_type {
+                            Some(DeclType::Array2DPointer {
+                                elem_type,
+                                points_to_const,
+                                ..
+                            }) => Some((*elem_type, *points_to_const)),
+                            _ => None,
+                        })
+                } else {
+                    None
+                };
+                if let Some((elem_type, points_to_const)) = declared_row.or_else(|| {
+                    self.array2d_row_pointer_element_type(pointer)
+                        .map(|elem_type| (elem_type, self.pointer_expr_points_to_const(pointer)))
+                }) {
+                    return Ok(DeclType::Pointer {
+                        pointee: PointeeType::Scalar(elem_type),
+                        points_to_const,
+                    });
+                }
+                return match self.non_evaluating_generic_selection_type(pointer, aliases)? {
+                    DeclType::Pointer { pointee, .. } => match pointee {
+                        PointeeType::Scalar(ty) => Ok(DeclType::Scalar(ty)),
+                        PointeeType::Struct(type_name) => Ok(DeclType::Struct(type_name)),
+                        PointeeType::Void => Err(CustError::new("expected pointer expression")),
+                    },
+                    _ => Err(CustError::new("expected pointer expression")),
+                };
+            }
+            Expr::DerefSet { pointer, value } => {
+                if self.expr_is_character_pointer_output_value(pointer) {
+                    let target_type = DeclType::Pointer {
+                        pointee: PointeeType::Scalar(CType::Char),
+                        points_to_const: false,
+                    };
+                    let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                    self.validate_non_evaluating_assignment_type(&target_type, &value_type, value)?;
+                    return Ok(target_type);
+                }
+                let pointer_type = self.non_evaluating_generic_selection_type(pointer, aliases)?;
+                let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                return match pointer_type {
+                    DeclType::Pointer {
+                        points_to_const: true,
+                        ..
+                    } => Err(CustError::new("cannot assign through pointer to const")),
+                    DeclType::Pointer { pointee, .. } => {
+                        let target_type = match pointee {
+                            PointeeType::Scalar(ty) => DeclType::Scalar(ty),
+                            PointeeType::Struct(type_name) => DeclType::Struct(type_name),
+                            PointeeType::Void => {
+                                return Err(CustError::new("expected pointer expression"));
+                            }
+                        };
+                        self.validate_non_evaluating_assignment_type(
+                            &target_type,
+                            &value_type,
+                            value,
+                        )?;
+                        Ok(target_type)
+                    }
+                    _ => Err(CustError::new("expected pointer expression")),
+                };
+            }
+            Expr::DerefCompoundSet { pointer, op, value } => {
+                let pointer_type = self.non_evaluating_generic_selection_type(pointer, aliases)?;
+                let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                let DeclType::Pointer {
+                    pointee: PointeeType::Scalar(pointee_type),
+                    points_to_const,
+                } = pointer_type
+                else {
+                    return Err(CustError::new("expected pointer expression"));
+                };
+                if points_to_const {
+                    return Err(CustError::new("cannot assign through pointer to const"));
+                }
+                let DeclType::Scalar(value_type) = value_type else {
+                    return Err(CustError::new(
+                        "compound assignment requires scalar operands",
+                    ));
+                };
+                if pointee_type == CType::Double || value_type == CType::Double {
+                    Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                }
+                return Ok(DeclType::Scalar(pointee_type));
+            }
+            Expr::StructArray2DGet {
+                target,
+                row,
+                column,
+            } => {
+                for index in [row.as_ref(), column.as_ref()] {
+                    if !matches!(
+                        self.non_evaluating_generic_selection_type(index, aliases)?,
+                        DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                    ) {
+                        return Err(CustError::new("array subscript requires an integer value"));
+                    }
+                }
+                if let Some(elem_type) =
+                    self.non_evaluating_two_dimensional_struct_field_element_type(target, aliases)?
+                {
+                    return Ok(DeclType::Scalar(elem_type));
+                }
+            }
+            Expr::ArrayGet { name, index } => {
+                let index_type = self.non_evaluating_generic_selection_type(index, aliases)?;
+                if !matches!(
+                    index_type,
+                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                ) {
+                    let reverse_pointee = match &index_type {
+                        DeclType::Pointer { pointee, .. } | DeclType::Array(pointee, _) => {
+                            Some(pointee)
+                        }
+                        _ => None,
+                    };
+                    if let Some(pointee) = reverse_pointee {
+                        let reverse_index_type = self.non_evaluating_generic_selection_type(
+                            &Expr::Var(name.clone()),
+                            aliases,
+                        )?;
+                        if !matches!(
+                            reverse_index_type,
+                            DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                        ) {
+                            return Err(CustError::new(
+                                "array subscript requires an integer value",
+                            ));
+                        }
+                        return match pointee {
+                            PointeeType::Scalar(ty) => Ok(DeclType::Scalar(*ty)),
+                            PointeeType::Struct(type_name) => {
+                                Ok(DeclType::Struct(type_name.clone()))
+                            }
+                            PointeeType::Void => Err(CustError::new(format!(
+                                "indexed variable '{name}' does not have scalar elements"
+                            ))),
+                        };
+                    }
+                    return Err(CustError::new("array subscript requires an integer value"));
+                }
+                if let Some(declared_type) =
+                    Self::scoped_double_storage_declared_type(aliases, name)
+                {
+                    let pointee = match declared_type {
+                        DeclType::Pointer { pointee, .. } | DeclType::Array(pointee, _) => pointee,
+                        _ => {
+                            return Err(CustError::new(format!(
+                                "indexed variable '{name}' does not have scalar elements"
+                            )));
+                        }
+                    };
+                    return match pointee {
+                        PointeeType::Scalar(ty) => Ok(DeclType::Scalar(*ty)),
+                        PointeeType::Struct(type_name) => Ok(DeclType::Struct(type_name.clone())),
+                        PointeeType::Void => Err(CustError::new(format!(
+                            "indexed variable '{name}' does not have scalar elements"
+                        ))),
+                    };
+                }
+            }
+            Expr::ArraySet { name, index, value } => {
+                if !matches!(
+                    self.non_evaluating_generic_selection_type(index, aliases)?,
+                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                ) {
+                    return Err(CustError::new("array subscript requires an integer value"));
+                }
+                let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                if let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name))
+                    && let Some(declared_type) = &fact.declared_type
+                {
+                    let (pointee, points_to_const) = match declared_type {
+                        DeclType::Pointer {
+                            pointee,
+                            points_to_const,
+                        } => (pointee, *points_to_const),
+                        DeclType::Array(pointee, _) => (pointee, fact.object_is_const),
+                        _ => {
+                            return Err(CustError::new(format!(
+                                "indexed variable '{name}' does not have scalar elements"
+                            )));
+                        }
+                    };
+                    if points_to_const {
+                        return Err(CustError::new(format!(
+                            "cannot assign to const variable '{name}'"
+                        )));
+                    }
+                    return match pointee {
+                        PointeeType::Scalar(ty) => {
+                            if !matches!(value_type, DeclType::Scalar(_)) {
+                                return Err(CustError::new(if *ty == CType::Double {
+                                    "cannot assign pointer expression to double value"
+                                } else {
+                                    "scalar assignment requires a scalar value"
+                                }));
+                            }
+                            Ok(DeclType::Scalar(*ty))
+                        }
+                        PointeeType::Struct(type_name) if matches!(&value_type, DeclType::Struct(actual) if actual == type_name) => {
+                            Ok(DeclType::Struct(type_name.clone()))
+                        }
+                        PointeeType::Struct(_) => {
+                            Err(CustError::new("incompatible struct assignment type"))
+                        }
+                        PointeeType::Void => Err(CustError::new(format!(
+                            "indexed variable '{name}' does not have scalar elements"
+                        ))),
+                    };
+                }
+            }
+            Expr::ArrayCompoundSet {
+                name,
+                index,
+                op,
+                value,
+            } => {
+                if !matches!(
+                    self.non_evaluating_generic_selection_type(index, aliases)?,
+                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                ) {
+                    return Err(CustError::new("array subscript requires an integer value"));
+                }
+                let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
+                if let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name))
+                    && let Some(declared_type) = &fact.declared_type
+                {
+                    let (pointee, points_to_const) = match declared_type {
+                        DeclType::Pointer {
+                            pointee,
+                            points_to_const,
+                        } => (pointee, *points_to_const),
+                        DeclType::Array(pointee, _) => (pointee, fact.object_is_const),
+                        _ => {
+                            return Err(CustError::new(format!(
+                                "indexed variable '{name}' does not have scalar elements"
+                            )));
+                        }
+                    };
+                    if points_to_const {
+                        return Err(CustError::new(format!(
+                            "cannot assign to const variable '{name}'"
+                        )));
+                    }
+                    let PointeeType::Scalar(target_type) = pointee else {
+                        return Err(CustError::new(
+                            "compound assignment requires scalar operands",
+                        ));
+                    };
+                    let target_type = DeclType::Scalar(*target_type);
+                    Self::validate_non_evaluating_compound_assignment_type(
+                        &target_type,
+                        &value_type,
+                        *op,
+                    )?;
+                    return Ok(target_type);
+                }
+            }
+            Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) => {
+                let inner_type = self.non_evaluating_generic_selection_type(inner, aliases)?;
+                if matches!(&inner_type, DeclType::Void) {
+                    self.reject_void_scalar_operand(inner)?;
+                }
+                if let DeclType::Scalar(ty) = inner_type {
+                    return Ok(DeclType::Scalar(if ty == CType::Double {
+                        CType::Double
+                    } else {
+                        CType::Int
+                    }));
+                }
+            }
+            Expr::BitwiseNot(inner) => {
+                let inner_type = self.non_evaluating_generic_selection_type(inner, aliases)?;
+                if matches!(&inner_type, DeclType::Void) {
+                    self.reject_void_scalar_operand(inner)?;
+                }
+                if let DeclType::Scalar(ty) = inner_type {
+                    if ty == CType::Double {
+                        return Err(CustError::new(
+                            "bitwise operations on double values are not supported",
+                        ));
+                    }
+                    return Ok(DeclType::Scalar(CType::Int));
+                }
+            }
+            Expr::LogicalNot(inner) => {
+                let inner_type = self.non_evaluating_generic_selection_type(inner, aliases)?;
+                if matches!(&inner_type, DeclType::Void) {
+                    self.reject_void_scalar_operand(inner)?;
+                }
+                if matches!(
+                    inner_type,
+                    DeclType::Scalar(_)
+                        | DeclType::Pointer { .. }
+                        | DeclType::Array2DPointer { .. }
+                ) {
+                    return Ok(DeclType::Scalar(CType::Int));
+                }
+            }
+            Expr::Binary(left, op, right) => {
+                let left_is_output = self.expr_is_character_pointer_output_value(left);
+                let right_is_output = self.expr_is_character_pointer_output_value(right);
+                if left_is_output || right_is_output {
+                    if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+                        for (operand, is_output) in [
+                            (left.as_ref(), left_is_output),
+                            (right.as_ref(), right_is_output),
+                        ] {
+                            if is_output {
+                                self.validate_character_pointer_output_argument_with_liveness(
+                                    "character pointer output equality",
+                                    "operand",
+                                    operand,
+                                    false,
+                                )?;
+                                continue;
+                            }
+                            match self.non_evaluating_generic_selection_type(operand, aliases)? {
+                                DeclType::Scalar(CType::Double) => {
+                                    return Err(CustError::new(
+                                        "cannot compare pointer with double value",
+                                    ));
+                                }
+                                DeclType::Scalar(CType::Bool | CType::Int | CType::Char) => {}
+                                _ => {
+                                    return Err(CustError::new(
+                                        "character pointer output equality requires another output or an integer null pointer constant",
+                                    ));
+                                }
+                            }
+                        }
+                        return Ok(DeclType::Scalar(CType::Int));
+                    }
+                    if matches!(
+                        op,
+                        BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
+                    ) {
+                        return Err(CustError::new(
+                            "character pointer output ordering comparisons are not supported",
+                        ));
+                    }
+                }
+                let left_type = self.non_evaluating_generic_selection_type(left, aliases)?;
+                let right_type = self.non_evaluating_generic_selection_type(right, aliases)?;
+                for (operand, operand_type) in
+                    [(left.as_ref(), &left_type), (right.as_ref(), &right_type)]
+                {
+                    if matches!(operand_type, DeclType::Void) {
+                        self.reject_void_scalar_operand(operand)?;
+                    }
+                }
+                let promoted_scalar = |left: CType, right: CType| {
+                    DeclType::Scalar(if left == CType::Double || right == CType::Double {
+                        CType::Double
+                    } else {
+                        CType::Int
+                    })
+                };
+                return match op {
+                    BinaryOp::Add | BinaryOp::Subscript | BinaryOp::Sub => {
+                        match (&left_type, &right_type) {
+                            (
+                                DeclType::Pointer {
+                                    pointee: PointeeType::Void,
+                                    ..
+                                },
+                                _,
+                            )
+                            | (
+                                _,
+                                DeclType::Pointer {
+                                    pointee: PointeeType::Void,
+                                    ..
+                                },
+                            ) => Err(CustError::new(
+                                "pointer to void arithmetic is not supported",
+                            )),
+                            (DeclType::Pointer { .. }, DeclType::Scalar(CType::Double))
+                            | (DeclType::Scalar(CType::Double), DeclType::Pointer { .. })
+                            | (DeclType::Array2DPointer { .. }, DeclType::Scalar(CType::Double))
+                            | (DeclType::Scalar(CType::Double), DeclType::Array2DPointer { .. }) => {
+                                Err(CustError::new(
+                                    "pointer arithmetic requires an integer offset",
+                                ))
+                            }
+                            (DeclType::Pointer { .. }, DeclType::Scalar(_)) => Ok(left_type),
+                            (DeclType::Array2DPointer { .. }, DeclType::Scalar(_)) => Ok(left_type),
+                            (DeclType::Scalar(_), DeclType::Pointer { .. })
+                            | (DeclType::Scalar(_), DeclType::Array2DPointer { .. })
+                                if matches!(op, BinaryOp::Add | BinaryOp::Subscript) =>
+                            {
+                                Ok(right_type)
+                            }
+                            (
+                                DeclType::Pointer {
+                                    pointee: left_pointee,
+                                    ..
+                                },
+                                DeclType::Pointer {
+                                    pointee: right_pointee,
+                                    ..
+                                },
+                            ) if *op == BinaryOp::Sub => {
+                                self.ensure_pointer_pointee_types_compatible(
+                                    left_pointee,
+                                    right_pointee,
+                                    true,
+                                )?;
+                                Ok(DeclType::Scalar(CType::Int))
+                            }
+                            (
+                                DeclType::Array2DPointer {
+                                    elem_type: left_elem,
+                                    columns: left_columns,
+                                    ..
+                                },
+                                DeclType::Array2DPointer {
+                                    elem_type: right_elem,
+                                    columns: right_columns,
+                                    ..
+                                },
+                            ) if *op == BinaryOp::Sub
+                                && left_elem == right_elem
+                                && left_columns == right_columns =>
+                            {
+                                Ok(DeclType::Scalar(CType::Int))
+                            }
+                            (DeclType::Pointer { .. }, DeclType::Pointer { .. }) => {
+                                Err(CustError::new("cannot add two pointers"))
+                            }
+                            (DeclType::Array2DPointer { .. }, DeclType::Array2DPointer { .. }) => {
+                                Err(CustError::new("cannot add two pointers"))
+                            }
+                            (DeclType::Scalar(left), DeclType::Scalar(right)) => {
+                                Ok(promoted_scalar(*left, *right))
+                            }
+                            _ => Err(CustError::new(
+                                "arithmetic operands must be scalar or pointer values",
+                            )),
+                        }
+                    }
+                    BinaryOp::Mul | BinaryOp::Div => match (&left_type, &right_type) {
+                        (DeclType::Scalar(left), DeclType::Scalar(right)) => {
+                            Ok(promoted_scalar(*left, *right))
+                        }
+                        _ => Err(CustError::new(
+                            "multiplication and division require scalar operands, not pointers",
+                        )),
+                    },
+                    BinaryOp::Rem => match (&left_type, &right_type) {
+                        (DeclType::Scalar(CType::Double), DeclType::Scalar(_))
+                        | (DeclType::Scalar(_), DeclType::Scalar(CType::Double)) => Err(
+                            CustError::new("remainder on double values is not supported"),
+                        ),
+                        (DeclType::Scalar(_), DeclType::Scalar(_)) => {
+                            Ok(DeclType::Scalar(CType::Int))
+                        }
+                        _ => Err(CustError::new("remainder requires integer operands")),
+                    },
+                    BinaryOp::ShiftLeft
+                    | BinaryOp::ShiftRight
+                    | BinaryOp::BitAnd
+                    | BinaryOp::BitXor
+                    | BinaryOp::BitOr => match (&left_type, &right_type) {
+                        (DeclType::Scalar(CType::Double), DeclType::Scalar(_))
+                        | (DeclType::Scalar(_), DeclType::Scalar(CType::Double)) => Err(
+                            CustError::new("bitwise operations on double values are not supported"),
+                        ),
+                        (DeclType::Scalar(_), DeclType::Scalar(_)) => {
+                            Ok(DeclType::Scalar(CType::Int))
+                        }
+                        _ => Err(CustError::new(
+                            "pointer bitwise operations are not supported",
+                        )),
+                    },
+                    BinaryOp::Eq | BinaryOp::Ne => match (&left_type, &right_type) {
+                        (
+                            DeclType::Array2DPointer {
+                                elem_type: left_elem,
+                                columns: left_columns,
+                                ..
+                            },
+                            DeclType::Array2DPointer {
+                                elem_type: right_elem,
+                                columns: right_columns,
+                                ..
+                            },
+                        ) if left_elem == right_elem && left_columns == right_columns => {
+                            Ok(DeclType::Scalar(CType::Int))
+                        }
+                        (
+                            DeclType::Pointer {
+                                pointee: left_pointee,
+                                ..
+                            },
+                            DeclType::Pointer {
+                                pointee: right_pointee,
+                                ..
+                            },
+                        ) => {
+                            self.ensure_pointer_pointee_types_compatible(
+                                left_pointee,
+                                right_pointee,
+                                false,
+                            )?;
+                            Ok(DeclType::Scalar(CType::Int))
+                        }
+                        (DeclType::Pointer { .. }, DeclType::Scalar(CType::Double))
+                        | (DeclType::Scalar(CType::Double), DeclType::Pointer { .. })
+                        | (DeclType::Array2DPointer { .. }, DeclType::Scalar(CType::Double))
+                        | (DeclType::Scalar(CType::Double), DeclType::Array2DPointer { .. }) => {
+                            Err(CustError::new("cannot compare pointer with double value"))
+                        }
+                        (DeclType::Pointer { .. }, DeclType::Scalar(_))
+                        | (DeclType::Array2DPointer { .. }, DeclType::Scalar(_))
+                            if !self.generic_expr_is_null_pointer_constant(right) =>
+                        {
+                            Err(CustError::new(
+                                "cannot compare pointer with nonzero integer",
+                            ))
+                        }
+                        (DeclType::Scalar(_), DeclType::Pointer { .. })
+                        | (DeclType::Scalar(_), DeclType::Array2DPointer { .. })
+                            if !self.generic_expr_is_null_pointer_constant(left) =>
+                        {
+                            Err(CustError::new(
+                                "cannot compare pointer with nonzero integer",
+                            ))
+                        }
+                        (DeclType::Pointer { .. }, DeclType::Scalar(_))
+                        | (DeclType::Array2DPointer { .. }, DeclType::Scalar(_))
+                        | (DeclType::Scalar(_), DeclType::Pointer { .. })
+                        | (DeclType::Scalar(_), DeclType::Array2DPointer { .. })
+                        | (DeclType::Scalar(_), DeclType::Scalar(_)) => {
+                            Ok(DeclType::Scalar(CType::Int))
+                        }
+                        _ => Err(CustError::new(
+                            "equality operands must be scalar or pointer values",
+                        )),
+                    },
+                    BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+                        match (&left_type, &right_type) {
+                            (
+                                DeclType::Pointer {
+                                    pointee: PointeeType::Void,
+                                    ..
+                                },
+                                _,
+                            )
+                            | (
+                                _,
+                                DeclType::Pointer {
+                                    pointee: PointeeType::Void,
+                                    ..
+                                },
+                            ) => Err(CustError::new(
+                                "pointer to void ordering comparisons are not supported",
+                            )),
+                            (DeclType::Pointer { .. }, DeclType::Scalar(CType::Double))
+                            | (DeclType::Scalar(CType::Double), DeclType::Pointer { .. }) => {
+                                Err(CustError::new("cannot compare pointer with double value"))
+                            }
+                            (DeclType::Pointer { .. }, DeclType::Scalar(_))
+                            | (DeclType::Scalar(_), DeclType::Pointer { .. }) => Err(
+                                CustError::new("pointer ordering comparisons are not supported"),
+                            ),
+                            (
+                                DeclType::Pointer {
+                                    pointee: left_pointee,
+                                    ..
+                                },
+                                DeclType::Pointer {
+                                    pointee: right_pointee,
+                                    ..
+                                },
+                            ) => {
+                                self.ensure_pointer_pointee_types_compatible(
+                                    left_pointee,
+                                    right_pointee,
+                                    false,
+                                )?;
+                                Ok(DeclType::Scalar(CType::Int))
+                            }
+                            (DeclType::Scalar(_), DeclType::Scalar(_)) => {
+                                Ok(DeclType::Scalar(CType::Int))
+                            }
+                            _ => Err(CustError::new(
+                                "ordering operands must be scalar or pointer values",
+                            )),
+                        }
+                    }
+                    BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
+                        if matches!(
+                            (&left_type, &right_type),
+                            (
+                                DeclType::Scalar(_)
+                                    | DeclType::Pointer { .. }
+                                    | DeclType::Array2DPointer { .. },
+                                DeclType::Scalar(_)
+                                    | DeclType::Pointer { .. }
+                                    | DeclType::Array2DPointer { .. }
+                            )
+                        ) {
+                            Ok(DeclType::Scalar(CType::Int))
+                        } else {
+                            Err(CustError::new(
+                                "logical operands must be scalar or pointer values",
+                            ))
+                        }
+                    }
+                };
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                let cond_type = self.non_evaluating_generic_selection_type(cond, aliases)?;
+                if matches!(&cond_type, DeclType::Void) {
+                    self.reject_void_scalar_operand(cond)?;
+                }
+                match cond_type {
+                    DeclType::Scalar(_)
+                    | DeclType::Pointer { .. }
+                    | DeclType::Array2DPointer { .. } => {}
+                    DeclType::Void => unreachable!("void conditions return above"),
+                    DeclType::Struct(_) => {
+                        return Err(CustError::new("struct value used as scalar expression"));
+                    }
+                    _ => {
+                        return Err(CustError::new(
+                            "conditional condition requires a scalar expression",
+                        ));
+                    }
+                }
+                let then_type = self.non_evaluating_generic_selection_type(then_expr, aliases)?;
+                let else_type = self.non_evaluating_generic_selection_type(else_expr, aliases)?;
+                return self.generic_conditional_expression_type_from_types(
+                    then_expr, else_expr, then_type, else_type,
+                );
+            }
+            Expr::Comma(left, right) => {
+                self.non_evaluating_generic_selection_type(left, aliases)?;
+                return self.non_evaluating_generic_selection_type(right, aliases);
+            }
+            Expr::StructGet { .. }
+            | Expr::StructSet { .. }
+            | Expr::StructCompoundSet { .. }
+            | Expr::StructArrayGet { .. }
+            | Expr::StructElementGet { .. }
+            | Expr::StructElementSet { .. }
+            | Expr::StructElementCompoundSet { .. }
+            | Expr::StructPtrGet { .. }
+            | Expr::StructPtrArrayGet { .. }
+            | Expr::StructPtrSet { .. }
+            | Expr::StructPtrCompoundSet { .. }
+            | Expr::StructFieldArrayElementGet { .. }
+            | Expr::StructFieldArrayElementSet { .. }
+            | Expr::StructFieldArrayElementCompoundSet { .. }
+            | Expr::AggregateFieldGet { .. }
+            | Expr::AggregateFieldSet { .. }
+            | Expr::AggregateFieldCompoundSet { .. } => {
+                if let Some(declared_type) =
+                    self.non_evaluating_aggregate_field_expr_type(expr, aliases)?
+                {
+                    return Ok(declared_type);
+                }
+            }
+            _ => {}
+        }
+        self.generic_selection_type(expr)
+    }
+
+    fn non_evaluating_selected_generic_association<'a>(
+        &self,
+        expr: &'a Expr,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<&'a Expr> {
+        let depth = self.generic_selection_validation_depth.get();
+        if depth >= MAX_GENERIC_SELECTION_VALIDATION_DEPTH {
+            return Err(CustError::new(format!(
+                "generic selection validation nesting limit of {MAX_GENERIC_SELECTION_VALIDATION_DEPTH} exceeded"
+            )));
+        }
+        self.generic_selection_validation_depth.set(depth + 1);
+        let result = self.non_evaluating_selected_generic_association_at_depth(expr, aliases);
+        self.generic_selection_validation_depth.set(depth);
+        result
+    }
+
+    fn non_evaluating_selected_generic_association_at_depth<'a>(
+        &self,
+        expr: &'a Expr,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<&'a Expr> {
+        let Expr::GenericSelection {
+            controlling,
+            associations,
+            default,
+            no_match_error,
+        } = expr
+        else {
+            return Err(CustError::new("expected generic selection expression"));
+        };
+        let controlling_type = self.non_evaluating_generic_selection_type(controlling, aliases)?;
+        let mut selected = None;
+        for (association_type, association) in associations {
+            self.non_evaluating_generic_selection_type(association, aliases)?;
+            if association_type == &controlling_type {
+                selected = Some(association);
+            }
+        }
+        if let Some(default) = default {
+            self.non_evaluating_generic_selection_type(default, aliases)?;
+        }
+        selected.or(default.as_deref()).ok_or_else(|| CustError {
+            message: no_match_error.clone(),
+            io_error: false,
+        })
+    }
+
+    fn begin_double_storage_call_analysis(
+        &self,
+        visited_functions: &mut HashSet<String>,
+        name: &str,
+    ) -> CustResult<bool> {
+        if visited_functions.contains(name) {
+            return Ok(false);
+        }
+        if visited_functions.len() >= self.double_storage_analysis_call_depth_limit.get() {
+            return Err(CustError::new(format!(
+                "function call depth limit exceeded while analyzing '{name}'"
+            )));
+        }
+        visited_functions.insert(name.to_string());
+        Ok(true)
+    }
+
+    fn double_storage_call_parameter_scope(
+        &self,
+        function: &Function,
+        args: &[Expr],
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        argument_aliases: Option<&[Vec<HashMap<String, DoubleStorageFact>>]>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<DoubleStorageCallParameterScope> {
+        let mut parameter_scope = Self::double_storage_parameter_scope(function);
+        let mut parameterized = false;
+        let mut aggregate_parameter_targets: Vec<(
+            DoubleStorageAggregateTarget,
+            DoubleStorageAggregateTarget,
+        )> = Vec::new();
+        let mut nested_parameter_targets = Vec::new();
+        let mut aggregate_argument_targets = Vec::new();
+        for (index, (param, arg)) in function.params.iter().zip(args).enumerate() {
+            let aliases = argument_aliases
+                .and_then(|argument_aliases| argument_aliases.get(index))
+                .map(Vec::as_slice)
+                .unwrap_or(aliases);
+            let mut copied_pointer_targets = HashMap::new();
+            {
+                let fact = parameter_scope
+                    .get_mut(&param.name)
+                    .expect("function parameters have double storage facts");
+                if param.kind == ParamKind::Pointer {
+                    fact.has_double_storage = self
+                        .non_evaluating_expr_has_double_storage_with_cache(
+                            arg,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    parameterized |= fact.has_double_storage;
+                    if matches!(param.ty, ParamType::Struct(_)) {
+                        let targets = self.non_evaluating_aggregate_targets_with_cache(
+                            arg,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                        if !targets.is_empty() {
+                            aggregate_argument_targets.push((param.name.clone(), targets.clone()));
+                            if targets.len() == 1 {
+                                let (target_name, target_scope_index) = match &targets[0] {
+                                    DoubleStorageAggregateTarget::Direct { name, scope_index }
+                                    | DoubleStorageAggregateTarget::Element {
+                                        name,
+                                        scope_index,
+                                        ..
+                                    } => (name, *scope_index),
+                                    DoubleStorageAggregateTarget::Possible(_) => unreachable!(
+                                        "non_evaluating_aggregate_targets flattens possible targets"
+                                    ),
+                                };
+                                if let Some(source) = aliases
+                                    .get(target_scope_index)
+                                    .and_then(|scope| scope.get(target_name))
+                                {
+                                    fact.double_storage_fields =
+                                        source.double_storage_fields.clone();
+                                    fact.double_storage_element_fields =
+                                        Self::aggregate_target_double_storage_element_fields(
+                                            &targets[0],
+                                            aliases,
+                                        );
+                                    copied_pointer_targets = Self::aggregate_target_pointer_targets(
+                                        &targets[0],
+                                        aliases,
+                                    );
+                                }
+                            } else {
+                                for target in &targets {
+                                    fact.double_storage_fields.extend(
+                                        Self::aggregate_target_double_storage_fields(
+                                            target, aliases,
+                                        ),
+                                    );
+                                    Self::merge_aggregate_pointer_targets(
+                                        &mut copied_pointer_targets,
+                                        &Self::aggregate_target_pointer_targets(target, aliases),
+                                    );
+                                }
+                            }
+                            let local_target = if targets.len() == 1
+                                && Self::double_storage_aggregate_target_name(&targets[0])
+                                    .is_some_and(|(scope_index, _)| scope_index == 0)
+                            {
+                                targets[0].clone()
+                            } else if targets.len() == 1 {
+                                aggregate_parameter_targets
+                                    .iter()
+                                    .find(|(target, _)| target == &targets[0])
+                                    .map(|(_, target)| target.clone())
+                                    .unwrap_or_else(|| {
+                                        let target = match &targets[0] {
+                                            DoubleStorageAggregateTarget::Direct { .. } => {
+                                                DoubleStorageAggregateTarget::Direct {
+                                                    name: param.name.clone(),
+                                                    scope_index: 1,
+                                                }
+                                            }
+                                            DoubleStorageAggregateTarget::Element { index, .. } => {
+                                                DoubleStorageAggregateTarget::Element {
+                                                    name: param.name.clone(),
+                                                    scope_index: 1,
+                                                    index: *index,
+                                                }
+                                            }
+                                            DoubleStorageAggregateTarget::Possible(_) => {
+                                                unreachable!(
+                                                    "non_evaluating_aggregate_targets flattens possible targets"
+                                                )
+                                            }
+                                        };
+                                        aggregate_parameter_targets
+                                            .push((targets[0].clone(), target.clone()));
+                                        target
+                                    })
+                            } else {
+                                DoubleStorageAggregateTarget::Direct {
+                                    name: param.name.clone(),
+                                    scope_index: 1,
+                                }
+                            };
+                            fact.aggregate_target = Some(local_target);
+                            parameterized = true;
+                        }
+                    }
+                } else if param.kind == ParamKind::Struct {
+                    fact.double_storage_fields = self.aggregate_argument_double_storage_fields(
+                        arg,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                        arg,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    parameterized |= !fact.double_storage_fields.is_empty();
+                }
+            }
+            if !copied_pointer_targets.is_empty() {
+                let remapped_targets = Self::seed_parameter_aggregate_pointer_targets(
+                    &param.name,
+                    copied_pointer_targets,
+                    aliases,
+                    &mut parameter_scope,
+                    &mut nested_parameter_targets,
+                );
+                parameter_scope
+                    .get_mut(&param.name)
+                    .expect("function parameters retain their double storage facts")
+                    .aggregate_pointer_targets = remapped_targets;
+                parameterized = true;
+            }
+        }
+        Ok((
+            parameter_scope,
+            parameterized,
+            nested_parameter_targets,
+            aggregate_parameter_targets,
+            aggregate_argument_targets,
+        ))
+    }
+
+    fn seed_parameter_aggregate_pointer_targets(
+        parameter_name: &str,
+        targets: HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+        parameter_scope: &mut HashMap<String, DoubleStorageFact>,
+        nested_parameter_targets: &mut Vec<(DoubleStorageAggregateTarget, String)>,
+    ) -> HashMap<Vec<String>, DoubleStorageAggregateTarget> {
+        let mut remapped_targets = HashMap::new();
+        let mut ordered_targets = targets.into_iter().collect::<Vec<_>>();
+        ordered_targets.sort_by(|left, right| left.0.cmp(&right.0));
+        for (target_index, (path, original_target)) in ordered_targets.into_iter().enumerate() {
+            if Self::double_storage_aggregate_target_name(&original_target)
+                .is_some_and(|(scope_index, _)| scope_index == 0)
+            {
+                remapped_targets.insert(path, original_target);
+                continue;
+            }
+            let synthetic_name = format!("\0aggregate-target:{parameter_name}:{target_index}");
+            let synthetic_target = match &original_target {
+                DoubleStorageAggregateTarget::Element { index, .. } => {
+                    DoubleStorageAggregateTarget::Element {
+                        name: synthetic_name.clone(),
+                        scope_index: 1,
+                        index: *index,
+                    }
+                }
+                DoubleStorageAggregateTarget::Direct { .. }
+                | DoubleStorageAggregateTarget::Possible(_) => {
+                    DoubleStorageAggregateTarget::Direct {
+                        name: synthetic_name.clone(),
+                        scope_index: 1,
+                    }
+                }
+            };
+            parameter_scope.insert(
+                synthetic_name.clone(),
+                DoubleStorageFact {
+                    has_double_storage: false,
+                    declared_type: None,
+                    object_is_const: false,
+                    double_storage_fields: Self::aggregate_target_double_storage_fields(
+                        &original_target,
+                        aliases,
+                    ),
+                    double_storage_element_fields:
+                        Self::aggregate_target_double_storage_element_fields(
+                            &original_target,
+                            aliases,
+                        ),
+                    aggregate_pointer_targets: HashMap::new(),
+                    aggregate_target: Some(synthetic_target.clone()),
+                    aggregate_fields_written: false,
+                    static_local_id: None,
+                },
+            );
+            nested_parameter_targets.push((original_target, synthetic_name));
+            remapped_targets.insert(path, synthetic_target);
+        }
+        remapped_targets
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn remap_double_storage_call_target(
+        &self,
+        target: DoubleStorageAggregateTarget,
+        function: &Function,
+        args: &[Expr],
+        nested_parameter_targets: &[(DoubleStorageAggregateTarget, String)],
+        aggregate_argument_targets: &[(String, Vec<DoubleStorageAggregateTarget>)],
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<Vec<DoubleStorageAggregateTarget>> {
+        let mut pending = vec![target];
+        let mut remapped = Vec::new();
+        while let Some(target) = pending.pop() {
+            if let DoubleStorageAggregateTarget::Possible(possible) = target {
+                pending.extend(possible);
+                continue;
+            }
+            let Some((scope_index, target_name)) =
+                Self::double_storage_aggregate_target_name(&target)
+            else {
+                continue;
+            };
+            if scope_index == 0 {
+                if !remapped.contains(&target) {
+                    remapped.push(target);
+                }
+                continue;
+            }
+            if scope_index != 1 {
+                continue;
+            }
+            let replacement = if let Some((original, _)) = nested_parameter_targets
+                .iter()
+                .find(|(_, synthetic_name)| synthetic_name == target_name)
+            {
+                vec![original.clone()]
+            } else if let Some((_, targets)) = aggregate_argument_targets
+                .iter()
+                .find(|(parameter_name, _)| parameter_name == target_name)
+            {
+                targets.clone()
+            } else if let Some((_, argument)) = function
+                .params
+                .iter()
+                .zip(args)
+                .find(|(param, _)| param.name == target_name)
+            {
+                self.non_evaluating_aggregate_targets_with_cache(
+                    argument,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?
+            } else {
+                Vec::new()
+            };
+            let relative_index = match target {
+                DoubleStorageAggregateTarget::Element { index, .. } => index,
+                DoubleStorageAggregateTarget::Direct { .. }
+                | DoubleStorageAggregateTarget::Possible(_) => None,
+            };
+            for mut replacement in replacement {
+                if let (Some(relative_index), DoubleStorageAggregateTarget::Element { index, .. }) =
+                    (relative_index, &mut replacement)
+                {
+                    *index = Some(relative_index);
+                }
+                if !remapped.contains(&replacement) {
+                    remapped.push(replacement);
+                }
+            }
+        }
+        Ok(remapped)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn remap_double_storage_call_pointer_targets(
+        &self,
+        targets: HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+        function: &Function,
+        args: &[Expr],
+        nested_parameter_targets: &[(DoubleStorageAggregateTarget, String)],
+        aggregate_argument_targets: &[(String, Vec<DoubleStorageAggregateTarget>)],
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<HashMap<Vec<String>, DoubleStorageAggregateTarget>> {
+        let mut remapped_targets = HashMap::new();
+        for (path, target) in targets {
+            let mut remapped_target = None;
+            for target in self.remap_double_storage_call_target(
+                target,
+                function,
+                args,
+                nested_parameter_targets,
+                aggregate_argument_targets,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )? {
+                Self::merge_double_storage_aggregate_target(&mut remapped_target, &Some(target));
+            }
+            if let Some(target) = remapped_target {
+                remapped_targets.insert(path, target);
+            }
+        }
+        Ok(remapped_targets)
+    }
+
+    fn analyze_double_storage_call(
         &self,
         name: &str,
-        argument: usize,
-        expr: &Expr,
-    ) -> CustResult<()> {
-        if let Expr::PointerCast { expr, .. } = expr {
-            return self.validate_non_evaluating_memory_double_storage(name, argument, expr);
+        args: &[Expr],
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        argument_aliases: Option<&[Vec<HashMap<String, DoubleStorageFact>>]>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<DoubleStorageAnalysis> {
+        let Some(function) = self.functions.get(name) else {
+            return Ok(DoubleStorageAnalysis::default());
+        };
+        if visited_functions.len() >= self.double_storage_analysis_call_depth_limit.get()
+            && matches!(
+                function.return_type,
+                ReturnType::Scalar(CType::Bool | CType::Int | CType::Char)
+            )
+            && function.params.iter().all(|param| {
+                param.kind == ParamKind::Scalar
+                    && matches!(
+                        param.ty,
+                        ParamType::Scalar(CType::Bool | CType::Int | CType::Char)
+                    )
+            })
+            && aliases.iter().all(|scope| {
+                scope
+                    .values()
+                    .all(|fact| matches!(fact.declared_type, None | Some(DeclType::Scalar(_))))
+            })
+        {
+            // The bounded provenance analyzer uses larger host stack frames than interpreted
+            // calls. Once its lower depth limit is reached, a scalar-only call cannot carry or
+            // mutate any tracked pointer/aggregate provenance across the call boundary. Let the
+            // ordinary evaluated call continue to Cust's separate runtime depth limit instead of
+            // rejecting otherwise supported scalar global initialization.
+            return Ok(DoubleStorageAnalysis::default());
         }
-        let has_double_storage = self.expr_is_unsupported_double_pointer(expr)
+        let (
+            parameter_scope,
+            parameterized,
+            nested_parameter_targets,
+            aggregate_parameter_targets,
+            aggregate_argument_targets,
+        ) = self.double_storage_call_parameter_scope(
+            function,
+            args,
+            visited_functions,
+            completed_functions,
+            argument_aliases,
+            aliases,
+        )?;
+        let parameter_cache_key = if parameterized {
+            Self::parameterized_double_storage_cache_key(name, function, &parameter_scope)
+        } else {
+            name.to_string()
+        };
+        let cache_key = format!(
+            "{parameter_cache_key}\0{aggregate_argument_targets:?}\0{aggregate_parameter_targets:?}\0{nested_parameter_targets:?}\0{}",
+            Self::double_storage_global_cache_signature(aliases)
+        );
+        if let Some(result) = completed_functions.get(&cache_key) {
+            return Ok(result.clone());
+        }
+        let recursive_fallback =
+            !self.begin_double_storage_call_analysis(visited_functions, name)?;
+        let recursive_fallback_key = format!("\0recursive-fallback:{name}");
+        if recursive_fallback {
+            if let Some(result) = completed_functions.get(&recursive_fallback_key) {
+                return Ok(result.clone());
+            }
+            let fallback = DoubleStorageAnalysis {
+                returns_double_storage: matches!(
+                    &function.return_type,
+                    ReturnType::Scalar(CType::Double)
+                        | ReturnType::Pointer {
+                            ty: PointeeType::Void
+                                | PointeeType::Scalar(CType::Double)
+                                | PointeeType::Struct(_),
+                            ..
+                        }
+                        | ReturnType::Array2DPointer {
+                            elem_type: CType::Double,
+                            ..
+                        }
+                ),
+                ..DoubleStorageAnalysis::default()
+            };
+            completed_functions.insert(recursive_fallback_key.clone(), fallback);
+        }
+        let initial_parameter_scope = parameter_scope.clone();
+        let initial_global_scope = aliases
+            .first()
+            .cloned()
+            .unwrap_or_else(|| self.double_storage_globals.clone());
+        let mut callee_aliases = vec![initial_global_scope.clone(), parameter_scope];
+        let analysis = self.statements_may_return_double_storage_with_aliases(
+            &function.body,
+            visited_functions,
+            completed_functions,
+            &mut callee_aliases,
+            true,
+        );
+        if !recursive_fallback {
+            visited_functions.remove(name);
+        }
+        let mut analysis = analysis?;
+        let mut returned_targets = Vec::new();
+        for target in analysis.returned_targets.drain(..) {
+            for target in self.remap_double_storage_call_target(
+                target,
+                function,
+                args,
+                &nested_parameter_targets,
+                &aggregate_argument_targets,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )? {
+                if !returned_targets.contains(&target) {
+                    returned_targets.push(target);
+                }
+            }
+        }
+        analysis.returned_targets = returned_targets;
+        analysis.returned_pointer_targets = self.remap_double_storage_call_pointer_targets(
+            std::mem::take(&mut analysis.returned_pointer_targets),
+            function,
+            args,
+            &nested_parameter_targets,
+            &aggregate_argument_targets,
+            visited_functions,
+            completed_functions,
+            aliases,
+        )?;
+        for param in &function.params {
+            if param.kind == ParamKind::Pointer && matches!(param.ty, ParamType::Struct(_)) {
+                let initial = initial_parameter_scope
+                    .get(&param.name)
+                    .expect("function parameters have double storage facts");
+                let final_fact = callee_aliases
+                    .last()
+                    .expect("callee analysis retains its parameter scope")
+                    .get(&param.name)
+                    .expect("function parameters have double storage facts");
+                let mut exit_fields = HashSet::new();
+                let mut exit_element_fields = HashMap::new();
+                let mut exit_pointer_targets = HashMap::new();
+                let mut fields_written = false;
+                if !analysis.always_returns {
+                    exit_fields.extend(final_fact.double_storage_fields.iter().cloned());
+                    Self::merge_double_storage_element_fields(
+                        &mut exit_element_fields,
+                        &final_fact.double_storage_element_fields,
+                    );
+                    Self::merge_aggregate_pointer_targets(
+                        &mut exit_pointer_targets,
+                        &final_fact.aggregate_pointer_targets,
+                    );
+                    fields_written |= final_fact.aggregate_fields_written;
+                }
+                for return_aliases in &analysis.return_aliases {
+                    if let Some(return_fact) = return_aliases
+                        .get(1)
+                        .and_then(|scope| scope.get(&param.name))
+                    {
+                        exit_fields.extend(return_fact.double_storage_fields.iter().cloned());
+                        Self::merge_double_storage_element_fields(
+                            &mut exit_element_fields,
+                            &return_fact.double_storage_element_fields,
+                        );
+                        Self::merge_aggregate_pointer_targets(
+                            &mut exit_pointer_targets,
+                            &return_fact.aggregate_pointer_targets,
+                        );
+                        fields_written |= return_fact.aggregate_fields_written;
+                    }
+                }
+                if exit_fields.remove(&vec!["\0recursive-widened".to_string()]) {
+                    analysis
+                        .widened_parameter_targets
+                        .insert(param.name.clone());
+                }
+                if initial.double_storage_fields != exit_fields
+                    || initial.double_storage_element_fields != exit_element_fields
+                    || initial.aggregate_pointer_targets != exit_pointer_targets
+                    || fields_written
+                {
+                    analysis.changed_parameter_fields.insert(
+                        param.name.clone(),
+                        (exit_fields, exit_element_fields, exit_pointer_targets),
+                    );
+                }
+            }
+        }
+        for (target, synthetic_name) in &nested_parameter_targets {
+            let initial = initial_parameter_scope
+                .get(synthetic_name)
+                .expect("nested aggregate targets have initial facts");
+            let final_fact = callee_aliases
+                .last()
+                .expect("callee analysis retains its parameter scope")
+                .get(synthetic_name)
+                .expect("nested aggregate targets retain their facts");
+            let mut exit_fields = HashSet::new();
+            let mut exit_element_fields = HashMap::new();
+            let mut exit_pointer_targets = HashMap::new();
+            let mut fields_written = false;
+            if !analysis.always_returns {
+                exit_fields.extend(final_fact.double_storage_fields.iter().cloned());
+                Self::merge_double_storage_element_fields(
+                    &mut exit_element_fields,
+                    &final_fact.double_storage_element_fields,
+                );
+                Self::merge_aggregate_pointer_targets(
+                    &mut exit_pointer_targets,
+                    &final_fact.aggregate_pointer_targets,
+                );
+                fields_written |= final_fact.aggregate_fields_written;
+            }
+            for return_aliases in &analysis.return_aliases {
+                if let Some(return_fact) = return_aliases
+                    .get(1)
+                    .and_then(|scope| scope.get(synthetic_name))
+                {
+                    exit_fields.extend(return_fact.double_storage_fields.iter().cloned());
+                    Self::merge_double_storage_element_fields(
+                        &mut exit_element_fields,
+                        &return_fact.double_storage_element_fields,
+                    );
+                    Self::merge_aggregate_pointer_targets(
+                        &mut exit_pointer_targets,
+                        &return_fact.aggregate_pointer_targets,
+                    );
+                    fields_written |= return_fact.aggregate_fields_written;
+                }
+            }
+            if initial.double_storage_fields != exit_fields
+                || initial.double_storage_element_fields != exit_element_fields
+                || initial.aggregate_pointer_targets != exit_pointer_targets
+                || fields_written
+            {
+                analysis.changed_aggregate_target_facts.push((
+                    target.clone(),
+                    exit_fields,
+                    exit_element_fields,
+                    exit_pointer_targets,
+                ));
+            }
+        }
+        for (_, _, pointer_targets) in analysis.changed_parameter_fields.values_mut() {
+            *pointer_targets = self.remap_double_storage_call_pointer_targets(
+                std::mem::take(pointer_targets),
+                function,
+                args,
+                &nested_parameter_targets,
+                &aggregate_argument_targets,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?;
+        }
+        for (_, _, _, pointer_targets) in &mut analysis.changed_aggregate_target_facts {
+            *pointer_targets = self.remap_double_storage_call_pointer_targets(
+                std::mem::take(pointer_targets),
+                function,
+                args,
+                &nested_parameter_targets,
+                &aggregate_argument_targets,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?;
+        }
+        let mut exit_aliases = (!analysis.always_returns).then_some(callee_aliases);
+        for return_aliases in &analysis.return_aliases {
+            if let Some(exit_aliases) = &mut exit_aliases {
+                Self::merge_double_storage_aliases(exit_aliases, return_aliases);
+            } else {
+                exit_aliases = Some(return_aliases.clone());
+            }
+        }
+        if let Some(exit_global_scope) = exit_aliases.and_then(|aliases| aliases.into_iter().next())
+            && exit_global_scope != initial_global_scope
+        {
+            analysis.changed_global_facts = Some(exit_global_scope);
+        }
+        if recursive_fallback {
+            for (name, (fields, element_fields, _)) in &mut analysis.changed_parameter_fields {
+                for changed_fields in element_fields.values() {
+                    fields.extend(changed_fields.iter().cloned());
+                }
+                if !element_fields.is_empty() {
+                    element_fields.clear();
+                    analysis.widened_parameter_targets.insert(name.clone());
+                }
+            }
+            for (target, _, _, pointer_targets) in &mut analysis.changed_aggregate_target_facts {
+                Self::widen_recursive_double_storage_aggregate_target(target);
+                for target in pointer_targets.values_mut() {
+                    Self::widen_recursive_double_storage_aggregate_target(target);
+                }
+            }
+            for target in &mut analysis.returned_targets {
+                Self::widen_recursive_double_storage_aggregate_target(target);
+            }
+            for target in analysis.returned_pointer_targets.values_mut() {
+                Self::widen_recursive_double_storage_aggregate_target(target);
+            }
+            completed_functions.remove(&recursive_fallback_key);
+        } else {
+            completed_functions.insert(cache_key, analysis.clone());
+        }
+        Ok(analysis)
+    }
+
+    fn analyze_double_storage_call_from_source_order(
+        &self,
+        name: &str,
+        args: &[Expr],
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<DoubleStorageAnalysis> {
+        let mut call_aliases = aliases.to_vec();
+        let mut argument_aliases = Vec::with_capacity(args.len());
+        for argument in args {
+            let pre_effect_aliases = call_aliases.clone();
+            self.update_double_storage_aliases_from_expr(
+                argument,
+                visited_functions,
+                completed_functions,
+                &mut call_aliases,
+            )?;
+            argument_aliases.push(self.double_storage_value_aliases_after_effects(
+                argument,
+                &pre_effect_aliases,
+                &call_aliases,
+                visited_functions,
+                completed_functions,
+            )?);
+        }
+        self.analyze_double_storage_call(
+            name,
+            args,
+            visited_functions,
+            completed_functions,
+            Some(&argument_aliases),
+            &call_aliases,
+        )
+    }
+
+    fn non_evaluating_array_index(expr: &Expr) -> Option<usize> {
+        match expr {
+            Expr::Number(value) => usize::try_from(*value).ok(),
+            Expr::Cast { ty, expr } if *ty != CType::Double => {
+                Self::non_evaluating_array_index(expr)
+                    .and_then(|value| i64::try_from(value).ok())
+                    .and_then(|value| usize::try_from(ty.normalize(value)).ok())
+            }
+            Expr::UnaryPlus(expr) => Self::non_evaluating_array_index(expr),
+            _ => None,
+        }
+    }
+
+    fn non_evaluating_array_offset(expr: &Expr) -> Option<i64> {
+        match expr {
+            Expr::Number(value) => Some(*value),
+            Expr::Cast { ty, expr } if *ty != CType::Double => {
+                Self::non_evaluating_array_offset(expr).map(|value| ty.normalize(value))
+            }
+            Expr::UnaryPlus(expr) => Self::non_evaluating_array_offset(expr),
+            Expr::UnaryMinus(expr) => Self::non_evaluating_array_offset(expr)?.checked_neg(),
+            _ => None,
+        }
+    }
+
+    fn double_storage_element_fields_for_index(
+        fact: &DoubleStorageFact,
+        index: &Expr,
+    ) -> HashSet<Vec<String>> {
+        let mut fields = fact.double_storage_fields.clone();
+        if let Some(index) = Self::non_evaluating_array_index(index) {
+            if let Some(element_fields) = fact.double_storage_element_fields.get(&index) {
+                fields.extend(element_fields.iter().cloned());
+            }
+        } else {
+            for element_fields in fact.double_storage_element_fields.values() {
+                fields.extend(element_fields.iter().cloned());
+            }
+        }
+        fields
+    }
+
+    fn merge_double_storage_element_fields(
+        target: &mut HashMap<usize, HashSet<Vec<String>>>,
+        source: &HashMap<usize, HashSet<Vec<String>>>,
+    ) {
+        for (index, fields) in source {
+            target
+                .entry(*index)
+                .or_default()
+                .extend(fields.iter().cloned());
+        }
+    }
+
+    fn non_evaluating_aggregate_target(
+        &self,
+        expr: &Expr,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> Option<DoubleStorageAggregateTarget> {
+        match expr {
+            Expr::Var(name) | Expr::AddressOf(name) => aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+                .and_then(|fact| fact.aggregate_target.clone()),
+            Expr::PointerCast { expr, .. }
+            | Expr::Assign { value: expr, .. }
+            | Expr::Comma(_, expr) => self.non_evaluating_aggregate_target(expr, aliases),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let mut targets = self.non_evaluating_aggregate_targets(then_expr, aliases);
+                targets.extend(self.non_evaluating_aggregate_targets(else_expr, aliases));
+                targets.dedup();
+                match targets.as_slice() {
+                    [] => None,
+                    [target] => Some(target.clone()),
+                    _ => Some(DoubleStorageAggregateTarget::Possible(targets)),
+                }
+            }
+            Expr::Increment { target, .. } => self.non_evaluating_aggregate_target(target, aliases),
+            Expr::AddressOfArray { name, index } => {
+                self.non_evaluating_indexed_aggregate_target(name, index, aliases)
+            }
+            Expr::Binary(base, BinaryOp::Add, offset) => {
+                let mut target = self.non_evaluating_aggregate_target(base, aliases)?;
+                Self::offset_double_storage_aggregate_target(&mut target, offset, false);
+                Some(target)
+            }
+            Expr::Binary(base, BinaryOp::Sub, offset) => {
+                let mut target = self.non_evaluating_aggregate_target(base, aliases)?;
+                Self::offset_double_storage_aggregate_target(&mut target, offset, true);
+                Some(target)
+            }
+            Expr::GenericSelection { .. } => self
+                .non_evaluating_selected_generic_association(expr, aliases)
+                .ok()
+                .and_then(|selected| self.non_evaluating_aggregate_target(selected, aliases)),
+            Expr::StructGet { name, fields } => aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))?
+                .aggregate_pointer_targets
+                .get(fields)
+                .cloned(),
+            Expr::StructPtrGet { pointer, fields } => {
+                let target = self.non_evaluating_aggregate_target(pointer, aliases)?;
+                Self::aggregate_pointer_target_for_field_path(&target, fields, aliases)
+                    .and_then(|(target, remaining)| remaining.is_empty().then_some(target))
+            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => {
+                let fact = aliases.iter().rev().find_map(|scope| scope.get(name))?;
+                if let Some(index) = Self::non_evaluating_array_index(index) {
+                    let mut path = vec![format!("\0element:{index}")];
+                    path.extend(fields.iter().cloned());
+                    fact.aggregate_pointer_targets.get(&path).cloned()
+                } else {
+                    let mut targets = Vec::new();
+                    for (path, target) in &fact.aggregate_pointer_targets {
+                        if path.len() == fields.len() + 1
+                            && path
+                                .first()
+                                .is_some_and(|element| element.starts_with("\0element:"))
+                            && path[1..] == fields[..]
+                        {
+                            Self::collect_double_storage_aggregate_targets(target, &mut targets);
+                        }
+                    }
+                    match targets.as_slice() {
+                        [] => None,
+                        [target] => Some(target.clone()),
+                        _ => Some(DoubleStorageAggregateTarget::Possible(targets)),
+                    }
+                }
+            }
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            } => {
+                let path = Self::nested_aggregate_element_field_path(array_fields, index, fields);
+                aliases
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(name))?
+                    .aggregate_pointer_targets
+                    .get(&path)
+                    .cloned()
+            }
+            _ => None,
+        }
+    }
+
+    fn non_evaluating_indexed_aggregate_target(
+        &self,
+        name: &str,
+        index: &Expr,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> Option<DoubleStorageAggregateTarget> {
+        let scope_index = aliases.iter().rposition(|scope| scope.contains_key(name))?;
+        let mut target = aliases[scope_index]
+            .get(name)
+            .and_then(|fact| fact.aggregate_target.clone())
+            .unwrap_or_else(|| DoubleStorageAggregateTarget::Element {
+                name: name.to_string(),
+                scope_index,
+                index: Some(0),
+            });
+        Self::offset_double_storage_aggregate_target(&mut target, index, false);
+        Some(target)
+    }
+
+    fn direct_double_storage_aggregate_target(
+        name: &str,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> Option<DoubleStorageAggregateTarget> {
+        aliases
+            .iter()
+            .rposition(|scope| scope.contains_key(name))
+            .map(|scope_index| DoubleStorageAggregateTarget::Direct {
+                name: name.to_string(),
+                scope_index,
+            })
+    }
+
+    fn offset_double_storage_aggregate_target(
+        target: &mut DoubleStorageAggregateTarget,
+        offset: &Expr,
+        subtract: bool,
+    ) {
+        match target {
+            DoubleStorageAggregateTarget::Element { index, .. } => {
+                *index = index.and_then(|base| {
+                    let base = i64::try_from(base).ok()?;
+                    let offset = Self::non_evaluating_array_offset(offset)?;
+                    let result = if subtract {
+                        base.checked_sub(offset)?
+                    } else {
+                        base.checked_add(offset)?
+                    };
+                    usize::try_from(result).ok()
+                });
+            }
+            DoubleStorageAggregateTarget::Possible(targets) => {
+                for target in targets {
+                    Self::offset_double_storage_aggregate_target(target, offset, subtract);
+                }
+            }
+            DoubleStorageAggregateTarget::Direct { .. } => {}
+        }
+    }
+
+    fn widen_recursive_double_storage_aggregate_target(target: &mut DoubleStorageAggregateTarget) {
+        match target {
+            DoubleStorageAggregateTarget::Element { index, .. } => *index = None,
+            DoubleStorageAggregateTarget::Possible(targets) => {
+                for target in targets {
+                    Self::widen_recursive_double_storage_aggregate_target(target);
+                }
+            }
+            DoubleStorageAggregateTarget::Direct { .. } => {}
+        }
+    }
+
+    fn collect_double_storage_aggregate_targets(
+        target: &DoubleStorageAggregateTarget,
+        targets: &mut Vec<DoubleStorageAggregateTarget>,
+    ) {
+        match target {
+            DoubleStorageAggregateTarget::Possible(possible) => {
+                for target in possible {
+                    Self::collect_double_storage_aggregate_targets(target, targets);
+                }
+            }
+            target if !targets.contains(target) => targets.push(target.clone()),
+            _ => {}
+        }
+    }
+
+    fn double_storage_aggregate_target_name(
+        target: &DoubleStorageAggregateTarget,
+    ) -> Option<(usize, &str)> {
+        match target {
+            DoubleStorageAggregateTarget::Direct { name, scope_index }
+            | DoubleStorageAggregateTarget::Element {
+                name, scope_index, ..
+            } => Some((*scope_index, name)),
+            DoubleStorageAggregateTarget::Possible(targets) => targets
+                .first()
+                .and_then(Self::double_storage_aggregate_target_name),
+        }
+    }
+
+    fn merge_double_storage_aggregate_target(
+        target: &mut Option<DoubleStorageAggregateTarget>,
+        possible: &Option<DoubleStorageAggregateTarget>,
+    ) {
+        let Some(possible) = possible else {
+            return;
+        };
+        let Some(current) = target.as_ref() else {
+            *target = Some(possible.clone());
+            return;
+        };
+        if current == possible {
+            return;
+        }
+        let mut targets = Vec::new();
+        Self::collect_double_storage_aggregate_targets(current, &mut targets);
+        Self::collect_double_storage_aggregate_targets(possible, &mut targets);
+        *target = Some(DoubleStorageAggregateTarget::Possible(targets));
+    }
+
+    fn widen_loop_aggregate_targets(aliases: &mut [HashMap<String, DoubleStorageFact>]) {
+        for scope in aliases {
+            for fact in scope.values_mut() {
+                if let Some(target) = &mut fact.aggregate_target {
+                    Self::widen_moving_aggregate_target(target);
+                }
+                for target in fact.aggregate_pointer_targets.values_mut() {
+                    Self::widen_moving_aggregate_target(target);
+                }
+            }
+        }
+    }
+
+    fn widen_moving_aggregate_target(target: &mut DoubleStorageAggregateTarget) {
+        let DoubleStorageAggregateTarget::Possible(targets) = target else {
+            return;
+        };
+        let mut flattened = Vec::new();
+        for possible in targets.iter() {
+            Self::collect_double_storage_aggregate_targets(possible, &mut flattened);
+        }
+        let mut widened: Vec<DoubleStorageAggregateTarget> = Vec::new();
+        for possible in flattened {
+            if let DoubleStorageAggregateTarget::Element {
+                name,
+                scope_index,
+                index,
+            } = &possible
+                && let Some(DoubleStorageAggregateTarget::Element {
+                    index: existing_index,
+                    ..
+                }) = widened.iter_mut().find(|existing| {
+                    matches!(
+                        existing,
+                        DoubleStorageAggregateTarget::Element {
+                            name: existing_name,
+                            scope_index: existing_scope_index,
+                            ..
+                        } if existing_name == name && existing_scope_index == scope_index
+                    )
+                })
+            {
+                if *existing_index != *index {
+                    *existing_index = None;
+                }
+                continue;
+            }
+            widened.push(possible);
+        }
+        *targets = widened;
+    }
+
+    fn non_evaluating_aggregate_targets(
+        &self,
+        expr: &Expr,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> Vec<DoubleStorageAggregateTarget> {
+        let mut targets = match expr {
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let mut targets = self.non_evaluating_aggregate_targets(then_expr, aliases);
+                targets.extend(self.non_evaluating_aggregate_targets(else_expr, aliases));
+                targets
+            }
+            Expr::Comma(_, right) => self.non_evaluating_aggregate_targets(right, aliases),
+            _ => self
+                .non_evaluating_aggregate_target(expr, aliases)
+                .map(|target| {
+                    let mut targets = Vec::new();
+                    Self::collect_double_storage_aggregate_targets(&target, &mut targets);
+                    targets
+                })
+                .unwrap_or_default(),
+        };
+        targets.dedup();
+        targets
+    }
+
+    fn non_evaluating_aggregate_targets_with_cache(
+        &self,
+        expr: &Expr,
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<Vec<DoubleStorageAggregateTarget>> {
+        let mut targets = match expr {
+            Expr::Call { name, args } => {
+                self.analyze_double_storage_call_from_source_order(
+                    name,
+                    args,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?
+                .returned_targets
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let mut targets = self.non_evaluating_aggregate_targets_with_cache(
+                    then_expr,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                targets.extend(self.non_evaluating_aggregate_targets_with_cache(
+                    else_expr,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?);
+                targets
+            }
+            Expr::Comma(_, right) => self.non_evaluating_aggregate_targets_with_cache(
+                right,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?,
+            Expr::PointerCast { expr, .. } => self.non_evaluating_aggregate_targets_with_cache(
+                expr,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?,
+            Expr::Binary(base, BinaryOp::Add | BinaryOp::Sub, offset) => {
+                let mut targets = self.non_evaluating_aggregate_targets_with_cache(
+                    base,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                for target in &mut targets {
+                    Self::offset_double_storage_aggregate_target(
+                        target,
+                        offset,
+                        matches!(expr, Expr::Binary(_, BinaryOp::Sub, _)),
+                    );
+                }
+                targets
+            }
+            Expr::GenericSelection { .. } => self.non_evaluating_aggregate_targets_with_cache(
+                self.non_evaluating_selected_generic_association(expr, aliases)?,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?,
+            _ => self.non_evaluating_aggregate_targets(expr, aliases),
+        };
+        targets.dedup();
+        Ok(targets)
+    }
+
+    fn non_evaluating_aggregate_target_with_cache(
+        &self,
+        expr: &Expr,
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<Option<DoubleStorageAggregateTarget>> {
+        let targets = self.non_evaluating_aggregate_targets_with_cache(
+            expr,
+            visited_functions,
+            completed_functions,
+            aliases,
+        )?;
+        Ok(match targets.as_slice() {
+            [] => None,
+            [target] => Some(target.clone()),
+            _ => Some(DoubleStorageAggregateTarget::Possible(targets)),
+        })
+    }
+
+    fn aggregate_target_double_storage_fields(
+        target: &DoubleStorageAggregateTarget,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> HashSet<Vec<String>> {
+        let (name, scope_index, index) = match target {
+            DoubleStorageAggregateTarget::Direct { name, scope_index } => {
+                (name, *scope_index, None)
+            }
+            DoubleStorageAggregateTarget::Element {
+                name,
+                scope_index,
+                index,
+            } => (name, *scope_index, Some(index)),
+            DoubleStorageAggregateTarget::Possible(targets) => {
+                let mut fields = HashSet::new();
+                for target in targets {
+                    fields.extend(Self::aggregate_target_double_storage_fields(
+                        target, aliases,
+                    ));
+                }
+                return fields;
+            }
+        };
+        let Some(fact) = aliases.get(scope_index).and_then(|scope| scope.get(name)) else {
+            return HashSet::new();
+        };
+        let mut fields = fact.double_storage_fields.clone();
+        match index {
+            Some(Some(index)) => {
+                if let Some(element_fields) = fact.double_storage_element_fields.get(index) {
+                    fields.extend(element_fields.iter().cloned());
+                }
+            }
+            Some(None) => {
+                for element_fields in fact.double_storage_element_fields.values() {
+                    fields.extend(element_fields.iter().cloned());
+                }
+            }
+            None => {}
+        }
+        fields
+    }
+
+    fn replace_aggregate_target_double_storage_fields(
+        target: &DoubleStorageAggregateTarget,
+        fields: HashSet<Vec<String>>,
+        aliases: &mut [HashMap<String, DoubleStorageFact>],
+    ) {
+        let (name, scope_index) = match target {
+            DoubleStorageAggregateTarget::Direct { name, scope_index }
+            | DoubleStorageAggregateTarget::Element {
+                name, scope_index, ..
+            } => (name, *scope_index),
+            DoubleStorageAggregateTarget::Possible(targets) => {
+                for target in targets {
+                    let mut conservative_fields =
+                        Self::aggregate_target_double_storage_fields(target, aliases);
+                    conservative_fields.extend(fields.iter().cloned());
+                    Self::replace_aggregate_target_double_storage_fields(
+                        target,
+                        conservative_fields,
+                        aliases,
+                    );
+                }
+                return;
+            }
+        };
+        let Some(fact) = aliases
+            .get_mut(scope_index)
+            .and_then(|scope| scope.get_mut(name))
+        else {
+            return;
+        };
+        fact.aggregate_fields_written = true;
+        match target {
+            DoubleStorageAggregateTarget::Direct { .. } => fact.double_storage_fields = fields,
+            DoubleStorageAggregateTarget::Element {
+                index: Some(index), ..
+            } => {
+                if fields.is_empty() {
+                    fact.double_storage_element_fields.remove(index);
+                } else {
+                    fact.double_storage_element_fields.insert(*index, fields);
+                }
+            }
+            DoubleStorageAggregateTarget::Element { index: None, .. } => {
+                fact.double_storage_fields.extend(fields);
+            }
+            DoubleStorageAggregateTarget::Possible(_) => {
+                unreachable!("possible aggregate targets are handled before lookup")
+            }
+        }
+    }
+
+    fn aggregate_target_double_storage_element_fields(
+        target: &DoubleStorageAggregateTarget,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> HashMap<usize, HashSet<Vec<String>>> {
+        match target {
+            DoubleStorageAggregateTarget::Direct { name, scope_index }
+            | DoubleStorageAggregateTarget::Element {
+                name, scope_index, ..
+            } => aliases
+                .get(*scope_index)
+                .and_then(|scope| scope.get(name))
+                .map(|fact| fact.double_storage_element_fields.clone())
+                .unwrap_or_default(),
+            DoubleStorageAggregateTarget::Possible(targets) => {
+                let mut element_fields = HashMap::new();
+                for target in targets {
+                    Self::merge_double_storage_element_fields(
+                        &mut element_fields,
+                        &Self::aggregate_target_double_storage_element_fields(target, aliases),
+                    );
+                }
+                element_fields
+            }
+        }
+    }
+
+    fn replace_aggregate_target_double_storage_element_fields(
+        target: &DoubleStorageAggregateTarget,
+        element_fields: HashMap<usize, HashSet<Vec<String>>>,
+        aliases: &mut [HashMap<String, DoubleStorageFact>],
+    ) {
+        match target {
+            DoubleStorageAggregateTarget::Direct { name, scope_index }
+            | DoubleStorageAggregateTarget::Element {
+                name, scope_index, ..
+            } => {
+                if let Some(fact) = aliases
+                    .get_mut(*scope_index)
+                    .and_then(|scope| scope.get_mut(name))
+                {
+                    fact.aggregate_fields_written = true;
+                    fact.double_storage_element_fields = element_fields;
+                }
+            }
+            DoubleStorageAggregateTarget::Possible(targets) => {
+                for target in targets {
+                    Self::replace_aggregate_target_double_storage_element_fields(
+                        target,
+                        element_fields.clone(),
+                        aliases,
+                    );
+                }
+            }
+        }
+    }
+
+    fn aggregate_target_has_double_storage_field(
+        target: &DoubleStorageAggregateTarget,
+        fields: &[String],
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> bool {
+        match target {
+            DoubleStorageAggregateTarget::Direct { name, scope_index } => aliases
+                .get(*scope_index)
+                .and_then(|scope| scope.get(name))
+                .is_some_and(|fact| {
+                    Self::double_storage_fields_contain(&fact.double_storage_fields, fields)
+                }),
+            DoubleStorageAggregateTarget::Element {
+                name,
+                scope_index,
+                index,
+            } => aliases
+                .get(*scope_index)
+                .and_then(|scope| scope.get(name))
+                .is_some_and(|fact| {
+                    Self::double_storage_fields_contain(&fact.double_storage_fields, fields)
+                        || index
+                            .and_then(|index| fact.double_storage_element_fields.get(&index))
+                            .is_some_and(|element_fields| {
+                                Self::double_storage_fields_contain(element_fields, fields)
+                            })
+                        || index.is_none()
+                            && fact
+                                .double_storage_element_fields
+                                .values()
+                                .any(|element_fields| {
+                                    Self::double_storage_fields_contain(element_fields, fields)
+                                })
+                }),
+            DoubleStorageAggregateTarget::Possible(targets) => targets.iter().any(|target| {
+                Self::aggregate_target_has_double_storage_field(target, fields, aliases)
+            }),
+        }
+    }
+
+    fn aggregate_pointer_target_for_field_path(
+        target: &DoubleStorageAggregateTarget,
+        fields: &[String],
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> Option<(DoubleStorageAggregateTarget, Vec<String>)> {
+        match target {
+            DoubleStorageAggregateTarget::Possible(targets) => {
+                let mut selected_target = None;
+                let mut selected_remaining = None;
+                for possible in targets {
+                    let Some((target, remaining)) =
+                        Self::aggregate_pointer_target_for_field_path(possible, fields, aliases)
+                    else {
+                        continue;
+                    };
+                    Self::merge_double_storage_aggregate_target(
+                        &mut selected_target,
+                        &Some(target),
+                    );
+                    selected_remaining.get_or_insert(remaining);
+                }
+                selected_target.zip(selected_remaining)
+            }
+            DoubleStorageAggregateTarget::Direct { name, scope_index } => aliases
+                .get(*scope_index)
+                .and_then(|scope| scope.get(name))
+                .and_then(|fact| {
+                    fact.aggregate_pointer_targets
+                        .iter()
+                        .filter_map(|(path, target)| {
+                            fields
+                                .strip_prefix(path.as_slice())
+                                .map(|remaining| (path.len(), target.clone(), remaining.to_vec()))
+                        })
+                        .max_by_key(|(prefix_len, _, _)| *prefix_len)
+                        .map(|(_, target, remaining)| (target, remaining))
+                }),
+            DoubleStorageAggregateTarget::Element {
+                name,
+                scope_index,
+                index,
+            } => aliases
+                .get(*scope_index)
+                .and_then(|scope| scope.get(name))
+                .and_then(|fact| {
+                    fact.aggregate_pointer_targets
+                        .iter()
+                        .filter_map(|(path, target)| {
+                            let (first, nested_path) = path.split_first()?;
+                            let selected_element = match index {
+                                Some(index) => {
+                                    first == &format!("\0element:{index}") || first == "\0element:*"
+                                }
+                                None => first.starts_with("\0element:"),
+                            };
+                            (selected_element && fields.starts_with(nested_path)).then(|| {
+                                (
+                                    nested_path.len(),
+                                    target.clone(),
+                                    fields[nested_path.len()..].to_vec(),
+                                )
+                            })
+                        })
+                        .max_by_key(|(prefix_len, _, _)| *prefix_len)
+                        .map(|(_, target, remaining)| (target, remaining))
+                }),
+        }
+    }
+
+    fn replace_aggregate_target_nested_double_storage_fields(
+        target: &DoubleStorageAggregateTarget,
+        prefix: &[String],
+        replacement: &HashSet<Vec<String>>,
+        has_double_storage: bool,
+        aliases: &mut [HashMap<String, DoubleStorageFact>],
+    ) {
+        let (name, scope_index) = match target {
+            DoubleStorageAggregateTarget::Direct { name, scope_index }
+            | DoubleStorageAggregateTarget::Element {
+                name, scope_index, ..
+            } => (name, *scope_index),
+            DoubleStorageAggregateTarget::Possible(targets) => {
+                for target in targets {
+                    let mut conservative_replacement = Self::selected_nested_double_storage_fields(
+                        &Self::aggregate_target_double_storage_fields(target, aliases),
+                        prefix,
+                    );
+                    conservative_replacement.extend(replacement.iter().cloned());
+                    let conservative_has_double_storage = has_double_storage
+                        || Self::aggregate_target_has_double_storage_field(target, prefix, aliases);
+                    Self::replace_aggregate_target_nested_double_storage_fields(
+                        target,
+                        prefix,
+                        &conservative_replacement,
+                        conservative_has_double_storage,
+                        aliases,
+                    );
+                }
+                return;
+            }
+        };
+        let Some(fact) = aliases
+            .get_mut(scope_index)
+            .and_then(|scope| scope.get_mut(name))
+        else {
+            return;
+        };
+        fact.aggregate_fields_written = true;
+        if prefix.iter().any(|field| field == "\0element:*") {
+            if has_double_storage {
+                fact.double_storage_fields.insert(prefix.to_vec());
+            }
+            for path in replacement {
+                let mut nested = prefix.to_vec();
+                nested.extend(path.iter().cloned());
+                fact.double_storage_fields.insert(nested);
+            }
+            return;
+        }
+        let target_fields = match target {
+            DoubleStorageAggregateTarget::Direct { .. } => &mut fact.double_storage_fields,
+            DoubleStorageAggregateTarget::Element {
+                index: Some(index), ..
+            } => fact
+                .double_storage_element_fields
+                .entry(*index)
+                .or_default(),
+            DoubleStorageAggregateTarget::Element { index: None, .. } => {
+                if has_double_storage {
+                    fact.double_storage_fields.insert(prefix.to_vec());
+                }
+                for path in replacement {
+                    let mut nested = prefix.to_vec();
+                    nested.extend(path.iter().cloned());
+                    fact.double_storage_fields.insert(nested);
+                }
+                return;
+            }
+            DoubleStorageAggregateTarget::Possible(_) => {
+                unreachable!("possible aggregate targets are handled before lookup")
+            }
+        };
+        Self::replace_nested_double_storage_fields(target_fields, prefix, replacement);
+        if has_double_storage {
+            target_fields.insert(prefix.to_vec());
+        }
+    }
+
+    fn replace_aggregate_target_nested_pointer_targets(
+        target: &DoubleStorageAggregateTarget,
+        prefix: &[String],
+        replacement: &HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+        aliases: &mut [HashMap<String, DoubleStorageFact>],
+    ) {
+        let (name, scope_index, element) = match target {
+            DoubleStorageAggregateTarget::Direct { name, scope_index } => {
+                (name, *scope_index, None)
+            }
+            DoubleStorageAggregateTarget::Element {
+                name,
+                scope_index,
+                index,
+            } => (
+                name,
+                *scope_index,
+                Some(
+                    index
+                        .map(|index| format!("\0element:{index}"))
+                        .unwrap_or_else(|| "\0element:*".to_string()),
+                ),
+            ),
+            DoubleStorageAggregateTarget::Possible(targets) => {
+                for target in targets {
+                    Self::merge_aggregate_target_nested_pointer_targets(
+                        target,
+                        prefix,
+                        replacement,
+                        aliases,
+                    );
+                }
+                return;
+            }
+        };
+        let Some(fact) = aliases
+            .get_mut(scope_index)
+            .and_then(|scope| scope.get_mut(name))
+        else {
+            return;
+        };
+        fact.aggregate_fields_written = true;
+        let mut target_prefix = element.into_iter().collect::<Vec<_>>();
+        target_prefix.extend_from_slice(prefix);
+        if !target_prefix.iter().any(|field| field == "\0element:*") {
+            fact.aggregate_pointer_targets
+                .retain(|path, _| !path.starts_with(&target_prefix));
+        }
+        for (path, target) in replacement {
+            let mut nested = target_prefix.clone();
+            nested.extend(path.iter().cloned());
+            Self::merge_aggregate_pointer_targets(
+                &mut fact.aggregate_pointer_targets,
+                &HashMap::from([(nested, target.clone())]),
+            );
+        }
+    }
+
+    fn merge_aggregate_target_nested_pointer_targets(
+        target: &DoubleStorageAggregateTarget,
+        prefix: &[String],
+        replacement: &HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+        aliases: &mut [HashMap<String, DoubleStorageFact>],
+    ) {
+        let mut existing = Self::selected_aggregate_pointer_targets(
+            &Self::aggregate_target_pointer_targets(target, aliases),
+            prefix,
+        );
+        Self::merge_aggregate_pointer_targets(&mut existing, replacement);
+        Self::replace_aggregate_target_nested_pointer_targets(target, prefix, &existing, aliases);
+    }
+
+    fn double_storage_field_path_matches(stored: &[String], selected: &[String]) -> bool {
+        stored.len() == selected.len()
+            && stored.iter().zip(selected).all(|(stored, selected)| {
+                stored == selected
+                    || stored == "\0element:*" && selected.starts_with("\0element:")
+                    || selected == "\0element:*" && stored.starts_with("\0element:")
+            })
+    }
+
+    fn double_storage_fields_contain(
+        stored_fields: &HashSet<Vec<String>>,
+        selected: &[String],
+    ) -> bool {
+        stored_fields
+            .iter()
+            .any(|stored| Self::double_storage_field_path_matches(stored, selected))
+    }
+
+    fn nested_aggregate_element_field_path(
+        array_fields: &[String],
+        index: &Expr,
+        fields: &[String],
+    ) -> Vec<String> {
+        let mut path = array_fields.to_vec();
+        path.push(match Self::non_evaluating_array_index(index) {
+            Some(index) => format!("\0element:{index}"),
+            None => "\0element:*".to_string(),
+        });
+        path.extend_from_slice(fields);
+        path
+    }
+
+    fn current_runtime_double_storage_aliases(
+        &self,
+    ) -> CustResult<Vec<HashMap<String, DoubleStorageFact>>> {
+        let mut aliases = vec![HashMap::new(); self.scopes.len().max(1)];
+        aliases[0] = self.double_storage_globals.clone();
+        for (scope_index, scope) in self.scopes.iter().enumerate() {
+            for (name, value) in &scope.values {
+                let (has_double_storage, declared_type, aggregate_target) = match value {
+                    Value::Scalar { ty, .. } => {
+                        (*ty == CType::Double, Some(DeclType::Scalar(*ty)), None)
+                    }
+                    Value::Array(array) => {
+                        let array = array.borrow();
+                        (
+                            array.elem_type == CType::Double,
+                            Some(DeclType::Array(
+                                PointeeType::Scalar(array.elem_type),
+                                array.elements.len(),
+                            )),
+                            None,
+                        )
+                    }
+                    Value::Pointer {
+                        pointer,
+                        ty,
+                        points_to_const,
+                    } => (
+                        self.current_pointer_has_double_storage(pointer)?,
+                        Some(DeclType::Pointer {
+                            pointee: ty.clone(),
+                            points_to_const: *points_to_const,
+                        }),
+                        None,
+                    ),
+                    Value::Struct { type_name, .. } => (
+                        false,
+                        Some(DeclType::Struct(type_name.clone())),
+                        Some(DoubleStorageAggregateTarget::Direct {
+                            name: name.clone(),
+                            scope_index,
+                        }),
+                    ),
+                    Value::StructArray {
+                        type_name,
+                        elements,
+                        read_only,
+                    } => (
+                        false,
+                        Some(DeclType::Pointer {
+                            pointee: PointeeType::Struct(type_name.clone()),
+                            points_to_const: *read_only,
+                        }),
+                        Some(DoubleStorageAggregateTarget::Element {
+                            name: name.clone(),
+                            scope_index,
+                            index: (!elements.is_empty()).then_some(0),
+                        }),
+                    ),
+                };
+                let fact =
+                    aliases[scope_index]
+                        .entry(name.clone())
+                        .or_insert_with(|| DoubleStorageFact {
+                            has_double_storage: false,
+                            declared_type: None,
+                            object_is_const: false,
+                            double_storage_fields: HashSet::new(),
+                            double_storage_element_fields: HashMap::new(),
+                            aggregate_pointer_targets: HashMap::new(),
+                            aggregate_target: None,
+                            aggregate_fields_written: false,
+                            static_local_id: None,
+                        });
+                fact.has_double_storage = has_double_storage;
+                fact.declared_type = declared_type;
+                fact.object_is_const = scope.const_variables.contains(name);
+                fact.aggregate_target = aggregate_target;
+                fact.static_local_id = scope.static_local_ids.get(name).copied();
+            }
+        }
+        Ok(aliases)
+    }
+
+    fn non_evaluating_expr_has_double_storage(
+        &self,
+        expr: &Expr,
+        visited_functions: &mut HashSet<String>,
+    ) -> CustResult<bool> {
+        let aliases = self.current_runtime_double_storage_aliases()?;
+        self.non_evaluating_expr_has_double_storage_with_cache(
+            expr,
+            visited_functions,
+            &mut HashMap::new(),
+            &aliases,
+        )
+    }
+
+    fn current_pointer_has_double_storage(&self, pointer: &PointerValue) -> CustResult<bool> {
+        if let PointerValue::ObjectByte { base, .. } = pointer {
+            return self.current_pointer_has_double_storage(base);
+        }
+        Ok(match self.pointer_value_type(pointer)? {
+            Some(PointeeType::Scalar(CType::Double)) => true,
+            Some(PointeeType::Struct(type_name)) => {
+                self.struct_types.get(&type_name).is_some_and(|aggregate| {
+                    aggregate
+                        .fields
+                        .iter()
+                        .any(|field| field.ty.contains_double_storage(&self.struct_types))
+                })
+            }
+            Some(PointeeType::Void | PointeeType::Scalar(_)) | None => false,
+        })
+    }
+
+    fn current_struct_field_has_double_storage(
+        &self,
+        type_name: &str,
+        values: &HashMap<String, StructFieldValue>,
+        fields: &[String],
+    ) -> CustResult<bool> {
+        let (_, field) = Self::nested_field_value(type_name, values, fields)?;
+        match field {
+            StructFieldValue::Pointer { pointer, .. } => {
+                self.current_pointer_has_double_storage(pointer)
+            }
+            StructFieldValue::Array { value, .. } => Ok(value.borrow().elem_type == CType::Double),
+            StructFieldValue::Struct { type_name, .. }
+            | StructFieldValue::StructArray { type_name, .. } => {
+                Ok(self.struct_types.get(type_name).is_some_and(|aggregate| {
+                    aggregate
+                        .fields
+                        .iter()
+                        .any(|field| field.ty.contains_double_storage(&self.struct_types))
+                }))
+            }
+            StructFieldValue::Scalar { ty, .. } => Ok(*ty == CType::Double),
+        }
+    }
+
+    fn current_expr_has_double_storage(&self, expr: &Expr) -> CustResult<bool> {
+        match expr {
+            Expr::Var(name) => match self.find_variable(name) {
+                Some(Value::Pointer { pointer, .. }) => {
+                    self.current_pointer_has_double_storage(pointer)
+                }
+                Some(Value::Array(array)) => Ok(array.borrow().elem_type == CType::Double),
+                _ => Ok(false),
+            },
+            Expr::StructGet { name, fields } => match self.find_variable(name) {
+                Some(Value::Struct {
+                    type_name,
+                    fields: values,
+                }) => self.current_struct_field_has_double_storage(type_name, values, fields),
+                _ => Ok(false),
+            },
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => match self.find_variable(name) {
+                Some(Value::StructArray {
+                    type_name,
+                    elements,
+                    ..
+                }) => {
+                    if let Some(index) = Self::non_evaluating_array_index(index) {
+                        return elements.get(index).map_or(Ok(false), |values| {
+                            self.current_struct_field_has_double_storage(type_name, values, fields)
+                        });
+                    }
+                    for values in elements {
+                        if self
+                            .current_struct_field_has_double_storage(type_name, values, fields)?
+                        {
+                            return Ok(true);
+                        }
+                    }
+                    Ok(false)
+                }
+                _ => Ok(false),
+            },
+            _ => Ok(false),
+        }
+    }
+
+    fn non_evaluating_expr_has_double_storage_with_cache(
+        &self,
+        expr: &Expr,
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<bool> {
+        let lexical_aggregate_type = |name: &str| {
+            aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+                .and_then(|fact| match fact.declared_type.as_ref() {
+                    Some(DeclType::Struct(type_name)) => Some(type_name.clone()),
+                    Some(DeclType::Pointer {
+                        pointee: PointeeType::Struct(type_name),
+                        ..
+                    }) => Some(type_name.clone()),
+                    _ => None,
+                })
+        };
+        let addressed_aggregate_type = match expr {
+            Expr::AddressOfStructField { name, fields }
+            | Expr::AddressOfStructElementField { name, fields, .. } => {
+                lexical_aggregate_type(name).map(|type_name| (type_name, fields))
+            }
+            Expr::AddressOfStructPtrField {
+                pointer, fields, ..
+            } => match pointer.as_ref() {
+                Expr::Var(name) | Expr::AddressOf(name) => {
+                    lexical_aggregate_type(name).map(|type_name| (type_name, fields))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if addressed_aggregate_type.is_some_and(|(type_name, fields)| {
+            self.aggregate_type_field_metadata(&type_name, fields)
+                .is_ok_and(|metadata| {
+                    metadata.is_some_and(|(field_type, _, _)| {
+                        matches!(
+                            field_type,
+                            StructFieldType::Pointer(PointeeType::Scalar(CType::Double))
+                        )
+                    })
+                })
+        }) {
+            return Ok(true);
+        }
+        if let Expr::Var(name) | Expr::AddressOf(name) | Expr::AddressOfArray { name, .. } = expr
+            && let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name))
+        {
+            let declared_has_double_storage = match fact.declared_type.as_ref() {
+                Some(
+                    DeclType::Scalar(CType::Double)
+                    | DeclType::Array(PointeeType::Scalar(CType::Double), _)
+                    | DeclType::Array2D(CType::Double, _, _)
+                    | DeclType::Array2DPointer {
+                        elem_type: CType::Double,
+                        ..
+                    },
+                ) => true,
+                Some(DeclType::Pointer {
+                    pointee: PointeeType::Scalar(CType::Double),
+                    ..
+                }) if matches!(expr, Expr::AddressOf(_)) => true,
+                Some(
+                    DeclType::Struct(type_name)
+                    | DeclType::Pointer {
+                        pointee: PointeeType::Struct(type_name),
+                        ..
+                    }
+                    | DeclType::Array(PointeeType::Struct(type_name), _),
+                ) => self.struct_types.get(type_name).is_some_and(|aggregate| {
+                    aggregate
+                        .fields
+                        .iter()
+                        .any(|field| field.ty.contains_double_storage(&self.struct_types))
+                }),
+                Some(
+                    DeclType::Void
+                    | DeclType::Scalar(_)
+                    | DeclType::Pointer { .. }
+                    | DeclType::Array(_, _)
+                    | DeclType::Array2D(_, _, _)
+                    | DeclType::Array2DPointer { .. },
+                )
+                | None => false,
+            };
+            return Ok(fact.has_double_storage || declared_has_double_storage);
+        }
+        match expr {
+            Expr::StructGet { name, fields } => {
+                if aliases
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(name))
+                    .is_some_and(|fact| {
+                        Self::double_storage_fields_contain(&fact.double_storage_fields, fields)
+                    })
+                {
+                    return Ok(true);
+                }
+            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => {
+                if self
+                    .non_evaluating_indexed_aggregate_target(name, index, aliases)
+                    .is_some_and(|target| {
+                        Self::aggregate_target_has_double_storage_field(&target, fields, aliases)
+                    })
+                {
+                    return Ok(true);
+                }
+                if aliases
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(name))
+                    .is_some_and(|fact| {
+                        Self::double_storage_fields_contain(&fact.double_storage_fields, fields)
+                            || Self::double_storage_element_fields_for_index(fact, index)
+                                .iter()
+                                .any(|stored| {
+                                    Self::double_storage_field_path_matches(stored, fields)
+                                })
+                    })
+                {
+                    return Ok(true);
+                }
+            }
+            Expr::StructPtrGet { pointer, fields } => {
+                if self
+                    .non_evaluating_aggregate_target(pointer, aliases)
+                    .is_some_and(|target| {
+                        Self::aggregate_target_has_double_storage_field(&target, fields, aliases)
+                    })
+                {
+                    return Ok(true);
+                }
+                if self
+                    .aggregate_argument_double_storage_fields(
+                        pointer,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?
+                    .iter()
+                    .any(|stored| Self::double_storage_field_path_matches(stored, fields))
+                {
+                    return Ok(true);
+                }
+            }
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            } => {
+                let path = Self::nested_aggregate_element_field_path(array_fields, index, fields);
+                if aliases
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(name))
+                    .is_some_and(|fact| {
+                        Self::double_storage_fields_contain(&fact.double_storage_fields, &path)
+                    })
+                {
+                    return Ok(true);
+                }
+            }
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                if self
+                    .aggregate_argument_double_storage_fields(
+                        aggregate,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?
+                    .iter()
+                    .any(|stored| Self::double_storage_field_path_matches(stored, fields))
+                {
+                    return Ok(true);
+                }
+            }
+            _ => {}
+        }
+        if let Expr::StructSet { value, .. } = expr {
+            return self.non_evaluating_expr_has_double_storage_with_cache(
+                value,
+                visited_functions,
+                completed_functions,
+                aliases,
+            );
+        }
+        if let Some(field_type) = self.non_evaluating_aggregate_field_expr_type(expr, aliases)? {
+            return Ok(match field_type {
+                DeclType::Pointer {
+                    pointee: PointeeType::Scalar(CType::Double),
+                    ..
+                } => true,
+                DeclType::Pointer {
+                    pointee: PointeeType::Struct(type_name),
+                    ..
+                } => self.struct_types.get(&type_name).is_some_and(|aggregate| {
+                    aggregate
+                        .fields
+                        .iter()
+                        .any(|field| field.ty.contains_double_storage(&self.struct_types))
+                }),
+                _ => false,
+            });
+        }
+        match expr {
+            Expr::PointerCast { expr, .. } | Expr::Increment { target: expr, .. } => {
+                return self.non_evaluating_expr_has_double_storage_with_cache(
+                    expr,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                );
+            }
+            Expr::Call { name, args } => {
+                let analysis = self.analyze_double_storage_call_from_source_order(
+                    name,
+                    args,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                if self.functions.contains_key(name) {
+                    return Ok(analysis.returns_double_storage);
+                }
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                return Ok(self.non_evaluating_expr_has_double_storage_with_cache(
+                    then_expr,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )? || self.non_evaluating_expr_has_double_storage_with_cache(
+                    else_expr,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?);
+            }
+            Expr::Comma(_, right) => {
+                return self.non_evaluating_expr_has_double_storage_with_cache(
+                    right,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                );
+            }
+            Expr::Assign { value, .. } => {
+                return self.non_evaluating_expr_has_double_storage_with_cache(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                );
+            }
+            Expr::StructPtrSet { value, .. }
+            | Expr::StructArraySet { value, .. }
+            | Expr::StructElementSet { value, .. }
+            | Expr::StructElementArraySet { value, .. }
+            | Expr::StructFieldArrayElementSet { value, .. }
+            | Expr::AggregateFieldSet { value, .. } => {
+                return self.non_evaluating_expr_has_double_storage_with_cache(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                );
+            }
+            Expr::Binary(left, BinaryOp::Add | BinaryOp::Subscript | BinaryOp::Sub, right) => {
+                return Ok(self.non_evaluating_expr_has_double_storage_with_cache(
+                    left,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )? || self.non_evaluating_expr_has_double_storage_with_cache(
+                    right,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?);
+            }
+            Expr::GenericSelection { .. } => {
+                return self.non_evaluating_expr_has_double_storage_with_cache(
+                    self.non_evaluating_selected_generic_association(expr, aliases)?,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                );
+            }
+            _ => {}
+        }
+
+        Ok(self.expr_is_unsupported_double_pointer(expr)
+            || match expr {
+                Expr::Var(name) => match self.find_variable(name) {
+                    Some(Value::Pointer { pointer, .. }) => matches!(
+                        self.pointer_value_type(pointer)?,
+                        Some(PointeeType::Scalar(CType::Double))
+                    ),
+                    _ => false,
+                },
+                _ => false,
+            }
             || match self.pointer_expr_pointee_type(expr)? {
                 Some(PointeeType::Struct(type_name)) => {
                     self.struct_types.get(&type_name).is_some_and(|aggregate| {
@@ -23084,8 +27561,3587 @@ impl Interpreter {
                             .any(|field| field.ty.contains_double_storage(&self.struct_types))
                     })
                 }
+                Some(PointeeType::Scalar(CType::Double)) => true,
                 Some(PointeeType::Void | PointeeType::Scalar(_)) | None => false,
+            })
+    }
+
+    fn expr_uses_double_storage_alias(
+        &self,
+        expr: &Expr,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<bool> {
+        match expr {
+            Expr::Var(name) | Expr::AddressOf(name) | Expr::AddressOfArray { name, .. } => {
+                Ok(aliases
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(name))
+                    .map(|fact| fact.has_double_storage)
+                    .unwrap_or(false))
+            }
+            Expr::PointerCast { expr, .. } | Expr::Increment { target: expr, .. } => {
+                self.expr_uses_double_storage_alias(expr, aliases)
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => Ok(self.expr_uses_double_storage_alias(then_expr, aliases)?
+                || self.expr_uses_double_storage_alias(else_expr, aliases)?),
+            Expr::Comma(_, right) => self.expr_uses_double_storage_alias(right, aliases),
+            Expr::Binary(left, BinaryOp::Add | BinaryOp::Subscript | BinaryOp::Sub, right) => {
+                Ok(self.expr_uses_double_storage_alias(left, aliases)?
+                    || self.expr_uses_double_storage_alias(right, aliases)?)
+            }
+            Expr::GenericSelection { .. } => self.expr_uses_double_storage_alias(
+                self.non_evaluating_selected_generic_association(expr, aliases)?,
+                aliases,
+            ),
+            _ => Ok(false),
+        }
+    }
+
+    fn replace_nested_double_storage_fields(
+        target_fields: &mut HashSet<Vec<String>>,
+        prefix: &[String],
+        replacement: &HashSet<Vec<String>>,
+    ) {
+        target_fields.retain(|path| !path.starts_with(prefix));
+        target_fields.extend(replacement.iter().map(|path| {
+            let mut nested = prefix.to_vec();
+            nested.extend(path.iter().cloned());
+            nested
+        }));
+    }
+
+    fn selected_nested_double_storage_fields(
+        stored_fields: &HashSet<Vec<String>>,
+        prefix: &[String],
+    ) -> HashSet<Vec<String>> {
+        stored_fields
+            .iter()
+            .filter_map(|path| path.strip_prefix(prefix).map(<[String]>::to_vec))
+            .collect()
+    }
+
+    fn aggregate_argument_double_storage_fields(
+        &self,
+        expr: &Expr,
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<HashSet<Vec<String>>> {
+        match expr {
+            Expr::Var(name) => Ok(aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+                .map(|fact| fact.double_storage_fields.clone())
+                .unwrap_or_default()),
+            Expr::AddressOf(name) => Ok(aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+                .map(|fact| fact.double_storage_fields.clone())
+                .unwrap_or_default()),
+            Expr::AddressOfArray { name, index } => Ok(aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+                .map(|fact| Self::double_storage_element_fields_for_index(fact, index))
+                .unwrap_or_default()),
+            Expr::PointerCast { expr, .. } => self.aggregate_argument_double_storage_fields(
+                expr,
+                visited_functions,
+                completed_functions,
+                aliases,
+            ),
+            Expr::StructGet { name, fields } => Ok(aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+                .map(|fact| {
+                    Self::selected_nested_double_storage_fields(&fact.double_storage_fields, fields)
+                })
+                .unwrap_or_default()),
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => Ok(aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+                .map(|fact| {
+                    Self::selected_nested_double_storage_fields(
+                        &Self::double_storage_element_fields_for_index(fact, index),
+                        fields,
+                    )
+                })
+                .unwrap_or_default()),
+            Expr::ArrayGet { name, index } => Ok(aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+                .map(|fact| Self::double_storage_element_fields_for_index(fact, index))
+                .unwrap_or_default()),
+            Expr::Deref(pointer) => {
+                let mut fields = HashSet::new();
+                for target in self.non_evaluating_aggregate_targets_with_cache(
+                    pointer,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )? {
+                    fields.extend(Self::aggregate_target_double_storage_fields(
+                        &target, aliases,
+                    ));
+                }
+                Ok(fields)
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let mut fields = self.aggregate_argument_double_storage_fields(
+                    then_expr,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                fields.extend(self.aggregate_argument_double_storage_fields(
+                    else_expr,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?);
+                Ok(fields)
+            }
+            Expr::Comma(_, right) => self.aggregate_argument_double_storage_fields(
+                right,
+                visited_functions,
+                completed_functions,
+                aliases,
+            ),
+            Expr::GenericSelection { .. } => self.aggregate_argument_double_storage_fields(
+                self.non_evaluating_selected_generic_association(expr, aliases)?,
+                visited_functions,
+                completed_functions,
+                aliases,
+            ),
+            Expr::Call { name, args } => Ok(self
+                .analyze_double_storage_call_from_source_order(
+                    name,
+                    args,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?
+                .returned_fields),
+            Expr::AggregateLiteral { init, .. } => {
+                let mut fields = HashSet::new();
+                self.collect_non_evaluating_aggregate_literal_double_storage_fields(
+                    init,
+                    &mut Vec::new(),
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                    &mut fields,
+                )?;
+                Ok(fields)
+            }
+            Expr::Assign { value, .. } => self.aggregate_argument_double_storage_fields(
+                value,
+                visited_functions,
+                completed_functions,
+                aliases,
+            ),
+            Expr::StructSet { value, .. }
+            | Expr::StructPtrSet { value, .. }
+            | Expr::ArraySet { value, .. }
+            | Expr::StructElementSet { value, .. }
+            | Expr::DerefSet { value, .. } => self.aggregate_argument_double_storage_fields(
+                value,
+                visited_functions,
+                completed_functions,
+                aliases,
+            ),
+            _ => Ok(HashSet::new()),
+        }
+    }
+
+    fn selected_aggregate_pointer_targets(
+        targets: &HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+        prefix: &[String],
+    ) -> HashMap<Vec<String>, DoubleStorageAggregateTarget> {
+        let mut selected = HashMap::new();
+        for (path, target) in targets {
+            let Some(path) = path.strip_prefix(prefix) else {
+                continue;
             };
+            Self::merge_aggregate_pointer_targets(
+                &mut selected,
+                &HashMap::from([(path.to_vec(), target.clone())]),
+            );
+        }
+        selected
+    }
+
+    fn aggregate_target_pointer_targets(
+        target: &DoubleStorageAggregateTarget,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> HashMap<Vec<String>, DoubleStorageAggregateTarget> {
+        match target {
+            DoubleStorageAggregateTarget::Direct { name, scope_index } => aliases
+                .get(*scope_index)
+                .and_then(|scope| scope.get(name))
+                .map(|fact| fact.aggregate_pointer_targets.clone())
+                .unwrap_or_default(),
+            DoubleStorageAggregateTarget::Element {
+                name,
+                scope_index,
+                index,
+            } => {
+                let Some(fact) = aliases.get(*scope_index).and_then(|scope| scope.get(name)) else {
+                    return HashMap::new();
+                };
+                if let Some(index) = index {
+                    return Self::selected_aggregate_pointer_targets(
+                        &fact.aggregate_pointer_targets,
+                        &[format!("\0element:{index}")],
+                    );
+                }
+                let mut targets = HashMap::new();
+                for (path, target) in &fact.aggregate_pointer_targets {
+                    let Some((element, path)) = path.split_first() else {
+                        continue;
+                    };
+                    if element.starts_with("\0element:") {
+                        Self::merge_aggregate_pointer_targets(
+                            &mut targets,
+                            &HashMap::from([(path.to_vec(), target.clone())]),
+                        );
+                    }
+                }
+                targets
+            }
+            DoubleStorageAggregateTarget::Possible(possible) => {
+                let mut targets = HashMap::new();
+                for target in possible {
+                    Self::merge_aggregate_pointer_targets(
+                        &mut targets,
+                        &Self::aggregate_target_pointer_targets(target, aliases),
+                    );
+                }
+                targets
+            }
+        }
+    }
+
+    fn aggregate_argument_pointer_targets(
+        &self,
+        expr: &Expr,
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<HashMap<Vec<String>, DoubleStorageAggregateTarget>> {
+        Ok(match expr {
+            Expr::Var(name) | Expr::AddressOf(name) => aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+                .map(|fact| fact.aggregate_pointer_targets.clone())
+                .unwrap_or_default(),
+            Expr::StructGet { name, fields } => aliases
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+                .map(|fact| {
+                    Self::selected_aggregate_pointer_targets(
+                        &fact.aggregate_pointer_targets,
+                        fields,
+                    )
+                })
+                .unwrap_or_default(),
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => self
+                .non_evaluating_indexed_aggregate_target(name, index, aliases)
+                .map(|target| {
+                    Self::selected_aggregate_pointer_targets(
+                        &Self::aggregate_target_pointer_targets(&target, aliases),
+                        fields,
+                    )
+                })
+                .unwrap_or_default(),
+            Expr::StructPtrGet { pointer, fields } => {
+                let mut targets = HashMap::new();
+                for target in self.non_evaluating_aggregate_targets_with_cache(
+                    pointer,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )? {
+                    Self::merge_aggregate_pointer_targets(
+                        &mut targets,
+                        &Self::selected_aggregate_pointer_targets(
+                            &Self::aggregate_target_pointer_targets(&target, aliases),
+                            fields,
+                        ),
+                    );
+                }
+                targets
+            }
+            Expr::ArrayGet { name, index } => self
+                .non_evaluating_indexed_aggregate_target(name, index, aliases)
+                .map(|target| Self::aggregate_target_pointer_targets(&target, aliases))
+                .unwrap_or_default(),
+            Expr::Deref(pointer) => {
+                let mut targets = HashMap::new();
+                for target in self.non_evaluating_aggregate_targets_with_cache(
+                    pointer,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )? {
+                    Self::merge_aggregate_pointer_targets(
+                        &mut targets,
+                        &Self::aggregate_target_pointer_targets(&target, aliases),
+                    );
+                }
+                targets
+            }
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                Self::selected_aggregate_pointer_targets(
+                    &self.aggregate_argument_pointer_targets(
+                        aggregate,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?,
+                    fields,
+                )
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let mut targets = self.aggregate_argument_pointer_targets(
+                    then_expr,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                Self::merge_aggregate_pointer_targets(
+                    &mut targets,
+                    &self.aggregate_argument_pointer_targets(
+                        else_expr,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?,
+                );
+                targets
+            }
+            Expr::Comma(_, right)
+            | Expr::PointerCast { expr: right, .. }
+            | Expr::Assign { value: right, .. } => self.aggregate_argument_pointer_targets(
+                right,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?,
+            Expr::GenericSelection { .. } => self.aggregate_argument_pointer_targets(
+                self.non_evaluating_selected_generic_association(expr, aliases)?,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?,
+            Expr::Call { name, args } => {
+                self.analyze_double_storage_call_from_source_order(
+                    name,
+                    args,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?
+                .returned_pointer_targets
+            }
+            Expr::AggregateLiteral {
+                type_name, init, ..
+            } => {
+                let mut targets = HashMap::new();
+                self.collect_aggregate_pointer_initializer_targets(
+                    type_name,
+                    init,
+                    &mut Vec::new(),
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                    &mut targets,
+                )?;
+                targets
+            }
+            Expr::StructSet { value, .. }
+            | Expr::StructPtrSet { value, .. }
+            | Expr::ArraySet { value, .. }
+            | Expr::StructElementSet { value, .. }
+            | Expr::DerefSet { value, .. } => self.aggregate_argument_pointer_targets(
+                value,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?,
+            _ => HashMap::new(),
+        })
+    }
+
+    fn collect_non_evaluating_aggregate_literal_double_storage_fields(
+        &self,
+        initializers: &[StructInitializer],
+        prefix: &mut Vec<String>,
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+        fields: &mut HashSet<Vec<String>>,
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            if let StructInitializer::Designated { field, value } = initializer {
+                prefix.push(field.clone());
+                match value.as_ref() {
+                    StructInitializer::Expr(expr) => {
+                        if self.expr_uses_double_storage_alias(expr, aliases)?
+                            || self.non_evaluating_expr_has_double_storage_with_cache(
+                                expr,
+                                visited_functions,
+                                completed_functions,
+                                aliases,
+                            )?
+                        {
+                            fields.insert(prefix.clone());
+                        }
+                    }
+                    StructInitializer::Struct(nested) => {
+                        self.collect_non_evaluating_aggregate_literal_double_storage_fields(
+                            nested,
+                            prefix,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                            fields,
+                        )?;
+                    }
+                    StructInitializer::StructArray(elements) => {
+                        let mut next_index = 0;
+                        for element in elements {
+                            let (index, nested) = match element {
+                                StructArrayInitializer::Element(nested) => {
+                                    let index = next_index;
+                                    next_index += 1;
+                                    (index, nested)
+                                }
+                                StructArrayInitializer::Designated { index, value } => {
+                                    next_index = index + 1;
+                                    (*index, value)
+                                }
+                            };
+                            prefix.push(format!("\0element:{index}"));
+                            self.collect_non_evaluating_aggregate_literal_double_storage_fields(
+                                nested,
+                                prefix,
+                                visited_functions,
+                                completed_functions,
+                                aliases,
+                                fields,
+                            )?;
+                            prefix.pop();
+                        }
+                    }
+                    StructInitializer::Array(_)
+                    | StructInitializer::Array2D(_)
+                    | StructInitializer::Designated { .. } => {}
+                }
+                prefix.pop();
+            }
+        }
+        Ok(())
+    }
+
+    fn set_double_storage_alias(
+        aliases: &mut [HashMap<String, DoubleStorageFact>],
+        name: &str,
+        has_double_storage: bool,
+    ) {
+        if let Some(scope) = aliases
+            .iter_mut()
+            .rev()
+            .find(|scope| scope.contains_key(name))
+        {
+            scope
+                .get_mut(name)
+                .expect("matched scope contains the double storage fact")
+                .has_double_storage = has_double_storage;
+        } else {
+            aliases
+                .first_mut()
+                .expect("double storage analysis requires a function scope")
+                .insert(
+                    name.to_string(),
+                    DoubleStorageFact {
+                        has_double_storage,
+                        declared_type: None,
+                        object_is_const: false,
+                        double_storage_fields: HashSet::new(),
+                        double_storage_element_fields: HashMap::new(),
+                        aggregate_pointer_targets: HashMap::new(),
+                        aggregate_target: None,
+                        aggregate_fields_written: false,
+                        static_local_id: None,
+                    },
+                );
+        }
+    }
+
+    fn set_double_storage_aggregate_target(
+        aliases: &mut [HashMap<String, DoubleStorageFact>],
+        name: &str,
+        aggregate_target: Option<DoubleStorageAggregateTarget>,
+    ) {
+        if let Some(fact) = aliases
+            .iter_mut()
+            .rev()
+            .find_map(|scope| scope.get_mut(name))
+        {
+            fact.aggregate_target = aggregate_target;
+        }
+    }
+
+    fn merge_double_storage_aliases(
+        aliases: &mut [HashMap<String, DoubleStorageFact>],
+        possible_aliases: &[HashMap<String, DoubleStorageFact>],
+    ) {
+        for (scope, possible_scope) in aliases.iter_mut().zip(possible_aliases) {
+            for (name, fact) in possible_scope {
+                scope
+                    .entry(name.clone())
+                    .and_modify(|current| {
+                        current.has_double_storage |= fact.has_double_storage;
+                        current
+                            .double_storage_fields
+                            .extend(fact.double_storage_fields.iter().cloned());
+                        Self::merge_double_storage_element_fields(
+                            &mut current.double_storage_element_fields,
+                            &fact.double_storage_element_fields,
+                        );
+                        current.aggregate_fields_written |= fact.aggregate_fields_written;
+                        Self::merge_double_storage_aggregate_target(
+                            &mut current.aggregate_target,
+                            &fact.aggregate_target,
+                        );
+                        Self::merge_aggregate_pointer_targets(
+                            &mut current.aggregate_pointer_targets,
+                            &fact.aggregate_pointer_targets,
+                        );
+                    })
+                    .or_insert_with(|| fact.clone());
+            }
+        }
+    }
+
+    fn join_double_storage_branches(
+        aliases: &mut [HashMap<String, DoubleStorageFact>],
+        then_aliases: &[HashMap<String, DoubleStorageFact>],
+        else_aliases: &[HashMap<String, DoubleStorageFact>],
+    ) {
+        for ((scope, then_scope), else_scope) in
+            aliases.iter_mut().zip(then_aliases).zip(else_aliases)
+        {
+            *scope = then_scope.clone();
+            for (name, fact) in else_scope {
+                scope
+                    .entry(name.clone())
+                    .and_modify(|current| {
+                        current.has_double_storage |= fact.has_double_storage;
+                        current
+                            .double_storage_fields
+                            .extend(fact.double_storage_fields.iter().cloned());
+                        Self::merge_double_storage_element_fields(
+                            &mut current.double_storage_element_fields,
+                            &fact.double_storage_element_fields,
+                        );
+                        current.aggregate_fields_written |= fact.aggregate_fields_written;
+                        Self::merge_double_storage_aggregate_target(
+                            &mut current.aggregate_target,
+                            &fact.aggregate_target,
+                        );
+                        Self::merge_aggregate_pointer_targets(
+                            &mut current.aggregate_pointer_targets,
+                            &fact.aggregate_pointer_targets,
+                        );
+                    })
+                    .or_insert_with(|| fact.clone());
+            }
+        }
+    }
+
+    fn merge_aggregate_pointer_targets(
+        targets: &mut HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+        possible_targets: &HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+    ) {
+        for (path, possible_target) in possible_targets {
+            targets
+                .entry(path.clone())
+                .and_modify(|target| {
+                    let mut merged = Some(target.clone());
+                    Self::merge_double_storage_aggregate_target(
+                        &mut merged,
+                        &Some(possible_target.clone()),
+                    );
+                    *target = merged.expect("aggregate pointer target merge stays populated");
+                })
+                .or_insert_with(|| possible_target.clone());
+        }
+    }
+
+    fn collect_double_storage_initializer_fields(
+        &self,
+        initializers: &[StructInitializer],
+        prefix: &mut Vec<String>,
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &mut Vec<HashMap<String, DoubleStorageFact>>,
+        fields: &mut HashSet<Vec<String>>,
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                StructInitializer::Designated { field, value } => {
+                    prefix.push(field.clone());
+                    match value.as_ref() {
+                        StructInitializer::Expr(expr) => {
+                            self.update_double_storage_aliases_from_expr(
+                                expr,
+                                visited_functions,
+                                completed_functions,
+                                aliases,
+                            )?;
+                            if self.expr_uses_double_storage_alias(expr, aliases)?
+                                || self.non_evaluating_expr_has_double_storage_with_cache(
+                                    expr,
+                                    visited_functions,
+                                    completed_functions,
+                                    aliases,
+                                )?
+                            {
+                                fields.insert(prefix.clone());
+                            }
+                        }
+                        StructInitializer::Struct(nested) => {
+                            self.collect_double_storage_initializer_fields(
+                                nested,
+                                prefix,
+                                visited_functions,
+                                completed_functions,
+                                aliases,
+                                fields,
+                            )?;
+                        }
+                        StructInitializer::StructArray(elements) => {
+                            let mut next_index = 0;
+                            for element in elements {
+                                let (index, nested) = match element {
+                                    StructArrayInitializer::Element(nested) => {
+                                        let index = next_index;
+                                        next_index += 1;
+                                        (index, nested)
+                                    }
+                                    StructArrayInitializer::Designated { index, value } => {
+                                        next_index = index + 1;
+                                        (*index, value)
+                                    }
+                                };
+                                prefix.push(format!("\0element:{index}"));
+                                self.collect_double_storage_initializer_fields(
+                                    nested,
+                                    prefix,
+                                    visited_functions,
+                                    completed_functions,
+                                    aliases,
+                                    fields,
+                                )?;
+                                prefix.pop();
+                            }
+                        }
+                        StructInitializer::Array(_)
+                        | StructInitializer::Array2D(_)
+                        | StructInitializer::Designated { .. } => {}
+                    }
+                    prefix.pop();
+                }
+                StructInitializer::Struct(nested) => {
+                    self.collect_double_storage_initializer_fields(
+                        nested,
+                        prefix,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                        fields,
+                    )?;
+                }
+                StructInitializer::StructArray(elements) => {
+                    let mut next_index = 0;
+                    for element in elements {
+                        let (index, nested) = match element {
+                            StructArrayInitializer::Element(nested) => {
+                                let index = next_index;
+                                next_index += 1;
+                                (index, nested)
+                            }
+                            StructArrayInitializer::Designated { index, value } => {
+                                next_index = index + 1;
+                                (*index, value)
+                            }
+                        };
+                        prefix.push(format!("\0element:{index}"));
+                        self.collect_double_storage_initializer_fields(
+                            nested,
+                            prefix,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                            fields,
+                        )?;
+                        prefix.pop();
+                    }
+                }
+                StructInitializer::Expr(_)
+                | StructInitializer::Array(_)
+                | StructInitializer::Array2D(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn collect_aggregate_pointer_initializer_targets(
+        &self,
+        type_name: &str,
+        initializers: &[StructInitializer],
+        prefix: &mut Vec<String>,
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+        targets: &mut HashMap<Vec<String>, DoubleStorageAggregateTarget>,
+    ) -> CustResult<()> {
+        let Some(aggregate) = self.struct_types.get(type_name) else {
+            return Ok(());
+        };
+        let field_definitions = aggregate.fields.clone();
+        let mut next_field_index = 0;
+        for initializer in initializers {
+            let (field, value) = match initializer {
+                StructInitializer::Designated { field, value } => {
+                    let Some(field_index) = field_definitions
+                        .iter()
+                        .position(|definition| definition.name == *field)
+                    else {
+                        continue;
+                    };
+                    next_field_index = field_index + 1;
+                    (&field_definitions[field_index], value.as_ref())
+                }
+                value => {
+                    let Some(field) = field_definitions.get(next_field_index) else {
+                        continue;
+                    };
+                    next_field_index += 1;
+                    (field, value)
+                }
+            };
+            prefix.push(field.name.clone());
+            match value {
+                StructInitializer::Expr(expr) => {
+                    if matches!(field.ty, StructFieldType::Struct(_)) {
+                        for (path, target) in self.aggregate_argument_pointer_targets(
+                            expr,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )? {
+                            let mut nested_path = prefix.clone();
+                            nested_path.extend(path);
+                            Self::merge_aggregate_pointer_targets(
+                                targets,
+                                &HashMap::from([(nested_path, target)]),
+                            );
+                        }
+                    } else if let Some(target) = self.non_evaluating_aggregate_target_with_cache(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )? {
+                        targets.insert(prefix.clone(), target);
+                    }
+                }
+                StructInitializer::Struct(nested) => {
+                    if let StructFieldType::Struct(nested_type_name) = &field.ty {
+                        self.collect_aggregate_pointer_initializer_targets(
+                            nested_type_name,
+                            nested,
+                            prefix,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                            targets,
+                        )?;
+                    }
+                }
+                StructInitializer::StructArray(elements) => {
+                    if let StructFieldType::StructArray(nested_type_name, _) = &field.ty {
+                        let mut next_index = 0;
+                        for element in elements {
+                            let (index, nested) = match element {
+                                StructArrayInitializer::Element(nested) => {
+                                    let index = next_index;
+                                    next_index += 1;
+                                    (index, nested)
+                                }
+                                StructArrayInitializer::Designated { index, value } => {
+                                    next_index = index + 1;
+                                    (*index, value)
+                                }
+                            };
+                            prefix.push(format!("\0element:{index}"));
+                            self.collect_aggregate_pointer_initializer_targets(
+                                nested_type_name,
+                                nested,
+                                prefix,
+                                visited_functions,
+                                completed_functions,
+                                aliases,
+                                targets,
+                            )?;
+                            prefix.pop();
+                        }
+                    }
+                }
+                StructInitializer::Array(_)
+                | StructInitializer::Array2D(_)
+                | StructInitializer::Designated { .. } => {}
+            }
+            prefix.pop();
+        }
+        Ok(())
+    }
+
+    fn update_double_storage_aliases_from_array_initializers(
+        &self,
+        initializers: &[ArrayInitializer],
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &mut Vec<HashMap<String, DoubleStorageFact>>,
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            if let ArrayInitializer::Expr(expr) | ArrayInitializer::Designated { value: expr, .. } =
+                initializer
+            {
+                self.update_double_storage_aliases_from_expr(
+                    expr,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn update_double_storage_aliases_from_struct_initializers(
+        &self,
+        initializers: &[StructInitializer],
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &mut Vec<HashMap<String, DoubleStorageFact>>,
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            match initializer {
+                StructInitializer::Expr(expr) => self.update_double_storage_aliases_from_expr(
+                    expr,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?,
+                StructInitializer::Array(values) => self
+                    .update_double_storage_aliases_from_array_initializers(
+                        values,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?,
+                StructInitializer::Array2D(rows) => {
+                    for row in rows {
+                        self.update_double_storage_aliases_from_array_initializers(
+                            row,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    }
+                }
+                StructInitializer::Struct(values) => self
+                    .update_double_storage_aliases_from_struct_initializers(
+                        values,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?,
+                StructInitializer::StructArray(elements) => {
+                    for element in elements {
+                        let values = match element {
+                            StructArrayInitializer::Element(values)
+                            | StructArrayInitializer::Designated { value: values, .. } => values,
+                        };
+                        self.update_double_storage_aliases_from_struct_initializers(
+                            values,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    }
+                }
+                StructInitializer::Designated { value, .. } => self
+                    .update_double_storage_aliases_from_struct_initializers(
+                        std::slice::from_ref(value),
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?,
+            }
+        }
+        Ok(())
+    }
+
+    fn update_double_storage_aliases_from_struct_array_initializers(
+        &self,
+        initializers: &[StructArrayInitializer],
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &mut Vec<HashMap<String, DoubleStorageFact>>,
+    ) -> CustResult<()> {
+        for initializer in initializers {
+            let values = match initializer {
+                StructArrayInitializer::Element(values)
+                | StructArrayInitializer::Designated { value: values, .. } => values,
+            };
+            self.update_double_storage_aliases_from_struct_initializers(
+                values,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn update_double_storage_aliases_from_expr(
+        &self,
+        expr: &Expr,
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &mut Vec<HashMap<String, DoubleStorageFact>>,
+    ) -> CustResult<()> {
+        let depth = self.double_storage_expression_depth.get();
+        if depth >= MAX_DOUBLE_STORAGE_EXPRESSION_DEPTH {
+            return Err(CustError::new(format!(
+                "non-evaluating callee-expression nesting limit of {MAX_DOUBLE_STORAGE_EXPRESSION_DEPTH} exceeded"
+            )));
+        }
+        self.double_storage_expression_depth.set(depth + 1);
+        let result = self.update_double_storage_aliases_from_expr_at_depth(
+            expr,
+            visited_functions,
+            completed_functions,
+            aliases,
+        );
+        self.double_storage_expression_depth.set(depth);
+        result
+    }
+
+    fn update_double_storage_aliases_from_expr_at_depth(
+        &self,
+        expr: &Expr,
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &mut Vec<HashMap<String, DoubleStorageFact>>,
+    ) -> CustResult<()> {
+        match expr {
+            Expr::Assign { name, value } => {
+                let pre_effect_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let value_aliases = self.double_storage_value_aliases_after_effects(
+                    value,
+                    &pre_effect_aliases,
+                    aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let target_is_aggregate = aliases
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(name))
+                    .and_then(|fact| fact.declared_type.as_ref())
+                    .is_some_and(|declared_type| matches!(declared_type, DeclType::Struct(_)));
+                if target_is_aggregate {
+                    let copied_fields = self.aggregate_argument_double_storage_fields(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        &value_aliases,
+                    )?;
+                    let copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        &value_aliases,
+                    )?;
+                    if let Some(fact) = aliases
+                        .iter_mut()
+                        .rev()
+                        .find_map(|scope| scope.get_mut(name))
+                    {
+                        fact.double_storage_fields = copied_fields;
+                        fact.aggregate_pointer_targets = copied_pointer_targets;
+                    }
+                    return Ok(());
+                }
+                let aggregate_target = self.non_evaluating_aggregate_target_with_cache(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )?;
+                if self.expr_uses_double_storage_alias(value, &value_aliases)?
+                    || self.non_evaluating_expr_has_double_storage_with_cache(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        &value_aliases,
+                    )?
+                {
+                    Self::set_double_storage_alias(aliases, name, true);
+                } else {
+                    Self::set_double_storage_alias(aliases, name, false);
+                }
+                Self::set_double_storage_aggregate_target(aliases, name, aggregate_target);
+            }
+            Expr::Comma(left, right) => {
+                self.update_double_storage_aliases_from_expr(
+                    left,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                self.update_double_storage_aliases_from_expr(
+                    right,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                self.update_double_storage_aliases_from_expr(
+                    cond,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let mut then_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    then_expr,
+                    visited_functions,
+                    completed_functions,
+                    &mut then_aliases,
+                )?;
+                let mut else_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    else_expr,
+                    visited_functions,
+                    completed_functions,
+                    &mut else_aliases,
+                )?;
+                Self::join_double_storage_branches(aliases, &then_aliases, &else_aliases);
+            }
+            Expr::Binary(left, BinaryOp::LogicalAnd | BinaryOp::LogicalOr, right) => {
+                self.update_double_storage_aliases_from_expr(
+                    left,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let skipped_aliases = aliases.clone();
+                let mut evaluated_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    right,
+                    visited_functions,
+                    completed_functions,
+                    &mut evaluated_aliases,
+                )?;
+                Self::join_double_storage_branches(aliases, &skipped_aliases, &evaluated_aliases);
+            }
+            Expr::Binary(left, _, right) => {
+                self.update_double_storage_aliases_from_expr(
+                    left,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                self.update_double_storage_aliases_from_expr(
+                    right,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+            }
+            Expr::PointerCast { expr, .. }
+            | Expr::Cast { expr, .. }
+            | Expr::VoidCast(expr)
+            | Expr::ScalarLiteral { init: expr, .. }
+            | Expr::AddressOfScalarLiteral { init: expr, .. }
+            | Expr::UnaryPlus(expr)
+            | Expr::UnaryMinus(expr)
+            | Expr::BitwiseNot(expr)
+            | Expr::LogicalNot(expr) => self.update_double_storage_aliases_from_expr(
+                expr,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?,
+            Expr::Deref(expr)
+            | Expr::StructPtrGet { pointer: expr, .. }
+            | Expr::AddressOfStructPtrField { pointer: expr, .. }
+            | Expr::AggregateFieldGet {
+                aggregate: expr, ..
+            }
+            | Expr::AddressOfAggregateField {
+                aggregate: expr, ..
+            } => self.update_double_storage_aliases_from_expr(
+                expr,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?,
+            Expr::AddressOfArray { index, .. }
+            | Expr::AddressOfStructElementField { index, .. }
+            | Expr::AddressOfStructArrayField { index, .. }
+            | Expr::ArrayGet { index, .. }
+            | Expr::StructArrayGet { index, .. }
+            | Expr::StructFieldArrayElementGet { index, .. }
+            | Expr::StructElementGet { index, .. }
+            | Expr::StringGet { index, .. } => self.update_double_storage_aliases_from_expr(
+                index,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?,
+            Expr::StructPtrArrayGet { pointer, index, .. }
+            | Expr::AddressOfStructPtrArrayField { pointer, index, .. } => {
+                for operand in [pointer.as_ref(), index.as_ref()] {
+                    self.update_double_storage_aliases_from_expr(
+                        operand,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                }
+            }
+            Expr::StructElementArrayGet {
+                index, array_index, ..
+            }
+            | Expr::AddressOfStructElementArrayField {
+                index, array_index, ..
+            } => {
+                for operand in [index.as_ref(), array_index.as_ref()] {
+                    self.update_double_storage_aliases_from_expr(
+                        operand,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                }
+            }
+            Expr::Array2DGet { row, column, .. } => {
+                for operand in [row.as_ref(), column.as_ref()] {
+                    self.update_double_storage_aliases_from_expr(
+                        operand,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                }
+            }
+            Expr::StructArray2DGet {
+                target,
+                row,
+                column,
+                ..
+            } => {
+                match target {
+                    Array2DFieldTarget::Direct { .. } => {}
+                    Array2DFieldTarget::Element { index, .. } => {
+                        self.update_double_storage_aliases_from_expr(
+                            index,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    }
+                    Array2DFieldTarget::Pointer { pointer, .. } => {
+                        self.update_double_storage_aliases_from_expr(
+                            pointer,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    }
+                }
+                for operand in [row.as_ref(), column.as_ref()] {
+                    self.update_double_storage_aliases_from_expr(
+                        operand,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                }
+            }
+            Expr::ScalarLiteralSet { init, value, .. }
+            | Expr::ScalarLiteralCompoundSet { init, value, .. } => {
+                self.update_double_storage_aliases_from_expr(
+                    init,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+            }
+            Expr::CompoundAssign { name, op, value } => {
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                if matches!(op, CompoundOp::Add | CompoundOp::Sub) {
+                    let mut aggregate_target = aliases
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.get(name))
+                        .and_then(|fact| fact.aggregate_target.clone());
+                    if let Some(target) = &mut aggregate_target {
+                        Self::offset_double_storage_aggregate_target(
+                            target,
+                            value,
+                            matches!(op, CompoundOp::Sub),
+                        );
+                    }
+                    Self::set_double_storage_aggregate_target(aliases, name, aggregate_target);
+                }
+            }
+            Expr::StructCompoundSet {
+                name,
+                fields,
+                op,
+                value,
+            } => {
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                if matches!(op, CompoundOp::Add | CompoundOp::Sub)
+                    && let Some(target) = aliases
+                        .iter_mut()
+                        .rev()
+                        .find_map(|scope| scope.get_mut(name))
+                        .and_then(|fact| fact.aggregate_pointer_targets.get_mut(fields))
+                {
+                    Self::offset_double_storage_aggregate_target(
+                        target,
+                        value,
+                        matches!(op, CompoundOp::Sub),
+                    );
+                }
+            }
+            Expr::StructArraySet { index, value, .. }
+            | Expr::ArrayCompoundSet { index, value, .. }
+            | Expr::StructArrayCompoundSet { index, value, .. }
+            | Expr::StructFieldArrayElementCompoundSet { index, value, .. } => {
+                self.update_double_storage_aliases_from_expr(
+                    index,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+            }
+            Expr::ArraySet { name, index, value } => {
+                self.update_double_storage_aliases_from_expr(
+                    index,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let copied_fields = self.aggregate_argument_double_storage_fields(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let has_double_storage = self.expr_uses_double_storage_alias(value, aliases)?
+                    || self.non_evaluating_expr_has_double_storage_with_cache(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                if let Some(target) =
+                    self.non_evaluating_indexed_aggregate_target(name, index, aliases)
+                {
+                    Self::replace_aggregate_target_nested_double_storage_fields(
+                        &target,
+                        &[],
+                        &copied_fields,
+                        has_double_storage,
+                        aliases,
+                    );
+                    Self::replace_aggregate_target_nested_pointer_targets(
+                        &target,
+                        &[],
+                        &copied_pointer_targets,
+                        aliases,
+                    );
+                }
+            }
+            Expr::DerefSet { pointer, value } => {
+                let pre_effect_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    pointer,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let pointer_value_aliases = self.double_storage_value_aliases_after_effects(
+                    pointer,
+                    &pre_effect_aliases,
+                    aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let target = self.non_evaluating_aggregate_target_with_cache(
+                    pointer,
+                    visited_functions,
+                    completed_functions,
+                    &pointer_value_aliases,
+                )?;
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let copied_fields = self.aggregate_argument_double_storage_fields(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let has_double_storage = self.expr_uses_double_storage_alias(value, aliases)?
+                    || self.non_evaluating_expr_has_double_storage_with_cache(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                if let Some(target) = target {
+                    Self::replace_aggregate_target_nested_double_storage_fields(
+                        &target,
+                        &[],
+                        &copied_fields,
+                        has_double_storage,
+                        aliases,
+                    );
+                    Self::replace_aggregate_target_nested_pointer_targets(
+                        &target,
+                        &[],
+                        &copied_pointer_targets,
+                        aliases,
+                    );
+                }
+            }
+            Expr::DerefCompoundSet { pointer, value, .. } => {
+                self.update_double_storage_aliases_from_expr(
+                    pointer,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+            }
+            Expr::StructElementArraySet {
+                index,
+                array_index,
+                value,
+                ..
+            }
+            | Expr::StructElementArrayCompoundSet {
+                index,
+                array_index,
+                value,
+                ..
+            } => {
+                for operand in [index.as_ref(), array_index.as_ref(), value.as_ref()] {
+                    self.update_double_storage_aliases_from_expr(
+                        operand,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                }
+            }
+            Expr::Array2DSet {
+                row, column, value, ..
+            }
+            | Expr::Array2DCompoundSet {
+                row, column, value, ..
+            } => {
+                for operand in [row.as_ref(), column.as_ref(), value.as_ref()] {
+                    self.update_double_storage_aliases_from_expr(
+                        operand,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                }
+            }
+            Expr::StructArray2DSet {
+                target,
+                row,
+                column,
+                value,
+            }
+            | Expr::StructArray2DCompoundSet {
+                target,
+                row,
+                column,
+                value,
+                ..
+            } => {
+                match target {
+                    Array2DFieldTarget::Direct { .. } => {}
+                    Array2DFieldTarget::Element { index, .. } => {
+                        self.update_double_storage_aliases_from_expr(
+                            index,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    }
+                    Array2DFieldTarget::Pointer { pointer, .. } => {
+                        self.update_double_storage_aliases_from_expr(
+                            pointer,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    }
+                }
+                for operand in [row.as_ref(), column.as_ref(), value.as_ref()] {
+                    self.update_double_storage_aliases_from_expr(
+                        operand,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                }
+            }
+            Expr::AggregateFieldSet {
+                aggregate, value, ..
+            }
+            | Expr::AggregateFieldCompoundSet {
+                aggregate, value, ..
+            } => {
+                self.update_double_storage_aliases_from_expr(
+                    aggregate,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+            }
+            Expr::Increment { target, op, .. } => {
+                let pre_effect_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    target,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let target_value_aliases = self.double_storage_value_aliases_after_effects(
+                    target,
+                    &pre_effect_aliases,
+                    aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let Some(mut aggregate_target) = self.non_evaluating_aggregate_target_with_cache(
+                    target,
+                    visited_functions,
+                    completed_functions,
+                    &target_value_aliases,
+                )?
+                else {
+                    return Ok(());
+                };
+                let owner_and_fields = match target.as_ref() {
+                    Expr::StructGet { name, fields } => {
+                        Self::direct_double_storage_aggregate_target(name, &target_value_aliases)
+                            .map(|owner| (owner, fields.clone()))
+                    }
+                    Expr::StructElementGet {
+                        name,
+                        index,
+                        fields,
+                    } => target_value_aliases
+                        .iter()
+                        .rposition(|scope| scope.contains_key(name))
+                        .map(|scope_index| {
+                            (
+                                DoubleStorageAggregateTarget::Element {
+                                    name: name.clone(),
+                                    scope_index,
+                                    index: Self::non_evaluating_array_index(index),
+                                },
+                                fields.clone(),
+                            )
+                        }),
+                    Expr::StructFieldArrayElementGet {
+                        name,
+                        array_fields,
+                        index,
+                        fields,
+                    } => Self::direct_double_storage_aggregate_target(name, &target_value_aliases)
+                        .map(|owner| {
+                            (
+                                owner,
+                                Self::nested_aggregate_element_field_path(
+                                    array_fields,
+                                    index,
+                                    fields,
+                                ),
+                            )
+                        }),
+                    Expr::StructPtrGet { pointer, fields } => self
+                        .non_evaluating_aggregate_target_with_cache(
+                            pointer,
+                            visited_functions,
+                            completed_functions,
+                            &target_value_aliases,
+                        )?
+                        .map(|owner| (owner, fields.clone())),
+                    _ => None,
+                };
+                Self::offset_double_storage_aggregate_target(
+                    &mut aggregate_target,
+                    &Expr::Number(1),
+                    matches!(op, IncrementOp::Dec),
+                );
+                if let Expr::Var(name) = target.as_ref() {
+                    Self::set_double_storage_aggregate_target(
+                        aliases,
+                        name,
+                        Some(aggregate_target),
+                    );
+                    return Ok(());
+                }
+                if let Some((owner, fields)) = owner_and_fields {
+                    Self::replace_aggregate_target_nested_pointer_targets(
+                        &owner,
+                        &fields,
+                        &HashMap::from([(Vec::new(), aggregate_target)]),
+                        aliases,
+                    );
+                }
+            }
+            Expr::Call { name, args } => {
+                let mut argument_aliases = Vec::with_capacity(args.len());
+                for argument in args {
+                    let pre_effect_aliases = aliases.clone();
+                    self.update_double_storage_aliases_from_expr(
+                        argument,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    argument_aliases.push(self.double_storage_value_aliases_after_effects(
+                        argument,
+                        &pre_effect_aliases,
+                        aliases,
+                        visited_functions,
+                        completed_functions,
+                    )?);
+                }
+                let analysis = self.analyze_double_storage_call(
+                    name,
+                    args,
+                    visited_functions,
+                    completed_functions,
+                    Some(&argument_aliases),
+                    aliases,
+                )?;
+                let Some(function) = self.functions.get(name) else {
+                    return Ok(());
+                };
+                let mut changes = Vec::new();
+                for ((param, arg), argument_aliases) in
+                    function.params.iter().zip(args).zip(&argument_aliases)
+                {
+                    let Some((fields, element_fields, pointer_targets)) =
+                        analysis.changed_parameter_fields.get(&param.name)
+                    else {
+                        continue;
+                    };
+                    let mut targets = self.non_evaluating_aggregate_targets_with_cache(
+                        arg,
+                        visited_functions,
+                        completed_functions,
+                        argument_aliases,
+                    )?;
+                    if analysis.widened_parameter_targets.contains(&param.name) {
+                        for target in &mut targets {
+                            Self::widen_recursive_double_storage_aggregate_target(target);
+                        }
+                    }
+                    if !targets.is_empty() {
+                        let mut changed_fields = fields.clone();
+                        if analysis.widened_parameter_targets.contains(&param.name) {
+                            changed_fields.insert(vec!["\0recursive-widened".to_string()]);
+                        }
+                        changes.push((
+                            targets,
+                            changed_fields,
+                            element_fields.clone(),
+                            pointer_targets.clone(),
+                        ));
+                    }
+                }
+                for (targets, fields, element_fields, pointer_targets) in changes {
+                    if targets.len() == 1 {
+                        Self::replace_aggregate_target_double_storage_fields(
+                            &targets[0],
+                            fields,
+                            aliases,
+                        );
+                        Self::replace_aggregate_target_double_storage_element_fields(
+                            &targets[0],
+                            element_fields,
+                            aliases,
+                        );
+                        Self::replace_aggregate_target_nested_pointer_targets(
+                            &targets[0],
+                            &[],
+                            &pointer_targets,
+                            aliases,
+                        );
+                    } else {
+                        for target in targets {
+                            let mut conservative_fields =
+                                Self::aggregate_target_double_storage_fields(&target, aliases);
+                            conservative_fields.extend(fields.iter().cloned());
+                            Self::replace_aggregate_target_double_storage_fields(
+                                &target,
+                                conservative_fields,
+                                aliases,
+                            );
+                            let mut conservative_element_fields =
+                                Self::aggregate_target_double_storage_element_fields(
+                                    &target, aliases,
+                                );
+                            Self::merge_double_storage_element_fields(
+                                &mut conservative_element_fields,
+                                &element_fields,
+                            );
+                            Self::replace_aggregate_target_double_storage_element_fields(
+                                &target,
+                                conservative_element_fields,
+                                aliases,
+                            );
+                            Self::merge_aggregate_target_nested_pointer_targets(
+                                &target,
+                                &[],
+                                &pointer_targets,
+                                aliases,
+                            );
+                        }
+                    }
+                }
+                for (target, fields, element_fields, pointer_targets) in
+                    &analysis.changed_aggregate_target_facts
+                {
+                    Self::replace_aggregate_target_double_storage_fields(
+                        target,
+                        fields.clone(),
+                        aliases,
+                    );
+                    Self::replace_aggregate_target_double_storage_element_fields(
+                        target,
+                        element_fields.clone(),
+                        aliases,
+                    );
+                    Self::replace_aggregate_target_nested_pointer_targets(
+                        target,
+                        &[],
+                        pointer_targets,
+                        aliases,
+                    );
+                }
+                if let Some(global_facts) = &analysis.changed_global_facts {
+                    *aliases
+                        .first_mut()
+                        .expect("double storage analysis retains its global scope") =
+                        global_facts.clone();
+                }
+            }
+            Expr::StructSet {
+                name,
+                fields,
+                value,
+            } => {
+                let pre_effect_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let value_aliases = self.double_storage_value_aliases_after_effects(
+                    value,
+                    &pre_effect_aliases,
+                    aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let has_double_storage = self
+                    .expr_uses_double_storage_alias(value, &value_aliases)?
+                    || self.non_evaluating_expr_has_double_storage_with_cache(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        &value_aliases,
+                    )?;
+                let copied_fields = self.aggregate_argument_double_storage_fields(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )?;
+                let mut copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )?;
+                if let Some(assigned_target) = self.non_evaluating_aggregate_target_with_cache(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )? {
+                    copied_pointer_targets.insert(Vec::new(), assigned_target);
+                }
+                if let Some(target) = Self::direct_double_storage_aggregate_target(name, aliases) {
+                    Self::replace_aggregate_target_nested_double_storage_fields(
+                        &target,
+                        fields,
+                        &copied_fields,
+                        has_double_storage,
+                        aliases,
+                    );
+                    Self::replace_aggregate_target_nested_pointer_targets(
+                        &target,
+                        fields,
+                        &copied_pointer_targets,
+                        aliases,
+                    );
+                }
+            }
+            Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                value,
+            } => {
+                self.update_double_storage_aliases_from_expr(
+                    index,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let pre_effect_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let value_aliases = self.double_storage_value_aliases_after_effects(
+                    value,
+                    &pre_effect_aliases,
+                    aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let has_double_storage = self
+                    .expr_uses_double_storage_alias(value, &value_aliases)?
+                    || self.non_evaluating_expr_has_double_storage_with_cache(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        &value_aliases,
+                    )?;
+                let copied_fields = self.aggregate_argument_double_storage_fields(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )?;
+                let mut copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )?;
+                if let Some(assigned_target) = self.non_evaluating_aggregate_target_with_cache(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )? {
+                    copied_pointer_targets.insert(Vec::new(), assigned_target);
+                }
+                if let Some(target) =
+                    self.non_evaluating_indexed_aggregate_target(name, index, aliases)
+                {
+                    Self::replace_aggregate_target_nested_double_storage_fields(
+                        &target,
+                        fields,
+                        &copied_fields,
+                        has_double_storage,
+                        aliases,
+                    );
+                    Self::replace_aggregate_target_nested_pointer_targets(
+                        &target,
+                        fields,
+                        &copied_pointer_targets,
+                        aliases,
+                    );
+                }
+            }
+            Expr::StructPtrSet {
+                pointer,
+                fields,
+                value,
+            } => {
+                let pre_effect_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    pointer,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let pointer_value_aliases = self.double_storage_value_aliases_after_effects(
+                    pointer,
+                    &pre_effect_aliases,
+                    aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let target = self.non_evaluating_aggregate_target_with_cache(
+                    pointer,
+                    visited_functions,
+                    completed_functions,
+                    &pointer_value_aliases,
+                )?;
+                let pre_effect_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let value_aliases = self.double_storage_value_aliases_after_effects(
+                    value,
+                    &pre_effect_aliases,
+                    aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let has_double_storage = self
+                    .expr_uses_double_storage_alias(value, &value_aliases)?
+                    || self.non_evaluating_expr_has_double_storage_with_cache(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        &value_aliases,
+                    )?;
+                let copied_fields = self.aggregate_argument_double_storage_fields(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )?;
+                let mut copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )?;
+                if let Some(assigned_target) = self.non_evaluating_aggregate_target_with_cache(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )? {
+                    copied_pointer_targets.insert(Vec::new(), assigned_target);
+                }
+                if let Some(target) = target {
+                    let (write_target, write_fields) =
+                        Self::aggregate_pointer_target_for_field_path(&target, fields, aliases)
+                            .filter(|(_, remaining)| !remaining.is_empty())
+                            .unwrap_or_else(|| (target, fields.clone()));
+                    Self::replace_aggregate_target_nested_double_storage_fields(
+                        &write_target,
+                        &write_fields,
+                        &copied_fields,
+                        has_double_storage,
+                        aliases,
+                    );
+                    Self::replace_aggregate_target_nested_pointer_targets(
+                        &write_target,
+                        &write_fields,
+                        &copied_pointer_targets,
+                        aliases,
+                    );
+                }
+            }
+            Expr::StructPtrCompoundSet {
+                pointer,
+                fields,
+                op,
+                value,
+            } => {
+                let pre_effect_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    pointer,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let pointer_value_aliases = self.double_storage_value_aliases_after_effects(
+                    pointer,
+                    &pre_effect_aliases,
+                    aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let target = self
+                    .non_evaluating_aggregate_target_with_cache(
+                        pointer,
+                        visited_functions,
+                        completed_functions,
+                        &pointer_value_aliases,
+                    )?
+                    .ok_or_else(|| CustError::new("expected aggregate pointer expression"))?;
+                let (mut field_target, remaining) =
+                    Self::aggregate_pointer_target_for_field_path(&target, fields, aliases)
+                        .ok_or_else(|| CustError::new("expected aggregate pointer field"))?;
+                if !remaining.is_empty() {
+                    return Err(CustError::new("expected aggregate pointer field"));
+                }
+                if matches!(op, CompoundOp::Add | CompoundOp::Sub) {
+                    Self::offset_double_storage_aggregate_target(
+                        &mut field_target,
+                        value,
+                        matches!(op, CompoundOp::Sub),
+                    );
+                }
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                Self::replace_aggregate_target_nested_pointer_targets(
+                    &target,
+                    fields,
+                    &HashMap::from([(Vec::new(), field_target)]),
+                    aliases,
+                );
+            }
+            Expr::StructElementCompoundSet {
+                name,
+                index,
+                fields,
+                op,
+                value,
+            } => {
+                let target = self
+                    .non_evaluating_indexed_aggregate_target(name, index, aliases)
+                    .ok_or_else(|| CustError::new("expected aggregate array element"))?;
+                let (mut field_target, remaining) =
+                    Self::aggregate_pointer_target_for_field_path(&target, fields, aliases)
+                        .ok_or_else(|| CustError::new("expected aggregate pointer field"))?;
+                if !remaining.is_empty() {
+                    return Err(CustError::new("expected aggregate pointer field"));
+                }
+                if matches!(op, CompoundOp::Add | CompoundOp::Sub) {
+                    Self::offset_double_storage_aggregate_target(
+                        &mut field_target,
+                        value,
+                        matches!(op, CompoundOp::Sub),
+                    );
+                }
+                self.update_double_storage_aliases_from_expr(
+                    index,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                Self::replace_aggregate_target_nested_pointer_targets(
+                    &target,
+                    fields,
+                    &HashMap::from([(Vec::new(), field_target)]),
+                    aliases,
+                );
+            }
+            Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                value,
+            } => {
+                self.update_double_storage_aliases_from_expr(
+                    index,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let pre_effect_aliases = aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?;
+                let value_aliases = self.double_storage_value_aliases_after_effects(
+                    value,
+                    &pre_effect_aliases,
+                    aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let has_double_storage = self
+                    .expr_uses_double_storage_alias(value, &value_aliases)?
+                    || self.non_evaluating_expr_has_double_storage_with_cache(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        &value_aliases,
+                    )?;
+                let copied_fields = self.aggregate_argument_double_storage_fields(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )?;
+                let mut copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )?;
+                if let Some(assigned_target) = self.non_evaluating_aggregate_target_with_cache(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &value_aliases,
+                )? {
+                    copied_pointer_targets.insert(Vec::new(), assigned_target);
+                }
+                let path = Self::nested_aggregate_element_field_path(array_fields, index, fields);
+                if let Some(target) = Self::direct_double_storage_aggregate_target(name, aliases) {
+                    Self::replace_aggregate_target_nested_double_storage_fields(
+                        &target,
+                        &path,
+                        &copied_fields,
+                        has_double_storage,
+                        aliases,
+                    );
+                    Self::replace_aggregate_target_nested_pointer_targets(
+                        &target,
+                        &path,
+                        &copied_pointer_targets,
+                        aliases,
+                    );
+                }
+            }
+            Expr::GenericSelection { .. } => self.update_double_storage_aliases_from_expr(
+                self.non_evaluating_selected_generic_association(expr, aliases)?,
+                visited_functions,
+                completed_functions,
+                aliases,
+            )?,
+            Expr::AggregateLiteral { init, .. } | Expr::AddressOfAggregateLiteral { init, .. } => {
+                self.update_double_storage_aliases_from_struct_initializers(
+                    init,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?
+            }
+            Expr::ArrayLiteral { init, .. } => self
+                .update_double_storage_aliases_from_array_initializers(
+                    init,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?,
+            Expr::AggregateArrayLiteral { init, .. } => self
+                .update_double_storage_aliases_from_struct_array_initializers(
+                    init,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                )?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn double_storage_value_aliases_after_effects(
+        &self,
+        expr: &Expr,
+        pre_effect_aliases: &[HashMap<String, DoubleStorageFact>],
+        post_effect_aliases: &[HashMap<String, DoubleStorageFact>],
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+    ) -> CustResult<Vec<HashMap<String, DoubleStorageFact>>> {
+        match expr {
+            Expr::Comma(left, right) => {
+                let mut right_pre_effect_aliases = pre_effect_aliases.to_vec();
+                self.update_double_storage_aliases_from_expr(
+                    left,
+                    visited_functions,
+                    completed_functions,
+                    &mut right_pre_effect_aliases,
+                )?;
+                self.double_storage_value_aliases_after_effects(
+                    right,
+                    &right_pre_effect_aliases,
+                    post_effect_aliases,
+                    visited_functions,
+                    completed_functions,
+                )
+            }
+            Expr::Assign { value, .. } => {
+                let mut value_post_effect_aliases = pre_effect_aliases.to_vec();
+                self.update_double_storage_aliases_from_expr(
+                    value,
+                    visited_functions,
+                    completed_functions,
+                    &mut value_post_effect_aliases,
+                )?;
+                self.double_storage_value_aliases_after_effects(
+                    value,
+                    pre_effect_aliases,
+                    &value_post_effect_aliases,
+                    visited_functions,
+                    completed_functions,
+                )
+            }
+            Expr::Deref(expr)
+            | Expr::PointerCast { expr, .. }
+            | Expr::StructPtrGet { pointer: expr, .. }
+            | Expr::AggregateFieldGet {
+                aggregate: expr, ..
+            } => self.double_storage_value_aliases_after_effects(
+                expr,
+                pre_effect_aliases,
+                post_effect_aliases,
+                visited_functions,
+                completed_functions,
+            ),
+            Expr::Conditional {
+                cond: condition,
+                then_expr,
+                else_expr,
+            } => {
+                let mut branch_pre_effect_aliases = pre_effect_aliases.to_vec();
+                self.update_double_storage_aliases_from_expr(
+                    condition,
+                    visited_functions,
+                    completed_functions,
+                    &mut branch_pre_effect_aliases,
+                )?;
+                let mut then_post_effect_aliases = branch_pre_effect_aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    then_expr,
+                    visited_functions,
+                    completed_functions,
+                    &mut then_post_effect_aliases,
+                )?;
+                let then_value_aliases = self.double_storage_value_aliases_after_effects(
+                    then_expr,
+                    &branch_pre_effect_aliases,
+                    &then_post_effect_aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let mut else_post_effect_aliases = branch_pre_effect_aliases.clone();
+                self.update_double_storage_aliases_from_expr(
+                    else_expr,
+                    visited_functions,
+                    completed_functions,
+                    &mut else_post_effect_aliases,
+                )?;
+                let else_value_aliases = self.double_storage_value_aliases_after_effects(
+                    else_expr,
+                    &branch_pre_effect_aliases,
+                    &else_post_effect_aliases,
+                    visited_functions,
+                    completed_functions,
+                )?;
+                let mut value_aliases = branch_pre_effect_aliases;
+                Self::join_double_storage_branches(
+                    &mut value_aliases,
+                    &then_value_aliases,
+                    &else_value_aliases,
+                );
+                Ok(value_aliases)
+            }
+            Expr::GenericSelection { .. } => {
+                let selected =
+                    self.non_evaluating_selected_generic_association(expr, pre_effect_aliases)?;
+                self.double_storage_value_aliases_after_effects(
+                    selected,
+                    pre_effect_aliases,
+                    post_effect_aliases,
+                    visited_functions,
+                    completed_functions,
+                )
+            }
+            _ if self.double_storage_value_uses_pre_effect_aliases(expr, pre_effect_aliases)? => {
+                Ok(pre_effect_aliases.to_vec())
+            }
+            _ => Ok(post_effect_aliases.to_vec()),
+        }
+    }
+
+    fn double_storage_value_uses_pre_effect_aliases(
+        &self,
+        expr: &Expr,
+        aliases: &[HashMap<String, DoubleStorageFact>],
+    ) -> CustResult<bool> {
+        match expr {
+            Expr::Call { .. } => Ok(true),
+            Expr::Increment { prefix: false, .. } => Ok(true),
+            Expr::Deref(expr)
+            | Expr::PointerCast { expr, .. }
+            | Expr::Comma(_, expr)
+            | Expr::StructPtrGet { pointer: expr, .. }
+            | Expr::AggregateFieldGet {
+                aggregate: expr, ..
+            } => self.double_storage_value_uses_pre_effect_aliases(expr, aliases),
+            Expr::Assign { value, .. } => {
+                self.double_storage_value_uses_pre_effect_aliases(value, aliases)
+            }
+            Expr::GenericSelection { .. } => self.double_storage_value_uses_pre_effect_aliases(
+                self.non_evaluating_selected_generic_association(expr, aliases)?,
+                aliases,
+            ),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => Ok(
+                self.double_storage_value_uses_pre_effect_aliases(then_expr, aliases)?
+                    || self.double_storage_value_uses_pre_effect_aliases(else_expr, aliases)?,
+            ),
+            _ => Ok(false),
+        }
+    }
+
+    fn statements_may_return_double_storage(
+        &self,
+        function: &Function,
+        visited_functions: &mut HashSet<String>,
+    ) -> CustResult<bool> {
+        let mut aliases = vec![
+            self.double_storage_globals.clone(),
+            Self::double_storage_parameter_scope(function),
+        ];
+        self.statements_may_return_double_storage_with_aliases(
+            &function.body,
+            visited_functions,
+            &mut HashMap::new(),
+            &mut aliases,
+            false,
+        )
+        .map(|analysis| analysis.returns_double_storage)
+    }
+
+    fn statements_may_return_double_storage_with_aliases(
+        &self,
+        statements: &[Stmt],
+        visited_functions: &mut HashSet<String>,
+        completed_functions: &mut HashMap<String, DoubleStorageAnalysis>,
+        aliases: &mut Vec<HashMap<String, DoubleStorageFact>>,
+        track_control_expressions: bool,
+    ) -> CustResult<DoubleStorageAnalysis> {
+        let mut analysis = DoubleStorageAnalysis::default();
+        for statement in statements {
+            let mut statement_analysis = match statement {
+                Stmt::Return(Some(expr)) => {
+                    let return_value_aliases = aliases.clone();
+                    self.update_double_storage_aliases_from_expr(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    let classification_aliases = self.double_storage_value_aliases_after_effects(
+                        expr,
+                        &return_value_aliases,
+                        aliases,
+                        visited_functions,
+                        completed_functions,
+                    )?;
+                    DoubleStorageAnalysis {
+                        returns_double_storage: self
+                            .expr_uses_double_storage_alias(expr, &classification_aliases)?
+                            || self.non_evaluating_expr_has_double_storage_with_cache(
+                                expr,
+                                visited_functions,
+                                completed_functions,
+                                &classification_aliases,
+                            )?,
+                        returned_fields: self.aggregate_argument_double_storage_fields(
+                            expr,
+                            visited_functions,
+                            completed_functions,
+                            &classification_aliases,
+                        )?,
+                        returned_targets: self.non_evaluating_aggregate_targets_with_cache(
+                            expr,
+                            visited_functions,
+                            completed_functions,
+                            &classification_aliases,
+                        )?,
+                        returned_pointer_targets: self.aggregate_argument_pointer_targets(
+                            expr,
+                            visited_functions,
+                            completed_functions,
+                            &classification_aliases,
+                        )?,
+                        always_returns: true,
+                        always_stops_sequence: true,
+                        return_aliases: vec![aliases.clone()],
+                        ..DoubleStorageAnalysis::default()
+                    }
+                }
+                Stmt::VarDecl {
+                    ty,
+                    name,
+                    expr,
+                    is_const,
+                    ..
+                } => {
+                    self.update_double_storage_aliases_from_expr(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    aliases
+                        .last_mut()
+                        .expect("double storage analysis requires a function scope")
+                        .insert(
+                            name.clone(),
+                            DoubleStorageFact {
+                                has_double_storage: *ty == CType::Double,
+                                declared_type: Some(DeclType::Scalar(*ty)),
+                                object_is_const: *is_const,
+                                double_storage_fields: HashSet::new(),
+                                double_storage_element_fields: HashMap::new(),
+                                aggregate_pointer_targets: HashMap::new(),
+                                aggregate_target: None,
+                                aggregate_fields_written: false,
+                                static_local_id: None,
+                            },
+                        );
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::ArrayDecl {
+                    name,
+                    elem_type,
+                    init,
+                    is_const,
+                    ..
+                } => {
+                    self.update_double_storage_aliases_from_array_initializers(
+                        init,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    aliases
+                        .last_mut()
+                        .expect("double storage analysis requires a function scope")
+                        .insert(
+                            name.clone(),
+                            DoubleStorageFact {
+                                has_double_storage: *elem_type == CType::Double,
+                                declared_type: Some(DeclType::Pointer {
+                                    pointee: PointeeType::Scalar(*elem_type),
+                                    points_to_const: *is_const,
+                                }),
+                                object_is_const: *is_const,
+                                double_storage_fields: HashSet::new(),
+                                double_storage_element_fields: HashMap::new(),
+                                aggregate_pointer_targets: HashMap::new(),
+                                aggregate_target: None,
+                                aggregate_fields_written: false,
+                                static_local_id: None,
+                            },
+                        );
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::Array2DDecl {
+                    name,
+                    elem_type,
+                    rows,
+                    columns,
+                    init,
+                    is_const,
+                } => {
+                    for row in init {
+                        self.update_double_storage_aliases_from_array_initializers(
+                            row,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    }
+                    aliases
+                        .last_mut()
+                        .expect("double storage analysis requires a function scope")
+                        .insert(
+                            name.clone(),
+                            DoubleStorageFact {
+                                has_double_storage: *elem_type == CType::Double,
+                                declared_type: Some(DeclType::Array2D(*elem_type, *rows, *columns)),
+                                object_is_const: *is_const,
+                                double_storage_fields: HashSet::new(),
+                                double_storage_element_fields: HashMap::new(),
+                                aggregate_pointer_targets: HashMap::new(),
+                                aggregate_target: None,
+                                aggregate_fields_written: false,
+                                static_local_id: None,
+                            },
+                        );
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::PointerDecl {
+                    name,
+                    ty,
+                    expr,
+                    is_const,
+                    points_to_const,
+                    ..
+                } => {
+                    let value_aliases = aliases.clone();
+                    self.update_double_storage_aliases_from_expr(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    let classification_aliases = self.double_storage_value_aliases_after_effects(
+                        expr,
+                        &value_aliases,
+                        aliases,
+                        visited_functions,
+                        completed_functions,
+                    )?;
+                    let has_double_storage = self
+                        .expr_uses_double_storage_alias(expr, &classification_aliases)?
+                        || self.non_evaluating_expr_has_double_storage_with_cache(
+                            expr,
+                            visited_functions,
+                            completed_functions,
+                            &classification_aliases,
+                        )?;
+                    let aggregate_target = self.non_evaluating_aggregate_target_with_cache(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        &classification_aliases,
+                    )?;
+                    aliases
+                        .last_mut()
+                        .expect("double storage analysis requires a function scope")
+                        .insert(
+                            name.clone(),
+                            DoubleStorageFact {
+                                has_double_storage,
+                                declared_type: Some(DeclType::Pointer {
+                                    pointee: ty.clone(),
+                                    points_to_const: *points_to_const,
+                                }),
+                                object_is_const: *is_const,
+                                double_storage_fields: HashSet::new(),
+                                double_storage_element_fields: HashMap::new(),
+                                aggregate_pointer_targets: HashMap::new(),
+                                aggregate_target,
+                                aggregate_fields_written: false,
+                                static_local_id: None,
+                            },
+                        );
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::CharacterPointerOutputDecl { name, expr } => {
+                    self.update_double_storage_aliases_from_expr(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    aliases
+                        .last_mut()
+                        .expect("double storage analysis requires a function scope")
+                        .insert(
+                            name.clone(),
+                            DoubleStorageFact {
+                                has_double_storage: false,
+                                declared_type: None,
+                                object_is_const: false,
+                                double_storage_fields: HashSet::new(),
+                                double_storage_element_fields: HashMap::new(),
+                                aggregate_pointer_targets: HashMap::new(),
+                                aggregate_target: None,
+                                aggregate_fields_written: false,
+                                static_local_id: None,
+                            },
+                        );
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::Array2DPointerDecl {
+                    name,
+                    elem_type,
+                    columns,
+                    expr,
+                    is_const,
+                    points_to_const,
+                } => {
+                    self.update_double_storage_aliases_from_expr(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    let has_double_storage = *elem_type == CType::Double
+                        || self.expr_uses_double_storage_alias(expr, aliases)?
+                        || self.non_evaluating_expr_has_double_storage_with_cache(
+                            expr,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    aliases
+                        .last_mut()
+                        .expect("double storage analysis requires a function scope")
+                        .insert(
+                            name.clone(),
+                            DoubleStorageFact {
+                                has_double_storage,
+                                declared_type: Some(DeclType::Array2DPointer {
+                                    elem_type: *elem_type,
+                                    columns: *columns,
+                                    points_to_const: *points_to_const,
+                                }),
+                                object_is_const: *is_const,
+                                double_storage_fields: HashSet::new(),
+                                double_storage_element_fields: HashMap::new(),
+                                aggregate_pointer_targets: HashMap::new(),
+                                aggregate_target: None,
+                                aggregate_fields_written: false,
+                                static_local_id: None,
+                            },
+                        );
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::StructVarDecl {
+                    type_name,
+                    name,
+                    init,
+                    is_const,
+                    ..
+                } => {
+                    let mut double_storage_fields = HashSet::new();
+                    let mut aggregate_pointer_targets = HashMap::new();
+                    match init {
+                        Some(StructVarInitializer::Fields(initializers)) => {
+                            self.collect_double_storage_initializer_fields(
+                                initializers,
+                                &mut Vec::new(),
+                                visited_functions,
+                                completed_functions,
+                                aliases,
+                                &mut double_storage_fields,
+                            )?;
+                            self.collect_aggregate_pointer_initializer_targets(
+                                type_name,
+                                initializers,
+                                &mut Vec::new(),
+                                visited_functions,
+                                completed_functions,
+                                aliases,
+                                &mut aggregate_pointer_targets,
+                            )?;
+                        }
+                        Some(StructVarInitializer::Expr(expr)) => {
+                            let value_aliases = aliases.clone();
+                            self.update_double_storage_aliases_from_expr(
+                                expr,
+                                visited_functions,
+                                completed_functions,
+                                aliases,
+                            )?;
+                            let classification_aliases = self
+                                .double_storage_value_aliases_after_effects(
+                                    expr,
+                                    &value_aliases,
+                                    aliases,
+                                    visited_functions,
+                                    completed_functions,
+                                )?;
+                            double_storage_fields.extend(
+                                self.aggregate_argument_double_storage_fields(
+                                    expr,
+                                    visited_functions,
+                                    completed_functions,
+                                    &classification_aliases,
+                                )?,
+                            );
+                            aggregate_pointer_targets = self.aggregate_argument_pointer_targets(
+                                expr,
+                                visited_functions,
+                                completed_functions,
+                                &classification_aliases,
+                            )?;
+                        }
+                        None => {}
+                    }
+                    let scope_index = aliases.len() - 1;
+                    aliases
+                        .last_mut()
+                        .expect("double storage analysis requires a function scope")
+                        .insert(
+                            name.clone(),
+                            DoubleStorageFact {
+                                has_double_storage: false,
+                                declared_type: Some(DeclType::Struct(type_name.clone())),
+                                object_is_const: *is_const,
+                                double_storage_fields,
+                                double_storage_element_fields: HashMap::new(),
+                                aggregate_pointer_targets,
+                                aggregate_target: Some(DoubleStorageAggregateTarget::Direct {
+                                    name: name.clone(),
+                                    scope_index,
+                                }),
+                                aggregate_fields_written: false,
+                                static_local_id: None,
+                            },
+                        );
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::StructArrayDecl {
+                    type_name,
+                    name,
+                    init,
+                    is_const,
+                    ..
+                } => {
+                    let mut double_storage_element_fields = HashMap::new();
+                    let mut aggregate_pointer_targets = HashMap::new();
+                    let mut next_index = 0;
+                    for element in init {
+                        let (index, initializers) = match element {
+                            StructArrayInitializer::Element(initializers) => {
+                                let index = next_index;
+                                next_index += 1;
+                                (index, initializers)
+                            }
+                            StructArrayInitializer::Designated { index, value } => {
+                                next_index = index + 1;
+                                (*index, value)
+                            }
+                        };
+                        let mut fields = HashSet::new();
+                        self.collect_double_storage_initializer_fields(
+                            initializers,
+                            &mut Vec::new(),
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                            &mut fields,
+                        )?;
+                        if !fields.is_empty() {
+                            double_storage_element_fields.insert(index, fields);
+                        }
+                        let mut pointer_path = vec![format!("\0element:{index}")];
+                        self.collect_aggregate_pointer_initializer_targets(
+                            type_name,
+                            initializers,
+                            &mut pointer_path,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                            &mut aggregate_pointer_targets,
+                        )?;
+                    }
+                    let scope_index = aliases.len() - 1;
+                    aliases
+                        .last_mut()
+                        .expect("double storage analysis requires a function scope")
+                        .insert(
+                            name.clone(),
+                            DoubleStorageFact {
+                                has_double_storage: false,
+                                declared_type: Some(DeclType::Pointer {
+                                    pointee: PointeeType::Struct(type_name.clone()),
+                                    points_to_const: *is_const,
+                                }),
+                                object_is_const: *is_const,
+                                double_storage_fields: HashSet::new(),
+                                double_storage_element_fields,
+                                aggregate_pointer_targets,
+                                aggregate_target: Some(DoubleStorageAggregateTarget::Element {
+                                    name: name.clone(),
+                                    scope_index,
+                                    index: Some(0),
+                                }),
+                                aggregate_fields_written: false,
+                                static_local_id: None,
+                            },
+                        );
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::Assign(name, expr) => {
+                    let value_aliases = aliases.clone();
+                    self.update_double_storage_aliases_from_expr(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    let classification_aliases = self.double_storage_value_aliases_after_effects(
+                        expr,
+                        &value_aliases,
+                        aliases,
+                        visited_functions,
+                        completed_functions,
+                    )?;
+                    let aggregate_target = self.non_evaluating_aggregate_target_with_cache(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        &classification_aliases,
+                    )?;
+                    let has_double_storage = self
+                        .expr_uses_double_storage_alias(expr, &classification_aliases)?
+                        || self.non_evaluating_expr_has_double_storage_with_cache(
+                            expr,
+                            visited_functions,
+                            completed_functions,
+                            &classification_aliases,
+                        )?;
+                    let copied_fields = self.aggregate_argument_double_storage_fields(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        &classification_aliases,
+                    )?;
+                    let target_is_aggregate = aliases
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.get(name))
+                        .and_then(|fact| fact.declared_type.as_ref())
+                        .is_some_and(|declared_type| matches!(declared_type, DeclType::Struct(_)));
+                    if target_is_aggregate {
+                        let copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                            expr,
+                            visited_functions,
+                            completed_functions,
+                            &classification_aliases,
+                        )?;
+                        if let Some(fact) = aliases
+                            .iter_mut()
+                            .rev()
+                            .find_map(|scope| scope.get_mut(name))
+                        {
+                            fact.double_storage_fields = copied_fields;
+                            fact.aggregate_pointer_targets = copied_pointer_targets;
+                        }
+                    } else {
+                        Self::set_double_storage_alias(aliases, name, has_double_storage);
+                        Self::set_double_storage_aggregate_target(aliases, name, aggregate_target);
+                    }
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::DerefAssign { pointer, value } => {
+                    let pre_effect_aliases = aliases.clone();
+                    self.update_double_storage_aliases_from_expr(
+                        pointer,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    let pointer_value_aliases = self.double_storage_value_aliases_after_effects(
+                        pointer,
+                        &pre_effect_aliases,
+                        aliases,
+                        visited_functions,
+                        completed_functions,
+                    )?;
+                    let target = self.non_evaluating_aggregate_target_with_cache(
+                        pointer,
+                        visited_functions,
+                        completed_functions,
+                        &pointer_value_aliases,
+                    )?;
+                    self.update_double_storage_aliases_from_expr(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    if let Some(target) = target {
+                        let copied_fields = self.aggregate_argument_double_storage_fields(
+                            value,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                        let copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                            value,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                        Self::replace_aggregate_target_double_storage_fields(
+                            &target,
+                            copied_fields,
+                            aliases,
+                        );
+                        Self::replace_aggregate_target_nested_pointer_targets(
+                            &target,
+                            &[],
+                            &copied_pointer_targets,
+                            aliases,
+                        );
+                    }
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::ArrayAssign { name, index, value } => {
+                    self.update_double_storage_aliases_from_expr(
+                        index,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    self.update_double_storage_aliases_from_expr(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    let target_is_aggregate = aliases
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.get(name))
+                        .is_some_and(|fact| fact.aggregate_target.is_some());
+                    if target_is_aggregate {
+                        let copied_fields = self.aggregate_argument_double_storage_fields(
+                            value,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                        let copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                            value,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                        if let Some(target) =
+                            self.non_evaluating_indexed_aggregate_target(name, index, aliases)
+                        {
+                            Self::replace_aggregate_target_double_storage_fields(
+                                &target,
+                                copied_fields,
+                                aliases,
+                            );
+                            Self::replace_aggregate_target_nested_pointer_targets(
+                                &target,
+                                &[],
+                                &copied_pointer_targets,
+                                aliases,
+                            );
+                        }
+                    }
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::StructAssign {
+                    name,
+                    fields,
+                    value,
+                } => {
+                    let pre_effect_aliases = aliases.clone();
+                    self.update_double_storage_aliases_from_expr(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    let value_aliases = self.double_storage_value_aliases_after_effects(
+                        value,
+                        &pre_effect_aliases,
+                        aliases,
+                        visited_functions,
+                        completed_functions,
+                    )?;
+                    let has_double_storage = self
+                        .expr_uses_double_storage_alias(value, &value_aliases)?
+                        || self.non_evaluating_expr_has_double_storage_with_cache(
+                            value,
+                            visited_functions,
+                            completed_functions,
+                            &value_aliases,
+                        )?;
+                    let assigned_aggregate_target = self
+                        .non_evaluating_aggregate_target_with_cache(
+                            value,
+                            visited_functions,
+                            completed_functions,
+                            &value_aliases,
+                        )?;
+                    let copied_fields = self.aggregate_argument_double_storage_fields(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        &value_aliases,
+                    )?;
+                    let mut copied_pointer_targets = self.aggregate_argument_pointer_targets(
+                        value,
+                        visited_functions,
+                        completed_functions,
+                        &value_aliases,
+                    )?;
+                    if let Some(assigned_target) = assigned_aggregate_target {
+                        copied_pointer_targets.insert(Vec::new(), assigned_target);
+                    }
+                    if let Some(target) =
+                        Self::direct_double_storage_aggregate_target(name, aliases)
+                    {
+                        Self::replace_aggregate_target_nested_double_storage_fields(
+                            &target,
+                            fields,
+                            &copied_fields,
+                            has_double_storage,
+                            aliases,
+                        );
+                        Self::replace_aggregate_target_nested_pointer_targets(
+                            &target,
+                            fields,
+                            &copied_pointer_targets,
+                            aliases,
+                        );
+                    }
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::Many(statements) => self.statements_may_return_double_storage_with_aliases(
+                    statements,
+                    visited_functions,
+                    completed_functions,
+                    aliases,
+                    track_control_expressions,
+                )?,
+                Stmt::Block(statements) => {
+                    aliases.push(HashMap::new());
+                    let result = self.statements_may_return_double_storage_with_aliases(
+                        statements,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                        track_control_expressions,
+                    );
+                    aliases.pop();
+                    result?
+                }
+                Stmt::StaticLocal { id, decl } => {
+                    let (name, _) = Self::static_local_name_and_const(decl)?;
+                    let key = Self::double_storage_static_local_key(*id);
+                    if let Some(fact) = aliases
+                        .first()
+                        .and_then(|globals| globals.get(&key))
+                        .cloned()
+                    {
+                        aliases
+                            .last_mut()
+                            .expect("double storage analysis requires a function scope")
+                            .insert(name.to_string(), fact);
+                        DoubleStorageAnalysis::default()
+                    } else {
+                        let result = self.statements_may_return_double_storage_with_aliases(
+                            std::slice::from_ref(decl.as_ref()),
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                            track_control_expressions,
+                        )?;
+                        aliases
+                            .last_mut()
+                            .and_then(|scope| scope.get_mut(name))
+                            .expect("static local declarations create double storage facts")
+                            .static_local_id = Some(*id);
+                        result
+                    }
+                }
+                Stmt::If {
+                    cond,
+                    then_branch,
+                    else_branch,
+                } => {
+                    if track_control_expressions {
+                        self.update_double_storage_aliases_from_expr(
+                            cond,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    }
+                    let mut then_aliases = aliases.clone();
+                    let mut then_analysis = self
+                        .statements_may_return_double_storage_with_aliases(
+                            then_branch,
+                            visited_functions,
+                            completed_functions,
+                            &mut then_aliases,
+                            track_control_expressions,
+                        )?;
+                    let mut else_aliases = aliases.clone();
+                    let else_analysis = self.statements_may_return_double_storage_with_aliases(
+                        else_branch,
+                        visited_functions,
+                        completed_functions,
+                        &mut else_aliases,
+                        track_control_expressions,
+                    )?;
+                    match (
+                        then_analysis.always_stops_sequence,
+                        else_analysis.always_stops_sequence,
+                    ) {
+                        (true, false) => *aliases = else_aliases,
+                        (false, true) => *aliases = then_aliases,
+                        _ => Self::join_double_storage_branches(
+                            aliases,
+                            &then_aliases,
+                            &else_aliases,
+                        ),
+                    }
+                    let always_returns =
+                        then_analysis.always_returns && else_analysis.always_returns;
+                    let always_stops_sequence =
+                        then_analysis.always_stops_sequence && else_analysis.always_stops_sequence;
+                    then_analysis.merge(else_analysis);
+                    then_analysis.always_returns = always_returns;
+                    then_analysis.always_stops_sequence = always_stops_sequence;
+                    then_analysis
+                }
+                Stmt::While { cond, body } => {
+                    if track_control_expressions {
+                        self.update_double_storage_aliases_from_expr(
+                            cond,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    }
+                    let mut loop_entry_aliases = aliases.clone();
+                    let mut loop_analysis = DoubleStorageAnalysis::default();
+                    let mut break_exit_aliases = Vec::new();
+                    loop {
+                        let mut body_aliases = loop_entry_aliases.clone();
+                        let mut body_analysis = self
+                            .statements_may_return_double_storage_with_aliases(
+                                body,
+                                visited_functions,
+                                completed_functions,
+                                &mut body_aliases,
+                                track_control_expressions,
+                            )?;
+                        break_exit_aliases.extend(body_analysis.break_aliases.iter().cloned());
+                        let mut next_entry_aliases = loop_entry_aliases.clone();
+                        if !body_analysis.always_stops_sequence {
+                            if track_control_expressions {
+                                self.update_double_storage_aliases_from_expr(
+                                    cond,
+                                    visited_functions,
+                                    completed_functions,
+                                    &mut body_aliases,
+                                )?;
+                            }
+                            Self::merge_double_storage_aliases(
+                                &mut next_entry_aliases,
+                                &body_aliases,
+                            );
+                        }
+                        for continue_aliases in &body_analysis.continue_aliases {
+                            let mut continue_aliases = continue_aliases.clone();
+                            if track_control_expressions {
+                                self.update_double_storage_aliases_from_expr(
+                                    cond,
+                                    visited_functions,
+                                    completed_functions,
+                                    &mut continue_aliases,
+                                )?;
+                            }
+                            Self::merge_double_storage_aliases(
+                                &mut next_entry_aliases,
+                                &continue_aliases,
+                            );
+                        }
+                        body_analysis.break_aliases.clear();
+                        body_analysis.continue_aliases.clear();
+                        loop_analysis.merge(body_analysis);
+                        Self::widen_loop_aggregate_targets(&mut next_entry_aliases);
+                        if next_entry_aliases == loop_entry_aliases {
+                            break;
+                        }
+                        loop_entry_aliases = next_entry_aliases;
+                    }
+                    *aliases = loop_entry_aliases;
+                    for break_aliases in &break_exit_aliases {
+                        Self::merge_double_storage_aliases(aliases, break_aliases);
+                    }
+                    loop_analysis.break_aliases.clear();
+                    loop_analysis.continue_aliases.clear();
+                    loop_analysis.always_returns = false;
+                    loop_analysis.always_stops_sequence = false;
+                    loop_analysis
+                }
+                Stmt::DoWhile { body, cond } => {
+                    let mut loop_entry_aliases = aliases.clone();
+                    let mut loop_analysis = DoubleStorageAnalysis::default();
+                    let mut exit_aliases = Vec::new();
+                    loop {
+                        let mut body_aliases = loop_entry_aliases.clone();
+                        let mut body_analysis = self
+                            .statements_may_return_double_storage_with_aliases(
+                                body,
+                                visited_functions,
+                                completed_functions,
+                                &mut body_aliases,
+                                track_control_expressions,
+                            )?;
+                        exit_aliases.extend(body_analysis.break_aliases.iter().cloned());
+                        let mut post_body_aliases =
+                            (!body_analysis.always_stops_sequence).then_some(body_aliases);
+                        for continue_aliases in &body_analysis.continue_aliases {
+                            if let Some(post_body_aliases) = &mut post_body_aliases {
+                                Self::merge_double_storage_aliases(
+                                    post_body_aliases,
+                                    continue_aliases,
+                                );
+                            } else {
+                                post_body_aliases = Some(continue_aliases.clone());
+                            }
+                        }
+                        let mut next_entry_aliases = loop_entry_aliases.clone();
+                        if let Some(mut post_body_aliases) = post_body_aliases {
+                            if track_control_expressions {
+                                self.update_double_storage_aliases_from_expr(
+                                    cond,
+                                    visited_functions,
+                                    completed_functions,
+                                    &mut post_body_aliases,
+                                )?;
+                            }
+                            Self::merge_double_storage_aliases(
+                                &mut next_entry_aliases,
+                                &post_body_aliases,
+                            );
+                            exit_aliases.push(post_body_aliases);
+                        }
+                        body_analysis.break_aliases.clear();
+                        body_analysis.continue_aliases.clear();
+                        loop_analysis.merge(body_analysis);
+                        Self::widen_loop_aggregate_targets(&mut next_entry_aliases);
+                        if next_entry_aliases == loop_entry_aliases {
+                            break;
+                        }
+                        loop_entry_aliases = next_entry_aliases;
+                    }
+                    if let Some(first_exit) = exit_aliases.first() {
+                        *aliases = first_exit.clone();
+                        for possible_exit in exit_aliases.iter().skip(1) {
+                            Self::merge_double_storage_aliases(aliases, possible_exit);
+                        }
+                    }
+                    loop_analysis.break_aliases.clear();
+                    loop_analysis.continue_aliases.clear();
+                    loop_analysis.always_stops_sequence = loop_analysis.always_returns;
+                    loop_analysis
+                }
+                Stmt::For {
+                    init,
+                    cond,
+                    increment,
+                    body,
+                } => {
+                    let mut for_aliases = aliases.clone();
+                    for_aliases.push(HashMap::new());
+                    let mut for_analysis = DoubleStorageAnalysis::default();
+                    if let Some(init) = init {
+                        for_analysis.merge(
+                            self.statements_may_return_double_storage_with_aliases(
+                                std::slice::from_ref(init.as_ref()),
+                                visited_functions,
+                                completed_functions,
+                                &mut for_aliases,
+                                track_control_expressions,
+                            )?,
+                        );
+                    }
+                    if track_control_expressions && let Some(cond) = cond {
+                        self.update_double_storage_aliases_from_expr(
+                            cond,
+                            visited_functions,
+                            completed_functions,
+                            &mut for_aliases,
+                        )?;
+                    }
+                    let mut loop_entry_aliases = for_aliases;
+                    let mut break_exit_aliases = Vec::new();
+                    loop {
+                        let mut iteration_aliases = loop_entry_aliases.clone();
+                        let mut body_analysis = self
+                            .statements_may_return_double_storage_with_aliases(
+                                body,
+                                visited_functions,
+                                completed_functions,
+                                &mut iteration_aliases,
+                                track_control_expressions,
+                            )?;
+                        break_exit_aliases.extend(body_analysis.break_aliases.iter().cloned());
+                        let mut post_body_aliases =
+                            (!body_analysis.always_stops_sequence).then_some(iteration_aliases);
+                        for continue_aliases in &body_analysis.continue_aliases {
+                            if let Some(post_body_aliases) = &mut post_body_aliases {
+                                Self::merge_double_storage_aliases(
+                                    post_body_aliases,
+                                    continue_aliases,
+                                );
+                            } else {
+                                post_body_aliases = Some(continue_aliases.clone());
+                            }
+                        }
+                        body_analysis.break_aliases.clear();
+                        body_analysis.continue_aliases.clear();
+                        for_analysis.merge(body_analysis);
+                        let mut next_entry_aliases = loop_entry_aliases.clone();
+                        if let Some(mut post_body_aliases) = post_body_aliases {
+                            if let Some(increment) = increment {
+                                for_analysis.merge(
+                                    self.statements_may_return_double_storage_with_aliases(
+                                        std::slice::from_ref(increment.as_ref()),
+                                        visited_functions,
+                                        completed_functions,
+                                        &mut post_body_aliases,
+                                        track_control_expressions,
+                                    )?,
+                                );
+                            }
+                            if track_control_expressions && let Some(cond) = cond {
+                                self.update_double_storage_aliases_from_expr(
+                                    cond,
+                                    visited_functions,
+                                    completed_functions,
+                                    &mut post_body_aliases,
+                                )?;
+                            }
+                            Self::merge_double_storage_aliases(
+                                &mut next_entry_aliases,
+                                &post_body_aliases,
+                            );
+                        }
+                        Self::widen_loop_aggregate_targets(&mut next_entry_aliases);
+                        if next_entry_aliases == loop_entry_aliases {
+                            break;
+                        }
+                        loop_entry_aliases = next_entry_aliases;
+                    }
+                    loop_entry_aliases.truncate(aliases.len());
+                    *aliases = loop_entry_aliases;
+                    for break_aliases in &break_exit_aliases {
+                        Self::merge_double_storage_aliases(aliases, break_aliases);
+                    }
+                    for_analysis.break_aliases.clear();
+                    for_analysis.continue_aliases.clear();
+                    for_analysis.always_returns = false;
+                    for_analysis.always_stops_sequence = false;
+                    for_analysis
+                }
+                Stmt::Switch { expr, sections } => {
+                    if track_control_expressions {
+                        self.update_double_storage_aliases_from_expr(
+                            expr,
+                            visited_functions,
+                            completed_functions,
+                            aliases,
+                        )?;
+                    }
+                    let entry_aliases = aliases.clone();
+                    let outer_scope_count = aliases.len();
+                    let has_default = sections
+                        .iter()
+                        .any(|section| matches!(section.label, SwitchLabel::Default));
+                    let mut fallthrough_aliases: Option<Vec<HashMap<String, DoubleStorageFact>>> =
+                        None;
+                    let mut exit_aliases = Vec::new();
+                    let mut switch_analysis = DoubleStorageAnalysis::default();
+                    let mut section_outcomes = Vec::new();
+                    for section in sections {
+                        let mut section_aliases = entry_aliases.clone();
+                        if let Some(previous_aliases) = &fallthrough_aliases {
+                            Self::merge_double_storage_aliases(
+                                &mut section_aliases,
+                                previous_aliases,
+                            );
+                        }
+                        section_aliases.push(HashMap::new());
+                        let mut section_analysis = self
+                            .statements_may_return_double_storage_with_aliases(
+                                &section.statements,
+                                visited_functions,
+                                completed_functions,
+                                &mut section_aliases,
+                                track_control_expressions,
+                            )?;
+                        let has_break = !section_analysis.break_aliases.is_empty();
+                        let has_continue = !section_analysis.continue_aliases.is_empty();
+                        section_outcomes.push((
+                            section_analysis.always_returns,
+                            section_analysis.always_stops_sequence,
+                            has_break,
+                            has_continue,
+                        ));
+                        for break_aliases in &section_analysis.break_aliases {
+                            let mut break_aliases = break_aliases.clone();
+                            break_aliases.truncate(outer_scope_count);
+                            exit_aliases.push(break_aliases);
+                        }
+                        section_analysis.break_aliases.clear();
+                        if section_analysis.always_stops_sequence {
+                            fallthrough_aliases = None;
+                        } else {
+                            section_aliases.truncate(outer_scope_count);
+                            fallthrough_aliases = Some(section_aliases);
+                        }
+                        switch_analysis.merge(section_analysis);
+                    }
+                    if let Some(fallthrough_aliases) = fallthrough_aliases {
+                        exit_aliases.push(fallthrough_aliases);
+                    }
+                    if !has_default {
+                        exit_aliases.push(entry_aliases);
+                    }
+                    if let Some(first_exit) = exit_aliases.first() {
+                        *aliases = first_exit.clone();
+                        for possible_exit in exit_aliases.iter().skip(1) {
+                            Self::merge_double_storage_aliases(aliases, possible_exit);
+                        }
+                    }
+                    let mut next_returns = false;
+                    let mut next_stops = false;
+                    let mut all_entries_return = true;
+                    let mut all_entries_stop = true;
+                    for (always_returns, always_stops, has_break, has_continue) in
+                        section_outcomes.into_iter().rev()
+                    {
+                        let entry_returns = if always_stops {
+                            always_returns && !has_break && !has_continue
+                        } else {
+                            !has_break && !has_continue && next_returns
+                        };
+                        let entry_stops = if always_stops {
+                            !has_break
+                        } else {
+                            !has_break && next_stops
+                        };
+                        all_entries_return &= entry_returns;
+                        all_entries_stop &= entry_stops;
+                        next_returns = entry_returns;
+                        next_stops = entry_stops;
+                    }
+                    switch_analysis.always_returns = has_default && all_entries_return;
+                    switch_analysis.always_stops_sequence = has_default && all_entries_stop;
+                    switch_analysis
+                }
+                Stmt::Expr(expr) => {
+                    self.update_double_storage_aliases_from_expr(
+                        expr,
+                        visited_functions,
+                        completed_functions,
+                        aliases,
+                    )?;
+                    DoubleStorageAnalysis::default()
+                }
+                Stmt::Return(None) => DoubleStorageAnalysis {
+                    always_returns: true,
+                    always_stops_sequence: true,
+                    return_aliases: vec![aliases.clone()],
+                    ..DoubleStorageAnalysis::default()
+                },
+                Stmt::Break(_) => DoubleStorageAnalysis {
+                    always_stops_sequence: true,
+                    break_aliases: vec![aliases.clone()],
+                    ..DoubleStorageAnalysis::default()
+                },
+                Stmt::Continue(_) => DoubleStorageAnalysis {
+                    always_stops_sequence: true,
+                    continue_aliases: vec![aliases.clone()],
+                    ..DoubleStorageAnalysis::default()
+                },
+                Stmt::Empty | Stmt::EnumDecl { .. } | Stmt::StaticAssert { .. } => {
+                    DoubleStorageAnalysis::default()
+                }
+            };
+            Self::sync_double_storage_static_locals(aliases);
+            for exit_aliases in &mut statement_analysis.break_aliases {
+                Self::sync_double_storage_static_locals(exit_aliases);
+            }
+            for exit_aliases in &mut statement_analysis.continue_aliases {
+                Self::sync_double_storage_static_locals(exit_aliases);
+            }
+            for exit_aliases in &mut statement_analysis.return_aliases {
+                Self::sync_double_storage_static_locals(exit_aliases);
+            }
+            let always_stops_sequence = statement_analysis.always_stops_sequence;
+            analysis.merge(statement_analysis);
+            if always_stops_sequence {
+                analysis.always_stops_sequence = true;
+                break;
+            }
+        }
+        Ok(analysis)
+    }
+
+    fn validate_non_evaluating_memory_double_storage(
+        &self,
+        name: &str,
+        argument: usize,
+        expr: &Expr,
+    ) -> CustResult<()> {
+        if self.current_expr_has_double_storage(expr)? {
+            return Err(CustError::new(format!(
+                "function '{name}' does not yet support double object storage for argument {argument}"
+            )));
+        }
+        if let Expr::Call {
+            name: called_name, ..
+        } = expr
+        {
+            let mut visited_functions = HashSet::from([called_name.clone()]);
+            if let Some(function) = self.functions.get(called_name)
+                && self.statements_may_return_double_storage(function, &mut visited_functions)?
+            {
+                return Err(CustError::new(
+                    "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+                ));
+            }
+        }
+        let has_double_storage =
+            self.non_evaluating_expr_has_double_storage(expr, &mut HashSet::new())?;
         if has_double_storage {
             return Err(CustError::new(format!(
                 "function '{name}' does not yet support double object storage for argument {argument}"
@@ -23467,6 +31523,19 @@ impl Interpreter {
     }
 
     fn validate_nested_string_intrinsic_calls(&self, expr: &Expr) -> CustResult<()> {
+        let depth = self.non_evaluating_callee_expression_depth.get();
+        if depth >= MAX_NON_EVALUATING_CALLEE_EXPRESSION_DEPTH {
+            return Err(CustError::new(format!(
+                "non-evaluating callee-expression nesting limit of {MAX_NON_EVALUATING_CALLEE_EXPRESSION_DEPTH} exceeded"
+            )));
+        }
+        self.non_evaluating_callee_expression_depth.set(depth + 1);
+        let result = self.validate_nested_string_intrinsic_calls_at_depth(expr);
+        self.non_evaluating_callee_expression_depth.set(depth);
+        result
+    }
+
+    fn validate_nested_string_intrinsic_calls_at_depth(&self, expr: &Expr) -> CustResult<()> {
         match expr {
             Expr::Call { name, args } => {
                 if Self::is_character_classification_name(name)
@@ -23990,63 +32059,80 @@ impl Interpreter {
                 continue;
             }
             let actual_type = self.validated_generic_selection_type(argument)?;
-            match (expected_kind, expected_type, actual_type) {
-                (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Scalar(_))
-                | (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Pointer { .. }) => {
-                }
-                (ParamKind::Scalar, ParamType::Scalar(_), DeclType::Scalar(_)) => {}
-                (ParamKind::Scalar, ParamType::Scalar(_), DeclType::Pointer { .. }) => {
-                    return Err(CustError::new("pointer value used as scalar"));
-                }
-                (ParamKind::Scalar, ParamType::Scalar(_), DeclType::Struct(type_name)) => {
-                    return Err(CustError::new(format!(
-                        "{} value used as scalar",
-                        self.aggregate_kind_label(&type_name)
-                    )));
-                }
-                (
-                    ParamKind::Pointer,
-                    ParamType::Scalar(expected),
-                    DeclType::Pointer {
-                        pointee: PointeeType::Scalar(actual),
-                        points_to_const,
-                    },
-                ) if expected == &actual && (*expected_points_to_const || !points_to_const) => {}
-                (
-                    ParamKind::Pointer,
-                    ParamType::Struct(expected),
-                    DeclType::Pointer {
-                        pointee: PointeeType::Struct(actual),
-                        points_to_const,
-                    },
-                ) if expected == &actual && (*expected_points_to_const || !points_to_const) => {}
-                (
-                    ParamKind::Pointer,
-                    ParamType::Void,
-                    DeclType::Pointer {
-                        points_to_const, ..
-                    },
-                ) if *expected_points_to_const || !points_to_const => {}
-                (
-                    ParamKind::Pointer,
-                    _,
-                    DeclType::Pointer {
-                        pointee: PointeeType::Void,
-                        points_to_const,
-                    },
-                ) if *expected_points_to_const || !points_to_const => {}
-                (ParamKind::Pointer, _, DeclType::Scalar(_))
-                    if self.generic_expr_is_null_pointer_constant(argument) => {}
-                (ParamKind::Pointer, _, _) => {
-                    return Err(CustError::new("expected pointer expression"));
-                }
-                (ParamKind::Struct, ParamType::Struct(expected), DeclType::Struct(actual))
-                    if expected == &actual => {}
-                (ParamKind::Struct, _, _) => {
-                    return Err(CustError::new("incompatible struct argument type"));
-                }
-                _ => {}
+            self.validate_function_argument_decl_type(
+                *expected_kind,
+                expected_type,
+                *expected_points_to_const,
+                actual_type,
+                argument,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_function_argument_decl_type(
+        &self,
+        expected_kind: ParamKind,
+        expected_type: &ParamType,
+        expected_points_to_const: bool,
+        actual_type: DeclType,
+        argument: &Expr,
+    ) -> CustResult<()> {
+        match (expected_kind, expected_type, actual_type) {
+            (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Scalar(_))
+            | (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Pointer { .. }) => {}
+            (ParamKind::Scalar, ParamType::Scalar(_), DeclType::Scalar(_)) => {}
+            (ParamKind::Scalar, ParamType::Scalar(_), DeclType::Pointer { .. }) => {
+                return Err(CustError::new("pointer value used as scalar"));
             }
+            (ParamKind::Scalar, ParamType::Scalar(_), DeclType::Struct(type_name)) => {
+                return Err(CustError::new(format!(
+                    "{} value used as scalar",
+                    self.aggregate_kind_label(&type_name)
+                )));
+            }
+            (
+                ParamKind::Pointer,
+                ParamType::Scalar(expected),
+                DeclType::Pointer {
+                    pointee: PointeeType::Scalar(actual),
+                    points_to_const,
+                },
+            ) if expected == &actual && (expected_points_to_const || !points_to_const) => {}
+            (
+                ParamKind::Pointer,
+                ParamType::Struct(expected),
+                DeclType::Pointer {
+                    pointee: PointeeType::Struct(actual),
+                    points_to_const,
+                },
+            ) if expected == &actual && (expected_points_to_const || !points_to_const) => {}
+            (
+                ParamKind::Pointer,
+                ParamType::Void,
+                DeclType::Pointer {
+                    points_to_const, ..
+                },
+            ) if expected_points_to_const || !points_to_const => {}
+            (
+                ParamKind::Pointer,
+                _,
+                DeclType::Pointer {
+                    pointee: PointeeType::Void,
+                    points_to_const,
+                },
+            ) if expected_points_to_const || !points_to_const => {}
+            (ParamKind::Pointer, _, DeclType::Scalar(_))
+                if self.generic_expr_is_null_pointer_constant(argument) => {}
+            (ParamKind::Pointer, _, _) => {
+                return Err(CustError::new("expected pointer expression"));
+            }
+            (ParamKind::Struct, ParamType::Struct(expected), DeclType::Struct(actual))
+                if expected == &actual => {}
+            (ParamKind::Struct, _, _) => {
+                return Err(CustError::new("incompatible struct argument type"));
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -24829,13 +32915,41 @@ impl Interpreter {
         let CharacterPointerOutput::Slot { scope_id, .. } = output else {
             return true;
         };
+        self.scope_has_static_storage(*scope_id)
+    }
+
+    fn scope_has_static_storage(&self, scope_id: usize) -> bool {
         self.scopes
             .first()
-            .is_some_and(|scope| scope.id == *scope_id)
+            .is_some_and(|scope| scope.id == scope_id)
             || self
                 .static_locals
                 .values()
-                .any(|storage| storage.scope_id == *scope_id)
+                .any(|storage| storage.scope_id == scope_id)
+    }
+
+    fn pointer_target_has_static_storage(&self, pointer: &PointerValue) -> bool {
+        match pointer {
+            PointerValue::Null => true,
+            PointerValue::Scalar { scope_id, .. }
+            | PointerValue::Struct { scope_id, .. }
+            | PointerValue::StructElement { scope_id, .. }
+            | PointerValue::StructFieldElement { scope_id, .. }
+            | PointerValue::StructField { scope_id, .. } => {
+                self.scope_has_static_storage(*scope_id)
+            }
+            PointerValue::NestedStructArrayElement { pointer, .. }
+            | PointerValue::StructFieldElementField { pointer, .. }
+            | PointerValue::ObjectByte { base: pointer, .. } => {
+                self.pointer_target_has_static_storage(pointer)
+            }
+            PointerValue::ArrayBase { array, owner, .. }
+            | PointerValue::ArrayElement { array, owner, .. }
+            | PointerValue::Array2DRow { array, owner, .. } => owner.as_ref().map_or_else(
+                || array.borrow().has_static_storage,
+                |owner| self.scope_has_static_storage(owner.scope_id),
+            ),
+        }
     }
 
     fn character_pointer_output_initializer_is_static_constant(&self, expr: &Expr) -> bool {
@@ -25264,9 +33378,6 @@ impl Interpreter {
                 }
                 _ => Ok(None),
             },
-            Expr::AddressOfScalarLiteral {
-                ty: CType::Double, ..
-            } => Err(CustError::new("double pointers are not supported")),
             Expr::AddressOfScalarLiteral { ty, .. } => Ok(Some(PointeeType::Scalar(*ty))),
             Expr::AddressOfAggregateLiteral { type_name, .. } => {
                 Ok(Some(PointeeType::Struct(type_name.clone())))
@@ -26077,7 +34188,8 @@ impl Interpreter {
                     StructFieldType::Scalar(_) | StructFieldType::Struct(_) => is_const,
                 })
                 .unwrap_or(false),
-            Expr::AddressOfAggregateLiteral { read_only, .. } => *read_only,
+            Expr::AddressOfAggregateLiteral { read_only, .. }
+            | Expr::AddressOfScalarLiteral { read_only, .. } => *read_only,
             Expr::StructElementGet {
                 name,
                 index,
@@ -27774,12 +35886,28 @@ impl Interpreter {
         elem_type: CType,
         init: &[ArrayInitializer],
         read_only: bool,
-    ) -> CustResult<Rc<RefCell<ArrayValue>>> {
+    ) -> CustResult<PointerValue> {
         let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
         let Value::Array(array) = self.make_array_value(len, elem_type, init, read_only)? else {
             unreachable!("make_array_value always returns Value::Array")
         };
-        Ok(array)
+        let owner = if elem_type == CType::Double {
+            let scope_id = self
+                .scopes
+                .last()
+                .expect("compound literal evaluation requires a current scope")
+                .id;
+            let name = format!("__cust_compound_array#{}", self.next_compound_literal_id);
+            self.next_compound_literal_id += 1;
+            Some(ArrayPointerOwner { scope_id, name })
+        } else {
+            None
+        };
+        Ok(PointerValue::ArrayBase {
+            array,
+            source_name: None,
+            owner,
+        })
     }
 
     fn infer_array_initializer_len(init: &[ArrayInitializer]) -> usize {
@@ -27925,6 +36053,8 @@ impl Interpreter {
         &mut self,
         ty: CType,
         init: &Expr,
+        literal_id: usize,
+        read_only: bool,
     ) -> CustResult<PointerValue> {
         let value = self.eval_scalar_conversion(ty, init)?;
         let scope_id = self
@@ -27932,10 +36062,12 @@ impl Interpreter {
             .last()
             .expect("compound literal evaluation requires a current scope")
             .id;
-        let name = format!("__cust_compound_scalar#{}", self.next_compound_literal_id);
-        self.next_compound_literal_id += 1;
+        let name = format!("__cust_compound_scalar#{literal_id}");
         self.current_scope_mut()
             .insert(name.clone(), Value::Scalar { value, ty });
+        if read_only {
+            self.mark_current_variable_const(&name);
+        }
         Ok(PointerValue::Scalar { scope_id, name })
     }
 
@@ -28388,6 +36520,9 @@ impl Interpreter {
                 StructFieldValue::Pointer { pointer, .. },
                 StructInitializer::Expr(expr),
             ) => {
+                if self.expr_is_unsupported_double_pointer(expr) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 self.ensure_pointer_conversion_preserves_const(field.points_to_const, expr)?;
                 let assigned = self.eval_pointer(expr)?;
                 let assigned = self.attach_array_pointer_owner(assigned);
@@ -29216,8 +37351,9 @@ impl Interpreter {
         array_fields: &[String],
         index: &Expr,
     ) -> CustResult<PointerValue> {
-        if let Some(pointer) =
-            self.scalar_field_reverse_subscript_pointer(name, array_fields, index)?
+        if self
+            .scalar_field_reverse_subscript_pointee_type(name, array_fields, index)?
+            .is_some()
         {
             match index {
                 Expr::Var(pointer_name)
@@ -29231,7 +37367,9 @@ impl Interpreter {
                 _ => {}
             }
             self.ensure_reverse_subscript_pointee_mutable(index)?;
-            return Ok(pointer);
+            return self
+                .scalar_field_reverse_subscript_pointer(name, array_fields, index)?
+                .ok_or_else(|| CustError::new("reverse subscript metadata requires a pointer"));
         }
 
         if self.struct_field_is_pointer(name, array_fields) {
@@ -30457,11 +38595,10 @@ impl Interpreter {
         if self
             .scalar_field_reverse_subscript_pointee_type(name, fields, index)?
             .is_some()
+            || self.struct_field_is_pointer(name, fields)
         {
-            self.ensure_reverse_subscript_pointee_mutable(index)?;
-            let pointer = self
-                .scalar_field_reverse_subscript_pointer(name, fields, index)?
-                .expect("reverse subscript metadata requires a pointer");
+            let pointer =
+                self.struct_field_array_element_assignment_pointer(name, fields, index)?;
             let value = match self.pointer_value_type(&pointer)? {
                 Some(PointeeType::Scalar(ty)) => self.eval_scalar_conversion(ty, value)?,
                 _ => self.eval(value)?,
@@ -30496,11 +38633,10 @@ impl Interpreter {
         if self
             .scalar_field_reverse_subscript_pointee_type(name, fields, index)?
             .is_some()
+            || self.struct_field_is_pointer(name, fields)
         {
-            self.ensure_reverse_subscript_pointee_mutable(index)?;
-            let pointer = self
-                .scalar_field_reverse_subscript_pointer(name, fields, index)?
-                .expect("reverse subscript metadata requires a pointer");
+            let pointer =
+                self.struct_field_array_element_assignment_pointer(name, fields, index)?;
             let current = self.deref_pointer(&pointer)?;
             let ty = match self.pointer_value_type(&pointer)? {
                 Some(PointeeType::Scalar(ty)) => ty,
@@ -31508,6 +39644,18 @@ impl Interpreter {
                 } else {
                     return Err(CustError::new("expected pointer expression"));
                 };
+                if *pointee == PointeeType::Scalar(CType::Double) {
+                    self.ensure_pointer_type_matches(pointee, &pointer)?;
+                }
+                if !matches!(
+                    pointee,
+                    PointeeType::Scalar(CType::Double) | PointeeType::Void
+                ) && matches!(
+                    self.pointer_value_type(&pointer)?,
+                    Some(PointeeType::Scalar(CType::Double))
+                ) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 if *pointee == PointeeType::Scalar(CType::Char)
                     && !matches!(
                         pointer,
@@ -31653,11 +39801,11 @@ impl Interpreter {
                 self.find_struct_pointer_field_pointer(&pointer, fields)
             }
             Expr::AddressOfScalarLiteral {
-                ty: CType::Double, ..
-            } => Err(CustError::new("double pointers are not supported")),
-            Expr::AddressOfScalarLiteral { ty, init } => {
-                self.make_scalar_compound_literal_pointer(*ty, init)
-            }
+                ty,
+                init,
+                literal_id,
+                read_only,
+            } => self.make_scalar_compound_literal_pointer(*ty, init, *literal_id, *read_only),
             Expr::AddressOfAggregateLiteral {
                 type_name, init, ..
             } => self.make_aggregate_compound_literal_pointer(type_name, init),
@@ -31674,11 +39822,7 @@ impl Interpreter {
                 len,
                 init,
                 read_only,
-            } => Ok(PointerValue::ArrayBase {
-                array: self.make_array_compound_literal(*len, *elem_type, init, *read_only)?,
-                source_name: None,
-                owner: None,
-            }),
+            } => self.make_array_compound_literal(*len, *elem_type, init, *read_only),
             Expr::AggregateArrayLiteral {
                 type_name,
                 len,
@@ -31700,6 +39844,9 @@ impl Interpreter {
                         "cannot assign to const struct field '{}'",
                         self.aggregate_literal_const_field_label(aggregate, fields)
                     )));
+                }
+                if self.expr_is_unsupported_double_pointer(value) {
+                    return Err(CustError::new("double pointers are not supported"));
                 }
                 self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
                 let pointer = self.eval_pointer(value)?;
@@ -31923,6 +40070,9 @@ impl Interpreter {
                 fields,
                 value,
             } => {
+                if self.expr_is_unsupported_double_pointer(value) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 self.ensure_pointer_conversion_preserves_const(
                     self.struct_pointer_field_points_to_const(name, fields),
                     value,
@@ -31936,6 +40086,9 @@ impl Interpreter {
                 fields,
                 value,
             } => {
+                if self.expr_is_unsupported_double_pointer(value) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 let target_pointer = self.eval_pointer(pointer)?;
                 let target_points_to_const =
                     self.struct_pointer_pointer_field_points_to_const(&target_pointer, fields)?;
@@ -31955,6 +40108,9 @@ impl Interpreter {
                 fields,
                 value,
             } => {
+                if self.expr_is_unsupported_double_pointer(value) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 let metadata = self.struct_field_array_element_field_metadata(
                     name,
                     array_fields,
@@ -31981,6 +40137,9 @@ impl Interpreter {
                 fields,
                 value,
             } => {
+                if self.expr_is_unsupported_double_pointer(value) {
+                    return Err(CustError::new("double pointers are not supported"));
+                }
                 let Some((StructFieldType::Pointer(_), _, points_to_const)) =
                     self.struct_element_field_metadata(name, fields)?
                 else {
@@ -32747,16 +40906,8 @@ impl Interpreter {
     ) -> CustResult<PointerValue> {
         let left_is_pointer = self.expr_is_pointer_value(left);
         let right_is_pointer = self.expr_is_pointer_value(right);
-        if (left_is_pointer
-            && matches!(
-                self.pointer_expr_pointee_type(left)?,
-                Some(PointeeType::Scalar(CType::Double))
-            ))
-            || (right_is_pointer
-                && matches!(
-                    self.pointer_expr_pointee_type(right)?,
-                    Some(PointeeType::Scalar(CType::Double))
-                ))
+        if self.expr_is_unsupported_double_pointer(left)
+            || self.expr_is_unsupported_double_pointer(right)
         {
             return Err(CustError::new("double pointers are not supported"));
         }
@@ -33187,9 +41338,6 @@ impl Interpreter {
                     .and_then(|scope| scope.values.get(name))
                     .or_else(|| self.static_value_by_scope(*scope_id, name));
                 match value {
-                    Some(Value::Scalar {
-                        ty: CType::Double, ..
-                    }) => Err(CustError::new("double pointers are not supported")),
                     Some(Value::Scalar { value, .. }) => Ok(*value),
                     _ => Err(CustError::new(format!(
                         "pointer to out-of-scope variable '{name}'"
@@ -33262,9 +41410,6 @@ impl Interpreter {
                     .find(|scope| scope.id == *scope_id)
                     .and_then(|scope| scope.values.get_mut(name))
                 {
-                    Some(Value::Scalar {
-                        ty: CType::Double, ..
-                    }) => Err(CustError::new("double pointers are not supported")),
                     Some(Value::Scalar {
                         value: slot, ty, ..
                     }) => {
@@ -33498,7 +41643,11 @@ impl Interpreter {
             } => {
                 self.ensure_array_pointer_owner_live(owner.as_ref())?;
                 let len = array.borrow().elements.len();
-                let candidate = *base_index as i64 + index_value;
+                let candidate = (*base_index as i64)
+                    .checked_add(index_value)
+                    .ok_or_else(|| {
+                        CustError::new("array pointer index overflow during pointer arithmetic")
+                    })?;
                 let Ok(index) = usize::try_from(candidate) else {
                     return Err(CustError::new(format!(
                         "array pointer index {candidate} out of bounds for length {len}"
@@ -33542,7 +41691,7 @@ impl Interpreter {
     }
 
     fn validate_array_subscript(&self, index: &Expr) -> CustResult<()> {
-        if self.expr_is_double_value(index) {
+        if self.expr_is_pointer_value(index) || self.expr_is_double_value(index) {
             return Err(CustError::new("array subscript requires an integer value"));
         }
         self.sizeof_expr(index)?;
@@ -34127,6 +42276,8 @@ impl Interpreter {
     }
 
     fn pointer_values_equal(&self, left: &PointerValue, right: &PointerValue) -> CustResult<bool> {
+        self.ensure_pointer_value_live(left)?;
+        self.ensure_pointer_value_live(right)?;
         if matches!(left, PointerValue::Null) || matches!(right, PointerValue::Null) {
             return Ok(Self::pointer_eq(left, right));
         }
@@ -34140,6 +42291,19 @@ impl Interpreter {
             );
         }
         Ok(Self::pointer_eq(left, right))
+    }
+
+    fn ensure_pointer_value_live(&self, pointer: &PointerValue) -> CustResult<()> {
+        match pointer {
+            PointerValue::Null => Ok(()),
+            PointerValue::ObjectByte { base, .. } => self.ensure_pointer_value_live(base),
+            PointerValue::ArrayBase { owner, .. }
+            | PointerValue::ArrayElement { owner, .. }
+            | PointerValue::Array2DRow { owner, .. } => {
+                self.ensure_array_pointer_owner_live(owner.as_ref())
+            }
+            _ => self.pointer_value_type(pointer).map(|_| ()),
+        }
     }
 
     fn array_pointer_index(pointer: &PointerValue) -> CustResult<(&Rc<RefCell<ArrayValue>>, i64)> {
@@ -34191,6 +42355,8 @@ impl Interpreter {
     }
 
     fn pointer_difference(&self, left: &PointerValue, right: &PointerValue) -> CustResult<i64> {
+        self.ensure_pointer_value_live(left)?;
+        self.ensure_pointer_value_live(right)?;
         if matches!(left, PointerValue::ObjectByte { .. })
             || matches!(right, PointerValue::ObjectByte { .. })
         {
@@ -34550,8 +42716,127 @@ impl Interpreter {
     }
 
     fn validate_double_conditional_expression(&self, expr: &Expr) -> CustResult<()> {
-        if matches!(expr, Expr::Conditional { .. }) && self.expr_is_double_value(expr) {
+        let pointer_branches_require_type_validation = match expr {
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } if self.array2d_row_pointer_element_type(then_expr).is_none()
+                && self.array2d_row_pointer_element_type(else_expr).is_none() =>
+            {
+                let then_pointee = self.pointer_expr_pointee_type(then_expr)?;
+                let else_pointee = self.pointer_expr_pointee_type(else_expr)?;
+                match (&then_pointee, &else_pointee) {
+                    (Some(then_pointee), Some(else_pointee)) => then_pointee != else_pointee,
+                    (Some(_), None) => !self.generic_expr_is_null_pointer_constant(else_expr),
+                    (None, Some(_)) => !self.generic_expr_is_null_pointer_constant(then_expr),
+                    (None, None) => false,
+                }
+            }
+            _ => false,
+        };
+        if matches!(expr, Expr::Conditional { .. })
+            && (self.expr_is_double_value(expr) || pointer_branches_require_type_validation)
+        {
             self.generic_selection_type(expr)?;
+        }
+        Ok(())
+    }
+
+    fn pointer_equality_operand_pointee_type(
+        &self,
+        expr: &Expr,
+    ) -> CustResult<Option<PointeeType>> {
+        match expr {
+            Expr::Call { name, .. } => Ok(self
+                .functions
+                .get(name)
+                .map(|function| &function.return_type)
+                .or_else(|| {
+                    self.prototypes
+                        .get(name)
+                        .map(|signature| &signature.return_type)
+                })
+                .and_then(|return_type| match return_type {
+                    ReturnType::Pointer { ty, .. } => Some(ty.clone()),
+                    ReturnType::Array2DPointer { elem_type, .. } => {
+                        Some(PointeeType::Scalar(*elem_type))
+                    }
+                    ReturnType::Scalar(_) | ReturnType::Struct(_) | ReturnType::Void => None,
+                })),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let then_type = self.pointer_equality_operand_pointee_type(then_expr)?;
+                let else_type = self.pointer_equality_operand_pointee_type(else_expr)?;
+                match (&then_type, &else_type) {
+                    (Some(PointeeType::Void), Some(_)) | (Some(_), Some(PointeeType::Void)) => {
+                        Ok(Some(PointeeType::Void))
+                    }
+                    _ => Ok(then_type.or(else_type)),
+                }
+            }
+            Expr::Comma(_, right) => self.pointer_equality_operand_pointee_type(right),
+            Expr::Binary(left, BinaryOp::Add | BinaryOp::Subscript, right) => self
+                .pointer_equality_operand_pointee_type(left)?
+                .map_or_else(
+                    || self.pointer_equality_operand_pointee_type(right),
+                    |ty| Ok(Some(ty)),
+                ),
+            Expr::Binary(left, BinaryOp::Sub, right) => {
+                let left_type = self.pointer_equality_operand_pointee_type(left)?;
+                let right_type = self.pointer_equality_operand_pointee_type(right)?;
+                if left_type.is_some() && right_type.is_none() {
+                    Ok(left_type)
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => self.pointer_expr_pointee_type(expr),
+        }
+    }
+
+    fn ensure_pointer_equality_types_compatible(
+        &self,
+        left: &Expr,
+        right: &Expr,
+    ) -> CustResult<()> {
+        if !self.expr_is_pointer_value(left) || !self.expr_is_pointer_value(right) {
+            return Ok(());
+        }
+        let (Some(left_type), Some(right_type)) = (
+            self.pointer_equality_operand_pointee_type(left)?,
+            self.pointer_equality_operand_pointee_type(right)?,
+        ) else {
+            return Ok(());
+        };
+        self.ensure_pointer_pointee_types_compatible(&left_type, &right_type, false)
+    }
+
+    fn ensure_pointer_pointee_types_compatible(
+        &self,
+        left_type: &PointeeType,
+        right_type: &PointeeType,
+        subtraction: bool,
+    ) -> CustResult<()> {
+        if left_type != right_type
+            && !matches!(left_type, PointeeType::Void)
+            && !matches!(right_type, PointeeType::Void)
+        {
+            if subtraction {
+                return Err(CustError::new(format!(
+                    "cannot subtract pointer to {} from pointer to {}",
+                    self.pointee_label(right_type),
+                    self.pointee_label(left_type)
+                )));
+            }
+            return Err(CustError::new(format!(
+                "cannot compare pointer to {} with pointer to {}",
+                self.pointee_label(left_type),
+                self.pointee_label(right_type)
+            )));
         }
         Ok(())
     }
@@ -34563,6 +42848,18 @@ impl Interpreter {
     ) -> CustResult<DeclType> {
         let then_type = self.generic_selection_type(then_expr)?;
         let else_type = self.generic_selection_type(else_expr)?;
+        self.generic_conditional_expression_type_from_types(
+            then_expr, else_expr, then_type, else_type,
+        )
+    }
+
+    fn generic_conditional_expression_type_from_types(
+        &self,
+        then_expr: &Expr,
+        else_expr: &Expr,
+        then_type: DeclType,
+        else_type: DeclType,
+    ) -> CustResult<DeclType> {
         match (&then_type, &else_type) {
             (DeclType::Scalar(then_scalar), DeclType::Scalar(else_scalar)) => Ok(DeclType::Scalar(
                 if *then_scalar == CType::Double || *else_scalar == CType::Double {
@@ -34571,6 +42868,24 @@ impl Interpreter {
                     CType::Int
                 },
             )),
+            (
+                DeclType::Array2DPointer {
+                    elem_type: then_elem,
+                    columns: then_columns,
+                    points_to_const: then_const,
+                },
+                DeclType::Array2DPointer {
+                    elem_type: else_elem,
+                    columns: else_columns,
+                    points_to_const: else_const,
+                },
+            ) if then_elem == else_elem && then_columns == else_columns => {
+                Ok(DeclType::Array2DPointer {
+                    elem_type: *then_elem,
+                    columns: *then_columns,
+                    points_to_const: *then_const || *else_const,
+                })
+            }
             (
                 DeclType::Pointer {
                     pointee: then_pointee,
@@ -34602,11 +42917,13 @@ impl Interpreter {
                 points_to_const: *then_const || *else_const,
             }),
             (DeclType::Pointer { .. }, DeclType::Scalar(_))
+            | (DeclType::Array2DPointer { .. }, DeclType::Scalar(_))
                 if self.generic_expr_is_null_pointer_constant(else_expr) =>
             {
                 Ok(then_type)
             }
             (DeclType::Scalar(_), DeclType::Pointer { .. })
+            | (DeclType::Scalar(_), DeclType::Array2DPointer { .. })
                 if self.generic_expr_is_null_pointer_constant(then_expr) =>
             {
                 Ok(else_type)
@@ -34633,9 +42950,21 @@ impl Interpreter {
     }
 
     fn generic_aggregate_field_expr_type(&self, expr: &Expr) -> CustResult<Option<DeclType>> {
-        let (type_name, fields) = match expr {
+        let (type_name, fields, index) = match expr {
             Expr::StructGet { name, fields } => match self.find_variable(name) {
-                Some(Value::Struct { type_name, .. }) => (type_name.clone(), fields.as_slice()),
+                Some(Value::Struct { type_name, .. }) => {
+                    (type_name.clone(), fields.as_slice(), None)
+                }
+                _ => return Ok(None),
+            },
+            Expr::StructArrayGet {
+                name,
+                fields,
+                index,
+            } => match self.find_variable(name) {
+                Some(Value::Struct { type_name, .. }) => {
+                    (type_name.clone(), fields.as_slice(), Some(index.as_ref()))
+                }
                 _ => return Ok(None),
             },
             Expr::StructPtrGet { pointer, fields } => {
@@ -34644,16 +42973,34 @@ impl Interpreter {
                 else {
                     return Ok(None);
                 };
-                (type_name, fields.as_slice())
+                (type_name, fields.as_slice(), None)
             }
             Expr::AggregateFieldGet { aggregate, fields } => {
                 let type_name = self.aggregate_expr_type_name(aggregate)?;
-                (type_name, fields.as_slice())
+                (type_name, fields.as_slice(), None)
             }
             _ => return Ok(None),
         };
-        self.generic_aggregate_field_type(&type_name, fields)
-            .map(Some)
+        let field_type = self.generic_aggregate_field_type(&type_name, fields)?;
+        let Some(index) = index else {
+            return Ok(Some(field_type));
+        };
+        if matches!(
+            &field_type,
+            DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+        ) {
+            let reverse_type = self.non_evaluating_generic_selection_type(index, &[])?;
+            if matches!(
+                &reverse_type,
+                DeclType::Pointer { .. }
+                    | DeclType::Array(_, _)
+                    | DeclType::Array2DPointer { .. }
+                    | DeclType::Array2D(_, _, _)
+            ) {
+                return Self::non_evaluating_indexed_aggregate_field_type(reverse_type).map(Some);
+            }
+        }
+        Self::non_evaluating_indexed_aggregate_field_type(field_type).map(Some)
     }
 
     fn generic_aggregate_field_type(
@@ -34847,6 +43194,7 @@ impl Interpreter {
         }
         if is_pointer {
             let pointer = self.eval_pointer(expr)?;
+            self.ensure_pointer_value_live(&pointer)?;
             return Ok(Self::pointer_truthy(&pointer));
         }
         if is_double {
@@ -36051,8 +44399,27 @@ impl Interpreter {
         Ok(())
     }
 
+    fn validate_sizeof_binary_expression_depth(expr: &Expr) -> CustResult<()> {
+        let mut pending = vec![(expr, 0usize)];
+        while let Some((current, depth)) = pending.pop() {
+            if depth > MAX_SIZEOF_EXPRESSION_DEPTH {
+                return Err(CustError::new(format!(
+                    "sizeof expression nesting limit of {MAX_SIZEOF_EXPRESSION_DEPTH} exceeded"
+                )));
+            }
+            if let Expr::Binary(left, _, right) = current {
+                pending.push((left, depth + 1));
+                pending.push((right, depth + 1));
+            }
+        }
+        Ok(())
+    }
+
     fn sizeof_expr(&self, expr: &Expr) -> CustResult<i64> {
         let depth = self.sizeof_validation_depth.get();
+        if depth == 0 {
+            Self::validate_sizeof_binary_expression_depth(expr)?;
+        }
         self.sizeof_validation_depth.set(depth + 1);
         let result = (|| {
             if depth == 0 {
@@ -36146,8 +44513,12 @@ impl Interpreter {
                     fields,
                     index,
                 } => {
-                    self.validate_array_subscript(index)?;
-                    match self.sizeof_scalar_field_reverse_subscript(name, fields, index)? {
+                    let reverse_size =
+                        self.sizeof_scalar_field_reverse_subscript(name, fields, index)?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
+                    match reverse_size {
                         Some(size) => Ok(size),
                         None => match self.direct_struct_pointer_field_type(name, fields)? {
                             Some(ty) => ty.size(&self.struct_types),
@@ -36161,13 +44532,16 @@ impl Interpreter {
                     index,
                     fields,
                 } => {
-                    self.validate_array_subscript(index)?;
-                    match self.sizeof_scalar_field_reverse_subscript_field(
+                    let reverse_size = self.sizeof_scalar_field_reverse_subscript_field(
                         name,
                         array_fields,
                         index,
                         fields,
-                    )? {
+                    )?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
+                    match reverse_size {
                         Some(size) => Ok(size),
                         None => {
                             self.sizeof_struct_field_array_element_field(name, array_fields, fields)
@@ -36181,16 +44555,19 @@ impl Interpreter {
                     fields,
                     value,
                 } => {
-                    self.validate_array_subscript(index)?;
-                    self.validate_non_evaluating_assignment_value(value, None)?;
-                    self.validate_non_evaluating_double_assignment(expr, value, None)?;
-                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
-                    match self.sizeof_scalar_field_reverse_subscript_field(
+                    let reverse_size = self.sizeof_scalar_field_reverse_subscript_field(
                         name,
                         array_fields,
                         index,
                         fields,
-                    )? {
+                    )?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
+                    self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.validate_non_evaluating_double_assignment(expr, value, None)?;
+                    self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
+                    match reverse_size {
                         Some(size) => Ok(size),
                         None => {
                             self.sizeof_struct_field_array_element_field(name, array_fields, fields)
@@ -36205,19 +44582,22 @@ impl Interpreter {
                     op,
                     value,
                 } => {
-                    self.validate_array_subscript(index)?;
+                    let reverse_size = self.sizeof_scalar_field_reverse_subscript_field(
+                        name,
+                        array_fields,
+                        index,
+                        fields,
+                    )?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
                     self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
                     if self.expr_is_double_value(expr) {
                         Self::apply_double_compound_op(0.0, *op, 1.0)?;
                     }
                     self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
-                    match self.sizeof_scalar_field_reverse_subscript_field(
-                        name,
-                        array_fields,
-                        index,
-                        fields,
-                    )? {
+                    match reverse_size {
                         Some(size) => Ok(size),
                         None => {
                             self.sizeof_struct_field_array_element_field(name, array_fields, fields)
@@ -36229,10 +44609,12 @@ impl Interpreter {
                     index,
                     fields,
                 } => {
-                    self.validate_array_subscript(index)?;
-                    match self
-                        .sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?
-                    {
+                    let reverse_size =
+                        self.sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
+                    match reverse_size {
                         Some(size) => Ok(size),
                         None => self.sizeof_struct_element_field(name, fields),
                     }
@@ -36243,7 +44625,12 @@ impl Interpreter {
                     fields,
                     array_index,
                 } => {
-                    self.validate_array_subscript(index)?;
+                    if self
+                        .scalar_variable_reverse_subscript_pointee_type(name, index)?
+                        .is_none()
+                    {
+                        self.validate_array_subscript(index)?;
+                    }
                     self.validate_array_subscript(array_index)?;
                     self.sizeof_struct_element_expr_array_indexed_value(name, index, fields)
                 }
@@ -36277,12 +44664,12 @@ impl Interpreter {
                     }
                 }
                 Expr::ArrayGet { name, index } => {
-                    self.validate_array_subscript(index)?;
                     if let Some(size) =
                         self.sizeof_scalar_variable_reverse_subscript(name, index)?
                     {
                         return Ok(size);
                     }
+                    self.validate_array_subscript(index)?;
                     match self.find_variable(name) {
                         Some(Value::StructArray { type_name, .. }) => self
                             .struct_types
@@ -36367,20 +44754,6 @@ impl Interpreter {
                 Expr::AddressOf(name) if self.identifier_resolves_to_enum_constant(name) => Err(
                     CustError::new(format!("cannot take the address of enum constant '{name}'")),
                 ),
-                Expr::AddressOf(name)
-                    if matches!(
-                        self.find_variable(name),
-                        Some(Value::Scalar {
-                            ty: CType::Double,
-                            ..
-                        })
-                    ) =>
-                {
-                    Err(CustError::new("double pointers are not supported"))
-                }
-                Expr::AddressOfScalarLiteral {
-                    ty: CType::Double, ..
-                } => Err(CustError::new("double pointers are not supported")),
                 Expr::AddressOfScalarLiteral { init, .. } => {
                     self.sizeof_expr(init)?;
                     Ok(POINTER_SIZE)
@@ -36523,11 +44896,13 @@ impl Interpreter {
                     self.sizeof_assignment_result(name)
                 }
                 Expr::ArraySet { name, index, value } => {
-                    self.validate_array_subscript(index)?;
+                    let reverse_size =
+                        self.sizeof_scalar_variable_reverse_subscript(name, index)?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
                     self.sizeof_expr(value)?;
-                    if let Some(size) =
-                        self.sizeof_scalar_variable_reverse_subscript(name, index)?
-                    {
+                    if let Some(size) = reverse_size {
                         Ok(size)
                     } else {
                         self.sizeof_indexed_value(name)
@@ -36539,14 +44914,16 @@ impl Interpreter {
                     op,
                     value,
                 } => {
-                    self.validate_array_subscript(index)?;
+                    let reverse_size =
+                        self.sizeof_scalar_variable_reverse_subscript(name, index)?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
                     self.sizeof_expr(value)?;
                     if self.expr_is_double_value(value) {
                         Self::apply_double_compound_op(0.0, *op, 1.0)?;
                     }
-                    if let Some(size) =
-                        self.sizeof_scalar_variable_reverse_subscript(name, index)?
-                    {
+                    if let Some(size) = reverse_size {
                         Ok(size)
                     } else {
                         self.sizeof_indexed_value(name)
@@ -36609,11 +44986,15 @@ impl Interpreter {
                     index,
                     value,
                 } => {
-                    self.validate_array_subscript(index)?;
+                    let reverse_size =
+                        self.sizeof_scalar_field_reverse_subscript(name, fields, index)?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
                     self.validate_non_evaluating_assignment_value(value, None)?;
                     self.validate_non_evaluating_double_assignment(expr, value, None)?;
                     self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
-                    match self.sizeof_scalar_field_reverse_subscript(name, fields, index)? {
+                    match reverse_size {
                         Some(size) => Ok(size),
                         None => self.sizeof_struct_array_indexed_value(name, fields),
                     }
@@ -36625,14 +45006,18 @@ impl Interpreter {
                     op,
                     value,
                 } => {
-                    self.validate_array_subscript(index)?;
+                    let reverse_size =
+                        self.sizeof_scalar_field_reverse_subscript(name, fields, index)?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
                     self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
                     if self.expr_is_double_value(expr) {
                         Self::apply_double_compound_op(0.0, *op, 1.0)?;
                     }
                     self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
-                    match self.sizeof_scalar_field_reverse_subscript(name, fields, index)? {
+                    match reverse_size {
                         Some(size) => Ok(size),
                         None => self.sizeof_struct_array_indexed_value(name, fields),
                     }
@@ -36643,13 +45028,15 @@ impl Interpreter {
                     fields,
                     value,
                 } => {
-                    self.validate_array_subscript(index)?;
+                    let reverse_size =
+                        self.sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
                     self.validate_non_evaluating_assignment_value(value, None)?;
                     self.validate_non_evaluating_double_assignment(expr, value, None)?;
                     self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
-                    match self
-                        .sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?
-                    {
+                    match reverse_size {
                         Some(size) => Ok(size),
                         None => self.sizeof_struct_element_field(name, fields),
                     }
@@ -36661,16 +45048,18 @@ impl Interpreter {
                     op,
                     value,
                 } => {
-                    self.validate_array_subscript(index)?;
+                    let reverse_size =
+                        self.sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?;
+                    if reverse_size.is_none() {
+                        self.validate_array_subscript(index)?;
+                    }
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
                     self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
                     if self.expr_is_double_value(expr) {
                         Self::apply_double_compound_op(0.0, *op, 1.0)?;
                     }
                     self.validate_non_evaluating_aggregate_lvalue_mutable(expr)?;
-                    match self
-                        .sizeof_scalar_variable_reverse_subscript_field(name, index, fields)?
-                    {
+                    match reverse_size {
                         Some(size) => Ok(size),
                         None => self.sizeof_struct_element_field(name, fields),
                     }
@@ -36682,7 +45071,12 @@ impl Interpreter {
                     array_index,
                     value,
                 } => {
-                    self.validate_array_subscript(index)?;
+                    if self
+                        .scalar_variable_reverse_subscript_pointee_type(name, index)?
+                        .is_none()
+                    {
+                        self.validate_array_subscript(index)?;
+                    }
                     self.validate_array_subscript(array_index)?;
                     self.validate_non_evaluating_assignment_value(value, None)?;
                     self.validate_non_evaluating_double_assignment(expr, value, None)?;
@@ -36697,7 +45091,12 @@ impl Interpreter {
                     op,
                     value,
                 } => {
-                    self.validate_array_subscript(index)?;
+                    if self
+                        .scalar_variable_reverse_subscript_pointee_type(name, index)?
+                        .is_none()
+                    {
+                        self.validate_array_subscript(index)?;
+                    }
                     self.validate_array_subscript(array_index)?;
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
                     self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
@@ -36759,6 +45158,7 @@ impl Interpreter {
                 | Expr::ScalarLiteral {
                     ty: CType::Double,
                     init: inner,
+                    ..
                 } if self.expr_is_pointer_value(inner) => {
                     Err(CustError::new("cannot cast pointer expression to double"))
                 }
@@ -36770,12 +45170,16 @@ impl Interpreter {
                     self.sizeof_expr(inner)?;
                     Ok(ty.size())
                 }
-                Expr::ScalarLiteral { ty, init: inner } => {
+                Expr::ScalarLiteral {
+                    ty, init: inner, ..
+                } => {
                     self.reject_void_scalar_operand(inner)?;
                     self.sizeof_expr(inner)?;
                     Ok(ty.size())
                 }
-                Expr::ScalarLiteralSet { ty, init, value } => {
+                Expr::ScalarLiteralSet {
+                    ty, init, value, ..
+                } => {
                     self.sizeof_expr(init)?;
                     self.sizeof_expr(value)?;
                     Ok(ty.size())
@@ -36785,6 +45189,7 @@ impl Interpreter {
                     init,
                     op,
                     value,
+                    ..
                 } => {
                     self.sizeof_expr(init)?;
                     self.sizeof_expr(value)?;
@@ -37069,6 +45474,18 @@ impl Interpreter {
                 Expr::Binary(left, BinaryOp::Add | BinaryOp::Subscript | BinaryOp::Sub, right) => {
                     let left_is_pointer = self.expr_is_pointer_value(left);
                     let right_is_pointer = self.expr_is_pointer_value(right);
+                    if matches!(expr, Expr::Binary(_, BinaryOp::Add, _))
+                        && left_is_pointer
+                        && right_is_pointer
+                    {
+                        return Err(CustError::new("cannot add two pointers"));
+                    }
+                    if matches!(expr, Expr::Binary(_, BinaryOp::Subscript, _))
+                        && left_is_pointer
+                        && right_is_pointer
+                    {
+                        return Err(CustError::new("array subscript requires an integer value"));
+                    }
                     if (left_is_pointer && self.expr_is_double_value(right))
                         || (right_is_pointer && self.expr_is_double_value(left))
                     {
@@ -37087,6 +45504,27 @@ impl Interpreter {
                             "pointer to void arithmetic is not supported",
                         ));
                     }
+                    if matches!(expr, Expr::Binary(_, BinaryOp::Sub, _))
+                        && left_is_pointer
+                        && right_is_pointer
+                        && let (Some(left_pointee), Some(right_pointee)) = (
+                            self.pointer_expr_pointee_type(left)?,
+                            self.pointer_expr_pointee_type(right)?,
+                        )
+                    {
+                        self.ensure_pointer_pointee_types_compatible(
+                            &left_pointee,
+                            &right_pointee,
+                            true,
+                        )?;
+                    }
+                    if matches!(expr, Expr::Binary(_, BinaryOp::Sub, _))
+                        && !left_is_pointer
+                        && right_is_pointer
+                    {
+                        return Err(CustError::new("pointer value used as scalar"));
+                    }
+                    self.non_evaluating_generic_selection_type(expr, &[])?;
                     self.reject_void_scalar_operand(left)?;
                     self.reject_void_scalar_operand(right)?;
                     self.sizeof_expr(left)?;
@@ -37103,6 +45541,7 @@ impl Interpreter {
                             "multiplication and division require scalar operands, not pointers",
                         ));
                     }
+                    self.non_evaluating_generic_selection_type(expr, &[])?;
                     self.reject_void_scalar_operand(left)?;
                     self.reject_void_scalar_operand(right)?;
                     self.sizeof_expr(left)?;
@@ -37154,6 +45593,23 @@ impl Interpreter {
                             "pointer to void ordering comparisons are not supported",
                         ));
                     }
+                    if left_is_pointer && right_is_pointer {
+                        if let (Some(left_pointee), Some(right_pointee)) = (
+                            self.pointer_expr_pointee_type(left)?,
+                            self.pointer_expr_pointee_type(right)?,
+                        ) {
+                            self.ensure_pointer_pointee_types_compatible(
+                                &left_pointee,
+                                &right_pointee,
+                                false,
+                            )?;
+                        }
+                    } else if left_is_pointer || right_is_pointer {
+                        return Err(CustError::new(
+                            "pointer ordering comparisons are not supported",
+                        ));
+                    }
+                    self.non_evaluating_generic_selection_type(expr, &[])?;
                     self.reject_void_scalar_operand(left)?;
                     self.reject_void_scalar_operand(right)?;
                     self.sizeof_expr(left)?;
@@ -37168,6 +45624,8 @@ impl Interpreter {
                     {
                         return Err(CustError::new("cannot compare pointer with double value"));
                     }
+                    self.ensure_pointer_equality_types_compatible(left, right)?;
+                    self.non_evaluating_generic_selection_type(expr, &[])?;
                     self.reject_void_scalar_operand(left)?;
                     self.reject_void_scalar_operand(right)?;
                     self.sizeof_expr(left)?;
@@ -37175,6 +45633,7 @@ impl Interpreter {
                     Ok(INT_SIZE)
                 }
                 Expr::Binary(left, _, right) => {
+                    self.non_evaluating_generic_selection_type(expr, &[])?;
                     self.reject_void_scalar_operand(left)?;
                     self.reject_void_scalar_operand(right)?;
                     self.sizeof_expr(left)?;
@@ -37237,9 +45696,7 @@ impl Interpreter {
         else {
             unreachable!("sizeof conditional helper requires conditional expression")
         };
-        if self.expr_is_double_value(expr) {
-            self.generic_selection_type(expr)?;
-        }
+        self.validate_double_conditional_expression(expr)?;
         self.validate_non_evaluating_scalar_condition(cond)?;
         self.sizeof_expr(then_expr)?;
         self.sizeof_expr(else_expr)?;
@@ -38169,6 +46626,21 @@ impl Interpreter {
                     self.assign_deref_pointer(&pointer, updated)?;
                     return Ok(Self::increment_result(current, updated, prefix));
                 }
+                if self.struct_field_is_pointer(name, fields) {
+                    if self.struct_pointer_field_points_to_const(name, fields) {
+                        return Err(CustError::new("cannot assign through pointer to const"));
+                    }
+                    let pointer =
+                        self.direct_struct_pointer_field_index_pointer(name, fields, index)?;
+                    let current = self.deref_pointer(&pointer)?;
+                    let ty = match self.pointer_value_type(&pointer)? {
+                        Some(PointeeType::Scalar(ty)) => ty,
+                        _ => CType::Int,
+                    };
+                    let updated = Self::apply_typed_increment_op(current, ty, op);
+                    self.assign_deref_pointer(&pointer, updated)?;
+                    return Ok(Self::increment_result(current, updated, prefix));
+                }
                 self.ensure_variable_mutable(name)?;
                 self.ensure_struct_element_array_field_mutable(name, fields)?;
                 let (array, index) = self.checked_struct_array_index(name, fields, index)?;
@@ -38336,7 +46808,7 @@ impl Interpreter {
                 let updated = self.deref_pointer(&pointer)?;
                 Ok(Self::increment_result(current, updated, prefix))
             }
-            Expr::ScalarLiteral { ty, init } => {
+            Expr::ScalarLiteral { ty, init, .. } => {
                 let current = self.eval_scalar_conversion(*ty, init)?;
                 if *ty == CType::Double {
                     let current_value = f64::from_bits(current as u64);
@@ -38537,6 +47009,7 @@ impl Interpreter {
         {
             return Err(CustError::new("cannot compare pointer with double value"));
         }
+        self.ensure_pointer_equality_types_compatible(left, right)?;
 
         let equal = match (left_is_pointer, right_is_pointer) {
             (false, false)
@@ -38558,7 +47031,7 @@ impl Interpreter {
                         "cannot compare pointer with nonzero integer",
                     ));
                 }
-                Self::pointer_eq(&pointer, &PointerValue::Null)
+                self.pointer_values_equal(&pointer, &PointerValue::Null)?
             }
             (false, true) => {
                 let value = self.eval(left)?;
@@ -38568,7 +47041,7 @@ impl Interpreter {
                         "cannot compare pointer with nonzero integer",
                     ));
                 }
-                Self::pointer_eq(&PointerValue::Null, &pointer)
+                self.pointer_values_equal(&PointerValue::Null, &pointer)?
             }
         };
 
@@ -38939,6 +47412,33 @@ impl Interpreter {
         }
     }
 
+    fn ensure_static_aggregate_pointer_storage(
+        &self,
+        fields: &HashMap<String, StructFieldValue>,
+    ) -> CustResult<()> {
+        for field in fields.values() {
+            match field {
+                StructFieldValue::Pointer { pointer, .. } => {
+                    if !self.pointer_target_has_static_storage(pointer) {
+                        return Err(CustError::new(
+                            "static pointer initializer requires static storage duration",
+                        ));
+                    }
+                }
+                StructFieldValue::Struct { fields, .. } => {
+                    self.ensure_static_aggregate_pointer_storage(fields)?;
+                }
+                StructFieldValue::StructArray { elements, .. } => {
+                    for fields in elements {
+                        self.ensure_static_aggregate_pointer_storage(fields)?;
+                    }
+                }
+                StructFieldValue::Scalar { .. } | StructFieldValue::Array { .. } => {}
+            }
+        }
+        Ok(())
+    }
+
     fn initialize_static_local(&mut self, decl: &Stmt) -> CustResult<Value> {
         match decl {
             Stmt::VarDecl { ty, expr, .. } => Ok(Value::Scalar {
@@ -38954,8 +47454,22 @@ impl Interpreter {
                 if self.expr_is_unsupported_double_pointer(expr) {
                     return Err(CustError::new("double pointers are not supported"));
                 }
+                if matches!(
+                    expr,
+                    Expr::ArrayLiteral { .. } | Expr::AggregateArrayLiteral { .. }
+                ) {
+                    return Err(CustError::new(
+                        "static pointer initializer requires static storage duration",
+                    ));
+                }
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
+                let pointer = self.attach_array_pointer_owner(pointer);
+                if !self.pointer_target_has_static_storage(&pointer) {
+                    return Err(CustError::new(
+                        "static pointer initializer requires static storage duration",
+                    ));
+                }
                 let pointer = self.coerce_object_byte_pointer(ty, pointer)?;
                 self.ensure_pointer_type_matches(ty, &pointer)?;
                 Ok(Value::Pointer {
@@ -38977,6 +47491,12 @@ impl Interpreter {
             } => {
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
                 let pointer = self.eval_pointer(expr)?;
+                let pointer = self.attach_array_pointer_owner(pointer);
+                if !self.pointer_target_has_static_storage(&pointer) {
+                    return Err(CustError::new(
+                        "static pointer initializer requires static storage duration",
+                    ));
+                }
                 self.ensure_two_dimensional_row_pointer_type_matches(
                     *elem_type, *columns, &pointer,
                 )?;
@@ -39005,14 +47525,28 @@ impl Interpreter {
             }
             Stmt::StructVarDecl {
                 type_name, init, ..
-            } => self.make_struct_value(type_name, init.as_ref()),
+            } => {
+                let value = self.make_struct_value(type_name, init.as_ref())?;
+                if let Value::Struct { fields, .. } = &value {
+                    self.ensure_static_aggregate_pointer_storage(fields)?;
+                }
+                Ok(value)
+            }
             Stmt::StructArrayDecl {
                 type_name,
                 len,
                 init,
                 is_const,
                 ..
-            } => self.make_struct_array_value(type_name, *len, init, *is_const),
+            } => {
+                let value = self.make_struct_array_value(type_name, *len, init, *is_const)?;
+                if let Value::StructArray { elements, .. } = &value {
+                    for fields in elements {
+                        self.ensure_static_aggregate_pointer_storage(fields)?;
+                    }
+                }
+                Ok(value)
+            }
             _ => Err(CustError::new(
                 "static local declarations must declare variables",
             )),
@@ -39890,7 +48424,9 @@ impl Interpreter {
             Expr::CompoundAssign { name, op, value } => {
                 self.eval_compound_assignment_expr(name, *op, value)
             }
-            Expr::ScalarLiteralSet { ty, init, value } => {
+            Expr::ScalarLiteralSet {
+                ty, init, value, ..
+            } => {
                 self.eval_scalar_conversion(*ty, init)?;
                 self.eval_scalar_conversion(*ty, value)
             }
@@ -39899,6 +48435,7 @@ impl Interpreter {
                 init,
                 op,
                 value,
+                ..
             } => {
                 let current = self.eval_scalar_conversion(*ty, init)?;
                 self.eval_scalar_compound_result(current, *ty, *op, value)
@@ -40332,7 +48869,7 @@ impl Interpreter {
                 self.eval_discard(expr)?;
                 Err(CustError::new("void expression used as scalar"))
             }
-            Expr::ScalarLiteral { ty, init } => self.eval_scalar_conversion(*ty, init),
+            Expr::ScalarLiteral { ty, init, .. } => self.eval_scalar_conversion(*ty, init),
             Expr::AggregateLiteral { type_name, .. } => {
                 let aggregate_kind = self.aggregate_kind_label(type_name);
                 Err(CustError::new(format!(

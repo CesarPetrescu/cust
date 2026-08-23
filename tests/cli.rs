@@ -233,6 +233,32 @@ fn max_steps_flag_allows_programs_within_the_loop_iteration_budget() {
 }
 
 #[test]
+fn non_evaluating_memory_bounds_deep_comma_callee_expression_analysis() {
+    let operands = std::iter::repeat_n("0", 500).collect::<Vec<_>>().join(",");
+    let path = write_temp_source(&format!(
+        r#"
+void *memset(void *destination, int value, unsigned long count);
+int safe;
+void *selected_storage(void) {{ return ({operands}, &safe); }}
+int main(void) {{ return sizeof(memset(selected_storage(), 0, sizeof(safe))); }}
+"#
+    ));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&path)
+        .output()
+        .expect("cust binary should run");
+    fs::remove_file(&path).expect("temporary source should be removable");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "cust: non-evaluating callee-expression nesting limit of 128 exceeded\n"
+    );
+}
+
+#[test]
 fn max_steps_flag_rejects_non_positive_limits() {
     let path = write_temp_source("int main() { return 0; }\n");
 
