@@ -188,6 +188,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/direct_double_pointers.c",
     "tests/fixtures/compat/valid/direct_double_aggregate_fields.c",
     "tests/fixtures/compat/valid/direct_double_aggregate_array_fields.c",
+    "tests/fixtures/compat/valid/direct_double_aggregate_field_pointers.c",
     "tests/fixtures/compat/valid/direct_double_pointer_field_aggregate_elements.c",
     "tests/fixtures/compat/valid/increment_decrement.c",
     "tests/fixtures/compat/valid/embedded_aggregate_array_element_field_assignment.c",

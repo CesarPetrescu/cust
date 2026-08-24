@@ -2,6 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-24 — Conservative aggregate-target joins
+
+- In non-evaluating union-provenance analysis, `aggregate_target: None` is a meaningful mixed/unknown identity once both control-flow paths have bindings; it is not missing metadata that may be filled from the other path.
+- Therefore a branch join may retain an aggregate target only when both paths carry the same target. Every unequal pair, including concrete versus `None`, must join to `None`; otherwise later target-based parameter writeback can overwrite an unrelated static/global binding and launder union provenance.
+- The minimized sequence is a helper with `static struct Item *stored`, one analyzed call that conditionally stores `&union_member`, and a second analyzed call that conditionally receives a safe pointer before returning `stored` beneath `sizeof`.
+- No external research was required. Tagged debug instrumentation around static-state copies, statement joins, and return analysis isolated the source; focused RED/GREEN plus independent complete-diff review established the conservative rule.
+
 ## 2026-08-23 — v0.34.0 release consistency
 
 - Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.33.0`, then passed after Cargo/lock and both image tags moved to `0.34.0`. Cargo metadata and the built CLI report `cust 0.34.0`; local and remote annotated-tag preflight found no `v0.34.0` refs.

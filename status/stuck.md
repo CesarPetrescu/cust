@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.34.0 publication on 2026-08-23. Version-first CLI and Compose expectations failed against `0.33.0` and pass after package/lock/image metadata moved to `0.34.0`; Cargo metadata and the built CLI agree, the exact 1,977-test inventory reconciles, fresh complete-diff review is `APPROVED`, and the canonical local/no-cache-rebuilt-Docker gate passes. Release commit `4793b13c9a700eec804a8f32221bf37a8eb041e5` reached exact `origin/main` before annotated tag object `0ccc3a011b082f288df0213b5315ccc733f1b872`; local/remote tag objects match and peel exactly to the release commit. There are no active blockers.
+None. Last reviewed after aggregate-field direct `double *` closure on 2026-08-24. The remaining static-local union-provenance regression is fixed, independent complete-diff review returned `APPROVED`, all 2,057 local and rebuilt-Docker tests pass, and the runtime image prints `10`. There are no active blockers.
 
 ## Resolved this run
+
+### 2026-08-24 — Static aggregate-pointer provenance laundering
+
+- Failure: `sizeof(store_then_read(&choice.item)->values)` returned eight instead of rejecting a direct double pointer derived from union-backed aggregate storage when one analyzed helper call stored the pointer in a static local and a later call read it.
+- Root cause: branch provenance joining retained a concrete safe `aggregate_target` when the other path carried `None` for a mixed/unknown union-backed target. A later parameter writeback to that concrete safe target replaced the static binding and cleared its union taint.
+- RED/GREEN: the inherited strict regression failed with `Ok(8)`. `merge_union_pointer_provenance()` now clears target identity whenever the two branch targets differ, including unknown versus concrete; all 42 union-provenance tests pass.
+- Verification: independent complete-diff review returned `APPROVED`; all focused tests, all 2,057 local tests, rebuilt Docker tests, and runtime output `10` pass.
 
 ### 2026-08-19 — Direct-double-pointer non-evaluating provenance closure
 

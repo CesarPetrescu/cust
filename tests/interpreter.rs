@@ -1951,10 +1951,7 @@ int main(void) {
         let program = format!(
             "struct Sample {{ double values[2]; }}; int main(void) {{ struct Sample sample = {{{{1.0, 2.0}}}}; {expression}; return 0; }}"
         );
-        assert_eq!(
-            interpret(&program).expect_err(expression).to_string(),
-            "double pointers are not supported"
-        );
+        assert_eq!(interpret(&program).unwrap(), 0, "{expression}");
     }
 }
 
@@ -2039,14 +2036,68 @@ int main(void) {{
         );
         assert_eq!(
             interpret(&program).expect_err(expression).to_string(),
-            "double pointers are not supported",
+            "cannot convert pointer to double to pointer to int",
             "unexpected diagnostic for {expression}"
         );
     }
 }
 
 #[test]
-fn direct_double_aggregate_array_field_explicit_pointer_arithmetic_stays_unsupported() {
+fn const_struct_pointer_indexed_scalar_field_addresses_preserve_const() {
+    for address in ["&items[0].value", "&0[items].value"] {
+        let program = format!(
+            r#"
+struct Item {{ double value; }};
+int main(void) {{
+    struct Item storage[1] = {{{{1.0}}}};
+    const struct Item *items = storage;
+    double *pointer = {address};
+    return pointer != 0;
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(address).to_string(),
+            "cannot discard const qualifier from pointer target",
+            "unexpected diagnostic for {address}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_double_array_field_decay_preserves_const_qualification() {
+    for (declaration, value) in [
+        ("const struct Sample sample = {{1.0}};", "sample.values"),
+        (
+            "const struct Sample samples[1] = {{{1.0}}};",
+            "samples[0].values",
+        ),
+        (
+            "const struct Sample sample = {{1.0}}; const struct Sample *view = &sample;",
+            "view->values",
+        ),
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ const double values[1]; }};
+struct Holder {{ double *slot; }};
+int main(void) {{
+    {declaration}
+    struct Holder holder = {{0}};
+    return sizeof(holder.slot = {value});
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(value).to_string(),
+            "cannot discard const qualifier from pointer target",
+            "unexpected diagnostic for {value}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_array_field_explicit_pointer_arithmetic_is_supported() {
     for expression in [
         "*(sample.values + 1)",
         "*((1 ? sample.values : sample.values) + 1)",
@@ -2061,11 +2112,7 @@ int main(void) {{
 }}
 "#
         );
-        assert_eq!(
-            interpret(&program).expect_err(expression).to_string(),
-            "double pointers are not supported",
-            "unexpected diagnostic for {expression}"
-        );
+        assert_eq!(interpret(&program).unwrap(), 0, "{expression}");
     }
 }
 
@@ -2288,7 +2335,7 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_aggregate_assignment_results_preserve_array_pointer_boundaries() {
+fn direct_double_aggregate_assignment_results_support_array_decay() {
     for expression in [
         "(items[0] = replacement).values",
         "(outer.inner = replacement).values",
@@ -2311,16 +2358,12 @@ int main(void) {{
 "#
         );
 
-        assert_eq!(
-            interpret(&program).expect_err(expression).to_string(),
-            "double pointers are not supported",
-            "unexpected diagnostic for {expression}"
-        );
+        assert_eq!(interpret(&program).unwrap(), 1, "{expression}");
     }
 }
 
 #[test]
-fn nested_direct_double_array_fields_retain_pointer_boundaries() {
+fn nested_direct_double_array_fields_support_decay_and_element_addresses() {
     let raw_decay = r#"
 struct Item { double values[2]; };
 struct Box { struct Item items[1]; };
@@ -2340,17 +2383,12 @@ int main(void) {
 }
 "#;
 
-    let raw_error = interpret(raw_decay).unwrap_err();
-    assert_eq!(raw_error.to_string(), "double pointers are not supported");
-    let address_error = interpret(address).unwrap_err();
-    assert_eq!(
-        address_error.to_string(),
-        "double pointers are not supported"
-    );
+    assert_eq!(interpret(raw_decay).unwrap(), 0);
+    assert_eq!(interpret(address).unwrap(), 0);
 }
 
 #[test]
-fn direct_double_aggregate_array_field_addresses_under_sizeof_retain_pointer_boundary() {
+fn direct_double_aggregate_array_field_addresses_classify_under_sizeof() {
     for expression in [
         "&sample.values[0]",
         "&samples[0].values[0]",
@@ -2366,20 +2404,16 @@ int main(void) {{
     struct Sample samples[1] = {{{{{{3.0, 4.0}}}}}};
     struct Sample *slot = &sample;
     struct Box box = {{{{{{{{5.0, 6.0}}}}}}}};
-    return sizeof({expression});
+    return sizeof({expression}) == sizeof(double *) ? 0 : 1;
 }}
 "#
         );
-        assert_eq!(
-            interpret(&program).expect_err(expression).to_string(),
-            "double pointers are not supported",
-            "unexpected diagnostic for {expression}"
-        );
+        assert_eq!(interpret(&program).unwrap(), 0, "{expression}");
     }
 }
 
 #[test]
-fn direct_double_aggregate_array_field_addresses_under_generic_retain_pointer_boundary() {
+fn direct_double_aggregate_array_field_addresses_classify_under_generic() {
     for expression in [
         "&sample.values[0]",
         "&samples[0].values[0]",
@@ -2395,15 +2429,11 @@ int main(void) {{
     struct Sample samples[1] = {{{{{{3.0, 4.0}}}}}};
     struct Sample *slot = &sample;
     struct Box box = {{{{{{{{5.0, 6.0}}}}}}}};
-    return _Generic(({expression}), default: 0);
+    return _Generic(({expression}), double *: 0, default: 1);
 }}
 "#
         );
-        assert_eq!(
-            interpret(&program).expect_err(expression).to_string(),
-            "double pointers are not supported",
-            "unexpected diagnostic for {expression}"
-        );
+        assert_eq!(interpret(&program).unwrap(), 0, "{expression}");
     }
 }
 
@@ -2465,51 +2495,40 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_aggregate_array_pointer_escapes_reject_in_non_evaluating_routes() {
+fn direct_double_aggregate_array_pointers_work_in_non_evaluating_routes() {
     let routes = [
-        ("", "sample.values"),
-        ("", "samples[0].values"),
-        ("", "box.sample.values"),
-        ("", "slot->values"),
-        ("", "((struct Sample){{7.0, 8.0}}).values"),
-        (
-            "union Buffer buffer = {.values = {9.0, 10.0}};",
-            "buffer.values",
-        ),
+        "sample.values",
+        "samples[0].values",
+        "box.sample.values",
+        "slot->values",
+        "((struct Sample){{7.0, 8.0}}).values",
     ];
 
-    for (extra, base) in routes {
+    for base in routes {
         for expression in [
-            format!("sizeof(({base}) + 0)"),
-            format!("sizeof(({base}) == 0)"),
-            format!("sizeof(sink = {base})"),
-            format!("sizeof(take({base}))"),
-            format!("_Generic(({base}), default: 0)"),
-            format!("_Generic((({base}), 0), int: 0, default: 1)"),
-            format!("sizeof(&{base})"),
+            format!("sizeof(({base}) + 0) == sizeof(double *)"),
+            format!("sizeof(({base}) == 0) == sizeof(int)"),
+            format!("sizeof(sink = {base}) == sizeof(void *)"),
+            format!("sizeof(take({base})) == sizeof(int)"),
+            format!("_Generic(({base}), double *: 1, default: 0)"),
+            format!("_Generic((({base}), 0), int: 1, default: 0)"),
         ] {
             let program = format!(
                 r#"
 int take(void *value) {{ return value != 0; }}
 struct Sample {{ double values[2]; }};
 struct Box {{ struct Sample sample; }};
-union Buffer {{ double values[2]; }};
 int main(void) {{
     struct Sample sample = {{{{1.0, 2.0}}}};
     struct Sample samples[1] = {{{{{{3.0, 4.0}}}}}};
     struct Box box = {{{{{{5.0, 6.0}}}}}};
     struct Sample *slot = &sample;
     void *sink = 0;
-    {extra}
-    return {expression};
+    return {expression} ? 0 : 1;
 }}
 "#
             );
-            assert_eq!(
-                interpret(&program).expect_err(&expression).to_string(),
-                "double pointers are not supported",
-                "unexpected diagnostic for {expression}"
-            );
+            assert_eq!(interpret(&program).unwrap(), 0, "{expression}");
         }
     }
 }
@@ -2545,7 +2564,7 @@ int main(void) {{
 }
 
 #[test]
-fn direct_double_struct_pointer_array_element_addresses_cannot_round_trip() {
+fn direct_double_struct_pointer_array_element_addresses_round_trip() {
     for expression in [
         "*(&slot->values[0]) = 3.0",
         "*(&slot->values[0]) += 1.0",
@@ -2563,52 +2582,42 @@ int main(void) {{
 }}
 "#
         );
-        assert_eq!(
-            interpret(&program).expect_err(expression).to_string(),
-            "double pointers are not supported",
-            "unexpected diagnostic for {expression}"
-        );
+        assert_eq!(interpret(&program).unwrap(), 0, "{expression}");
     }
 }
 
 #[test]
-fn direct_double_nested_array_element_addresses_cannot_round_trip() {
+fn direct_double_nested_array_element_addresses_round_trip() {
     let program = r#"
 struct Item { double values[1]; };
 struct Box { struct Item items[1]; };
 int main(void) {
     struct Box box = {{{{1.0}}}};
     *(&box.items[0].values[0]) += 1.0;
-    return 0;
+    return box.items[0].values[0] == 2.0 ? 0 : 1;
 }
 "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "double pointers are not supported"
-    );
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]
-fn reverse_aggregate_double_array_element_addresses_cannot_round_trip() {
+fn reverse_aggregate_double_array_element_addresses_round_trip() {
     let program = r#"
 struct Item { double values[1]; };
 int main(void) {
     struct Item items[1] = {{{1.0}}};
     int index = 0;
     *(&index[items].values[0]) = 3.0;
-    return 0;
+    return items[0].values[0] == 3.0 ? 0 : 1;
 }
 "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "double pointers are not supported"
-    );
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]
-fn direct_double_explicit_array_element_addresses_stay_rejected_under_sizeof() {
+fn direct_double_explicit_array_element_addresses_validate_under_sizeof() {
     let program = r#"
 struct Sample { double values[1]; };
 int main(void) {
@@ -2618,10 +2627,7 @@ int main(void) {
 }
 "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "double pointers are not supported"
-    );
+    assert_eq!(interpret(program).unwrap(), 8);
 }
 
 #[test]
@@ -2702,12 +2708,7 @@ int main(void) {
     return sizeof((sample.values ? sample.values : sample.values)[0]);
 }
 "#;
-    assert_eq!(
-        interpret(invalid_double_array_condition)
-            .unwrap_err()
-            .to_string(),
-        "double pointers are not supported"
-    );
+    assert_eq!(interpret(invalid_double_array_condition).unwrap(), 8);
 
     let invalid_discard = r#"
 struct Sample { double values[1]; };
@@ -2716,14 +2717,11 @@ int main(void) {
     return sizeof(((sample.values), sample.values)[0]);
 }
 "#;
-    assert_eq!(
-        interpret(invalid_discard).unwrap_err().to_string(),
-        "double pointers are not supported"
-    );
+    assert_eq!(interpret(invalid_discard).unwrap(), 8);
 }
 
 #[test]
-fn wrapped_direct_double_array_field_pointer_results_stay_rejected_under_sizeof() {
+fn wrapped_direct_double_array_field_pointer_results_work_under_sizeof() {
     for expression in [
         "sizeof(1 ? sample.values : sample.values)",
         "sizeof((0, sample.values))",
@@ -2731,11 +2729,7 @@ fn wrapped_direct_double_array_field_pointer_results_stay_rejected_under_sizeof(
         let program = format!(
             "struct Sample {{ double values[4]; }}; int main(void) {{ struct Sample sample = {{{{1.0}}}}; return {expression}; }}"
         );
-        assert_eq!(
-            interpret(&program).expect_err(expression).to_string(),
-            "double pointers are not supported",
-            "unexpected diagnostic for {expression}"
-        );
+        assert_eq!(interpret(&program).unwrap(), 8, "{expression}");
     }
 }
 
@@ -3507,18 +3501,2163 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_aggregate_field_addresses_preserve_pointer_boundary_on_all_routes() {
-    for program in [
-        "struct Sample { double reading; }; int main(void) { struct Sample samples[1] = {{1.25}}; return &samples[0].reading != 0; }",
-        "struct Sample { double reading; }; int main(void) { return &((struct Sample){1.25}).reading != 0; }",
-        "struct Sample { double reading; }; struct Box { struct Sample samples[1]; }; int main(void) { struct Box box = {{{1.25}}}; return &box.samples[0].reading != 0; }",
+fn direct_double_aggregate_fields_support_scalar_addresses_and_array_decay() {
+    let program = r#"
+struct Sample { double reading; double values[3]; };
+double bump(double *pointer) {
+    *pointer += 0.5;
+    return *pointer;
+}
+double *next(double *pointer) {
+    return pointer + 1;
+}
+int main(void) {
+    struct Sample sample = {1.5, {2.0, 3.0, 4.0}};
+    double *scalar = &sample.reading;
+    double *array = sample.values;
+    if (*scalar != 1.5 || array[2] != 4.0) return 1;
+    if (bump(scalar) != 2.0 || sample.reading != 2.0) return 2;
+    double *middle = next(sample.values);
+    middle[0] += 2.0;
+    if (sample.values[1] != 5.0 || middle - sample.values != 1) return 3;
+    if (!_Generic(sample.values, double *: 1, default: 0)) return 4;
+    if (sizeof(&sample.reading) != sizeof(double *)) return 5;
+    return scalar == &sample.reading && array == sample.values ? 0 : 6;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_field_pointer_null_initializers_accept_read_only_slots() {
+    let program = r#"
+struct Box { const double *pointer; };
+int main(void) {
+    const struct Box box = {0};
+    return box.pointer != 0;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_cover_indexed_reverse_arrow_nested_and_literal_routes() {
+    let program = r#"
+struct Item { double scalar; double values[3]; };
+struct Box { struct Item items[2]; };
+struct PointerBox { double *pointer; };
+double *forward(double *pointer) { return pointer; }
+int main(void) {
+    struct Item items[2] = {{1.0, {2.0, 3.0, 4.0}}, {5.0, {6.0, 7.0, 8.0}}};
+    struct Item *arrow = items;
+    struct Box box = {{{9.0, {10.0, 11.0, 12.0}}, {13.0, {14.0, 15.0, 16.0}}}};
+    struct Box *box_pointer = &box;
+    double *indexed = &items[1].scalar;
+    double *reverse = &1[items].scalar;
+    double *arrow_array = arrow->values;
+    double *nested = box.items[1].values + 1;
+    double *nested_arrow = box_pointer->items[0].values + 2;
+    double *literal_scalar = &((struct Item){17.0, {18.0, 19.0, 20.0}}).scalar;
+    double *literal_array = ((struct Item){21.0, {22.0, 23.0, 24.0}}).values + 1;
+    struct PointerBox forwarded = {forward(nested)};
+    void *opaque = arrow_array;
+    double *round_trip = opaque;
+    *indexed += 0.5;
+    forwarded.pointer[0] += 1.0;
+    return indexed == reverse && *indexed == 5.5
+            && nested - box.items[1].values == 1 && *nested == 16.0
+            && *nested_arrow == 12.0 && *literal_scalar == 17.0
+            && *literal_array == 23.0 && round_trip == arrow->values
+            && box.items[0].values != box.items[1].values
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_preserve_recursive_const_and_lifetime() {
+    let valid = r#"
+struct Item { double scalar; double values[2]; };
+struct Box { struct Item item; };
+int main(void) {
+    const struct Box box = {{1.0, {2.0, 3.0}}};
+    const struct Box *view = &box;
+    const double *scalar = &view->item.scalar;
+    const double *array = view->item.values;
+    const void *opaque = array;
+    const double *round_trip = opaque;
+    return *scalar == 1.0 && array[1] == 3.0 && round_trip == array ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(valid).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "struct Item { double scalar; }; int main(void) { const struct Item item = {1.0}; double *pointer = &item.scalar; return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "struct Item { double values[1]; }; struct Box { const struct Item item; }; int main(void) { struct Box box = {{{1.0}}}; double *pointer = box.item.values; return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "struct Item { double values[1]; }; int main(void) { const struct Item item = {{1.0}}; void *pointer = item.values; return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "struct Item { double scalar; }; double *escape(void) { struct Item item = {1.0}; return &item.scalar; } int main(void) { return *escape() == 1.0; }",
+            "pointer to out-of-scope variable 'item'",
+        ),
+        (
+            "struct Item { double values[1]; }; double *escape(void) { struct Item item = {{1.0}}; return item.values; } int main(void) { return escape()[0] == 1.0; }",
+            "pointer to out-of-scope variable 'item'",
+        ),
     ] {
         assert_eq!(
             interpret(program).expect_err(program).to_string(),
-            "double pointers are not supported",
-            "unexpected diagnostic for {program}"
+            expected,
+            "{program}"
         );
     }
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_preserve_bounds_and_field_identity() {
+    let valid = r#"
+struct Pair { double left[3]; double right[3]; };
+int main(void) {
+    struct Pair pair = {{1.0, 2.0, 3.0}, {4.0, 5.0, 6.0}};
+    double *middle = pair.left + 1;
+    return middle[-1] == 1.0 && middle[1] == 3.0
+            && middle - pair.left == 1 && pair.left + 2 == middle + 1
+            && pair.left != pair.right ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(valid).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "struct Pair { double left[1]; double right[1]; }; int main(void) { struct Pair pair = {{1.0}, {2.0}}; return pair.left - pair.right; }",
+            "cannot subtract pointers to different arrays",
+        ),
+        (
+            "struct Pair { double values[1]; }; int main(void) { struct Pair pairs[2] = {{{1.0}}, {{2.0}}}; return pairs[0].values - pairs[1].values; }",
+            "cannot subtract pointers to different arrays",
+        ),
+        (
+            "struct Pair { double values[2]; }; int main(void) { struct Pair pair = {{1.0, 2.0}}; return *(pair.values + 3) == 0.0; }",
+            "array pointer index 3 out of bounds for length 2",
+        ),
+        (
+            "struct Pair { double values[2]; }; int main(void) { struct Pair pair = {{1.0, 2.0}}; double *pointer = pair.values + 1; return pointer[9223372036854775807] == 0.0; }",
+            "array pointer index overflow during pointer arithmetic",
+        ),
+        (
+            "struct Pair { double scalar; }; int main(void) { struct Pair pair = {1.0}; return *(&pair.scalar + 1) == 0.0; }",
+            "scalar pointer arithmetic is not supported",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "{program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_classify_without_evaluation() {
+    let program = r#"
+struct Item { double scalar; double values[2]; };
+struct Box { struct Item items[1]; };
+int calls = 0;
+int next(void) { calls++; return 0; }
+int main(void) {
+    struct Item items[1] = {{1.0, {2.0, 3.0}}};
+    struct Item *slot = items;
+    struct Box box = {{{4.0, {5.0, 6.0}}}};
+    if (sizeof(&items[next()].scalar) != sizeof(double *)) return 1;
+    if (sizeof(slot->values + next()) != sizeof(double *)) return 2;
+    if (!_Generic((&next()[items].scalar), double *: 1, default: 0)) return 3;
+    if (!_Generic(box.items[0].values, double *: 1, default: 0)) return 4;
+    if (!_Generic(((struct Item){7.0, {8.0, 9.0}}).values,
+            double *: 1, default: 0)) return 5;
+    if (_Alignof(double *) != _Alignof(void *)) return 6;
+    return calls == 0 ? 0 : 7;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_value_array_fields_forward_for_the_consuming_expression() {
+    let program = r#"
+struct Item { double values[2]; };
+int calls = 0;
+struct Item make(double base) {
+    calls++;
+    return (struct Item){{base, base + 1.0}};
+}
+double second(const double *pointer) { return pointer[1]; }
+int main(void) {
+    if (second(make(2.0).values) != 3.0 || calls != 1) return 1;
+    if (sizeof(make(4.0).values + 1) != sizeof(double *) || calls != 1) return 2;
+    if (!_Generic(make(6.0).values, double *: 1, default: 0) || calls != 1) return 3;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn function_returned_aggregate_field_pointers_have_full_expression_lifetime() {
+    let escaped_result = r#"
+struct Item { double values[1]; };
+struct Item make(void) { return (struct Item){{2.0}}; }
+int main(void) {
+    double *pointer = make().values;
+    int next_full_expression = 1;
+    return pointer[next_full_expression - 1] == 2.0 ? 0 : 1;
+}
+"#;
+    assert_eq!(
+        interpret(escaped_result).unwrap_err().to_string(),
+        "pointer to out-of-scope variable '__cust_compound_aggregate_field#0'"
+    );
+
+    let compound_literal = escaped_result
+        .replace(
+            "struct Item make(void) { return (struct Item){{2.0}}; }",
+            "",
+        )
+        .replace("make().values", "((struct Item){{2.0}}).values");
+    assert_eq!(interpret(&compound_literal), Ok(0));
+}
+
+#[test]
+fn direct_double_aggregate_field_pointer_fixture_matches_supported_routes() {
+    let program = include_str!("fixtures/compat/valid/direct_double_aggregate_field_pointers.c");
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_keep_exact_unsupported_boundaries() {
+    for (program, expected) in [
+        (
+            "union Choice { double scalar; int bits; }; int main(void) { union Choice choice = {.scalar = 1.0}; return &choice.scalar != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "union Choice { double values[2]; }; int main(void) { union Choice choice = {{1.0, 2.0}}; return choice.values != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "union Choice { double values[2]; }; int main(void) { union Choice choice = {{1.0, 2.0}}; return sizeof(choice.values + 0); }",
+            "double pointers are not supported",
+        ),
+        (
+            "union Choice { double scalar; int bits; }; int main(void) { union Choice choice = {.scalar = 1.0}; return _Generic(&choice.scalar, double *: 0, default: 1); }",
+            "double pointers are not supported",
+        ),
+        (
+            "struct Holder { double *pointer; }; int main(void) { double value = 1.0; struct Holder holder = {&value}; return &holder.pointer != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "struct Item { double values[2]; }; int main(void) { struct Item item = {{1.0, 2.0}}; return &item.values != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "struct Item { double values[2][3]; }; int main(void) { return 0; }",
+            "double multidimensional aggregate array fields are not supported at line 1, column 31",
+        ),
+        (
+            "struct Item { double scalar; }; int main(void) { struct Item item = {1.0}; return sizeof((char *)&item.scalar); }",
+            "double pointers are not supported",
+        ),
+        (
+            "void *memset(void *, int, unsigned long); struct Item { double values[2]; }; int main(void) { struct Item item = {{1.0, 2.0}}; memset(item.values, 0, sizeof(item.values)); return 0; }",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            expected,
+            "{program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_reject_nested_union_storage() {
+    for expression in [
+        "&choice.items[0].scalar != 0",
+        "choice.items[0].values != 0",
+        "sizeof(&choice.items[0].scalar)",
+        "_Generic((choice.items[0].values), double *: 0, default: 1)",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double scalar; double values[1]; }};
+union Choice {{ struct Item items[1]; }};
+int main(void) {{
+    union Choice choice = {{.items = {{{{1.0, {{2.0}}}}}}}};
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn non_double_fields_nested_in_union_arrays_remain_scalar_values() {
+    let program = r#"
+union Number { int value; char tag; };
+union Holder { union Number items[1]; };
+int main(void) {
+    union Holder holder = {{{7}}};
+    return holder.items[0].value;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 7);
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_reject_union_provenance_after_pointer_capture() {
+    let program = r#"
+struct Item { double scalar; double values[1]; };
+union Choice { struct Item item; };
+int main(void) {
+    union Choice choice = {{1.0, {2.0}}};
+    struct Item *item = &choice.item;
+    double *pointer = item->values;
+    return pointer != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_union_provenance_follows_zero_argument_returns() {
+    for expression in [
+        "get()->values != 0",
+        "sizeof(get()->values)",
+        "_Generic(get()->values, double *: 1, default: 0)",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double scalar; double values[1]; }};
+union Choice {{ struct Item item; }};
+union Choice choice = {{{{1.0, {{2.0}}}}}};
+struct Item *get(void) {{ return &choice.item; }}
+int main(void) {{ return {expression}; }}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_pointer_calls_reject_returned_union_array_storage_without_evaluation() {
+    for expression in ["sizeof(get())", "_Generic(get(), double *: 1, default: 0)"] {
+        let program = format!(
+            r#"
+union Choice {{ double values[1]; }};
+union Choice choice = {{{{1.0}}}};
+double *get(void) {{ return choice.values; }}
+int main(void) {{ return {expression}; }}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_union_provenance_ignores_unused_call_arguments() {
+    for expression in [
+        "get(&choice.item)->values != 0",
+        "sizeof(get(&choice.item)->values) == sizeof(double *)",
+        "_Generic(get(&choice.item)->values, double *: 1, default: 0)",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double scalar; double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Item safe = {{3.0, {{4.0}}}};
+struct Item *get(struct Item *unused) {{ return &safe; }}
+int main(void) {{
+    union Choice choice = {{{{1.0, {{2.0}}}}}};
+    return {expression} ? 0 : 1;
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect(expression),
+            0,
+            "unexpected result for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_union_provenance_follows_indexed_pointer_fields() {
+    let program = r#"
+struct Item { double scalar; double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *items; };
+int main(void) {
+    union Choice choice = {{1.0, {2.0}}};
+    struct Holder holder = {&choice.item};
+    return holder.items[0].values != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn indexed_struct_parameters_preserve_whole_union_provenance() {
+    for returned in ["items[0].values", "0[items].values"] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+union Choice {{ struct Item item; }};
+double *select(struct Item *items) {{ return {returned}; }}
+int main(void) {{
+    union Choice choice = {{{{{{2.0}}}}}};
+    return sizeof(select(&choice.item));
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(returned).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {returned}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_indexed_aggregate_pointers_preserve_captured_union_provenance() {
+    for expression in [
+        "sizeof(&items[0].scalar)",
+        "_Generic(&items[0].scalar, double *: 1, default: 0)",
+        "sizeof(holder.items[0].values)",
+        "_Generic(holder.items[0].values, double *: 1, default: 0)",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double scalar; double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Holder {{ struct Item *items; }};
+int main(void) {{
+    union Choice choice = {{{{1.0, {{2.0}}}}}};
+    struct Item *items = &choice.item;
+    struct Holder holder = {{&choice.item}};
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn returned_union_provenance_follows_local_aliases_and_lexical_shadowing() {
+    for body in [
+        "struct Item *saved = item; return saved;",
+        "struct Item *saved = &safe; saved = item; return saved;",
+        "struct Item *saved = item; { struct Item *item = &safe; saved = saved; } return saved;",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Item safe = {{{{3.0}}}};
+struct Item *forward(struct Item *item) {{ {body} }}
+int main(void) {{
+    union Choice choice = {{{{{{2.0}}}}}};
+    return sizeof(forward(&choice.item)->values);
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(body).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {body}"
+        );
+    }
+
+    let shadowed_return = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item safe = {{3.0}};
+struct Item *pick(struct Item *item) {
+    {
+        struct Item *item = &safe;
+        return item;
+    }
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(pick(&choice.item)->values) != 8;
+}
+"#;
+    assert_eq!(interpret(shadowed_return).unwrap(), 0);
+}
+
+#[test]
+fn returned_union_provenance_restores_shadowed_lexical_bindings() {
+    let unsafe_outer = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item safe = {{3.0}};
+struct Item *pick(struct Item *item) {
+    { struct Item *item = &safe; }
+    return item;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(pick(&choice.item)->values);
+}
+"#;
+    assert_eq!(
+        interpret(unsafe_outer).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+
+    let safe_outer = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item *pick(struct Item *item, struct Item *unsafe) {
+    { struct Item *item = unsafe; }
+    return item;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    struct Item safe = {{3.0}};
+    return sizeof(pick(&safe, &choice.item)->values) != 8;
+}
+"#;
+    assert_eq!(interpret(safe_outer).unwrap(), 0);
+}
+
+#[test]
+fn returned_union_provenance_excludes_terminated_branch_states() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item safe = {{3.0}};
+struct Item *pick_safe(int flag, struct Item *item) {
+    struct Item *pointer = &safe;
+    if (flag) {
+        pointer = item;
+        return &safe;
+    }
+    return pointer;
+}
+struct Item *pick_unsafe(int flag, struct Item *item) {
+    struct Item *pointer = &safe;
+    if (flag) pointer = item;
+    return pointer;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    if (sizeof(pick_safe(1, &choice.item)->values) != 8) return 1;
+    return sizeof(pick_unsafe(0, &choice.item)->values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+
+    let safe_only = program.replace(
+        "return sizeof(pick_unsafe(0, &choice.item)->values);",
+        "return 0;",
+    );
+    assert_eq!(interpret(&safe_only).unwrap(), 0);
+}
+
+#[test]
+fn returned_union_provenance_models_switch_fallthrough_and_break() {
+    let fallthrough = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item safe = {{3.0}};
+struct Item *pick(int selector, struct Item *item) {
+    struct Item *pointer = &safe;
+    switch (selector) {
+        case 0: pointer = item;
+        case 1: return pointer;
+        default: break;
+    }
+    return &safe;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(pick(0, &choice.item)->values);
+}
+"#;
+    assert_eq!(
+        interpret(fallthrough).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+
+    let stopped_fallthrough =
+        fallthrough.replace("case 0: pointer = item;", "case 0: pointer = item; break;");
+    assert_eq!(interpret(&stopped_fallthrough).unwrap(), 8);
+
+    let break_exit = fallthrough
+        .replace("case 0: pointer = item;", "case 0: pointer = item; break;")
+        .replace("return &safe;", "return pointer;");
+    assert_eq!(
+        interpret(&break_exit).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn returned_union_provenance_reaches_a_loop_fixed_point() {
+    for loop_statement in [
+        "while (keep) { if (done) return pointer; pointer = item; }",
+        "do { if (done) return pointer; pointer = item; } while (keep);",
+        "for (; keep; ) { if (done) return pointer; pointer = item; }",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Item safe = {{{{3.0}}}};
+struct Item *pick(int keep, int done, struct Item *item) {{
+    struct Item *pointer = &safe;
+    {loop_statement}
+    return &safe;
+}}
+int main(void) {{
+    union Choice choice = {{{{{{2.0}}}}}};
+    return sizeof(pick(1, 0, &choice.item)->values);
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {loop_statement}"
+        );
+    }
+
+    let reset_each_iteration = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item safe = {{3.0}};
+struct Item *pick(int keep, int done, struct Item *item) {
+    struct Item *pointer = item;
+    while (keep) {
+        pointer = &safe;
+        if (done) return pointer;
+        pointer = item;
+    }
+    return &safe;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(pick(1, 0, &choice.item)->values) != 8;
+}
+"#;
+    assert_eq!(interpret(reset_each_iteration).unwrap(), 0);
+}
+
+#[test]
+fn returned_union_provenance_branching_call_chains_scale_linearly() {
+    fn branching_program(depth: usize) -> String {
+        let mut program =
+            String::from("struct Item { double values[1]; };\nstruct Item safe = {{3.0}};\n");
+        program.push_str("struct Item *f0(struct Item *item) { return item; }\n");
+        for level in 1..=depth {
+            program.push_str(&format!(
+                "struct Item *f{level}(struct Item *item) {{ return 1 ? f{}(item) : f{}(item); }}\n",
+                level - 1,
+                level - 1,
+            ));
+        }
+        program.push_str(&format!(
+            "int main(void) {{ return sizeof(f{depth}(&safe)->values) != 8; }}\n"
+        ));
+        program
+    }
+
+    let start = std::time::Instant::now();
+    assert_eq!(interpret(&branching_program(4)).unwrap(), 0);
+    let shallow = start.elapsed().max(std::time::Duration::from_millis(10));
+
+    let start = std::time::Instant::now();
+    assert_eq!(interpret(&branching_program(8)).unwrap(), 0);
+    let deep = start.elapsed();
+
+    assert!(
+        deep <= shallow * 8 + std::time::Duration::from_millis(100),
+        "returned-pointer provenance should scale near-linearly: depth 4 took {shallow:?}, depth 8 took {deep:?}"
+    );
+}
+
+#[test]
+fn returned_union_provenance_joins_branch_assignments_and_nested_block_writes() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item safe = {{3.0}};
+struct Item *select(int flag, struct Item *item) {
+    struct Item *pointer = &safe;
+    {
+        if (flag) pointer = item;
+        else pointer = &safe;
+    }
+    return pointer;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(select(1, &choice.item)->values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn returned_union_provenance_tracks_pointer_fields_through_struct_pointer_calls() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Item safe = {{3.0}};
+struct Item *get(struct Holder *holder) { return holder->pointer; }
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    struct Holder holder = {&choice.item};
+    return sizeof(get(&holder)->values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn union_provenance_review_statement_and_control_expression_effects_are_preserved() {
+    for mutation in [
+        "holder.pointer = item;",
+        "(holder.pointer = item);",
+        "consume(holder.pointer = item);",
+        "if (holder.pointer = item) {}",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Holder {{ struct Item *pointer; }};
+struct Item safe = {{{{3.0}}}};
+int consume(struct Item *item) {{ return item != 0; }}
+struct Item *select_item(struct Item *item) {{
+    struct Holder holder = {{&safe}};
+    {mutation}
+    return holder.pointer;
+}}
+int main(void) {{
+    union Choice choice = {{{{{{2.0}}}}}};
+    return sizeof(select_item(&choice.item)->values);
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(mutation).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {mutation}"
+        );
+    }
+}
+
+#[test]
+fn union_provenance_review_called_helper_effects_are_preserved() {
+    for call in [
+        "store_item(&holder, item);",
+        "if (store_item(&holder, item)) {}",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Holder {{ struct Item *pointer; }};
+struct Item safe = {{{{3.0}}}};
+int store_item(struct Holder *holder, struct Item *item) {{
+    holder->pointer = item;
+    return 1;
+}}
+struct Item *select_item(struct Item *item) {{
+    struct Holder holder = {{&safe}};
+    {call}
+    return holder.pointer;
+}}
+int main(void) {{
+    union Choice choice = {{{{{{2.0}}}}}};
+    return sizeof(select_item(&choice.item)->values);
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(call).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {call}"
+        );
+    }
+}
+
+#[test]
+fn union_provenance_call_effects_survive_declarations_and_assignments() {
+    for (return_type, declaration, statement) in [
+        (
+            "struct Item *",
+            "",
+            "struct Item *ignored = store(&holder, item);",
+        ),
+        (
+            "struct Item *",
+            "struct Item *ignored = &safe;",
+            "ignored = store(&holder, item);",
+        ),
+        ("int", "", "int ignored = store(&holder, item);"),
+        ("int", "int ignored = 0;", "ignored = store(&holder, item);"),
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Holder {{ struct Item *pointer; }};
+struct Item safe = {{{{3.0}}}};
+{return_type} store(struct Holder *holder, struct Item *item) {{
+    holder->pointer = item;
+    return {return_value};
+}}
+struct Item *select(struct Item *item) {{
+    struct Holder holder = {{&safe}};
+    {declaration}
+    {statement}
+    return holder.pointer;
+}}
+int main(void) {{
+    union Choice choice = {{{{{{2.0}}}}}};
+    return sizeof(select(&choice.item)->values);
+}}
+"#,
+            return_value = if return_type == "int" { "0" } else { "&safe" },
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(statement).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {statement}"
+        );
+    }
+}
+
+#[test]
+fn return_and_scalar_initializer_expressions_apply_union_provenance_effects() {
+    let returned_comma = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Item safe = {{3.0}};
+struct Item *select(struct Holder holder, struct Item *item) {
+    return (holder.pointer = item, holder.pointer);
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    struct Holder holder = {&safe};
+    return sizeof(select(holder, &choice.item)->values);
+}
+"#;
+    let scalar_initializer = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Item safe = {{3.0}};
+int store(struct Holder *holder, struct Item *item) {
+    holder->pointer = item;
+    return 1;
+}
+struct Item *select(struct Item *item) {
+    struct Holder holder = {&safe};
+    int stored = store(&holder, item);
+    return stored ? holder.pointer : &safe;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(select(&choice.item)->values);
+}
+"#;
+
+    for program in [returned_comma, scalar_initializer] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "double pointers are not supported"
+        );
+    }
+}
+
+#[test]
+fn union_provenance_review_for_initializer_shadowing_restores_the_parameter() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item *select_item(struct Item *item, struct Item *unsafe_item) {
+    for (struct Item *item = unsafe_item; 0; ) {}
+    return item;
+}
+int main(void) {
+    struct Item safe = {{3.0}};
+    union Choice choice = {{{2.0}}};
+    return sizeof(select_item(&safe, &choice.item)->values) == 8 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn union_provenance_review_static_pointer_state_persists_across_calls() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item safe = {{3.0}};
+struct Item *remember_item(struct Item *item, int save) {
+    static struct Item *stored = &safe;
+    if (save) stored = item;
+    return stored;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    remember_item(&choice.item, 1);
+    return sizeof(remember_item(&safe, 0)->values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn union_provenance_review_aggregate_call_results_preserve_pointer_fields() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Holder make_holder(struct Item *item) {
+    return (struct Holder){item};
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(make_holder(&choice.item).pointer->values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn union_provenance_review_union_pointer_field_keeps_its_own_pointee_provenance() {
+    let program = r#"
+union Holder { double *pointer; int number; };
+double *select_pointer(union Holder *holder) { return holder->pointer; }
+int main(void) {
+    double value = 3.0;
+    union Holder holder = {&value};
+    return sizeof(select_pointer(&holder)) == sizeof(double *) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn union_provenance_review_aggregate_array_pointer_fields_keep_element_identity() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Item *select_second(struct Holder *holders) {
+    return holders[1].pointer;
+}
+int main(void) {
+    struct Item safe = {{3.0}};
+    union Choice choice = {{{2.0}}};
+    struct Holder holders[2] = {{&choice.item}, {&safe}};
+    return sizeof(select_second(holders)->values) == 8 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+
+    let unsafe_first = program
+        .replace("select_second", "select_first")
+        .replace("return holders[1].pointer;", "return holders[0].pointer;");
+    assert_eq!(
+        interpret(&unsafe_first).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn union_provenance_review_safe_nine_hop_forwarding_is_not_union_backed() {
+    let program = r#"
+struct Item { double values[1]; };
+struct Item safe = {{3.0}};
+struct Item *forward_zero(struct Item *item) { return item; }
+struct Item *forward_one(struct Item *item) { return forward_zero(item); }
+struct Item *forward_two(struct Item *item) { return forward_one(item); }
+struct Item *forward_three(struct Item *item) { return forward_two(item); }
+struct Item *forward_four(struct Item *item) { return forward_three(item); }
+struct Item *forward_five(struct Item *item) { return forward_four(item); }
+struct Item *forward_six(struct Item *item) { return forward_five(item); }
+struct Item *forward_seven(struct Item *item) { return forward_six(item); }
+struct Item *forward_eight(struct Item *item) { return forward_seven(item); }
+struct Item *forward_nine(struct Item *item) { return forward_eight(item); }
+int main(void) {
+    return sizeof(forward_nine(&safe)->values) == 8 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn union_provenance_review_non_evaluating_bool_dereference_assignment_accepts_pointer_truthiness() {
+    let program = r#"
+struct Source { int *value; };
+int main(void) {
+    int number = 1;
+    struct Source source = {&number};
+    _Bool result = 0;
+    _Bool *pointer = &result;
+    return sizeof(*pointer = source.value) == sizeof(_Bool) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn union_provenance_review_non_evaluating_direct_pointer_assignment_checks_pointee_type() {
+    let program = r#"
+struct Source { double *value; };
+int main(void) {
+    double number = 1.0;
+    struct Source source = {&number};
+    int *pointer = 0;
+    return sizeof(pointer = source.value);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot convert pointer to double to pointer to int"
+    );
+}
+
+#[test]
+fn union_provenance_review2_depth_analysis_only_applies_to_direct_double_pointer_calls() {
+    for (return_type, base, result) in [
+        ("int", "return 1;", "f12() - 1"),
+        ("void *", "return &value;", "f12() == &value ? 0 : 1"),
+    ] {
+        let mut program = format!("int value; {return_type} f0(void) {{ {base} }}\n");
+        for level in 1..=12 {
+            program.push_str(&format!(
+                "{return_type} f{level}(void) {{ return f{}(); }}\n",
+                level - 1
+            ));
+        }
+        program.push_str(&format!("int main(void) {{ return {result}; }}"));
+        assert_eq!(interpret(&program), Ok(0), "program: {program}");
+    }
+
+    let mut direct_double = String::from("double value; double *f0(void) { return &value; }\n");
+    for level in 1..=12 {
+        direct_double.push_str(&format!(
+            "double *f{level}(void) {{ return f{}(); }}\n",
+            level - 1
+        ));
+    }
+    direct_double.push_str("int main(void) { return sizeof(f12()); }");
+    assert_eq!(
+        interpret(&direct_double).unwrap_err().to_string(),
+        "union pointer provenance analysis call depth limit of 10 exceeded"
+    );
+}
+
+#[test]
+fn union_provenance_review2_returned_assignment_applies_pointer_provenance() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Item *store_and_return(struct Holder holder, struct Item *item) {
+    return holder.pointer = item;
+}
+int main(void) {
+    struct Item safe = {{3.0}};
+    union Choice choice = {{{2.0}}};
+    struct Holder holder = {&safe};
+    return sizeof(store_and_return(holder, &choice.item)->values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn union_provenance_review2_helper_effects_preserve_indexed_aggregate_lvalues() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Item safe = {{3.0}};
+void store(struct Holder *holder, struct Item *item) {
+    holder->pointer = item;
+}
+struct Item *store_and_read(struct Item *item) {
+    struct Holder holders[1] = {{&safe}};
+    store(&holders[0], item);
+    return holders[0].pointer;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(store_and_read(&choice.item)->values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn indexed_and_nested_aggregate_pointer_field_writes_preserve_union_provenance() {
+    let indexed = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Item safe = {{3.0}};
+struct Item *select(struct Item *item) {
+    struct Holder holders[1] = {{&safe}};
+    holders[0].pointer = item;
+    return holders[0].pointer;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(select(&choice.item)->values);
+}
+"#;
+    let nested = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Outer { struct Holder holders[1]; };
+struct Item safe = {{3.0}};
+struct Item *select(struct Item *item) {
+    struct Outer outer = {{{&safe}}};
+    outer.holders[0].pointer = item;
+    return outer.holders[0].pointer;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(select(&choice.item)->values);
+}
+"#;
+    let helper_writeback = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Outer { struct Holder holders[1]; };
+struct Item safe = {{3.0}};
+void store(struct Holder *holder, struct Item *item) {
+    holder->pointer = item;
+}
+struct Item *select(struct Item *item) {
+    struct Outer outer = {{{&safe}}};
+    store(&outer.holders[0], item);
+    return outer.holders[0].pointer;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(select(&choice.item)->values);
+}
+"#;
+
+    for program in [indexed, nested, helper_writeback] {
+        assert_eq!(
+            interpret(program).expect_err(program).to_string(),
+            "double pointers are not supported"
+        );
+    }
+}
+
+#[test]
+fn aliased_aggregate_pointer_parameters_share_union_provenance_writes() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Item safe = {{3.0}};
+struct Item *store_and_read(
+        struct Holder *a, struct Holder *b, struct Item *item) {
+    a->pointer = item;
+    return b->pointer;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    struct Holder holder = {&safe};
+    return sizeof(store_and_read(&holder, &holder, &choice.item)->values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+
+    let distinct = program.replacen(
+        "struct Holder holder = {&safe};\n    return sizeof(store_and_read(&holder, &holder, &choice.item)->values);",
+        "struct Holder a = {&safe};\n    struct Holder b = {&safe};\n    return sizeof(store_and_read(&a, &b, &choice.item)->values);",
+        1,
+    );
+    assert_eq!(interpret(&distinct), Ok(8));
+}
+
+#[test]
+fn canonical_aggregate_targets_detect_mixed_and_global_pointer_aliases() {
+    for (globals, setup, call) in [
+        (
+            "",
+            "struct Holder holder = {&safe}; struct Holder *alias = &holder;",
+            "store_and_read(&holder, alias, &choice.item)",
+        ),
+        (
+            "struct Holder holder = {&safe}; struct Holder *first = &holder; struct Holder *second = &holder;",
+            "",
+            "store_and_read(first, second, &choice.item)",
+        ),
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Holder {{ struct Item *pointer; }};
+struct Item safe = {{{{3.0}}}};
+{globals}
+struct Item *store_and_read(
+        struct Holder *written, struct Holder *read, struct Item *item) {{
+    written->pointer = item;
+    return read->pointer;
+}}
+int main(void) {{
+    union Choice choice = {{{{{{2.0}}}}}};
+    {setup}
+    return sizeof({call}->values);
+}}
+"#,
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(call).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {call}"
+        );
+    }
+}
+
+#[test]
+fn callee_writeback_targets_nested_and_offset_aggregate_objects_precisely() {
+    let nested = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Outer { struct Holder holder; };
+struct Item safe = {{3.0}};
+void store(struct Holder *holder, struct Item *item) { holder->pointer = item; }
+struct Item *select(struct Item *item) {
+    struct Outer outer = {{&safe}};
+    store(&outer.holder, item);
+    return outer.holder.pointer;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(select(&choice.item)->values);
+}
+"#;
+    assert_eq!(
+        interpret(nested).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+
+    for (offset, selected, unselected) in [("", 0, 1), (" + 1", 1, 0)] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Holder {{ struct Item *pointer; }};
+struct Item safe = {{{{3.0}}}};
+void store(struct Holder *holder, struct Item *item) {{ holder->pointer = item; }}
+struct Item *select(struct Item *item) {{
+    struct Holder holders[2] = {{{{&safe}}, {{&safe}}}};
+    store(holders{offset}, item);
+    return holders[INDEX].pointer;
+}}
+int main(void) {{
+    union Choice choice = {{{{{{2.0}}}}}};
+    return sizeof(select(&choice.item)->values);
+}}
+"#,
+        );
+        assert_eq!(
+            interpret(&program.replace("INDEX", &selected.to_string()))
+                .unwrap_err()
+                .to_string(),
+            "double pointers are not supported"
+        );
+        assert_eq!(
+            interpret(&program.replace("INDEX", &unselected.to_string())),
+            Ok(8),
+            "write through element {selected} tainted sibling {unselected}"
+        );
+    }
+}
+
+#[test]
+fn recursive_union_provenance_uses_cycle_summaries_without_argument_taint() {
+    let safe = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item safe = {{3.0}};
+struct Item *select(int depth, struct Item *item) {
+    if (depth) return select(depth - 1, item);
+    return &safe;
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(select(1, &choice.item)->values) == 8 ? 0 : 1;
+}
+"#;
+    assert_eq!(interpret(safe), Ok(0));
+
+    let unsafe_path = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+union Choice choice = {{{2.0}}};
+struct Item safe = {{3.0}};
+struct Item *select(int depth, struct Item *item) {
+    if (depth) return select(depth - 1, &choice.item);
+    return item;
+}
+int main(void) {
+    return sizeof(select(1, &safe)->values);
+}
+"#;
+    assert_eq!(
+        interpret(unsafe_path).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn non_evaluating_calls_propagate_global_aggregate_pointer_mutations() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Item safe = {{3.0}};
+struct Holder holder = {&safe};
+struct Holder *global_holder = &holder;
+void store(struct Item *item) {
+    global_holder->pointer = item;
+}
+struct Item *read(void) {
+    return global_holder->pointer;
+}
+struct Item *select(struct Item *item) {
+    store(item);
+    return read();
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(select(&choice.item)->values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn union_provenance_review2_static_provenance_persists_across_analyzed_calls() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Item safe = {{3.0}};
+struct Item *remember(struct Item *item, int save) {
+    static struct Item *stored = &safe;
+    if (save) stored = item;
+    return stored;
+}
+struct Item *store_then_read(struct Item *item) {
+    remember(item, 1);
+    return remember(&safe, 0);
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(store_then_read(&choice.item)->values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn union_provenance_review2_lexical_by_value_parameter_precedes_runtime_name_collision() {
+    let program = r#"
+union Holder { double *pointer; int number; };
+double *get(union Holder holder) {
+    return holder.pointer;
+}
+int main(void) {
+    double safe = 3.0;
+    union Holder holder = {&safe};
+    return sizeof(get(holder)) == sizeof(double *) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn union_provenance_review2_nested_aggregate_array_fields_keep_index_identity() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Outer { struct Holder holders[2]; };
+struct Item *get(struct Outer outer) {
+    return outer.holders[0].pointer;
+}
+int main(void) {
+    struct Item safe = {{3.0}};
+    union Choice choice = {{{2.0}}};
+    struct Outer outer = {{{&choice.item}, {&safe}}};
+    return sizeof(get(outer)->values) == sizeof(double[1]) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+    assert_eq!(
+        interpret(&program.replace("holders[0]", "holders[1]")),
+        Ok(0)
+    );
+}
+
+#[test]
+fn union_provenance_review2_sizeof_direct_assignments_validate_both_types() {
+    for (program, expected) in [
+        (
+            "int main(void) { int *pointer = 0; return sizeof(pointer = 1); }",
+            "expected pointer expression",
+        ),
+        (
+            "int main(void) { int out = 0; int *pointer = &out; return sizeof(out = pointer); }",
+            "scalar assignment requires a scalar value",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            expected,
+            "program: {program}"
+        );
+    }
+
+    assert_eq!(
+        interpret(
+            "int main(void) { int value = 1; int *pointer = &value; _Bool out = 0; return sizeof(out = pointer) == sizeof(_Bool) ? 0 : 1; }"
+        ),
+        Ok(0)
+    );
+}
+
+#[test]
+fn returned_union_provenance_does_not_taint_unselected_aggregate_pointer_fields() {
+    let program = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *unsafe; struct Item *safe; };
+struct Item *get_safe(struct Holder *holder) { return holder->safe; }
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    struct Item safe = {{3.0}};
+    struct Holder holder = {&choice.item, &safe};
+    return sizeof(get_safe(&holder)->values) == sizeof(double[1]) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn returned_union_provenance_tracks_canonical_aggregate_field_routes() {
+    let array_decay = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *unsafe; struct Item *safe; };
+struct Item *get_unsafe(struct Holder *holders) { return holders[0].unsafe; }
+struct Item *get_safe(struct Holder *holders) { return holders[0].safe; }
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    struct Item safe = {{3.0}};
+    struct Holder holders[1] = {{&choice.item, &safe}};
+    if (sizeof(get_safe(holders)->values) != 8) return 1;
+    return sizeof(get_unsafe(holders)->values);
+}
+"#;
+    assert_eq!(
+        interpret(array_decay).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+    assert_eq!(
+        interpret(&array_decay.replace("return sizeof(get_unsafe(holders)->values);", "return 0;"))
+            .unwrap(),
+        0
+    );
+
+    let pointer_alias = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *unsafe; struct Item *safe; };
+struct Item *get_unsafe(struct Holder *holder) { return holder->unsafe; }
+struct Item *get_safe(struct Holder *holder) { return holder->safe; }
+struct Item *forward_unsafe(struct Holder *holder) {
+    struct Holder *alias = holder;
+    return get_unsafe(alias);
+}
+struct Item *forward_safe(struct Holder *holder) {
+    struct Holder *alias = holder;
+    return get_safe(alias);
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    struct Item safe = {{3.0}};
+    struct Holder holder = {&choice.item, &safe};
+    if (sizeof(forward_safe(&holder)->values) != 8) return 1;
+    return sizeof(forward_unsafe(&holder)->values);
+}
+"#;
+    assert_eq!(
+        interpret(pointer_alias).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+    assert_eq!(
+        interpret(&pointer_alias.replace(
+            "return sizeof(forward_unsafe(&holder)->values);",
+            "return 0;"
+        ))
+        .unwrap(),
+        0
+    );
+
+    let local_initializers_and_cache = r#"
+struct Item { double values[1]; };
+union Choice { struct Item item; };
+struct Holder { struct Item *pointer; };
+struct Item *get(struct Holder *holder) { return holder->pointer; }
+struct Item *pick(int flag, struct Item *item) {
+    struct Holder safe_holder = {&safe};
+    struct Holder unsafe_holder = {item};
+    struct Holder *safe_alias = &safe_holder;
+    struct Holder *unsafe_alias = &unsafe_holder;
+    return flag ? get(safe_alias) : get(unsafe_alias);
+}
+int main(void) {
+    union Choice choice = {{{2.0}}};
+    return sizeof(pick(0, &choice.item)->values);
+}
+"#;
+    assert_eq!(
+        interpret(local_initializers_and_cache)
+            .unwrap_err()
+            .to_string(),
+        "double pointers are not supported"
+    );
+    assert_eq!(
+        interpret(&local_initializers_and_cache.replace(
+            "return flag ? get(safe_alias) : get(unsafe_alias);",
+            "return get(safe_alias);"
+        ))
+        .unwrap(),
+        8
+    );
+}
+
+#[test]
+fn generic_selected_aggregate_lvalue_double_array_decay_preserves_storage_identity() {
+    let program = r#"
+struct Sample { double values[1]; };
+int main(void) {
+    struct Sample sample = {{1.0}};
+    double *pointer = (_Generic(0, int: sample)).values;
+    *pointer = 2.0;
+    return sample.values[0] == 2.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn reverse_subscript_aggregate_pointer_fields_preserve_storage_identity() {
+    let program = r#"
+struct Box { double *pointer; };
+int main(void) {
+    double values[1] = {1.0};
+    struct Box boxes[1] = {{values}};
+    int index = 0;
+    double *pointer = index[boxes].pointer;
+    return pointer == values ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_reverse_subscript_aggregate_double_array_element_address_is_pointer_sized() {
+    let program = r#"
+struct Sample { double values[1]; };
+int main(void) {
+    struct Sample samples[1] = {{{1.0}}};
+    int index = 0;
+    return sizeof(&index[samples].values[0]) == sizeof(double *) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn union_provenance_review_analysis_has_a_deterministic_call_depth_limit() {
+    const CHILD_ENV: &str = "CUST_UNION_PROVENANCE_DEPTH_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let mut program =
+            String::from("struct Item { double values[1]; };\nstruct Item safe = {{3.0}};\n");
+        program.push_str("struct Item *f0(struct Item *item) { return item; }\n");
+        for level in 1..=22 {
+            program.push_str(&format!(
+                "struct Item *f{level}(struct Item *item) {{ return f{}(item); }}\n",
+                level - 1,
+            ));
+        }
+        program.push_str("int main(void) { return sizeof(f22(&safe)->values); }\n");
+        let error = interpret(&program).expect_err("deep analysis must stop with a Cust error");
+        assert_eq!(
+            error.to_string(),
+            "union pointer provenance analysis call depth limit of 10 exceeded"
+        );
+        return;
+    }
+
+    let output = std::process::Command::new(
+        std::env::current_exe().expect("current integration-test executable should exist"),
+    )
+    .args([
+        "--exact",
+        "union_provenance_review_analysis_has_a_deterministic_call_depth_limit",
+        "--nocapture",
+    ])
+    .env(CHILD_ENV, "1")
+    // 128 KiB is below Cust's baseline interpreter-frame requirement even for
+    // `return 0`; 256 KiB is the smallest tested stack that isolates recursive
+    // provenance analysis from the interpreter's fixed frame cost.
+    .env("RUST_MIN_STACK", "262144")
+    .output()
+    .expect("child integration test should run");
+
+    assert!(
+        output.status.success(),
+        "deep union-provenance analysis must not abort the host: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_reject_union_provenance_through_forwarding_calls() {
+    for expression in [
+        "identity(&choice.item)->values != 0",
+        "sizeof(identity(&choice.item)->values)",
+        "_Generic(identity(&choice.item)->values, double *: 1, default: 0)",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double scalar; double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Item *identity(struct Item *item) {{ return item; }}
+int main(void) {{
+    union Choice choice = {{{{1.0, {{2.0}}}}}};
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_reject_union_provenance_through_conditionals() {
+    let program = r#"
+struct Item { double scalar; double values[1]; };
+union Choice { struct Item item; };
+int main(void) {
+    union Choice choice = {{1.0, {2.0}}};
+    return (1 ? &choice.item : &choice.item)->values != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn direct_double_aggregate_field_pointers_reject_union_provenance_through_comma_and_reverse_subscript()
+ {
+    for expression in [
+        "(0, &choice.item)->values != 0",
+        "index[(&choice.item)].values != 0",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double scalar; double values[1]; }};
+union Choice {{ struct Item item; }};
+int main(void) {{
+    union Choice choice = {{{{1.0, {{2.0}}}}}};
+    int index = 0;
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn reverse_subscript_aggregate_double_fields_preserve_const_pointer_qualification() {
+    for expression in [
+        "double *pointer = &index.zero[items].scalar;",
+        "double *pointer = index.zero[items].values;",
+        "double *pointer = &index.zero[items].values[0];",
+        "sizeof(pointer = &index.zero[items].scalar);",
+        "sizeof(pointer = index.zero[items].values);",
+    ] {
+        let declaration = if expression.starts_with("sizeof") {
+            "double *pointer = 0;"
+        } else {
+            ""
+        };
+        let program = format!(
+            r#"
+struct Item {{ double scalar; double values[1]; }};
+struct Index {{ int zero; }};
+int main(void) {{
+    struct Item storage[1] = {{{{1.0, {{2.0}}}}}};
+    const struct Item *items = storage;
+    struct Index index = {{0}};
+    {declaration}
+    {expression}
+    return 0;
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "cannot discard const qualifier from pointer target",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn reverse_subscript_aggregate_double_array_fields_are_pointer_values() {
+    let program = r#"
+struct Item { double values[1]; };
+int main(void) {
+    struct Item items[1] = {{{2.0}}};
+    int index = 0;
+    double *pointer = index[items].values;
+    int same = index[items].values == pointer;
+    int generic = _Generic(index[items].values, double *: 1, default: 0);
+    return same && generic && index[items].values ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn reverse_subscript_aggregate_pointer_field_assignments_preserve_pointer_results() {
+    let program = r#"
+struct Box { double *pointer; };
+int main(void) {
+    double value = 1.0;
+    struct Box boxes[1] = {{0}};
+    int index = 0;
+    double *result = (index[boxes].pointer = &value);
+    int size = sizeof(index[boxes].pointer = &value);
+    return *result == 1.0 && boxes[0].pointer == &value
+            && size == sizeof(double *) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn reverse_subscript_pointer_field_assignment_results_preserve_const() {
+    let evaluated = r#"
+struct Box { const double *pointer; };
+int main(void) {
+    double value = 1.0;
+    const double *qualified = &value;
+    struct Box boxes[1] = {{0}};
+    int index = 0;
+    double *escaped = (index[boxes].pointer = qualified);
+    return escaped != 0;
+}
+"#;
+    let non_evaluated = r#"
+struct Box { const double *pointer; };
+int main(void) {
+    const double value = 1.0;
+    struct Box boxes[1] = {{0}};
+    int index = 0;
+    double *escaped = 0;
+    return sizeof(escaped = (index[boxes].pointer = &value));
+}
+"#;
+
+    for program in [evaluated, non_evaluated] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "cannot discard const qualifier from pointer target"
+        );
+    }
+}
+
+#[test]
+fn reverse_subscript_aggregate_double_array_element_addresses_preserve_const() {
+    let program = r#"
+struct Item { double values[1]; };
+int main(void) {
+    struct Item storage[1] = {{{2.0}}};
+    const struct Item *items = storage;
+    int index = 0;
+    double *pointer = &index[items].values[0];
+    return *pointer == 2.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn non_evaluating_direct_double_pointer_conversions_accept_void_pointer_sources() {
+    let program = r#"
+struct Sample { double values[1]; };
+struct Holder { double *pointer; };
+int main(void) {
+    struct Sample sample = {{2.0}};
+    void *opaque = sample.values;
+    struct Holder holder = {0};
+    int size = sizeof((struct Holder){.pointer = opaque})
+        + sizeof(holder.pointer = opaque);
+    return size == 16 && holder.pointer == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn union_backed_void_pointers_cannot_be_converted_to_double_pointers() {
+    for expression in [
+        "return sizeof((double *)opaque);",
+        "return _Generic((double *)opaque, double *: 1, default: 0);",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+union Choice {{ struct Item item; }};
+int main(void) {{
+    union Choice choice = {{{{{{2.0}}}}}};
+    void *opaque = &choice.item;
+    {expression}
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn union_backed_void_pointers_cannot_be_implicitly_converted_to_double_pointers() {
+    for expression in [
+        "sizeof(pointer = opaque)",
+        "_Generic((pointer = opaque), double *: 1, default: 0)",
+        "sizeof((struct Holder){.pointer = opaque})",
+        "_Generic(((struct Holder){.pointer = opaque}), struct Holder: 1, default: 0)",
+        "sizeof(take(opaque))",
+        "_Generic(take(opaque), int: 1, default: 0)",
+    ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+union Choice {{ struct Item item; }};
+struct Holder {{ double *pointer; }};
+int take(double *pointer) {{ return pointer != 0; }}
+int main(void) {{
+    union Choice choice = {{{{{{2.0}}}}}};
+    void *opaque = &choice.item;
+    double *pointer = 0;
+    return {expression};
+}}
+"#,
+        );
+
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            "double pointers are not supported",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn non_evaluating_aggregate_array_field_assignments_match_evaluated_diagnostics() {
+    for assignment in ["box.points = 1", "box.points += 1"] {
+        let source = |expression: &str| {
+            format!(
+                r#"
+struct Point {{ int value; }};
+struct Box {{ struct Point points[1]; }};
+int main(void) {{
+    struct Box box = {{{{{{1}}}}}};
+    return {expression};
+}}
+"#,
+            )
+        };
+        let expected = "struct field 'points' is a struct array";
+        assert_eq!(
+            interpret(&source(assignment)).unwrap_err().to_string(),
+            expected
+        );
+        for expression in [
+            format!("sizeof({assignment})"),
+            format!("_Generic(({assignment}), default: 0)"),
+        ] {
+            assert_eq!(
+                interpret(&source(&expression))
+                    .expect_err(&expression)
+                    .to_string(),
+                expected,
+                "unexpected diagnostic for {expression}"
+            );
+        }
+    }
+}
+
+#[test]
+fn non_evaluating_reverse_subscript_double_scalar_field_addresses_accept_pointer_operand() {
+    let program = r#"
+struct Item { double scalar; };
+int main(void) {
+    struct Item items[1] = {{2.0}};
+    int index = 0;
+    int size = sizeof(&index[items].scalar);
+    int generic = _Generic(&index[items].scalar, double *: 1, default: 0);
+    return size == 8 && generic ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn non_evaluating_aggregate_int_field_assignment_rejects_double_field_pointer_rhs() {
+    let program = r#"
+struct Sample { double values[1]; };
+struct Target { int value; };
+int main(void) {
+    struct Sample sample = {{2.0}};
+    struct Target target = {0};
+    return sizeof(target.value = sample.values);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer value used as scalar"
+    );
+}
+
+#[test]
+fn non_evaluating_bool_conversions_accept_aggregate_double_field_pointers() {
+    for expression in [
+        "(_Bool)sample.values",
+        "flag.value = sample.values",
+        "view->value = sample.values",
+        "index[flags].value = sample.values",
+        "flags[marker++].value = sample.values",
+        "index[wrappers].flags[marker++].value = sample.values",
+        "(struct Flag){.value = sample.values}",
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double values[1]; }};
+struct Flag {{ _Bool value; }};
+struct Wrapper {{ struct Flag flags[1]; }};
+int main(void) {{
+    struct Sample sample = {{{{2.0}}}};
+    struct Flag flag = {{0}};
+    struct Flag flags[1] = {{{{0}}}};
+    struct Wrapper wrappers[1] = {{{{{{{{0}}}}}}}};
+    struct Flag *view = &flag;
+    int index = 0;
+    int marker = 0;
+    return sizeof({expression}) == 1 && marker == 0 && flag.value == 0
+            && flags[0].value == 0 ? 0 : 1;
+}}
+"#
+        );
+        let result = interpret(&program).unwrap_or_else(|error| panic!("{expression}: {error}"));
+        assert_eq!(result, 0, "{expression}");
+    }
+}
+
+#[test]
+fn returned_direct_double_aggregate_field_pointer_rejects_expired_local_owner() {
+    let program = r#"
+struct Holder { double values[2]; };
+double *escape(void) {
+    struct Holder holder = {{1.0, 2.0}};
+    return holder.values;
+}
+int main(void) {
+    double *pointer = escape();
+    return pointer[0] == 1.0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to out-of-scope variable 'holder'"
+    );
+}
+
+#[test]
+fn const_nested_named_aggregate_array_rejects_double_field_pointer_writes() {
+    let program = r#"
+struct Item { double value; };
+struct Wrap { struct Item items[1]; };
+int main(void) {
+    const struct Wrap wrapper = {{{1.0}}};
+    double *pointer = &wrapper.items[0].value;
+    pointer[0] = 2.0;
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
 }
 
 #[test]
@@ -3527,10 +5666,6 @@ fn direct_double_struct_fields_preserve_pointer_array_and_const_boundaries() {
         (
             "struct Sample { double readings[2][3]; }; int main(void) { return 0; }",
             "double multidimensional aggregate array fields are not supported",
-        ),
-        (
-            "struct Sample { double reading; }; int main(void) { struct Sample sample = {1.25}; return &sample.reading != 0; }",
-            "double pointers are not supported",
         ),
         (
             "struct Sample { const double reading; }; int main(void) { struct Sample sample = {1.25}; sample.reading = 2.0; return 0; }",
@@ -3563,6 +5698,11 @@ fn direct_double_aggregate_array_fields_preserve_typedef_rank_boundaries() {
 
 #[test]
 fn direct_double_aggregate_array_fields_preserve_const_pointer_and_memory_boundaries() {
+    assert_eq!(
+        interpret("struct Sample { double readings[2]; }; int main(void) { struct Sample sample = {{1.0, 2.0}}; double *pointer = sample.readings; return pointer == &sample.readings[0] ? 0 : 1; }").unwrap(),
+        0
+    );
+
     for (program, expected) in [
         (
             "struct Sample { const double readings[2]; }; int main(void) { struct Sample sample = {{1.0, 2.0}}; sample.readings[0] = 3.0; return 0; }",
@@ -3575,14 +5715,6 @@ fn direct_double_aggregate_array_fields_preserve_const_pointer_and_memory_bounda
         (
             "struct Inner { double readings[2]; }; struct Outer { const struct Inner inner; }; int main(void) { struct Outer outer = {{{1.0, 2.0}}}; outer.inner.readings[0] += 1.0; return 0; }",
             "cannot modify read-only array 'readings'",
-        ),
-        (
-            "struct Sample { double readings[2]; }; int main(void) { struct Sample sample = {{1.0, 2.0}}; sample.readings; return 0; }",
-            "double pointers are not supported",
-        ),
-        (
-            "struct Sample { double readings[2]; }; int main(void) { struct Sample sample = {{1.0, 2.0}}; return &sample.readings[0] != 0; }",
-            "double pointers are not supported",
         ),
         (
             "void *memset(void *, int, unsigned long int); struct Sample { double readings[2]; }; int main(void) { struct Sample sample = {{1.0, 2.0}}; memset(sample.readings, 0, sizeof(sample.readings)); return 0; }",
@@ -4146,10 +6278,10 @@ int main(void) {
 "#;
     assert_eq!(interpret(value).unwrap(), 0);
 
-    for expression in [
-        "&sample.index[sample.values] != 0",
-        "sizeof(&sample.index[sample.values])",
-        "_Generic((&sample.index[sample.values]), default: 0)",
+    for (expression, expected) in [
+        ("&sample.index[sample.values] != 0", 1),
+        ("sizeof(&sample.index[sample.values])", 8),
+        ("_Generic((&sample.index[sample.values]), default: 0)", 0),
     ] {
         let program = format!(
             r#"
@@ -4160,11 +6292,7 @@ int main(void) {{
 }}
 "#
         );
-        assert_eq!(
-            interpret(&program).expect_err(expression).to_string(),
-            "double pointers are not supported",
-            "unexpected diagnostic for {expression}"
-        );
+        assert_eq!(interpret(&program).unwrap(), expected, "{expression}");
     }
 }
 
@@ -4195,34 +6323,71 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_aggregate_field_review_rejects_reverse_subscript_addresses() {
+fn direct_double_aggregate_field_review_supports_reverse_subscript_addresses() {
     let program = r#"
 struct Sample { double reading; };
 int main(void) {
     struct Sample samples[1] = {{1.25}};
     int index = 0;
-    return &index[samples].reading != 0;
+    return &index[samples].reading == &samples[0].reading ? 0 : 1;
 }
 "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "double pointers are not supported"
-    );
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]
-fn direct_double_aggregate_field_review_validates_addresses_under_sizeof() {
+fn aggregate_double_array_field_forms_are_validated_without_evaluation() {
+    for (expression, expected) in [
+        (
+            "~sample.values",
+            "pointer bitwise operations are not supported",
+        ),
+        ("sample.values++", "invalid increment/decrement target"),
+        (
+            "out[0] = sample.values",
+            "scalar assignment requires a scalar value",
+        ),
+        (
+            "(int){sample.values}",
+            "scalar assignment requires a scalar value",
+        ),
+        (
+            "(int[]){sample.values}",
+            "scalar assignment requires a scalar value",
+        ),
+    ] {
+        for query in [
+            format!("sizeof({expression})"),
+            format!("_Generic(({expression}), default: 0)"),
+        ] {
+            let program = format!(
+                r#"
+struct Sample {{ double values[1]; }};
+int main(void) {{
+    struct Sample sample = {{{{2.0}}}};
+    int out[1] = {{0}};
+    return {query};
+}}
+"#
+            );
+            assert_eq!(
+                interpret(&program).expect_err(&query).to_string(),
+                expected,
+                "unexpected diagnostic for {query}"
+            );
+        }
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_review_classifies_addresses_under_sizeof() {
     for program in [
         "struct Sample { double reading; }; int main(void) { struct Sample sample = {1.25}; return sizeof(&sample.reading); }",
         "struct Sample { double reading; }; int main(void) { struct Sample samples[1] = {{1.25}}; return sizeof(&samples[0].reading); }",
         "struct Sample { double reading; }; int main(void) { return sizeof(&((struct Sample){1.25}).reading); }",
     ] {
-        assert_eq!(
-            interpret(program).unwrap_err().to_string(),
-            "double pointers are not supported",
-            "unexpected diagnostic for {program}"
-        );
+        assert_eq!(interpret(program).unwrap(), 8, "{program}");
     }
 }
 
@@ -4456,7 +6621,7 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_sizeof_rejects_generic_aggregate_expression_field_address() {
+fn direct_double_sizeof_supports_generic_aggregate_expression_field_address() {
     let program = r#"
 struct Sample { double reading; };
 int main(void) {
@@ -4466,10 +6631,7 @@ int main(void) {
 }
 "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "double pointers are not supported"
-    );
+    assert_eq!(interpret(program).unwrap(), 8);
 }
 
 #[test]
@@ -4489,11 +6651,9 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_aggregate_field_address_fixture_preserves_pointer_boundary() {
-    let program = include_str!("fixtures/invalid/direct_double_aggregate_field_address.c");
-    let error = interpret(program).unwrap_err();
-
-    assert_eq!(error.to_string(), "double pointers are not supported");
+fn direct_double_aggregate_field_address_fixture_is_supported() {
+    let program = include_str!("fixtures/valid/direct_double_aggregate_field_address.c");
+    assert_eq!(interpret(program).unwrap(), 1);
 }
 
 #[test]
@@ -4576,17 +6736,32 @@ int main(void) {{
 }
 
 #[test]
-fn reverse_aggregate_double_array_field_addresses_do_not_escape_pointer_boundary() {
-    for expression in [
-        "(&index[items].values[0])[0] = 3.0",
-        "(&index[items].values[0])[0] += 2.0",
-        "(&index[items].values[0])[0]++",
-        "&index[items].values != 0",
-        "sizeof(&index[items].values)",
-        "0[&index[items].values[0]]",
-        "*(&index[items].values[0] + 0)",
-        "*(&index[items].values[0] - 0)",
+fn reverse_aggregate_double_array_field_element_addresses_support_pointer_operations() {
+    for (expression, expected) in [
+        ("(&index[items].values[0])[0] = 3.0", 3),
+        ("(&index[items].values[0])[0] += 2.0", 3),
+        ("(&index[items].values[0])[0]++", 1),
+        ("0[&index[items].values[0]]", 1),
+        ("*(&index[items].values[0] + 0)", 1),
+        ("*(&index[items].values[0] - 0)", 1),
     ] {
+        let program = format!(
+            r#"
+struct Item {{ double values[1]; }};
+int main(void) {{
+    struct Item items[1] = {{{{{{1.0}}}}}};
+    int index = 0;
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(interpret(&program).unwrap(), expected, "{expression}");
+    }
+}
+
+#[test]
+fn reverse_aggregate_double_array_field_addresses_do_not_escape_pointer_boundary() {
+    for expression in ["&index[items].values != 0", "sizeof(&index[items].values)"] {
         let program = format!(
             r#"
 struct Item {{ double values[1]; }};
@@ -4603,6 +6778,24 @@ int main(void) {{
             "unexpected result for {expression}"
         );
     }
+}
+
+#[test]
+fn sizeof_reverse_subscript_through_void_pointer_is_rejected() {
+    let program = r#"
+struct Sample { int index; };
+int main(void) {
+    struct Sample sample = {0};
+    int value = 1;
+    void *pointer = &value;
+    return sizeof(&sample.index[pointer]);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot index pointer to void"
+    );
 }
 
 #[test]
@@ -4689,12 +6882,30 @@ int main(void) {{
 }
 
 #[test]
+fn non_evaluating_pointer_truthiness_accepts_aggregate_double_array_decay() {
+    for (expression, expected) in [
+        ("sizeof(sample.values ? 1 : 2)", 8),
+        ("_Generic((sample.values ? 1 : 2), int: 0, default: 1)", 0),
+        ("sizeof(!sample.values)", 8),
+    ] {
+        let program = format!(
+            r#"
+struct Sample {{ double values[1]; }};
+int main(void) {{
+    struct Sample sample = {{{{1.0}}}};
+    return {expression};
+}}
+"#
+        );
+        assert_eq!(interpret(&program).unwrap(), expected, "{expression}");
+    }
+}
+
+#[test]
 fn non_evaluating_scalar_operators_reject_aggregate_double_array_decay() {
     for expression in [
-        "sizeof(sample.values ? 1 : 2)",
-        "_Generic((sample.values ? 1 : 2), int: 0, default: 1)",
-        "sizeof(!sample.values)",
         "sizeof(+sample.values)",
+        "sizeof(-sample.values)",
         "sizeof((int)sample.values)",
     ] {
         let program = format!(
@@ -4708,7 +6919,7 @@ int main(void) {{
         );
         assert_eq!(
             interpret(&program).unwrap_err().to_string(),
-            "double pointers are not supported",
+            "pointer value used as scalar",
             "unexpected result for {expression}"
         );
     }
@@ -8853,7 +11064,7 @@ fn direct_double_pointer_conditionals_validate_both_branch_types() {
 }
 
 #[test]
-fn direct_double_pointer_review_rejects_aggregate_owned_scalar_addresses() {
+fn direct_double_pointer_review_supports_aggregate_owned_scalar_addresses() {
     for program in [
         r#"
 struct DoubleValue { double value; };
@@ -8911,11 +11122,7 @@ int main(void) {
 }
 "#,
     ] {
-        let error = interpret(program).unwrap_err().to_string();
-        assert!(
-            error.contains("double pointers are not supported"),
-            "unexpected error: {error}"
-        );
+        assert_eq!(interpret(program).unwrap(), 1, "{program}");
     }
 }
 

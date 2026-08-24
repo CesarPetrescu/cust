@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::error::Error;
 #[cfg(target_os = "linux")]
 use std::ffi::CString;
@@ -18115,6 +18115,8 @@ impl Parser {
 const MAX_CALL_DEPTH: usize = 24;
 // Non-evaluating call analysis carries substantially larger provenance frames.
 const MAX_DOUBLE_STORAGE_CALL_DEPTH: usize = 16;
+const MAX_UNION_POINTER_PROVENANCE_CALL_DEPTH: usize = 10;
+const MAX_UNION_POINTER_PROVENANCE_LOOP_ITERATIONS: usize = 64;
 const MAX_GENERIC_SELECTION_VALIDATION_DEPTH: usize = 32;
 const MAX_SIZEOF_EXPRESSION_DEPTH: usize = 128;
 const MAX_NON_EVALUATING_CALLEE_EXPRESSION_DEPTH: usize = 128;
@@ -18150,6 +18152,9 @@ struct Interpreter {
     double_storage_analysis_call_depth_limit: Cell<usize>,
     double_expression_type_cache: RefCell<HashMap<usize, bool>>,
     double_storage_globals: HashMap<String, DoubleStorageFact>,
+    union_pointer_provenance_error: RefCell<Option<CustError>>,
+    function_result_temporaries: Vec<(usize, String, usize)>,
+    expired_full_expression_temporaries: HashSet<(usize, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18187,6 +18192,38 @@ type DoubleStorageCallParameterScope = (
     Vec<(DoubleStorageAggregateTarget, DoubleStorageAggregateTarget)>,
     Vec<(String, Vec<DoubleStorageAggregateTarget>)>,
 );
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+struct UnionPointerProvenanceBinding {
+    whole_object: bool,
+    fields: BTreeSet<Vec<String>>,
+    element_fields: BTreeSet<(usize, Vec<String>)>,
+    aggregate_type: Option<String>,
+    aggregate_target: Option<Box<UnionPointerAggregateTarget>>,
+    aggregate_is_array: bool,
+    alias_group: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct UnionPointerAggregateTarget {
+    root: UnionPointerAggregateRoot,
+    path: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum UnionPointerAggregateRoot {
+    Runtime { scope_id: usize, name: String },
+    Local { name: String, binding_index: usize },
+}
+
+type UnionPointerProvenanceCallCache = HashMap<
+    (
+        String,
+        Vec<UnionPointerProvenanceBinding>,
+        Vec<(String, UnionPointerProvenanceBinding)>,
+    ),
+    UnionPointerProvenanceBinding,
+>;
+type UnionPointerProvenance = HashMap<String, Vec<UnionPointerProvenanceBinding>>;
 
 #[derive(Debug, Clone, Default)]
 struct DoubleStorageAnalysis {
@@ -18724,6 +18761,9 @@ impl Interpreter {
             double_storage_analysis_call_depth_limit: Cell::new(MAX_DOUBLE_STORAGE_CALL_DEPTH),
             double_expression_type_cache: RefCell::new(HashMap::new()),
             double_storage_globals: HashMap::new(),
+            union_pointer_provenance_error: RefCell::new(None),
+            function_result_temporaries: Vec::new(),
+            expired_full_expression_temporaries: HashSet::new(),
         }
     }
 
@@ -18943,11 +18983,7 @@ impl Interpreter {
                 .struct_field_array_element_field_metadata(name, array_fields, index, fields)
                 .is_ok_and(|metadata| {
                     metadata.is_some_and(|(field_type, _, _)| {
-                        matches!(
-                            field_type,
-                            StructFieldType::Scalar(CType::Double)
-                                | StructFieldType::Array(CType::Double, _)
-                        )
+                        matches!(field_type, StructFieldType::Scalar(CType::Double))
                     })
                 }),
             Expr::StructPtrGet { pointer, fields }
@@ -19048,18 +19084,9 @@ impl Interpreter {
             Expr::AddressOfArray { index, .. } => self.expr_is_unsupported_double_pointer(index),
             Expr::AddressOfStructField { name, fields } => match self.find_variable(name) {
                 Some(Value::Struct { type_name, .. })
-                | Some(Value::StructArray { type_name, .. }) => self
-                    .aggregate_type_field_metadata(type_name, fields)
-                    .is_ok_and(|metadata| {
-                        metadata.is_some_and(|(field_type, _, _)| {
-                            matches!(
-                                field_type,
-                                StructFieldType::Scalar(CType::Double)
-                                    | StructFieldType::Array(CType::Double, _)
-                                    | StructFieldType::Pointer(PointeeType::Scalar(CType::Double,))
-                            )
-                        })
-                    }),
+                | Some(Value::StructArray { type_name, .. }) => {
+                    self.aggregate_double_field_pointer_is_unsupported(type_name, fields, true)
+                }
                 _ => false,
             },
             Expr::AddressOfStructArrayField {
@@ -19067,31 +19094,25 @@ impl Interpreter {
                 fields,
                 index,
             } => {
-                self.scalar_field_reverse_subscript_pointee_type(name, fields, index)
-                    .is_ok_and(|pointee| {
-                        matches!(pointee, Some(PointeeType::Scalar(CType::Double)))
-                    })
+                (self.aggregate_pointer_expr_has_union_container(index)
+                    && matches!(
+                        self.pointer_expr_pointee_type(expr),
+                        Ok(Some(PointeeType::Scalar(CType::Double)))
+                    ))
                     || match self.find_variable(name) {
                         Some(Value::Struct { type_name, .. })
                         | Some(Value::StructArray { type_name, .. }) => self
-                            .aggregate_type_field_metadata(type_name, fields)
-                            .is_ok_and(|metadata| {
-                                metadata.is_some_and(|(field_type, _, _)| {
-                                    matches!(field_type, StructFieldType::Array(CType::Double, _))
-                                })
-                            }),
+                            .aggregate_double_field_pointer_is_unsupported(
+                                type_name, fields, false,
+                            ),
                         _ => false,
                     }
             }
             Expr::StructGet { name, fields } => match self.find_variable(name) {
                 Some(Value::Struct { type_name, .. })
-                | Some(Value::StructArray { type_name, .. }) => self
-                    .aggregate_type_field_metadata(type_name, fields)
-                    .is_ok_and(|metadata| {
-                        metadata.is_some_and(|(field_type, _, _)| {
-                            matches!(field_type, StructFieldType::Array(CType::Double, _))
-                        })
-                    }),
+                | Some(Value::StructArray { type_name, .. }) => {
+                    self.aggregate_double_field_pointer_is_unsupported(type_name, fields, false)
+                }
                 _ => false,
             },
             Expr::AddressOfStructElementField {
@@ -19099,20 +19120,18 @@ impl Interpreter {
                 index,
                 fields,
             } => {
-                self.struct_element_expr_scalar_field_type(name, index, fields)
-                    .is_ok_and(|ty| ty == Some(CType::Double))
+                ((self.aggregate_pointer_expr_has_union_container(index)
+                    || self.aggregate_pointer_variable_has_union_container(name))
+                    && matches!(
+                        self.pointer_expr_pointee_type(expr),
+                        Ok(Some(PointeeType::Scalar(CType::Double)))
+                    ))
                     || self
-                        .struct_element_expr_field_metadata(name, index, fields)
-                        .is_ok_and(|metadata| {
-                            metadata.is_some_and(|(field_type, _, _)| {
-                                matches!(
-                                    field_type,
-                                    StructFieldType::Array(CType::Double, _)
-                                        | StructFieldType::Pointer(PointeeType::Scalar(
-                                            CType::Double,
-                                        ))
-                                )
-                            })
+                        .struct_element_expr_type_name(name, index)
+                        .is_some_and(|type_name| {
+                            self.aggregate_double_field_pointer_is_unsupported(
+                                &type_name, fields, true,
+                            )
                         })
             }
             Expr::AddressOfStructElementArrayField {
@@ -19125,67 +19144,83 @@ impl Interpreter {
                 name,
                 index,
                 fields,
-            } => self
-                .struct_element_expr_field_metadata(name, index, fields)
-                .is_ok_and(|metadata| {
-                    metadata.is_some_and(|(field_type, _, _)| {
-                        matches!(field_type, StructFieldType::Array(CType::Double, _))
-                    })
-                }),
-            Expr::AddressOfStructPtrField { pointer, fields } => self
-                .struct_pointer_expr_field_metadata(pointer, fields)
-                .is_ok_and(|metadata| {
-                    metadata.is_some_and(|(field_type, _, _)| {
-                        matches!(
-                            field_type,
-                            StructFieldType::Scalar(CType::Double)
-                                | StructFieldType::Array(CType::Double, _)
-                                | StructFieldType::Pointer(PointeeType::Scalar(CType::Double))
-                        )
-                    })
-                }),
+            } => {
+                ((self.aggregate_pointer_expr_has_union_container(index)
+                    || self.aggregate_pointer_variable_has_union_container(name))
+                    && matches!(
+                        self.pointer_expr_pointee_type(expr),
+                        Ok(Some(PointeeType::Scalar(CType::Double)))
+                    ))
+                    || self
+                        .struct_element_expr_type_name(name, index)
+                        .is_some_and(|type_name| {
+                            self.aggregate_double_field_pointer_is_unsupported(
+                                &type_name, fields, false,
+                            )
+                        })
+            }
+            Expr::AddressOfStructPtrField { pointer, fields } => {
+                (self.aggregate_pointer_expr_has_union_container(pointer)
+                    && matches!(
+                        self.pointer_expr_pointee_type(expr),
+                        Ok(Some(PointeeType::Scalar(CType::Double)))
+                    ))
+                    || matches!(
+                        self.pointer_expr_pointee_type(pointer),
+                        Ok(Some(PointeeType::Struct(type_name)))
+                            if self.aggregate_double_field_pointer_is_unsupported(
+                                &type_name, fields, true,
+                            )
+                    )
+            }
             Expr::AddressOfStructPtrArrayField {
                 pointer, fields, ..
             }
             | Expr::StructPtrGet {
                 pointer, fields, ..
-            } => self
-                .struct_pointer_expr_field_metadata(pointer, fields)
-                .is_ok_and(|metadata| {
-                    metadata.is_some_and(|(field_type, _, _)| {
-                        matches!(field_type, StructFieldType::Array(CType::Double, _))
-                    })
-                }),
+            } => {
+                (self.aggregate_pointer_expr_has_union_container(pointer)
+                    && matches!(
+                        self.pointer_expr_pointee_type(expr),
+                        Ok(Some(PointeeType::Scalar(CType::Double)))
+                    ))
+                    || matches!(
+                        self.pointer_expr_pointee_type(pointer),
+                        Ok(Some(PointeeType::Struct(type_name)))
+                            if self.aggregate_double_field_pointer_is_unsupported(
+                                &type_name, fields, false,
+                            )
+                    )
+            }
             Expr::AddressOfAggregateField { aggregate, fields } => self
-                .aggregate_literal_field_metadata(aggregate, fields)
-                .is_ok_and(|metadata| {
-                    metadata.is_some_and(|(field_type, _, _)| {
-                        matches!(
-                            field_type,
-                            StructFieldType::Scalar(CType::Double)
-                                | StructFieldType::Array(CType::Double, _)
-                                | StructFieldType::Pointer(PointeeType::Scalar(CType::Double))
-                        )
-                    })
+                .aggregate_expr_type_name(aggregate)
+                .is_ok_and(|type_name| {
+                    self.aggregate_double_field_pointer_is_unsupported(&type_name, fields, true)
                 }),
             Expr::StructFieldArrayElementGet {
                 name,
                 array_fields,
                 index,
                 fields,
-            } => self
-                .struct_field_array_element_field_metadata(name, array_fields, index, fields)
-                .is_ok_and(|metadata| {
-                    metadata.is_some_and(|(field_type, _, _)| {
-                        matches!(field_type, StructFieldType::Array(CType::Double, _))
-                    })
-                }),
+            } => {
+                ((self.aggregate_variable_field_path_has_union_container(name, array_fields)
+                    || self.aggregate_pointer_field_has_union_container(name, array_fields))
+                    && matches!(
+                        self.pointer_expr_pointee_type(expr),
+                        Ok(Some(PointeeType::Scalar(CType::Double)))
+                    ))
+                    || self
+                        .struct_field_array_element_type_name(name, array_fields, index)
+                        .is_some_and(|type_name| {
+                            self.aggregate_double_field_pointer_is_unsupported(
+                                &type_name, fields, false,
+                            )
+                        })
+            }
             Expr::AggregateFieldGet { aggregate, fields } => self
-                .aggregate_literal_field_metadata(aggregate, fields)
-                .is_ok_and(|metadata| {
-                    metadata.is_some_and(|(field_type, _, _)| {
-                        matches!(field_type, StructFieldType::Array(CType::Double, _))
-                    })
+                .aggregate_expr_type_name(aggregate)
+                .is_ok_and(|type_name| {
+                    self.aggregate_double_field_pointer_is_unsupported(&type_name, fields, false)
                 }),
             Expr::Deref(pointer)
             | Expr::DerefSet { pointer, .. }
@@ -19201,6 +19236,8 @@ impl Interpreter {
             }
             Expr::PointerCast { pointee, expr, .. } => {
                 self.expr_is_unsupported_double_pointer(expr)
+                    || (matches!(pointee, PointeeType::Scalar(CType::Double))
+                        && self.aggregate_pointer_expr_has_union_container(expr))
                     || (!matches!(
                         pointee,
                         PointeeType::Scalar(CType::Double) | PointeeType::Void
@@ -19224,6 +19261,12 @@ impl Interpreter {
             Expr::GenericSelection { .. } => self
                 .selected_generic_association(expr)
                 .is_ok_and(|selected| self.expr_is_unsupported_double_pointer(selected)),
+            Expr::Call { .. } => {
+                matches!(
+                    self.pointer_expr_pointee_type(expr),
+                    Ok(Some(PointeeType::Scalar(CType::Double)))
+                ) && self.aggregate_pointer_expr_has_union_container(expr)
+            }
             _ => false,
         }
     }
@@ -19304,6 +19347,9 @@ impl Interpreter {
             }
         })();
         self.pop_scope();
+        if let Some(error) = self.union_pointer_provenance_error.borrow_mut().take() {
+            return Err(error);
+        }
         match result {
             Err(error) => match error.program_termination() {
                 Some(ProgramTermination::Exit(status)) => Ok(status),
@@ -22792,6 +22838,31 @@ impl Interpreter {
         }
     }
 
+    fn reject_union_backed_double_pointer(&self, pointer: &PointerValue) -> CustResult<()> {
+        if self.memory_pointer_targets_union_field(pointer)?
+            && matches!(
+                self.pointer_value_type(pointer)?,
+                Some(PointeeType::Scalar(CType::Double))
+            )
+        {
+            return Err(CustError::new("double pointers are not supported"));
+        }
+        Ok(())
+    }
+
+    fn reject_union_backed_double_pointer_conversion(
+        &self,
+        destination: &PointeeType,
+        source: &Expr,
+    ) -> CustResult<()> {
+        if matches!(destination, PointeeType::Scalar(CType::Double))
+            && self.aggregate_pointer_expr_has_union_container(source)
+        {
+            return Err(CustError::new("double pointers are not supported"));
+        }
+        Ok(())
+    }
+
     fn aggregate_fields_contain_array_with_union_ancestor(
         &self,
         type_name: &str,
@@ -23652,10 +23723,16 @@ impl Interpreter {
                 fields,
                 ..
             } => {
-                if !matches!(
-                    self.non_evaluating_generic_selection_type(index, aliases)?,
-                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
-                ) {
+                let reverse_subscript = self
+                    .scalar_variable_reverse_subscript_pointee_type(name, index)?
+                    .is_some();
+                let index_type = self.non_evaluating_generic_selection_type(index, aliases)?;
+                if !reverse_subscript
+                    && !matches!(
+                        &index_type,
+                        DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                    )
+                {
                     return Err(CustError::new("array subscript requires an integer value"));
                 }
                 if let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name)) {
@@ -23707,11 +23784,25 @@ impl Interpreter {
                         && let Some((field_type, is_const, points_to_const)) =
                             self.struct_element_expr_field_metadata(name, index, fields)?
                     {
-                        return Ok(Some(Self::non_evaluating_field_metadata_type(
+                        let mut field_type = Self::non_evaluating_field_metadata_type(
                             field_type,
                             is_const,
                             points_to_const,
-                        )));
+                        );
+                        if reverse_subscript
+                            && let (
+                                DeclType::Pointer {
+                                    points_to_const, ..
+                                },
+                                DeclType::Pointer {
+                                    points_to_const: base_points_to_const,
+                                    ..
+                                },
+                            ) = (&mut field_type, &index_type)
+                        {
+                            *points_to_const |= *base_points_to_const;
+                        }
+                        return Ok(Some(field_type));
                     }
                     self.generic_aggregate_field_expr_type(expr)
                 }
@@ -23736,10 +23827,16 @@ impl Interpreter {
                 fields,
                 ..
             } => {
-                if !matches!(
-                    self.non_evaluating_generic_selection_type(index, aliases)?,
-                    DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
-                ) {
+                let reverse_subscript = self
+                    .scalar_field_reverse_subscript_pointee_type(name, array_fields, index)?
+                    .is_some();
+                let index_type = self.non_evaluating_generic_selection_type(index, aliases)?;
+                if !reverse_subscript
+                    && !matches!(
+                        &index_type,
+                        DeclType::Scalar(CType::Bool | CType::Int | CType::Char)
+                    )
+                {
                     return Err(CustError::new("array subscript requires an integer value"));
                 }
                 let Some(fact) = aliases.iter().rev().find_map(|scope| scope.get(name)) else {
@@ -23751,11 +23848,25 @@ impl Interpreter {
                             fields,
                         )?
                     {
-                        return Ok(Some(Self::non_evaluating_field_metadata_type(
+                        let mut field_type = Self::non_evaluating_field_metadata_type(
                             field_type,
                             is_const,
                             points_to_const,
-                        )));
+                        );
+                        if reverse_subscript
+                            && let (
+                                DeclType::Pointer {
+                                    points_to_const, ..
+                                },
+                                DeclType::Pointer {
+                                    points_to_const: base_points_to_const,
+                                    ..
+                                },
+                            ) = (&mut field_type, &index_type)
+                        {
+                            *points_to_const |= *base_points_to_const;
+                        }
+                        return Ok(Some(field_type));
                     }
                     return self.generic_aggregate_field_expr_type(expr);
                 };
@@ -23988,6 +24099,9 @@ impl Interpreter {
         value_type: &DeclType,
         value: &Expr,
     ) -> CustResult<()> {
+        if let DeclType::Pointer { pointee, .. } = target_type {
+            self.reject_union_backed_double_pointer_conversion(pointee, value)?;
+        }
         match (target_type, value_type) {
             (
                 DeclType::Pointer {
@@ -23999,7 +24113,7 @@ impl Interpreter {
                     points_to_const: value_points_to_const,
                 },
             ) => {
-                self.ensure_pointer_pointee_types_compatible(pointee, value_pointee, false)?;
+                self.ensure_pointer_conversion_type_matches(pointee, value_pointee)?;
                 if *value_points_to_const && !points_to_const {
                     return Err(CustError::new(
                         "cannot discard const qualifier from pointer target",
@@ -24012,6 +24126,17 @@ impl Interpreter {
             }
             (DeclType::Pointer { .. }, _) => Err(CustError::new("expected pointer expression")),
             (DeclType::Scalar(_), DeclType::Scalar(_)) => Ok(()),
+            (
+                DeclType::Scalar(CType::Bool),
+                DeclType::Pointer { .. }
+                | DeclType::Array(_, _)
+                | DeclType::Array2DPointer { .. }
+                | DeclType::Array2D(_, _, _),
+            ) => Ok(()),
+            (DeclType::Scalar(_), DeclType::Struct(type_name)) => Err(CustError::new(format!(
+                "{} value used as scalar",
+                self.aggregate_kind_label(type_name)
+            ))),
             (DeclType::Scalar(CType::Double), _) => Err(CustError::new(
                 "cannot assign pointer expression to double value",
             )),
@@ -32078,6 +32203,14 @@ impl Interpreter {
         actual_type: DeclType,
         argument: &Expr,
     ) -> CustResult<()> {
+        if expected_kind == ParamKind::Pointer
+            && let ParamType::Scalar(expected) = expected_type
+        {
+            self.reject_union_backed_double_pointer_conversion(
+                &PointeeType::Scalar(*expected),
+                argument,
+            )?;
+        }
         match (expected_kind, expected_type, actual_type) {
             (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Scalar(_))
             | (ParamKind::Scalar, ParamType::Scalar(CType::Bool), DeclType::Pointer { .. }) => {}
@@ -34000,6 +34133,2635 @@ impl Interpreter {
         Ok(None)
     }
 
+    fn aggregate_type_field_path_has_union_container(
+        &self,
+        type_name: &str,
+        path: &[String],
+    ) -> bool {
+        let mut current_type_name = type_name;
+        for (index, field_name) in path.iter().enumerate() {
+            let Some(aggregate) = self.struct_types.get(current_type_name) else {
+                return false;
+            };
+            if aggregate.kind == AggregateKind::Union {
+                return true;
+            }
+            let Some(field) = aggregate
+                .fields
+                .iter()
+                .find(|field| field.name == *field_name)
+            else {
+                return false;
+            };
+            if index + 1 == path.len() {
+                return false;
+            }
+            let StructFieldType::Struct(nested_type) = &field.ty else {
+                return false;
+            };
+            current_type_name = nested_type;
+        }
+        false
+    }
+
+    fn aggregate_double_field_pointer_is_unsupported(
+        &self,
+        type_name: &str,
+        path: &[String],
+        whole_field_address: bool,
+    ) -> bool {
+        let in_union = self.aggregate_type_field_path_has_union_container(type_name, path);
+        match self.aggregate_type_field_metadata(type_name, path) {
+            Ok(Some((StructFieldType::Scalar(CType::Double), _, _))) => {
+                whole_field_address && in_union
+            }
+            Ok(Some((StructFieldType::Array(CType::Double, _), _, _))) => {
+                whole_field_address || in_union
+            }
+            Ok(Some((StructFieldType::Pointer(PointeeType::Scalar(CType::Double)), _, _))) => {
+                whole_field_address
+            }
+            _ => false,
+        }
+    }
+
+    fn aggregate_variable_field_path_has_union_container(
+        &self,
+        name: &str,
+        fields: &[String],
+    ) -> bool {
+        match self.find_variable(name) {
+            Some(Value::Struct { type_name, .. }) | Some(Value::StructArray { type_name, .. }) => {
+                self.aggregate_type_field_path_has_union_container(type_name, fields)
+            }
+            _ => false,
+        }
+    }
+
+    fn aggregate_pointer_variable_has_union_container(&self, name: &str) -> bool {
+        matches!(
+            self.find_variable(name),
+            Some(Value::Pointer { pointer, .. })
+                if self.memory_pointer_targets_union_field(pointer).unwrap_or(false)
+        )
+    }
+
+    fn aggregate_pointer_field_has_union_container(&self, name: &str, fields: &[String]) -> bool {
+        self.read_direct_struct_pointer_field(name, fields)
+            .is_ok_and(|pointer| {
+                self.memory_pointer_targets_union_field(&pointer)
+                    .unwrap_or(false)
+            })
+    }
+
+    fn aggregate_fields_contain_union_pointer(
+        &self,
+        fields: &HashMap<String, StructFieldValue>,
+        prefix: &mut Vec<String>,
+        paths: &mut BTreeSet<Vec<String>>,
+    ) {
+        for (name, field) in fields {
+            prefix.push(name.clone());
+            match field {
+                StructFieldValue::Pointer { pointer, .. }
+                    if self
+                        .memory_pointer_targets_union_field(pointer)
+                        .unwrap_or(false) =>
+                {
+                    paths.insert(prefix.clone());
+                }
+                StructFieldValue::Struct { fields, .. } => {
+                    self.aggregate_fields_contain_union_pointer(fields, prefix, paths);
+                }
+                StructFieldValue::StructArray { elements, .. } => {
+                    for (index, fields) in elements.iter().enumerate() {
+                        prefix.push(format!("\0element:{index}"));
+                        self.aggregate_fields_contain_union_pointer(fields, prefix, paths);
+                        prefix.pop();
+                    }
+                }
+                StructFieldValue::Scalar { .. }
+                | StructFieldValue::Array { .. }
+                | StructFieldValue::Pointer { .. } => {}
+            }
+            prefix.pop();
+        }
+    }
+
+    fn active_union_pointer_binding<'a>(
+        provenance: &'a UnionPointerProvenance,
+        name: &str,
+    ) -> Option<&'a UnionPointerProvenanceBinding> {
+        provenance.get(name).and_then(|bindings| bindings.last())
+    }
+
+    fn union_pointer_runtime_aggregate_target(
+        pointer: &PointerValue,
+    ) -> Option<UnionPointerAggregateTarget> {
+        let (root, path) = match pointer {
+            PointerValue::Struct { scope_id, name } => (
+                UnionPointerAggregateRoot::Runtime {
+                    scope_id: *scope_id,
+                    name: name.clone(),
+                },
+                Vec::new(),
+            ),
+            PointerValue::StructElement {
+                scope_id,
+                name,
+                index,
+            } => (
+                UnionPointerAggregateRoot::Runtime {
+                    scope_id: *scope_id,
+                    name: name.clone(),
+                },
+                vec![format!("\0element:{index}")],
+            ),
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => {
+                let mut path = element_index
+                    .map(|index| vec![format!("\0element:{index}")])
+                    .unwrap_or_default();
+                path.extend(fields.iter().cloned());
+                (
+                    UnionPointerAggregateRoot::Runtime {
+                        scope_id: *scope_id,
+                        name: name.clone(),
+                    },
+                    path,
+                )
+            }
+            PointerValue::StructFieldElement {
+                scope_id,
+                name,
+                element_index,
+                fields,
+                index,
+            } => {
+                let mut path = element_index
+                    .map(|index| vec![format!("\0element:{index}")])
+                    .unwrap_or_default();
+                path.extend(fields.iter().cloned());
+                path.push(format!("\0element:{index}"));
+                (
+                    UnionPointerAggregateRoot::Runtime {
+                        scope_id: *scope_id,
+                        name: name.clone(),
+                    },
+                    path,
+                )
+            }
+            PointerValue::NestedStructArrayElement {
+                pointer,
+                fields,
+                index,
+            } => {
+                let mut target = Self::union_pointer_runtime_aggregate_target(pointer)?;
+                target.path.extend(fields.iter().cloned());
+                target.path.push(format!("\0element:{index}"));
+                return Some(target);
+            }
+            PointerValue::StructFieldElementField { pointer, fields } => {
+                let mut target = Self::union_pointer_runtime_aggregate_target(pointer)?;
+                target.path.extend(fields.iter().cloned());
+                return Some(target);
+            }
+            PointerValue::Null
+            | PointerValue::Scalar { .. }
+            | PointerValue::ArrayBase { .. }
+            | PointerValue::ArrayElement { .. }
+            | PointerValue::Array2DRow { .. }
+            | PointerValue::ObjectByte { .. } => return None,
+        };
+        Some(UnionPointerAggregateTarget { root, path })
+    }
+
+    fn union_pointer_aggregate_target(
+        &self,
+        expr: &Expr,
+        provenance: &UnionPointerProvenance,
+    ) -> Option<UnionPointerAggregateTarget> {
+        match expr {
+            Expr::Var(name) => Self::active_union_pointer_binding(provenance, name)
+                .and_then(|binding| {
+                    let mut target = binding.aggregate_target.as_deref()?.clone();
+                    if binding.aggregate_is_array {
+                        target.path.push("\0element:0".to_string());
+                    }
+                    Some(target)
+                })
+                .or_else(|| match self.find_variable(name) {
+                    Some(Value::Pointer { pointer, .. }) => {
+                        Self::union_pointer_runtime_aggregate_target(pointer)
+                    }
+                    Some(Value::Struct { .. }) => {
+                        self.find_variable_scope_id(name).map(|scope_id| {
+                            UnionPointerAggregateTarget {
+                                root: UnionPointerAggregateRoot::Runtime {
+                                    scope_id,
+                                    name: name.clone(),
+                                },
+                                path: Vec::new(),
+                            }
+                        })
+                    }
+                    Some(Value::StructArray { .. }) => {
+                        self.find_variable_scope_id(name).map(|scope_id| {
+                            UnionPointerAggregateTarget {
+                                root: UnionPointerAggregateRoot::Runtime {
+                                    scope_id,
+                                    name: name.clone(),
+                                },
+                                path: vec!["\0element:0".to_string()],
+                            }
+                        })
+                    }
+                    Some(Value::Scalar { .. } | Value::Array(_)) | None => None,
+                }),
+            Expr::AddressOf(name) => Self::active_union_pointer_binding(provenance, name)
+                .and_then(|binding| binding.aggregate_target.as_deref().cloned())
+                .or_else(|| {
+                    self.find_variable_scope_id(name)
+                        .map(|scope_id| UnionPointerAggregateTarget {
+                            root: UnionPointerAggregateRoot::Runtime {
+                                scope_id,
+                                name: name.clone(),
+                            },
+                            path: Vec::new(),
+                        })
+                }),
+            Expr::AddressOfArray { name, index } => {
+                let mut target = Self::active_union_pointer_binding(provenance, name)
+                    .and_then(|binding| binding.aggregate_target.as_deref().cloned())
+                    .or_else(|| {
+                        self.find_variable_scope_id(name).map(|scope_id| {
+                            UnionPointerAggregateTarget {
+                                root: UnionPointerAggregateRoot::Runtime {
+                                    scope_id,
+                                    name: name.clone(),
+                                },
+                                path: Vec::new(),
+                            }
+                        })
+                    })?;
+                target.path.push(format!(
+                    "\0element:{}",
+                    Self::non_evaluating_array_index(index)?
+                ));
+                Some(target)
+            }
+            Expr::AddressOfStructField { name, fields } => {
+                let mut target = self
+                    .union_pointer_aggregate_target(&Expr::AddressOf(name.clone()), provenance)?;
+                target.path.extend(fields.iter().cloned());
+                Some(target)
+            }
+            Expr::AddressOfStructArrayField {
+                name,
+                fields,
+                index,
+            } => {
+                let mut target = self
+                    .union_pointer_aggregate_target(&Expr::AddressOf(name.clone()), provenance)?;
+                target.path.extend(fields.iter().cloned());
+                target.path.push(format!(
+                    "\0element:{}",
+                    Self::non_evaluating_array_index(index)?
+                ));
+                Some(target)
+            }
+            Expr::AddressOfStructElementField {
+                name,
+                index,
+                fields,
+            } => {
+                let mut target = self
+                    .union_pointer_aggregate_target(&Expr::AddressOf(name.clone()), provenance)?;
+                target.path.push(format!(
+                    "\0element:{}",
+                    Self::non_evaluating_array_index(index)?
+                ));
+                target.path.extend(fields.iter().cloned());
+                Some(target)
+            }
+            Expr::AddressOfStructPtrField { pointer, fields } => {
+                let mut target = self.union_pointer_aggregate_target(pointer, provenance)?;
+                target.path.extend(fields.iter().cloned());
+                Some(target)
+            }
+            Expr::PointerCast { expr, .. }
+            | Expr::Assign { value: expr, .. }
+            | Expr::Comma(_, expr) => self.union_pointer_aggregate_target(expr, provenance),
+            Expr::Binary(base, BinaryOp::Add | BinaryOp::Sub, offset) => {
+                let mut target = self.union_pointer_aggregate_target(base, provenance)?;
+                let offset = Self::non_evaluating_array_offset(offset)?;
+                let offset = if matches!(expr, Expr::Binary(_, BinaryOp::Sub, _)) {
+                    offset.checked_neg()?
+                } else {
+                    offset
+                };
+                let element = target
+                    .path
+                    .iter_mut()
+                    .rev()
+                    .find(|component| component.starts_with("\0element:"))?;
+                let index = element
+                    .strip_prefix("\0element:")?
+                    .parse::<i64>()
+                    .ok()?
+                    .checked_add(offset)?;
+                *element = format!("\0element:{}", usize::try_from(index).ok()?);
+                Some(target)
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let then_target = self.union_pointer_aggregate_target(then_expr, provenance)?;
+                let else_target = self.union_pointer_aggregate_target(else_expr, provenance)?;
+                (then_target == else_target).then_some(then_target)
+            }
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .ok()
+                .and_then(|selected| self.union_pointer_aggregate_target(selected, provenance)),
+            _ => None,
+        }
+    }
+
+    fn union_pointer_element_path_index(component: &str) -> Option<usize> {
+        component.strip_prefix("\0element:")?.parse().ok()
+    }
+
+    fn union_pointer_root_binding<'a>(
+        target: &UnionPointerAggregateTarget,
+        provenance: &'a UnionPointerProvenance,
+    ) -> Option<&'a UnionPointerProvenanceBinding> {
+        match &target.root {
+            UnionPointerAggregateRoot::Local {
+                name,
+                binding_index,
+            } => provenance.get(name)?.get(*binding_index),
+            UnionPointerAggregateRoot::Runtime { name, .. } => provenance
+                .get(name)
+                .and_then(|bindings| bindings.last())
+                .or_else(|| {
+                    provenance.values().find_map(|bindings| {
+                        let binding = bindings.last()?;
+                        binding
+                            .aggregate_target
+                            .as_ref()
+                            .is_some_and(|candidate| candidate.root == target.root)
+                            .then_some(binding)
+                    })
+                }),
+        }
+    }
+
+    fn union_pointer_binding_for_target(
+        target: &UnionPointerAggregateTarget,
+        provenance: &UnionPointerProvenance,
+    ) -> Option<UnionPointerProvenanceBinding> {
+        let source = Self::union_pointer_root_binding(target, provenance)?;
+        let (element_index, prefix) =
+            target
+                .path
+                .split_first()
+                .map_or((None, &[][..]), |(first, rest)| {
+                    match Self::union_pointer_element_path_index(first) {
+                        Some(index) => (Some(index), rest),
+                        None => (None, target.path.as_slice()),
+                    }
+                });
+        let mut source_fields = source.fields.clone();
+        if let Some(index) = element_index {
+            source_fields.extend(
+                source
+                    .element_fields
+                    .iter()
+                    .filter(|(element, _)| *element == index)
+                    .map(|(_, path)| path.clone()),
+            );
+        }
+        let mut fields = BTreeSet::new();
+        let mut whole_object = source.whole_object && target.path.is_empty();
+        for path in source_fields {
+            if prefix.is_empty() {
+                fields.insert(path);
+            } else if let Some(remaining) = path.strip_prefix(prefix) {
+                if remaining.is_empty() {
+                    whole_object = true;
+                } else {
+                    fields.insert(remaining.to_vec());
+                }
+            }
+        }
+        Some(UnionPointerProvenanceBinding {
+            whole_object,
+            fields,
+            element_fields: BTreeSet::new(),
+            aggregate_type: source.aggregate_type.clone(),
+            aggregate_target: Some(Box::new(target.clone())),
+            aggregate_is_array: false,
+            alias_group: source.alias_group,
+        })
+    }
+
+    fn replace_union_pointer_paths(
+        paths: &mut BTreeSet<Vec<String>>,
+        prefix: &[String],
+        value: &UnionPointerProvenanceBinding,
+    ) {
+        paths.retain(|path| !path.starts_with(prefix));
+        if value.whole_object {
+            paths.insert(prefix.to_vec());
+        }
+        for path in &value.fields {
+            let mut nested = prefix.to_vec();
+            nested.extend(path.iter().cloned());
+            paths.insert(nested);
+        }
+        for (index, path) in &value.element_fields {
+            let mut nested = prefix.to_vec();
+            nested.push(format!("\0element:{index}"));
+            nested.extend(path.iter().cloned());
+            paths.insert(nested);
+        }
+    }
+
+    fn replace_union_pointer_target_provenance(
+        provenance: &mut UnionPointerProvenance,
+        target: &UnionPointerAggregateTarget,
+        value: UnionPointerProvenanceBinding,
+    ) {
+        let root_name = match &target.root {
+            UnionPointerAggregateRoot::Local { name, .. }
+            | UnionPointerAggregateRoot::Runtime { name, .. } => name,
+        };
+        let binding_index = match &target.root {
+            UnionPointerAggregateRoot::Local { binding_index, .. } => *binding_index,
+            UnionPointerAggregateRoot::Runtime { .. } => provenance
+                .get(root_name)
+                .and_then(|bindings| bindings.len().checked_sub(1))
+                .unwrap_or(0),
+        };
+        if let Some(binding) = provenance
+            .get_mut(root_name)
+            .and_then(|bindings| bindings.get_mut(binding_index))
+        {
+            let (element_index, prefix) =
+                target
+                    .path
+                    .split_first()
+                    .map_or((None, &[][..]), |(first, rest)| {
+                        match Self::union_pointer_element_path_index(first) {
+                            Some(index) => (Some(index), rest),
+                            None => (None, target.path.as_slice()),
+                        }
+                    });
+            if let Some(element_index) = element_index {
+                let mut paths = binding
+                    .element_fields
+                    .iter()
+                    .filter(|(index, _)| *index == element_index)
+                    .map(|(_, path)| path.clone())
+                    .collect::<BTreeSet<_>>();
+                Self::replace_union_pointer_paths(&mut paths, prefix, &value);
+                binding
+                    .element_fields
+                    .retain(|(index, _)| *index != element_index);
+                binding
+                    .element_fields
+                    .extend(paths.into_iter().map(|path| (element_index, path)));
+            } else {
+                Self::replace_union_pointer_paths(&mut binding.fields, prefix, &value);
+            }
+        }
+
+        for (name, bindings) in provenance {
+            let Some(index) = bindings.len().checked_sub(1) else {
+                continue;
+            };
+            if name == root_name && index == binding_index {
+                continue;
+            }
+            let binding = &mut bindings[index];
+            if binding.aggregate_target.as_deref() == Some(target) {
+                binding.whole_object = value.whole_object;
+                binding.fields.clone_from(&value.fields);
+                binding.element_fields.clone_from(&value.element_fields);
+                binding.aggregate_is_array = false;
+            }
+        }
+    }
+
+    fn union_pointer_static_local_key(id: usize, name: &str) -> String {
+        format!("\0static-local:{id}:{name}")
+    }
+
+    fn union_pointer_global_key(name: &str) -> String {
+        format!("\0global:{name}")
+    }
+
+    fn union_pointer_global_bindings(
+        &self,
+        provenance: &UnionPointerProvenance,
+    ) -> Vec<(String, UnionPointerProvenanceBinding)> {
+        let Some(globals) = self.scopes.first() else {
+            return Vec::new();
+        };
+        let mut bindings = globals
+            .values
+            .iter()
+            .map(|(name, value)| {
+                let key = Self::union_pointer_global_key(name);
+                let mut binding = Self::active_union_pointer_binding(provenance, &key)
+                    .cloned()
+                    .unwrap_or_else(|| self.union_pointer_provenance_value_binding(value));
+                if matches!(value, Value::Struct { .. } | Value::StructArray { .. })
+                    && binding.aggregate_target.is_none()
+                {
+                    binding.aggregate_target = Some(Box::new(UnionPointerAggregateTarget {
+                        root: UnionPointerAggregateRoot::Runtime {
+                            scope_id: globals.id,
+                            name: name.clone(),
+                        },
+                        path: Vec::new(),
+                    }));
+                }
+                (name.clone(), binding)
+            })
+            .collect::<Vec<_>>();
+        bindings.sort_by(|left, right| left.0.cmp(&right.0));
+        bindings
+    }
+
+    fn seed_union_pointer_globals(
+        &self,
+        target: &mut UnionPointerProvenance,
+        source: &UnionPointerProvenance,
+    ) {
+        for (name, binding) in self.union_pointer_global_bindings(source) {
+            target.insert(name.clone(), vec![binding.clone()]);
+            target.insert(Self::union_pointer_global_key(&name), vec![binding]);
+        }
+    }
+
+    fn copy_union_pointer_globals(
+        &self,
+        target: &mut UnionPointerProvenance,
+        source: &UnionPointerProvenance,
+    ) {
+        let Some(globals) = self.scopes.first() else {
+            return;
+        };
+        for name in globals.values.keys() {
+            let key = Self::union_pointer_global_key(name);
+            let Some(binding) = Self::active_union_pointer_binding(source, &key).cloned() else {
+                continue;
+            };
+            target.insert(key, vec![binding.clone()]);
+            if target.get(name).is_none_or(|bindings| bindings.len() == 1) {
+                target.insert(name.clone(), vec![binding]);
+            }
+        }
+    }
+
+    fn sync_union_pointer_globals(provenance: &mut UnionPointerProvenance) {
+        let bindings = provenance
+            .keys()
+            .filter_map(|key| {
+                key.strip_prefix("\0global:").and_then(|name| {
+                    let bindings = provenance.get(name)?;
+                    (bindings.len() == 1).then(|| {
+                        (
+                            key.clone(),
+                            bindings
+                                .last()
+                                .expect("global provenance binding exists")
+                                .clone(),
+                        )
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        for (key, binding) in bindings {
+            provenance.insert(key, vec![binding]);
+        }
+    }
+
+    fn copy_union_pointer_static_locals(
+        target: &mut UnionPointerProvenance,
+        source: &UnionPointerProvenance,
+    ) {
+        for (name, bindings) in source {
+            if name.starts_with("\0static-local:") {
+                target.insert(name.clone(), bindings.clone());
+            }
+        }
+    }
+
+    fn sync_union_pointer_static_locals(provenance: &mut UnionPointerProvenance) {
+        let bindings = provenance
+            .keys()
+            .filter_map(|key| {
+                key.strip_prefix("\0static-local:")
+                    .and_then(|key| key.split_once(':'))
+                    .and_then(|(_, name)| {
+                        Self::active_union_pointer_binding(provenance, name)
+                            .cloned()
+                            .map(|binding| (key.clone(), binding))
+                    })
+            })
+            .collect::<Vec<_>>();
+        for (key, binding) in bindings {
+            provenance.insert(key, vec![binding]);
+        }
+    }
+
+    fn union_pointer_binding_has_field(
+        binding: &UnionPointerProvenanceBinding,
+        fields: &[String],
+        index: Option<usize>,
+    ) -> bool {
+        binding.fields.contains(fields)
+            || match index {
+                Some(index) => binding.element_fields.contains(&(index, fields.to_vec())),
+                None => binding
+                    .element_fields
+                    .iter()
+                    .any(|(_, path)| path == fields),
+            }
+    }
+
+    fn aggregate_pointer_argument_union_field_paths_with_calls(
+        &self,
+        expr: &Expr,
+        parameter_provenance: &UnionPointerProvenance,
+        visited_functions: &mut HashSet<String>,
+        call_results: &mut UnionPointerProvenanceCallCache,
+    ) -> BTreeSet<Vec<String>> {
+        let mut paths = BTreeSet::new();
+        match expr {
+            Expr::Var(name) | Expr::AddressOf(name) | Expr::AddressOfArray { name, .. } => {
+                if let Some(binding) =
+                    Self::active_union_pointer_binding(parameter_provenance, name)
+                {
+                    paths.extend(binding.fields.iter().cloned());
+                    if let Expr::AddressOfArray { index, .. } = expr {
+                        let index = Self::non_evaluating_array_index(index);
+                        paths.extend(
+                            binding
+                                .element_fields
+                                .iter()
+                                .filter(|(element_index, _)| {
+                                    index.is_none() || index == Some(*element_index)
+                                })
+                                .map(|(_, path)| path.clone()),
+                        );
+                    }
+                }
+                match self.find_variable(name) {
+                    Some(Value::Struct { fields, .. }) => self
+                        .aggregate_fields_contain_union_pointer(
+                            fields,
+                            &mut Vec::new(),
+                            &mut paths,
+                        ),
+                    Some(Value::StructArray { elements, .. }) => {
+                        for fields in elements {
+                            self.aggregate_fields_contain_union_pointer(
+                                fields,
+                                &mut Vec::new(),
+                                &mut paths,
+                            );
+                        }
+                    }
+                    Some(Value::Pointer { pointer, .. }) => {
+                        if let Ok((_, fields)) = self.find_struct_pointer_fields(pointer) {
+                            self.aggregate_fields_contain_union_pointer(
+                                fields,
+                                &mut Vec::new(),
+                                &mut paths,
+                            );
+                        }
+                    }
+                    Some(Value::Scalar { .. } | Value::Array(_)) | None => {}
+                }
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                paths.extend(
+                    self.aggregate_pointer_argument_union_field_paths_with_calls(
+                        then_expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    ),
+                );
+                paths.extend(
+                    self.aggregate_pointer_argument_union_field_paths_with_calls(
+                        else_expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    ),
+                );
+            }
+            Expr::Comma(_, right)
+            | Expr::PointerCast { expr: right, .. }
+            | Expr::Assign { value: right, .. } => {
+                paths.extend(
+                    self.aggregate_pointer_argument_union_field_paths_with_calls(
+                        right,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    ),
+                );
+            }
+            Expr::GenericSelection { .. } => {
+                if let Ok(selected) = self.selected_generic_association(expr) {
+                    paths.extend(
+                        self.aggregate_pointer_argument_union_field_paths_with_calls(
+                            selected,
+                            parameter_provenance,
+                            visited_functions,
+                            call_results,
+                        ),
+                    );
+                }
+            }
+            Expr::Call { name, args } => {
+                paths.extend(
+                    self.union_pointer_call_provenance(
+                        name,
+                        args,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    )
+                    .fields,
+                );
+            }
+            Expr::AggregateLiteral {
+                type_name, init, ..
+            }
+            | Expr::AddressOfAggregateLiteral {
+                type_name, init, ..
+            } => self.collect_union_pointer_initializer_fields(
+                type_name,
+                init,
+                &mut Vec::new(),
+                parameter_provenance,
+                visited_functions,
+                call_results,
+                &mut paths,
+            ),
+            _ => {}
+        }
+        paths
+    }
+
+    fn union_pointer_call_provenance(
+        &self,
+        name: &str,
+        args: &[Expr],
+        parameter_provenance: &UnionPointerProvenance,
+        visited_functions: &mut HashSet<String>,
+        call_results: &mut UnionPointerProvenanceCallCache,
+    ) -> UnionPointerProvenanceBinding {
+        if self.functions.contains_key(name)
+            && (visited_functions.len() >= MAX_UNION_POINTER_PROVENANCE_CALL_DEPTH
+                || visited_functions.len() + 1 >= MAX_UNION_POINTER_PROVENANCE_CALL_DEPTH
+                    && self.functions.get(name).is_some_and(|function| {
+                        function.body.iter().any(|statement| {
+                            matches!(
+                                statement,
+                                Stmt::Return(Some(Expr::Call { name, .. }))
+                                    if self.functions.contains_key(name)
+                            )
+                        })
+                    }))
+            && !visited_functions.contains(name)
+        {
+            let mut error = self.union_pointer_provenance_error.borrow_mut();
+            if error.is_none() {
+                *error = Some(CustError::new(format!(
+                    "union pointer provenance analysis call depth limit of {MAX_UNION_POINTER_PROVENANCE_CALL_DEPTH} exceeded"
+                )));
+            }
+            return UnionPointerProvenanceBinding::default();
+        }
+        let mut argument_provenance = args
+            .iter()
+            .map(|argument| {
+                self.union_pointer_provenance_binding(
+                    argument,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                )
+            })
+            .collect::<Vec<_>>();
+        let fallback = UnionPointerProvenanceBinding {
+            whole_object: argument_provenance.iter().any(|binding| {
+                binding.whole_object
+                    || !binding.fields.is_empty()
+                    || !binding.element_fields.is_empty()
+            }),
+            fields: BTreeSet::new(),
+            element_fields: BTreeSet::new(),
+            aggregate_type: None,
+            aggregate_target: None,
+            aggregate_is_array: false,
+            alias_group: None,
+        };
+        let Some(function) = self.functions.get(name) else {
+            let cache_key = (
+                name.to_string(),
+                argument_provenance,
+                self.union_pointer_global_bindings(parameter_provenance),
+            );
+            call_results.insert(cache_key, fallback.clone());
+            return fallback;
+        };
+        Self::normalize_union_pointer_parameter_aliases(function, args, &mut argument_provenance);
+        let cache_key = (
+            name.to_string(),
+            argument_provenance.clone(),
+            self.union_pointer_global_bindings(parameter_provenance),
+        );
+        if let Some(result) = call_results.get(&cache_key) {
+            return result.clone();
+        }
+        call_results.insert(cache_key.clone(), UnionPointerProvenanceBinding::default());
+        let entered_function = visited_functions.insert(name.to_string());
+        let mut callee_parameters = HashMap::new();
+        self.seed_union_pointer_globals(&mut callee_parameters, parameter_provenance);
+        Self::copy_union_pointer_static_locals(&mut callee_parameters, parameter_provenance);
+        for (parameter, mut provenance) in function.params.iter().zip(argument_provenance) {
+            if let ParamType::Struct(type_name) = &parameter.ty {
+                provenance.aggregate_type = Some(type_name.clone());
+            }
+            callee_parameters
+                .entry(parameter.name.clone())
+                .or_default()
+                .push(provenance);
+        }
+        let mut saw_return = false;
+        let mut returned_provenance = UnionPointerProvenanceBinding::default();
+        let mut break_provenance = Vec::new();
+        let mut continue_provenance = Vec::new();
+        let _ = self.collect_returned_union_pointer_provenance(
+            &function.body,
+            &mut callee_parameters,
+            visited_functions,
+            call_results,
+            &mut break_provenance,
+            &mut continue_provenance,
+            &mut saw_return,
+            &mut returned_provenance,
+        );
+        Self::sync_union_pointer_globals(&mut callee_parameters);
+        if entered_function {
+            visited_functions.remove(name);
+        }
+        let result = if saw_return {
+            returned_provenance
+        } else {
+            fallback
+        };
+        call_results.insert(cache_key, result.clone());
+        result
+    }
+
+    fn collect_union_pointer_call_effects(
+        &self,
+        name: &str,
+        args: &[Expr],
+        parameter_provenance: &mut UnionPointerProvenance,
+        visited_functions: &mut HashSet<String>,
+        call_results: &mut UnionPointerProvenanceCallCache,
+    ) {
+        let Some(function) = self.functions.get(name).cloned() else {
+            return;
+        };
+        let incoming_provenance = parameter_provenance.clone();
+        if visited_functions.len() >= MAX_UNION_POINTER_PROVENANCE_CALL_DEPTH
+            || visited_functions.len() + 1 >= MAX_UNION_POINTER_PROVENANCE_CALL_DEPTH
+                && function.body.iter().any(|statement| {
+                    matches!(
+                        statement,
+                        Stmt::Return(Some(Expr::Call { name, .. }))
+                            if self.functions.contains_key(name)
+                    )
+                })
+        {
+            let mut error = self.union_pointer_provenance_error.borrow_mut();
+            if error.is_none() {
+                *error = Some(CustError::new(format!(
+                    "union pointer provenance analysis call depth limit of {MAX_UNION_POINTER_PROVENANCE_CALL_DEPTH} exceeded"
+                )));
+            }
+            return;
+        }
+        let mut argument_provenance = args
+            .iter()
+            .map(|argument| {
+                self.union_pointer_provenance_binding(
+                    argument,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                )
+            })
+            .collect::<Vec<_>>();
+        if !visited_functions.insert(name.to_string()) {
+            return;
+        }
+        Self::normalize_union_pointer_parameter_aliases(&function, args, &mut argument_provenance);
+        let mut callee_parameters = HashMap::new();
+        self.seed_union_pointer_globals(&mut callee_parameters, parameter_provenance);
+        Self::copy_union_pointer_static_locals(&mut callee_parameters, parameter_provenance);
+        for (parameter, mut provenance) in function
+            .params
+            .iter()
+            .zip(argument_provenance.iter().cloned())
+        {
+            if let ParamType::Struct(type_name) = &parameter.ty {
+                provenance.aggregate_type = Some(type_name.clone());
+            }
+            callee_parameters
+                .entry(parameter.name.clone())
+                .or_default()
+                .push(provenance);
+        }
+        let mut saw_return = false;
+        let mut returned_provenance = UnionPointerProvenanceBinding::default();
+        let _ = self.collect_returned_union_pointer_provenance(
+            &function.body,
+            &mut callee_parameters,
+            visited_functions,
+            call_results,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut saw_return,
+            &mut returned_provenance,
+        );
+        visited_functions.remove(name);
+        Self::sync_union_pointer_globals(&mut callee_parameters);
+        self.copy_union_pointer_globals(parameter_provenance, &callee_parameters);
+        Self::copy_union_pointer_static_locals(parameter_provenance, &callee_parameters);
+
+        for ((parameter, argument), argument_binding) in
+            function.params.iter().zip(args).zip(&argument_provenance)
+        {
+            if parameter.kind != ParamKind::Pointer
+                || !matches!(&parameter.ty, ParamType::Struct(_))
+            {
+                continue;
+            }
+            let Some(final_binding) =
+                Self::active_union_pointer_binding(&callee_parameters, &parameter.name).cloned()
+            else {
+                continue;
+            };
+            let Some(target) = argument_binding
+                .aggregate_target
+                .as_deref()
+                .cloned()
+                .or_else(|| self.union_pointer_aggregate_target(argument, parameter_provenance))
+            else {
+                continue;
+            };
+            Self::replace_union_pointer_target_provenance(
+                parameter_provenance,
+                &target,
+                final_binding,
+            );
+        }
+        if *parameter_provenance != incoming_provenance {
+            call_results.clear();
+        }
+    }
+
+    fn aggregate_pointer_expr_has_union_container(&self, expr: &Expr) -> bool {
+        self.aggregate_pointer_expr_has_union_container_with_calls(
+            expr,
+            &HashMap::new(),
+            &mut HashSet::new(),
+            &mut HashMap::new(),
+        )
+    }
+
+    fn normalize_union_pointer_parameter_aliases(
+        function: &Function,
+        args: &[Expr],
+        provenance: &mut [UnionPointerProvenanceBinding],
+    ) {
+        let source_groups = provenance
+            .iter()
+            .map(|binding| binding.alias_group)
+            .collect::<Vec<_>>();
+        let source_targets = provenance
+            .iter()
+            .map(|binding| binding.aggregate_target.clone())
+            .collect::<Vec<_>>();
+        for index in 0..provenance.len() {
+            if !matches!(
+                function.params.get(index),
+                Some(Param {
+                    kind: ParamKind::Pointer,
+                    ty: ParamType::Struct(_),
+                    ..
+                })
+            ) {
+                provenance[index].alias_group = None;
+                continue;
+            }
+            provenance[index].alias_group = (0..=index).find(|candidate| {
+                matches!(
+                    function.params.get(*candidate),
+                    Some(Param {
+                        kind: ParamKind::Pointer,
+                        ty: ParamType::Struct(_),
+                        ..
+                    })
+                ) && (args.get(index) == args.get(*candidate)
+                    || source_targets[index].is_some()
+                        && source_targets[index] == source_targets[*candidate]
+                    || source_groups[index].is_some()
+                        && source_groups[index] == source_groups[*candidate])
+            });
+        }
+    }
+
+    fn aggregate_pointer_expr_has_union_container_with_calls(
+        &self,
+        expr: &Expr,
+        parameter_provenance: &UnionPointerProvenance,
+        visited_functions: &mut HashSet<String>,
+        call_results: &mut UnionPointerProvenanceCallCache,
+    ) -> bool {
+        match expr {
+            Expr::Var(name) => parameter_provenance
+                .get(name)
+                .and_then(|bindings| bindings.last())
+                .map(|binding| binding.whole_object)
+                .unwrap_or_else(|| {
+                    matches!(
+                        self.find_variable(name),
+                        Some(Value::Pointer { pointer, .. })
+                            if self.memory_pointer_targets_union_field(pointer).unwrap_or(false)
+                    )
+                }),
+            Expr::AddressOf(name) => {
+                matches!(
+                    self.find_variable(name),
+                    Some(Value::Struct { type_name, .. })
+                        | Some(Value::StructArray { type_name, .. })
+                        if self
+                            .struct_types
+                            .get(type_name)
+                            .is_some_and(|aggregate| aggregate.kind == AggregateKind::Union)
+                )
+            }
+            Expr::AddressOfStructArrayField { name, fields, .. }
+            | Expr::AddressOfStructField { name, fields }
+            | Expr::AddressOfStructElementField { name, fields, .. }
+            | Expr::AddressOfStructElementArrayField { name, fields, .. } => {
+                self.aggregate_variable_field_path_has_union_container(name, fields)
+            }
+            Expr::StructGet { name, fields } | Expr::StructArrayGet { name, fields, .. } => {
+                Self::active_union_pointer_binding(parameter_provenance, name).map_or_else(
+                    || {
+                        self.aggregate_variable_field_path_has_union_container(name, fields)
+                            || self.aggregate_pointer_field_has_union_container(name, fields)
+                    },
+                    |binding| {
+                        let selected_field_is_pointer =
+                            binding.aggregate_type.as_ref().is_some_and(|type_name| {
+                                matches!(
+                                    self.aggregate_type_field_metadata(type_name, fields),
+                                    Ok(Some((StructFieldType::Pointer(_), _, _)))
+                                )
+                            });
+                        binding.fields.contains(fields)
+                            || binding.whole_object && !selected_field_is_pointer
+                    },
+                )
+            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            }
+            | Expr::StructElementArrayGet {
+                name,
+                index,
+                fields,
+                ..
+            } => Self::active_union_pointer_binding(parameter_provenance, name).map_or_else(
+                || self.aggregate_variable_field_path_has_union_container(name, fields),
+                |binding| {
+                    let selected_field_is_pointer =
+                        binding.aggregate_type.as_ref().is_some_and(|type_name| {
+                            matches!(
+                                self.aggregate_type_field_metadata(type_name, fields),
+                                Ok(Some((StructFieldType::Pointer(_), _, _)))
+                            )
+                        });
+                    (binding.whole_object && !selected_field_is_pointer)
+                        || Self::union_pointer_binding_has_field(
+                            binding,
+                            fields,
+                            Self::non_evaluating_array_index(index),
+                        )
+                },
+            ),
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            } => Self::active_union_pointer_binding(parameter_provenance, name).is_some_and(
+                |binding| {
+                    let selected =
+                        Self::nested_aggregate_element_field_path(array_fields, index, fields);
+                    binding
+                        .fields
+                        .iter()
+                        .any(|stored| Self::double_storage_field_path_matches(stored, &selected))
+                },
+            ),
+            Expr::StructPtrGet { pointer, fields }
+            | Expr::StructPtrArrayGet {
+                pointer, fields, ..
+            } => {
+                let pointer_type_name = match pointer.as_ref() {
+                    Expr::Var(name) => {
+                        Self::active_union_pointer_binding(parameter_provenance, name)
+                            .and_then(|binding| binding.aggregate_type.clone())
+                    }
+                    _ => None,
+                }
+                .or_else(|| match self.pointer_expr_pointee_type(pointer) {
+                    Ok(Some(PointeeType::Struct(type_name))) => Some(type_name),
+                    _ => None,
+                });
+                let selected_field_is_pointer = pointer_type_name.is_some_and(|type_name| {
+                    matches!(
+                        self.aggregate_type_field_metadata(&type_name, fields),
+                        Ok(Some((StructFieldType::Pointer(_), _, _)))
+                    )
+                });
+                let selected_field_is_union_backed = self
+                    .aggregate_pointer_argument_union_field_paths_with_calls(
+                        pointer,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    )
+                    .contains(fields)
+                    || match pointer.as_ref() {
+                        Expr::Var(name) => {
+                            Self::active_union_pointer_binding(parameter_provenance, name)
+                                .is_some_and(|binding| {
+                                    Self::union_pointer_binding_has_field(binding, fields, Some(0))
+                                })
+                        }
+                        _ => false,
+                    };
+                selected_field_is_union_backed
+                    || (!selected_field_is_pointer
+                        && self.aggregate_pointer_expr_has_union_container_with_calls(
+                            pointer,
+                            parameter_provenance,
+                            visited_functions,
+                            call_results,
+                        ))
+            }
+            Expr::AddressOfStructPtrField { pointer, fields }
+            | Expr::AddressOfStructPtrArrayField {
+                pointer, fields, ..
+            } => {
+                self.aggregate_pointer_argument_union_field_paths_with_calls(
+                    pointer,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                )
+                .contains(fields)
+                    || self.aggregate_pointer_expr_has_union_container_with_calls(
+                        pointer,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    )
+            }
+            Expr::AggregateFieldGet { aggregate, fields }
+            | Expr::AddressOfAggregateField { aggregate, fields } => self
+                .aggregate_pointer_argument_union_field_paths_with_calls(
+                    aggregate,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                )
+                .contains(fields),
+            Expr::PointerCast { expr: pointer, .. } => self
+                .aggregate_pointer_expr_has_union_container_with_calls(
+                    pointer,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                ),
+            Expr::Call { name, args } => {
+                self.union_pointer_call_provenance(
+                    name,
+                    args,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                )
+                .whole_object
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.aggregate_pointer_expr_has_union_container_with_calls(
+                    then_expr,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                ) || self.aggregate_pointer_expr_has_union_container_with_calls(
+                    else_expr,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                )
+            }
+            Expr::Comma(_, right) | Expr::Assign { value: right, .. } => self
+                .aggregate_pointer_expr_has_union_container_with_calls(
+                    right,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                ),
+            Expr::GenericSelection { .. } => {
+                self.selected_generic_association(expr)
+                    .is_ok_and(|selected| {
+                        self.aggregate_pointer_expr_has_union_container_with_calls(
+                            selected,
+                            parameter_provenance,
+                            visited_functions,
+                            call_results,
+                        )
+                    })
+            }
+            Expr::Binary(left, BinaryOp::Add | BinaryOp::Subscript | BinaryOp::Sub, right) => {
+                self.aggregate_pointer_expr_has_union_container_with_calls(
+                    left,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                ) || self.aggregate_pointer_expr_has_union_container_with_calls(
+                    right,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                )
+            }
+            _ => false,
+        }
+    }
+
+    fn merge_union_pointer_provenance(
+        target: &mut UnionPointerProvenance,
+        source: &UnionPointerProvenance,
+    ) {
+        for (name, bindings) in source {
+            let target_bindings = target.entry(name.clone()).or_default();
+            for (index, provenance) in bindings.iter().enumerate() {
+                if let Some(target) = target_bindings.get_mut(index) {
+                    target.whole_object |= provenance.whole_object;
+                    target.fields.extend(provenance.fields.iter().cloned());
+                    target
+                        .element_fields
+                        .extend(provenance.element_fields.iter().cloned());
+                    if target.aggregate_type.is_none() {
+                        target.aggregate_type.clone_from(&provenance.aggregate_type);
+                    }
+                    if target.aggregate_target != provenance.aggregate_target {
+                        target.aggregate_target = None;
+                    }
+                    target.aggregate_is_array |= provenance.aggregate_is_array;
+                    if target.alias_group.is_none() {
+                        target.alias_group = provenance.alias_group;
+                    }
+                } else {
+                    target_bindings.push(provenance.clone());
+                }
+            }
+        }
+    }
+
+    fn union_pointer_provenance_binding(
+        &self,
+        expr: &Expr,
+        parameter_provenance: &UnionPointerProvenance,
+        visited_functions: &mut HashSet<String>,
+        call_results: &mut UnionPointerProvenanceCallCache,
+    ) -> UnionPointerProvenanceBinding {
+        if let Expr::Var(name) = expr {
+            if let Some(binding) = Self::active_union_pointer_binding(parameter_provenance, name) {
+                if binding.aggregate_is_array
+                    && let Some(target) =
+                        self.union_pointer_aggregate_target(expr, parameter_provenance)
+                    && let Some(mut selected) =
+                        Self::union_pointer_binding_for_target(&target, parameter_provenance)
+                {
+                    selected.aggregate_type.clone_from(&binding.aggregate_type);
+                    return selected;
+                }
+                return binding.clone();
+            }
+            if let Some(value) = self.find_variable(name) {
+                let mut binding = self.union_pointer_provenance_value_binding(value);
+                binding.aggregate_target = self
+                    .union_pointer_aggregate_target(expr, parameter_provenance)
+                    .map(Box::new);
+                return binding;
+            }
+        }
+        if let Expr::Call { name, args } = expr {
+            return self.union_pointer_call_provenance(
+                name,
+                args,
+                parameter_provenance,
+                visited_functions,
+                call_results,
+            );
+        }
+        let mut binding = UnionPointerProvenanceBinding {
+            whole_object: self.aggregate_pointer_expr_has_union_container_with_calls(
+                expr,
+                parameter_provenance,
+                visited_functions,
+                call_results,
+            ),
+            fields: self.aggregate_pointer_argument_union_field_paths_with_calls(
+                expr,
+                parameter_provenance,
+                visited_functions,
+                call_results,
+            ),
+            element_fields: BTreeSet::new(),
+            aggregate_type: match expr {
+                Expr::AggregateLiteral { type_name, .. }
+                | Expr::AddressOfAggregateLiteral { type_name, .. } => Some(type_name.clone()),
+                _ => match self.pointer_expr_pointee_type(expr) {
+                    Ok(Some(PointeeType::Struct(type_name))) => Some(type_name),
+                    _ => None,
+                },
+            },
+            aggregate_target: self
+                .union_pointer_aggregate_target(expr, parameter_provenance)
+                .map(Box::new),
+            aggregate_is_array: false,
+            alias_group: None,
+        };
+        if let Some(target) = &binding.aggregate_target
+            && let Some(mut selected) =
+                Self::union_pointer_binding_for_target(target, parameter_provenance)
+        {
+            selected.whole_object |= binding.whole_object;
+            selected.fields.extend(binding.fields);
+            selected.aggregate_type = binding.aggregate_type;
+            binding = selected;
+        }
+        binding
+    }
+
+    fn union_pointer_provenance_value_binding(
+        &self,
+        value: &Value,
+    ) -> UnionPointerProvenanceBinding {
+        let mut binding = UnionPointerProvenanceBinding::default();
+        match value {
+            Value::Pointer { pointer, .. } => {
+                binding.aggregate_target =
+                    Self::union_pointer_runtime_aggregate_target(pointer).map(Box::new);
+                binding.whole_object = self
+                    .memory_pointer_targets_union_field(pointer)
+                    .unwrap_or(false);
+                if let Ok((_, fields)) = self.find_struct_pointer_fields(pointer) {
+                    self.aggregate_fields_contain_union_pointer(
+                        fields,
+                        &mut Vec::new(),
+                        &mut binding.fields,
+                    );
+                }
+                if let Ok(Some(PointeeType::Struct(type_name))) = self.pointer_value_type(pointer) {
+                    binding.aggregate_type = Some(type_name);
+                }
+            }
+            Value::Struct { type_name, fields } => {
+                binding.aggregate_type = Some(type_name.clone());
+                binding.whole_object = self
+                    .struct_types
+                    .get(type_name)
+                    .is_some_and(|aggregate| aggregate.kind == AggregateKind::Union);
+                self.aggregate_fields_contain_union_pointer(
+                    fields,
+                    &mut Vec::new(),
+                    &mut binding.fields,
+                );
+            }
+            Value::StructArray {
+                type_name,
+                elements,
+                ..
+            } => {
+                binding.aggregate_is_array = true;
+                binding.aggregate_type = Some(type_name.clone());
+                binding.whole_object = self
+                    .struct_types
+                    .get(type_name)
+                    .is_some_and(|aggregate| aggregate.kind == AggregateKind::Union);
+                for (index, fields) in elements.iter().enumerate() {
+                    let mut paths = BTreeSet::new();
+                    self.aggregate_fields_contain_union_pointer(
+                        fields,
+                        &mut Vec::new(),
+                        &mut paths,
+                    );
+                    binding
+                        .element_fields
+                        .extend(paths.into_iter().map(|path| (index, path)));
+                }
+            }
+            Value::Scalar { .. } | Value::Array(_) => {}
+        }
+        binding
+    }
+
+    fn replace_union_pointer_field_provenance(
+        parameter_provenance: &mut UnionPointerProvenance,
+        name: &str,
+        fields: &[String],
+        value: UnionPointerProvenanceBinding,
+    ) {
+        let Some(target) = Self::active_union_pointer_binding(parameter_provenance, name)
+            .map(|binding| (binding.alias_group, binding.aggregate_type.clone()))
+        else {
+            return;
+        };
+        for (binding_name, bindings) in parameter_provenance.iter_mut() {
+            let Some(binding) = bindings.last_mut() else {
+                continue;
+            };
+            if binding_name != name
+                && (target.0.is_none()
+                    || binding.alias_group != target.0
+                    || binding.aggregate_type != target.1)
+            {
+                continue;
+            }
+            binding.fields.retain(|path| !path.starts_with(fields));
+            if value.whole_object {
+                binding.fields.insert(fields.to_vec());
+            }
+            for path in &value.fields {
+                let mut nested = fields.to_vec();
+                nested.extend(path.iter().cloned());
+                binding.fields.insert(nested);
+            }
+        }
+    }
+
+    fn replace_union_pointer_element_field_provenance(
+        parameter_provenance: &mut UnionPointerProvenance,
+        name: &str,
+        index: Option<usize>,
+        fields: &[String],
+        value: UnionPointerProvenanceBinding,
+    ) {
+        let Some(index) = index else {
+            Self::replace_union_pointer_field_provenance(parameter_provenance, name, fields, value);
+            return;
+        };
+        let Some(binding) = parameter_provenance
+            .get_mut(name)
+            .and_then(|bindings| bindings.last_mut())
+        else {
+            return;
+        };
+        binding
+            .element_fields
+            .retain(|(element, path)| *element != index || !path.starts_with(fields));
+        if value.whole_object {
+            binding.element_fields.insert((index, fields.to_vec()));
+        }
+        for path in value.fields {
+            let mut nested = fields.to_vec();
+            nested.extend(path);
+            binding.element_fields.insert((index, nested));
+        }
+    }
+
+    fn collect_returned_union_pointer_assignment(
+        &self,
+        expr: &Expr,
+        parameter_provenance: &mut UnionPointerProvenance,
+        visited_functions: &mut HashSet<String>,
+        call_results: &mut UnionPointerProvenanceCallCache,
+    ) -> Option<UnionPointerProvenanceBinding> {
+        let (name, fields, value) = match expr {
+            Expr::Assign { name, value } => (name.as_str(), None, value.as_ref()),
+            Expr::StructSet {
+                name,
+                fields,
+                value,
+            } => (name.as_str(), Some(fields.as_slice()), value.as_ref()),
+            _ => return None,
+        };
+        let value = self.union_pointer_provenance_binding(
+            value,
+            parameter_provenance,
+            visited_functions,
+            call_results,
+        );
+        if let Some(fields) = fields {
+            Self::replace_union_pointer_field_provenance(
+                parameter_provenance,
+                name,
+                fields,
+                value.clone(),
+            );
+        } else if let Some(binding) = parameter_provenance
+            .get_mut(name)
+            .and_then(|bindings| bindings.last_mut())
+        {
+            *binding = value.clone();
+        }
+        Some(value)
+    }
+
+    fn collect_union_pointer_expression_effects(
+        &self,
+        expr: &Expr,
+        parameter_provenance: &mut UnionPointerProvenance,
+        visited_functions: &mut HashSet<String>,
+        call_results: &mut UnionPointerProvenanceCallCache,
+    ) {
+        match expr {
+            Expr::Assign { name, value } => {
+                self.collect_union_pointer_expression_effects(
+                    value,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                let value = self.union_pointer_provenance_binding(
+                    value,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                if let Some(binding) = parameter_provenance
+                    .get_mut(name)
+                    .and_then(|bindings| bindings.last_mut())
+                {
+                    *binding = value;
+                }
+            }
+            Expr::StructSet {
+                name,
+                fields,
+                value,
+            } => {
+                self.collect_union_pointer_expression_effects(
+                    value,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                let value = self.union_pointer_provenance_binding(
+                    value,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                Self::replace_union_pointer_field_provenance(
+                    parameter_provenance,
+                    name,
+                    fields,
+                    value,
+                );
+            }
+            Expr::StructPtrSet {
+                pointer,
+                fields,
+                value,
+            } => {
+                self.collect_union_pointer_expression_effects(
+                    pointer,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                self.collect_union_pointer_expression_effects(
+                    value,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                let value = self.union_pointer_provenance_binding(
+                    value,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                if let Expr::Var(name) = pointer.as_ref() {
+                    Self::replace_union_pointer_field_provenance(
+                        parameter_provenance,
+                        name,
+                        fields,
+                        value,
+                    );
+                }
+            }
+            Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                value,
+            } => {
+                self.collect_union_pointer_expression_effects(
+                    index,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                self.collect_union_pointer_expression_effects(
+                    value,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                let value = self.union_pointer_provenance_binding(
+                    value,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                Self::replace_union_pointer_element_field_provenance(
+                    parameter_provenance,
+                    name,
+                    Self::non_evaluating_array_index(index),
+                    fields,
+                    value,
+                );
+            }
+            Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                value,
+            } => {
+                self.collect_union_pointer_expression_effects(
+                    index,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                self.collect_union_pointer_expression_effects(
+                    value,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                let value = self.union_pointer_provenance_binding(
+                    value,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                let path = Self::nested_aggregate_element_field_path(array_fields, index, fields);
+                Self::replace_union_pointer_field_provenance(
+                    parameter_provenance,
+                    name,
+                    &path,
+                    value,
+                );
+            }
+            Expr::Comma(left, right) => {
+                self.collect_union_pointer_expression_effects(
+                    left,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                self.collect_union_pointer_expression_effects(
+                    right,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                self.collect_union_pointer_expression_effects(
+                    cond,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                let mut then_provenance = parameter_provenance.clone();
+                self.collect_union_pointer_expression_effects(
+                    then_expr,
+                    &mut then_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                let mut else_provenance = parameter_provenance.clone();
+                self.collect_union_pointer_expression_effects(
+                    else_expr,
+                    &mut else_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                *parameter_provenance = then_provenance;
+                Self::merge_union_pointer_provenance(parameter_provenance, &else_provenance);
+            }
+            Expr::Binary(left, BinaryOp::LogicalAnd | BinaryOp::LogicalOr, right) => {
+                self.collect_union_pointer_expression_effects(
+                    left,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                let skipped = parameter_provenance.clone();
+                self.collect_union_pointer_expression_effects(
+                    right,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                Self::merge_union_pointer_provenance(parameter_provenance, &skipped);
+            }
+            Expr::Binary(left, _, right) => {
+                self.collect_union_pointer_expression_effects(
+                    left,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+                self.collect_union_pointer_expression_effects(
+                    right,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                );
+            }
+            Expr::Call { args, .. } => {
+                for argument in args {
+                    self.collect_union_pointer_expression_effects(
+                        argument,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                }
+                if let Expr::Call { name, args } = expr {
+                    self.collect_union_pointer_call_effects(
+                        name,
+                        args,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                }
+            }
+            Expr::PointerCast { expr, .. }
+            | Expr::Cast { expr, .. }
+            | Expr::VoidCast(expr)
+            | Expr::Deref(expr)
+            | Expr::UnaryPlus(expr)
+            | Expr::UnaryMinus(expr)
+            | Expr::BitwiseNot(expr)
+            | Expr::LogicalNot(expr)
+            | Expr::Increment { target: expr, .. }
+            | Expr::StructPtrGet { pointer: expr, .. }
+            | Expr::AddressOfStructPtrField { pointer: expr, .. }
+            | Expr::AggregateFieldGet {
+                aggregate: expr, ..
+            }
+            | Expr::AddressOfAggregateField {
+                aggregate: expr, ..
+            } => self.collect_union_pointer_expression_effects(
+                expr,
+                parameter_provenance,
+                visited_functions,
+                call_results,
+            ),
+            Expr::GenericSelection { .. } => {
+                if let Ok(selected) = self.selected_generic_association(expr) {
+                    self.collect_union_pointer_expression_effects(
+                        selected,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn collect_union_pointer_initializer_fields(
+        &self,
+        type_name: &str,
+        initializers: &[StructInitializer],
+        prefix: &mut Vec<String>,
+        parameter_provenance: &UnionPointerProvenance,
+        visited_functions: &mut HashSet<String>,
+        call_results: &mut UnionPointerProvenanceCallCache,
+        fields: &mut BTreeSet<Vec<String>>,
+    ) {
+        let Some(aggregate) = self.struct_types.get(type_name) else {
+            return;
+        };
+        let field_definitions = aggregate.fields.clone();
+        let mut next_field_index = 0;
+        for initializer in initializers {
+            let (field, value) = match initializer {
+                StructInitializer::Designated { field, value } => {
+                    let Some(field_index) = field_definitions
+                        .iter()
+                        .position(|definition| definition.name == *field)
+                    else {
+                        continue;
+                    };
+                    next_field_index = field_index + 1;
+                    (&field_definitions[field_index], value.as_ref())
+                }
+                value => {
+                    let Some(field) = field_definitions.get(next_field_index) else {
+                        continue;
+                    };
+                    next_field_index += 1;
+                    (field, value)
+                }
+            };
+
+            prefix.push(field.name.clone());
+            match (value, &field.ty) {
+                (StructInitializer::Expr(expr), StructFieldType::Pointer(_)) => {
+                    if self.aggregate_pointer_expr_has_union_container_with_calls(
+                        expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    ) {
+                        fields.insert(prefix.clone());
+                    }
+                }
+                (StructInitializer::Expr(expr), StructFieldType::Struct(_)) => {
+                    for path in self.aggregate_pointer_argument_union_field_paths_with_calls(
+                        expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    ) {
+                        let mut path_with_prefix = prefix.clone();
+                        path_with_prefix.extend(path);
+                        fields.insert(path_with_prefix);
+                    }
+                }
+                (StructInitializer::Struct(nested), StructFieldType::Struct(nested_type)) => self
+                    .collect_union_pointer_initializer_fields(
+                        nested_type,
+                        nested,
+                        prefix,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                        fields,
+                    ),
+                (
+                    StructInitializer::StructArray(elements),
+                    StructFieldType::StructArray(nested_type, _),
+                ) => {
+                    let mut next_index = 0;
+                    for element in elements {
+                        let (index, nested) = match element {
+                            StructArrayInitializer::Element(nested) => {
+                                let index = next_index;
+                                next_index += 1;
+                                (index, nested)
+                            }
+                            StructArrayInitializer::Designated { index, value } => {
+                                next_index = index + 1;
+                                (*index, value)
+                            }
+                        };
+                        prefix.push(format!("\0element:{index}"));
+                        self.collect_union_pointer_initializer_fields(
+                            nested_type,
+                            nested,
+                            prefix,
+                            parameter_provenance,
+                            visited_functions,
+                            call_results,
+                            fields,
+                        );
+                        prefix.pop();
+                    }
+                }
+                _ => {}
+            }
+            prefix.pop();
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn collect_union_pointer_loop_provenance(
+        &self,
+        body: &[Stmt],
+        increment: Option<&Stmt>,
+        condition: Option<&Expr>,
+        condition_before_body: bool,
+        may_skip: bool,
+        parameter_provenance: &mut UnionPointerProvenance,
+        visited_functions: &mut HashSet<String>,
+        call_results: &mut UnionPointerProvenanceCallCache,
+        saw_return: &mut bool,
+        returned_provenance: &mut UnionPointerProvenanceBinding,
+    ) -> bool {
+        let mut incoming = parameter_provenance.clone();
+        if condition_before_body && let Some(condition) = condition {
+            self.collect_union_pointer_expression_effects(
+                condition,
+                &mut incoming,
+                visited_functions,
+                call_results,
+            );
+        }
+        let mut head = incoming.clone();
+        let mut exits = may_skip.then(|| incoming.clone());
+        let mut converged = false;
+
+        for _ in 0..MAX_UNION_POINTER_PROVENANCE_LOOP_ITERATIONS {
+            let mut body_provenance = head.clone();
+            let mut loop_breaks = Vec::new();
+            let mut loop_continues = Vec::new();
+            let body_falls_through = self.collect_returned_union_pointer_provenance(
+                body,
+                &mut body_provenance,
+                visited_functions,
+                call_results,
+                &mut loop_breaks,
+                &mut loop_continues,
+                saw_return,
+                returned_provenance,
+            );
+
+            for state in loop_breaks {
+                if let Some(exits) = &mut exits {
+                    Self::merge_union_pointer_provenance(exits, &state);
+                } else {
+                    exits = Some(state);
+                }
+            }
+
+            let mut backedge = body_falls_through.then_some(body_provenance);
+            for state in loop_continues {
+                if let Some(backedge) = &mut backedge {
+                    Self::merge_union_pointer_provenance(backedge, &state);
+                } else {
+                    backedge = Some(state);
+                }
+            }
+
+            if let Some(increment) = increment
+                && let Some(state) = &mut backedge
+            {
+                let mut increment_breaks = Vec::new();
+                let mut increment_continues = Vec::new();
+                if !self.collect_returned_union_pointer_provenance(
+                    std::slice::from_ref(increment),
+                    state,
+                    visited_functions,
+                    call_results,
+                    &mut increment_breaks,
+                    &mut increment_continues,
+                    saw_return,
+                    returned_provenance,
+                ) {
+                    backedge = None;
+                }
+            }
+            if let Some(state) = &mut backedge
+                && let Some(condition) = condition
+            {
+                self.collect_union_pointer_expression_effects(
+                    condition,
+                    state,
+                    visited_functions,
+                    call_results,
+                );
+            }
+
+            let Some(backedge) = backedge else {
+                converged = true;
+                break;
+            };
+            if let Some(exits) = &mut exits {
+                Self::merge_union_pointer_provenance(exits, &backedge);
+            } else {
+                exits = Some(backedge.clone());
+            }
+
+            let mut next_head = incoming.clone();
+            Self::merge_union_pointer_provenance(&mut next_head, &backedge);
+            if next_head == head {
+                converged = true;
+                break;
+            }
+            head = next_head;
+        }
+
+        if !converged {
+            returned_provenance.whole_object = true;
+        }
+        if let Some(exits) = exits {
+            *parameter_provenance = exits;
+            true
+        } else {
+            false
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn collect_returned_union_pointer_provenance(
+        &self,
+        statements: &[Stmt],
+        parameter_provenance: &mut UnionPointerProvenance,
+        visited_functions: &mut HashSet<String>,
+        call_results: &mut UnionPointerProvenanceCallCache,
+        break_provenance: &mut Vec<UnionPointerProvenance>,
+        continue_provenance: &mut Vec<UnionPointerProvenance>,
+        saw_return: &mut bool,
+        returned_provenance: &mut UnionPointerProvenanceBinding,
+    ) -> bool {
+        for statement in statements {
+            let falls_through = match statement {
+                Stmt::Return(Some(expr)) => {
+                    *saw_return = true;
+                    self.collect_union_pointer_expression_effects(
+                        expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                    let returned = self
+                        .collect_returned_union_pointer_assignment(
+                            expr,
+                            parameter_provenance,
+                            visited_functions,
+                            call_results,
+                        )
+                        .unwrap_or_else(|| {
+                            self.union_pointer_provenance_binding(
+                                expr,
+                                parameter_provenance,
+                                visited_functions,
+                                call_results,
+                            )
+                        });
+                    returned_provenance.whole_object |= returned.whole_object;
+                    returned_provenance.fields.extend(returned.fields);
+                    returned_provenance
+                        .element_fields
+                        .extend(returned.element_fields);
+                    false
+                }
+                Stmt::Many(statements) => self.collect_returned_union_pointer_provenance(
+                    statements,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                    break_provenance,
+                    continue_provenance,
+                    saw_return,
+                    returned_provenance,
+                ),
+                Stmt::Block(statements) => {
+                    let outer_binding_counts = parameter_provenance
+                        .iter()
+                        .map(|(name, bindings)| (name.clone(), bindings.len()))
+                        .collect::<HashMap<_, _>>();
+                    let outer_break_count = break_provenance.len();
+                    let outer_continue_count = continue_provenance.len();
+                    let falls_through = self.collect_returned_union_pointer_provenance(
+                        statements,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                        break_provenance,
+                        continue_provenance,
+                        saw_return,
+                        returned_provenance,
+                    );
+                    parameter_provenance.retain(|name, bindings| {
+                        if name.starts_with("\0static-local:") {
+                            return true;
+                        }
+                        let Some(count) = outer_binding_counts.get(name) else {
+                            return false;
+                        };
+                        bindings.truncate(*count);
+                        true
+                    });
+                    for state in &mut break_provenance[outer_break_count..] {
+                        state.retain(|name, bindings| {
+                            if name.starts_with("\0static-local:") {
+                                return true;
+                            }
+                            let Some(count) = outer_binding_counts.get(name) else {
+                                return false;
+                            };
+                            bindings.truncate(*count);
+                            true
+                        });
+                    }
+                    for state in &mut continue_provenance[outer_continue_count..] {
+                        state.retain(|name, bindings| {
+                            if name.starts_with("\0static-local:") {
+                                return true;
+                            }
+                            let Some(count) = outer_binding_counts.get(name) else {
+                                return false;
+                            };
+                            bindings.truncate(*count);
+                            true
+                        });
+                    }
+                    falls_through
+                }
+                Stmt::PointerDecl { name, expr, .. } => {
+                    self.collect_union_pointer_expression_effects(
+                        expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                    let provenance = self.union_pointer_provenance_binding(
+                        expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                    parameter_provenance
+                        .entry(name.clone())
+                        .or_default()
+                        .push(provenance);
+                    true
+                }
+                Stmt::Assign(name, expr) => {
+                    self.collect_union_pointer_expression_effects(
+                        expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                    if parameter_provenance.contains_key(name) {
+                        let provenance = self.union_pointer_provenance_binding(
+                            expr,
+                            parameter_provenance,
+                            visited_functions,
+                            call_results,
+                        );
+                        if let Some(binding) = parameter_provenance
+                            .get_mut(name)
+                            .and_then(|bindings| bindings.last_mut())
+                        {
+                            *binding = provenance;
+                        }
+                    }
+                    true
+                }
+                Stmt::StructVarDecl {
+                    type_name,
+                    name,
+                    init,
+                    ..
+                } => {
+                    let mut fields = BTreeSet::new();
+                    match init {
+                        Some(StructVarInitializer::Fields(initializers)) => self
+                            .collect_union_pointer_initializer_fields(
+                                type_name,
+                                initializers,
+                                &mut Vec::new(),
+                                parameter_provenance,
+                                visited_functions,
+                                call_results,
+                                &mut fields,
+                            ),
+                        Some(StructVarInitializer::Expr(expr)) => fields.extend(
+                            self.aggregate_pointer_argument_union_field_paths_with_calls(
+                                expr,
+                                parameter_provenance,
+                                visited_functions,
+                                call_results,
+                            ),
+                        ),
+                        None => {}
+                    }
+                    let binding_index = parameter_provenance.get(name).map_or(0, Vec::len);
+                    parameter_provenance.entry(name.clone()).or_default().push(
+                        UnionPointerProvenanceBinding {
+                            whole_object: self
+                                .struct_types
+                                .get(type_name)
+                                .is_some_and(|aggregate| aggregate.kind == AggregateKind::Union),
+                            fields,
+                            element_fields: BTreeSet::new(),
+                            aggregate_type: Some(type_name.clone()),
+                            aggregate_target: Some(Box::new(UnionPointerAggregateTarget {
+                                root: UnionPointerAggregateRoot::Local {
+                                    name: name.clone(),
+                                    binding_index,
+                                },
+                                path: Vec::new(),
+                            })),
+                            aggregate_is_array: false,
+                            alias_group: None,
+                        },
+                    );
+                    true
+                }
+                Stmt::StructArrayDecl {
+                    type_name,
+                    name,
+                    init,
+                    ..
+                } => {
+                    let mut element_fields = BTreeSet::new();
+                    for (next_index, element) in init.iter().enumerate() {
+                        let (index, initializers) = match element {
+                            StructArrayInitializer::Element(initializers) => {
+                                (next_index, initializers)
+                            }
+                            StructArrayInitializer::Designated { index, value } => (*index, value),
+                        };
+                        let mut fields = BTreeSet::new();
+                        self.collect_union_pointer_initializer_fields(
+                            type_name,
+                            initializers,
+                            &mut Vec::new(),
+                            parameter_provenance,
+                            visited_functions,
+                            call_results,
+                            &mut fields,
+                        );
+                        element_fields.extend(fields.into_iter().map(|path| (index, path)));
+                    }
+                    let binding_index = parameter_provenance.get(name).map_or(0, Vec::len);
+                    parameter_provenance.entry(name.clone()).or_default().push(
+                        UnionPointerProvenanceBinding {
+                            whole_object: self
+                                .struct_types
+                                .get(type_name)
+                                .is_some_and(|aggregate| aggregate.kind == AggregateKind::Union),
+                            fields: BTreeSet::new(),
+                            element_fields,
+                            aggregate_type: Some(type_name.clone()),
+                            aggregate_target: Some(Box::new(UnionPointerAggregateTarget {
+                                root: UnionPointerAggregateRoot::Local {
+                                    name: name.clone(),
+                                    binding_index,
+                                },
+                                path: Vec::new(),
+                            })),
+                            aggregate_is_array: true,
+                            alias_group: None,
+                        },
+                    );
+                    true
+                }
+                Stmt::StaticLocal { id, decl } => {
+                    let (name, _) = Self::static_local_name_and_const(decl)
+                        .expect("parsed static local has a declaration");
+                    let key = Self::union_pointer_static_local_key(*id, name);
+                    if let Some(binding) =
+                        Self::active_union_pointer_binding(parameter_provenance, &key)
+                            .cloned()
+                            .or_else(|| {
+                                self.static_locals.get(id).map(|storage| {
+                                    self.union_pointer_provenance_value_binding(&storage.value)
+                                })
+                            })
+                    {
+                        parameter_provenance
+                            .entry(name.to_string())
+                            .or_default()
+                            .push(binding.clone());
+                        parameter_provenance.insert(key, vec![binding]);
+                        true
+                    } else {
+                        let falls_through = self.collect_returned_union_pointer_provenance(
+                            std::slice::from_ref(decl),
+                            parameter_provenance,
+                            visited_functions,
+                            call_results,
+                            break_provenance,
+                            continue_provenance,
+                            saw_return,
+                            returned_provenance,
+                        );
+                        if let Some(binding) =
+                            Self::active_union_pointer_binding(parameter_provenance, name).cloned()
+                        {
+                            parameter_provenance.insert(key, vec![binding]);
+                        }
+                        falls_through
+                    }
+                }
+                Stmt::If {
+                    cond,
+                    then_branch,
+                    else_branch,
+                } => {
+                    self.collect_union_pointer_expression_effects(
+                        cond,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                    let incoming = parameter_provenance.clone();
+                    let mut then_provenance = incoming.clone();
+                    let then_falls_through = self.collect_returned_union_pointer_provenance(
+                        then_branch,
+                        &mut then_provenance,
+                        visited_functions,
+                        call_results,
+                        break_provenance,
+                        continue_provenance,
+                        saw_return,
+                        returned_provenance,
+                    );
+                    let mut else_provenance = incoming;
+                    let else_falls_through = self.collect_returned_union_pointer_provenance(
+                        else_branch,
+                        &mut else_provenance,
+                        visited_functions,
+                        call_results,
+                        break_provenance,
+                        continue_provenance,
+                        saw_return,
+                        returned_provenance,
+                    );
+                    match (then_falls_through, else_falls_through) {
+                        (true, true) => {
+                            *parameter_provenance = then_provenance;
+                            Self::merge_union_pointer_provenance(
+                                parameter_provenance,
+                                &else_provenance,
+                            );
+                        }
+                        (true, false) => *parameter_provenance = then_provenance,
+                        (false, true) => *parameter_provenance = else_provenance,
+                        (false, false) => {}
+                    }
+                    then_falls_through || else_falls_through
+                }
+                Stmt::While { cond, body } => self.collect_union_pointer_loop_provenance(
+                    body,
+                    None,
+                    Some(cond),
+                    true,
+                    true,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                    saw_return,
+                    returned_provenance,
+                ),
+                Stmt::DoWhile { body, cond } => self.collect_union_pointer_loop_provenance(
+                    body,
+                    None,
+                    Some(cond),
+                    false,
+                    false,
+                    parameter_provenance,
+                    visited_functions,
+                    call_results,
+                    saw_return,
+                    returned_provenance,
+                ),
+                Stmt::For {
+                    init,
+                    cond,
+                    increment,
+                    body,
+                } => {
+                    let outer_binding_counts = parameter_provenance
+                        .iter()
+                        .map(|(name, bindings)| (name.clone(), bindings.len()))
+                        .collect::<HashMap<_, _>>();
+                    if let Some(init) = init {
+                        let init_falls_through = self.collect_returned_union_pointer_provenance(
+                            std::slice::from_ref(init),
+                            parameter_provenance,
+                            visited_functions,
+                            call_results,
+                            break_provenance,
+                            continue_provenance,
+                            saw_return,
+                            returned_provenance,
+                        );
+                        if !init_falls_through {
+                            parameter_provenance.retain(|name, bindings| {
+                                let Some(count) = outer_binding_counts.get(name) else {
+                                    return false;
+                                };
+                                bindings.truncate(*count);
+                                true
+                            });
+                            return false;
+                        }
+                    }
+                    let falls_through = self.collect_union_pointer_loop_provenance(
+                        body,
+                        increment.as_deref(),
+                        cond.as_ref(),
+                        true,
+                        true,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                        saw_return,
+                        returned_provenance,
+                    );
+                    parameter_provenance.retain(|name, bindings| {
+                        let Some(count) = outer_binding_counts.get(name) else {
+                            return false;
+                        };
+                        bindings.truncate(*count);
+                        true
+                    });
+                    falls_through
+                }
+                Stmt::Switch { expr, sections } => {
+                    self.collect_union_pointer_expression_effects(
+                        expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                    let incoming = parameter_provenance.clone();
+                    let mut joined = (!sections
+                        .iter()
+                        .any(|section| section.label == SwitchLabel::Default))
+                    .then(|| incoming.clone());
+                    let mut fallthrough = None;
+                    for section in sections {
+                        let mut section_provenance = incoming.clone();
+                        if let Some(previous) = fallthrough.take() {
+                            Self::merge_union_pointer_provenance(
+                                &mut section_provenance,
+                                &previous,
+                            );
+                        }
+                        let mut section_breaks = Vec::new();
+                        let section_falls_through = self.collect_returned_union_pointer_provenance(
+                            &section.statements,
+                            &mut section_provenance,
+                            visited_functions,
+                            call_results,
+                            &mut section_breaks,
+                            continue_provenance,
+                            saw_return,
+                            returned_provenance,
+                        );
+                        for state in section_breaks {
+                            if let Some(joined) = &mut joined {
+                                Self::merge_union_pointer_provenance(joined, &state);
+                            } else {
+                                joined = Some(state);
+                            }
+                        }
+                        if section_falls_through {
+                            fallthrough = Some(section_provenance);
+                        }
+                    }
+                    if let Some(state) = fallthrough {
+                        if let Some(joined) = &mut joined {
+                            Self::merge_union_pointer_provenance(joined, &state);
+                        } else {
+                            joined = Some(state);
+                        }
+                    }
+                    if let Some(joined) = joined {
+                        *parameter_provenance = joined;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                Stmt::VarDecl { expr, .. } => {
+                    self.collect_union_pointer_expression_effects(
+                        expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                    true
+                }
+                Stmt::Empty
+                | Stmt::CharacterPointerOutputDecl { .. }
+                | Stmt::Array2DPointerDecl { .. }
+                | Stmt::ArrayDecl { .. }
+                | Stmt::Array2DDecl { .. }
+                | Stmt::EnumDecl { .. }
+                | Stmt::StaticAssert { .. }
+                | Stmt::DerefAssign { .. }
+                | Stmt::ArrayAssign { .. } => true,
+                Stmt::StructAssign {
+                    name,
+                    fields,
+                    value,
+                } => {
+                    self.collect_union_pointer_expression_effects(
+                        value,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                    let value = self.union_pointer_provenance_binding(
+                        value,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                    Self::replace_union_pointer_field_provenance(
+                        parameter_provenance,
+                        name,
+                        fields,
+                        value,
+                    );
+                    true
+                }
+                Stmt::Expr(expr) => {
+                    self.collect_union_pointer_expression_effects(
+                        expr,
+                        parameter_provenance,
+                        visited_functions,
+                        call_results,
+                    );
+                    true
+                }
+                Stmt::Break(_) => {
+                    break_provenance.push(parameter_provenance.clone());
+                    false
+                }
+                Stmt::Continue(_) => {
+                    continue_provenance.push(parameter_provenance.clone());
+                    false
+                }
+                Stmt::Return(None) => {
+                    *saw_return = true;
+                    false
+                }
+            };
+            Self::sync_union_pointer_static_locals(parameter_provenance);
+            Self::sync_union_pointer_globals(parameter_provenance);
+            if !falls_through {
+                return false;
+            }
+        }
+        true
+    }
+
     fn struct_field_array_element_field_metadata(
         &self,
         name: &str,
@@ -34111,22 +36873,30 @@ impl Interpreter {
                         .ok()
                 })
                 .unwrap_or(false),
-            Expr::AddressOfStructArrayField { name, fields, .. } => {
+            Expr::AddressOfStructArrayField {
+                name,
+                fields,
+                index,
+            } => {
                 if self.struct_field_is_pointer(name, fields) {
                     self.struct_pointer_field_points_to_const(name, fields)
                 } else {
                     self.direct_struct_array_field_points_to_const(name, fields)
+                        || self.pointer_expr_points_to_const(index)
                 }
             }
-            Expr::AddressOfStructElementField { name, fields, .. } => self
-                .find_variable_scope_id(name)
-                .and_then(|scope_id| {
-                    self.struct_field_points_to_const(scope_id, name, Some(0), fields)
-                        .ok()
-                })
-                .unwrap_or(false),
-            Expr::AddressOfStructElementArrayField { name, fields, .. } => self
-                .struct_element_field_metadata(name, fields)
+            Expr::AddressOfStructElementField {
+                name,
+                index,
+                fields,
+            } => self.struct_element_expr_field_points_to_const(name, index, fields),
+            Expr::AddressOfStructElementArrayField {
+                name,
+                fields,
+                index,
+                ..
+            } => self
+                .struct_element_expr_field_metadata(name, index, fields)
                 .ok()
                 .flatten()
                 .map(|(field_type, is_const, points_to_const)| match field_type {
@@ -34134,9 +36904,13 @@ impl Interpreter {
                     StructFieldType::Array(_, _)
                     | StructFieldType::Array2D(_, _, _)
                     | StructFieldType::StructArray(_, _) => {
-                        self.struct_array_element_field_points_to_const(name, fields) || is_const
+                        self.pointer_expr_points_to_const(index)
+                            || self.struct_array_element_field_points_to_const(name, fields)
+                            || is_const
                     }
-                    StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
+                    StructFieldType::Scalar(_) | StructFieldType::Struct(_) => {
+                        self.pointer_expr_points_to_const(index)
+                    }
                 })
                 .unwrap_or(false),
             Expr::StructGet { name, fields } => {
@@ -34230,19 +37004,24 @@ impl Interpreter {
                 .unwrap_or(false),
             Expr::StructElementSet {
                 name,
+                index,
                 fields,
                 value,
-                ..
             } => self
-                .struct_element_field_metadata(name, fields)
+                .struct_element_expr_field_metadata(name, index, fields)
                 .ok()
                 .flatten()
                 .is_some_and(|(field_type, _, points_to_const)| {
                     matches!(field_type, StructFieldType::Pointer(_))
                         && (points_to_const || self.pointer_expr_points_to_const(value))
                 }),
-            Expr::StructElementCompoundSet { name, fields, .. } => self
-                .struct_element_field_metadata(name, fields)
+            Expr::StructElementCompoundSet {
+                name,
+                index,
+                fields,
+                ..
+            } => self
+                .struct_element_expr_field_metadata(name, index, fields)
                 .ok()
                 .flatten()
                 .is_some_and(|(field_type, _, points_to_const)| {
@@ -34437,11 +37216,13 @@ impl Interpreter {
                     StructFieldType::Array(_, _)
                     | StructFieldType::Array2D(_, _, _)
                     | StructFieldType::StructArray(_, _) => {
-                        self.struct_field_array_element_path_points_to_const(
-                            name,
-                            array_fields,
-                            fields,
-                        ) || is_const
+                        self.pointer_expr_points_to_const(index)
+                            || self.struct_field_array_element_path_points_to_const(
+                                name,
+                                array_fields,
+                                fields,
+                            )
+                            || is_const
                     }
                     StructFieldType::Scalar(_) | StructFieldType::Struct(_) => false,
                 }),
@@ -34475,6 +37256,59 @@ impl Interpreter {
             Expr::CompoundAssign { name, .. } => self.pointer_variable_points_to_const(name),
             Expr::Increment { target, .. } => self.pointer_expr_points_to_const(target),
             _ => false,
+        }
+    }
+
+    fn pointer_assignment_target_points_to_const(&self, target: &Expr) -> bool {
+        match target {
+            Expr::Assign { name, .. } => self.pointer_variable_points_to_const(name),
+            Expr::StructSet { name, fields, .. } => {
+                self.struct_pointer_field_points_to_const(name, fields)
+            }
+            Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                ..
+            } => self
+                .struct_element_expr_field_metadata(name, index, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_)) && points_to_const
+                }),
+            Expr::StructPtrSet {
+                pointer, fields, ..
+            } => self
+                .struct_pointer_expr_field_metadata(pointer, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_)) && points_to_const
+                }),
+            Expr::AggregateFieldSet {
+                aggregate, fields, ..
+            } => self
+                .aggregate_literal_field_metadata(aggregate, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_)) && points_to_const
+                }),
+            Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            } => self
+                .struct_field_array_element_field_metadata(name, array_fields, index, fields)
+                .ok()
+                .flatten()
+                .is_some_and(|(field_type, _, points_to_const)| {
+                    matches!(field_type, StructFieldType::Pointer(_)) && points_to_const
+                }),
+            _ => self.pointer_expr_points_to_const(target),
         }
     }
 
@@ -34633,9 +37467,17 @@ impl Interpreter {
 
     fn ensure_array_pointer_owner_live(&self, owner: Option<&ArrayPointerOwner>) -> CustResult<()> {
         match owner {
-            Some(owner) if !self.live_scope_ids.contains(&owner.scope_id) => Err(CustError::new(
-                format!("pointer to out-of-scope variable '{}'", owner.name),
-            )),
+            Some(owner)
+                if !self.live_scope_ids.contains(&owner.scope_id)
+                    || self
+                        .expired_full_expression_temporaries
+                        .contains(&(owner.scope_id, owner.name.clone())) =>
+            {
+                Err(CustError::new(format!(
+                    "pointer to out-of-scope variable '{}'",
+                    owner.name
+                )))
+            }
             Some(_) | None => Ok(()),
         }
     }
@@ -35251,10 +38093,21 @@ impl Interpreter {
         let Some(actual) = self.pointer_value_type(pointer)? else {
             return Ok(());
         };
-        if !matches!(expected, PointeeType::Void) && &actual != expected {
+        self.ensure_pointer_conversion_type_matches(expected, &actual)
+    }
+
+    fn ensure_pointer_conversion_type_matches(
+        &self,
+        expected: &PointeeType,
+        actual: &PointeeType,
+    ) -> CustResult<()> {
+        if !matches!(expected, PointeeType::Void)
+            && !matches!(actual, PointeeType::Void)
+            && actual != expected
+        {
             return Err(CustError::new(format!(
                 "cannot convert pointer to {} to pointer to {}",
-                self.pointee_label(&actual),
+                self.pointee_label(actual),
                 self.pointee_label(expected)
             )));
         }
@@ -36965,6 +39818,48 @@ impl Interpreter {
             };
         }
         self.struct_element_field_metadata(name, path)
+    }
+
+    fn struct_element_expr_type_name(&self, name: &str, index: &Expr) -> Option<String> {
+        if let Ok(Some(PointeeType::Struct(type_name))) =
+            self.scalar_variable_reverse_subscript_pointee_type(name, index)
+        {
+            return Some(type_name);
+        }
+        match self.find_variable(name) {
+            Some(Value::StructArray { type_name, .. })
+            | Some(Value::Pointer {
+                ty: PointeeType::Struct(type_name),
+                ..
+            }) => Some(type_name.clone()),
+            _ => None,
+        }
+    }
+
+    fn struct_field_array_element_type_name(
+        &self,
+        name: &str,
+        array_fields: &[String],
+        index: &Expr,
+    ) -> Option<String> {
+        if let Ok(Some(PointeeType::Struct(type_name))) =
+            self.scalar_field_reverse_subscript_pointee_type(name, array_fields, index)
+        {
+            return Some(type_name);
+        }
+        let root_type = match self.find_variable(name) {
+            Some(Value::Struct { type_name, .. }) => type_name,
+            _ => return None,
+        };
+        match self.aggregate_type_field_metadata(root_type, array_fields) {
+            Ok(Some((
+                StructFieldType::StructArray(type_name, _)
+                | StructFieldType::Pointer(PointeeType::Struct(type_name)),
+                _,
+                _,
+            ))) => Some(type_name),
+            _ => None,
+        }
     }
 
     fn struct_element_expr_scalar_field_type(
@@ -39578,7 +42473,7 @@ impl Interpreter {
     }
 
     fn eval_pointer(&mut self, expr: &Expr) -> CustResult<PointerValue> {
-        match expr {
+        let pointer = match expr {
             Expr::GenericSelection { .. } => self
                 .eval_selected_generic(expr, |interpreter, selected| {
                     interpreter.eval_pointer(selected)
@@ -39830,7 +42725,17 @@ impl Interpreter {
                 read_only,
             } => self.make_aggregate_array_compound_literal(type_name, *len, init, *read_only),
             Expr::AggregateFieldGet { aggregate, fields } => {
-                self.eval_aggregate_literal_field_pointer(aggregate, fields)
+                if self.aggregate_expr_has_lvalue_pointer(aggregate) {
+                    let pointer = self
+                        .eval_aggregate_lvalue_pointer(aggregate)?
+                        .expect("classified aggregate lvalue should produce a pointer");
+                    match self.find_struct_pointer_array_field_base_pointer(&pointer, fields) {
+                        Ok(pointer) => Ok(pointer),
+                        Err(_) => self.read_struct_pointer_pointer_field(&pointer, fields),
+                    }
+                } else {
+                    self.eval_aggregate_literal_field_pointer(aggregate, fields)
+                }
             }
             Expr::AggregateFieldSet {
                 aggregate,
@@ -39991,7 +42896,7 @@ impl Interpreter {
                 fields,
             } => {
                 if matches!(
-                    self.struct_element_field_metadata(name, fields)?,
+                    self.struct_element_expr_field_metadata(name, index, fields)?,
                     Some((StructFieldType::Pointer(_), _, _))
                 ) {
                     let element_pointer = self.indexed_struct_element_pointer(name, index)?;
@@ -40141,7 +43046,7 @@ impl Interpreter {
                     return Err(CustError::new("double pointers are not supported"));
                 }
                 let Some((StructFieldType::Pointer(_), _, points_to_const)) =
-                    self.struct_element_field_metadata(name, fields)?
+                    self.struct_element_expr_field_metadata(name, index, fields)?
                 else {
                     return Err(CustError::new("expected pointer expression"));
                 };
@@ -40410,7 +43315,9 @@ impl Interpreter {
                 self.eval_pointer_arithmetic(left, op, right)
             }
             _ => Err(CustError::new("expected pointer expression")),
-        }
+        }?;
+        self.reject_union_backed_double_pointer(&pointer)?;
+        Ok(pointer)
     }
 
     fn eval_ordering(&mut self, left: &Expr, op: &BinaryOp, right: &Expr) -> CustResult<i64> {
@@ -40515,6 +43422,64 @@ impl Interpreter {
                     Ok(Some(PointeeType::Scalar(CType::Double)))
                 )
         })
+    }
+
+    fn aggregate_field_expr_is_array_designator(&self, expr: &Expr) -> bool {
+        let is_array = |metadata: CustResult<Option<(StructFieldType, bool, bool)>>| {
+            matches!(
+                metadata,
+                Ok(Some((
+                    StructFieldType::Array(_, _)
+                        | StructFieldType::Array2D(_, _, _)
+                        | StructFieldType::StructArray(_, _),
+                    _,
+                    _
+                )))
+            )
+        };
+        match expr {
+            Expr::StructGet { name, fields } => match self.find_variable(name) {
+                Some(Value::Struct { type_name, .. }) => {
+                    is_array(self.aggregate_type_field_metadata(type_name, fields))
+                }
+                _ => false,
+            },
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => is_array(self.struct_element_expr_field_metadata(name, index, fields)),
+            Expr::StructPtrGet { pointer, fields } => {
+                is_array(self.struct_pointer_expr_field_metadata(pointer, fields))
+            }
+            Expr::StructFieldArrayElementGet {
+                name,
+                array_fields,
+                index,
+                fields,
+            } => is_array(self.struct_field_array_element_field_metadata(
+                name,
+                array_fields,
+                index,
+                fields,
+            )),
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                is_array(self.aggregate_literal_field_metadata(aggregate, fields))
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.aggregate_field_expr_is_array_designator(then_expr)
+                    || self.aggregate_field_expr_is_array_designator(else_expr)
+            }
+            Expr::Comma(_, right) => self.aggregate_field_expr_is_array_designator(right),
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .is_ok_and(|selected| self.aggregate_field_expr_is_array_designator(selected)),
+            _ => false,
+        }
     }
 
     fn aggregate_expr_has_lvalue_pointer(&self, expr: &Expr) -> bool {
@@ -41987,12 +44952,34 @@ impl Interpreter {
                 )
             }
             Expr::StructGet { name, fields } => self.struct_field_decays_to_pointer(name, fields),
-            Expr::StructElementGet { name, fields, .. } => {
-                self.struct_element_field_decays_to_pointer(name, fields)
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => matches!(
+                self.struct_element_expr_field_metadata(name, index, fields),
+                Ok(Some((
+                    StructFieldType::Pointer(_)
+                        | StructFieldType::Array(_, _)
+                        | StructFieldType::Array2D(_, _, _)
+                        | StructFieldType::StructArray(_, _),
+                    _,
+                    _
+                )))
+            ),
+            Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                ..
             }
-            Expr::StructElementSet { name, fields, .. }
-            | Expr::StructElementCompoundSet { name, fields, .. } => matches!(
-                self.struct_element_field_metadata(name, fields),
+            | Expr::StructElementCompoundSet {
+                name,
+                index,
+                fields,
+                ..
+            } => matches!(
+                self.struct_element_expr_field_metadata(name, index, fields),
                 Ok(Some((StructFieldType::Pointer(_), _, _)))
             ),
             Expr::StructPtrGet { pointer, fields } => {
@@ -42951,7 +45938,9 @@ impl Interpreter {
 
     fn generic_aggregate_field_expr_type(&self, expr: &Expr) -> CustResult<Option<DeclType>> {
         let (type_name, fields, index) = match expr {
-            Expr::StructGet { name, fields } => match self.find_variable(name) {
+            Expr::StructGet { name, fields }
+            | Expr::StructSet { name, fields, .. }
+            | Expr::StructCompoundSet { name, fields, .. } => match self.find_variable(name) {
                 Some(Value::Struct { type_name, .. }) => {
                     (type_name.clone(), fields.as_slice(), None)
                 }
@@ -42967,7 +45956,13 @@ impl Interpreter {
                 }
                 _ => return Ok(None),
             },
-            Expr::StructPtrGet { pointer, fields } => {
+            Expr::StructPtrGet { pointer, fields }
+            | Expr::StructPtrSet {
+                pointer, fields, ..
+            }
+            | Expr::StructPtrCompoundSet {
+                pointer, fields, ..
+            } => {
                 let Some(PointeeType::Struct(type_name)) =
                     self.pointer_expr_pointee_type(pointer)?
                 else {
@@ -42975,8 +45970,36 @@ impl Interpreter {
                 };
                 (type_name, fields.as_slice(), None)
             }
-            Expr::AggregateFieldGet { aggregate, fields } => {
+            Expr::AggregateFieldGet { aggregate, fields }
+            | Expr::AggregateFieldSet {
+                aggregate, fields, ..
+            }
+            | Expr::AggregateFieldCompoundSet {
+                aggregate, fields, ..
+            } => {
                 let type_name = self.aggregate_expr_type_name(aggregate)?;
+                (type_name, fields.as_slice(), None)
+            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            }
+            | Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructElementCompoundSet {
+                name,
+                index,
+                fields,
+                ..
+            } => {
+                let Some(type_name) = self.struct_element_expr_type_name(name, index) else {
+                    return Ok(None);
+                };
                 (type_name, fields.as_slice(), None)
             }
             _ => return Ok(None),
@@ -43665,6 +46688,7 @@ impl Interpreter {
         aggregate: &Expr,
         path: &[String],
     ) -> CustResult<PointerValue> {
+        let function_result = self.aggregate_expr_is_function_result(aggregate);
         match self.eval_struct_expr(aggregate)? {
             ReturnValue::Struct { type_name, fields } => {
                 let (_, field_value) = Self::nested_field_value(&type_name, &fields, path)?;
@@ -43685,6 +46709,13 @@ impl Interpreter {
                         self.next_compound_literal_id += 1;
                         self.current_scope_mut()
                             .insert(name.clone(), Value::Struct { type_name, fields });
+                        if function_result {
+                            self.function_result_temporaries.push((
+                                scope_id,
+                                name.clone(),
+                                self.call_depth,
+                            ));
+                        }
                         let owner = Some(ArrayPointerOwner {
                             scope_id,
                             name: name.clone(),
@@ -43730,6 +46761,13 @@ impl Interpreter {
                                 read_only: *is_const,
                             },
                         );
+                        if function_result {
+                            self.function_result_temporaries.push((
+                                scope_id,
+                                name.clone(),
+                                self.call_depth,
+                            ));
+                        }
                         Ok(PointerValue::StructElement {
                             scope_id,
                             name,
@@ -43742,6 +46780,37 @@ impl Interpreter {
                 }
             }
             _ => Err(CustError::new("expected struct expression")),
+        }
+    }
+
+    fn aggregate_expr_is_function_result(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Call { name, .. } => self
+                .functions
+                .get(name)
+                .map(|function| &function.return_type)
+                .or_else(|| {
+                    self.prototypes
+                        .get(name)
+                        .map(|signature| &signature.return_type)
+                })
+                .is_some_and(|return_type| matches!(return_type, ReturnType::Struct(_))),
+            Expr::AggregateFieldGet { aggregate, .. } => {
+                self.aggregate_expr_is_function_result(aggregate)
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.aggregate_expr_is_function_result(then_expr)
+                    || self.aggregate_expr_is_function_result(else_expr)
+            }
+            Expr::Comma(_, right) => self.aggregate_expr_is_function_result(right),
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .is_ok_and(|selected| self.aggregate_expr_is_function_result(selected)),
+            _ => false,
         }
     }
 
@@ -43921,6 +46990,27 @@ impl Interpreter {
         Ok(())
     }
 
+    fn validate_non_evaluating_scalar_pointer_conversion(
+        &self,
+        target: CType,
+        value: &Expr,
+    ) -> CustResult<()> {
+        if !self.expr_is_pointer_value(value) {
+            return Ok(());
+        }
+        let pointee = self
+            .pointer_expr_pointee_type(value)?
+            .ok_or_else(|| CustError::new("expected pointer expression"))?;
+        self.validate_non_evaluating_assignment_type(
+            &DeclType::Scalar(target),
+            &DeclType::Pointer {
+                pointee,
+                points_to_const: self.pointer_expr_points_to_const(value),
+            },
+            value,
+        )
+    }
+
     fn validate_non_evaluating_aggregate_double_array_base_mutable(
         &self,
         expr: &Expr,
@@ -44042,6 +47132,86 @@ impl Interpreter {
     }
 
     fn validate_non_evaluating_aggregate_lvalue_mutable(&self, target: &Expr) -> CustResult<()> {
+        let aggregate_array_path = match target {
+            Expr::StructSet { name, fields, .. } | Expr::StructCompoundSet { name, fields, .. } => {
+                let metadata = match self.find_variable(name) {
+                    Some(Value::Struct { type_name, .. }) => {
+                        self.aggregate_type_field_metadata(type_name, fields)?
+                    }
+                    _ => None,
+                };
+                metadata
+                    .is_some_and(|(field_type, _, _)| {
+                        matches!(field_type, StructFieldType::StructArray(_, _))
+                    })
+                    .then_some(fields)
+            }
+            Expr::StructElementSet {
+                name,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructElementCompoundSet {
+                name,
+                index,
+                fields,
+                ..
+            } => self
+                .struct_element_expr_field_metadata(name, index, fields)?
+                .is_some_and(|(field_type, _, _)| {
+                    matches!(field_type, StructFieldType::StructArray(_, _))
+                })
+                .then_some(fields),
+            Expr::StructPtrSet {
+                pointer, fields, ..
+            }
+            | Expr::StructPtrCompoundSet {
+                pointer, fields, ..
+            } => self
+                .struct_pointer_expr_field_metadata(pointer, fields)?
+                .is_some_and(|(field_type, _, _)| {
+                    matches!(field_type, StructFieldType::StructArray(_, _))
+                })
+                .then_some(fields),
+            Expr::StructFieldArrayElementSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            }
+            | Expr::StructFieldArrayElementCompoundSet {
+                name,
+                array_fields,
+                index,
+                fields,
+                ..
+            } => self
+                .struct_field_array_element_field_metadata(name, array_fields, index, fields)?
+                .is_some_and(|(field_type, _, _)| {
+                    matches!(field_type, StructFieldType::StructArray(_, _))
+                })
+                .then_some(fields),
+            Expr::AggregateFieldSet {
+                aggregate, fields, ..
+            }
+            | Expr::AggregateFieldCompoundSet {
+                aggregate, fields, ..
+            } => self
+                .aggregate_literal_field_metadata(aggregate, fields)?
+                .is_some_and(|(field_type, _, _)| {
+                    matches!(field_type, StructFieldType::StructArray(_, _))
+                })
+                .then_some(fields),
+            _ => None,
+        };
+        if let Some(fields) = aggregate_array_path {
+            return Err(CustError::new(format!(
+                "struct field '{}' is a struct array",
+                Self::field_path_label(fields)
+            )));
+        }
         let validate_path = |type_name: &str, fields: &[String]| {
             if let Some(field) = self.const_aggregate_field_label_for_path(type_name, fields) {
                 return Err(CustError::new(format!(
@@ -44241,8 +47411,25 @@ impl Interpreter {
         value: &Expr,
         op: Option<CompoundOp>,
     ) -> CustResult<()> {
+        if let Some(destination) = self.pointer_expr_pointee_type(target)? {
+            self.reject_union_backed_double_pointer_conversion(&destination, value)?;
+        }
         if self.expr_is_pointer_value(target) && self.expr_is_unsupported_double_pointer(value) {
             return Err(CustError::new("double pointers are not supported"));
+        }
+        if op.is_none()
+            && self.expr_is_pointer_value(target)
+            && self.expr_is_pointer_value(value)
+            && let (Some(expected), Some(actual)) = (
+                self.pointer_expr_pointee_type(target)?,
+                self.pointer_expr_pointee_type(value)?,
+            )
+        {
+            self.ensure_pointer_conversion_type_matches(&expected, &actual)?;
+            self.ensure_pointer_conversion_preserves_const(
+                self.pointer_assignment_target_points_to_const(target),
+                value,
+            )?;
         }
         if self.expr_is_double_value(target) {
             if self.expr_is_pointer_value(value) {
@@ -44257,6 +47444,23 @@ impl Interpreter {
                     "{} value used as scalar",
                     self.aggregate_kind_label(&type_name)
                 )));
+            }
+        }
+        if !self.expr_is_pointer_value(target) && self.expr_is_pointer_value(value) {
+            let target_is_bool = matches!(
+                self.generic_aggregate_field_expr_type(target)?,
+                Some(DeclType::Scalar(CType::Bool))
+            ) || match target {
+                Expr::Deref(pointer)
+                | Expr::DerefSet { pointer, .. }
+                | Expr::DerefCompoundSet { pointer, .. } => matches!(
+                    self.pointer_expr_pointee_type(pointer)?,
+                    Some(PointeeType::Scalar(CType::Bool))
+                ),
+                _ => false,
+            };
+            if !target_is_bool {
+                return Err(CustError::new("pointer value used as scalar"));
             }
         }
         Ok(())
@@ -44328,75 +47532,7 @@ impl Interpreter {
         type_name: &str,
         initializers: &[StructInitializer],
     ) -> CustResult<()> {
-        let fields = self
-            .struct_types
-            .get(type_name)
-            .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
-        for initializer in initializers {
-            let StructInitializer::Designated { field, value } = initializer else {
-                continue;
-            };
-            let field = fields
-                .fields
-                .iter()
-                .find(|candidate| candidate.name == *field)
-                .ok_or_else(|| {
-                    CustError::new(format!("struct '{type_name}' has no field '{field}'"))
-                })?;
-            match (&field.ty, value.as_ref()) {
-                (StructFieldType::Pointer(_), StructInitializer::Expr(expr))
-                    if self.expr_is_unsupported_double_pointer(expr) =>
-                {
-                    return Err(CustError::new("double pointers are not supported"));
-                }
-                (StructFieldType::Scalar(CType::Double), StructInitializer::Expr(expr)) => {
-                    self.validate_non_evaluating_double_initializer_expr(expr)?;
-                }
-                (StructFieldType::Array(CType::Double, _), StructInitializer::Array(values)) => {
-                    for value in values {
-                        if let ArrayInitializer::Expr(expr)
-                        | ArrayInitializer::Designated { value: expr, .. } = value
-                        {
-                            self.validate_non_evaluating_double_initializer_expr(expr)?;
-                        }
-                    }
-                }
-                (StructFieldType::Struct(nested), StructInitializer::Struct(values)) => {
-                    self.validate_non_evaluating_struct_initializer_conversions(nested, values)?;
-                }
-                (
-                    StructFieldType::StructArray(nested, _),
-                    StructInitializer::StructArray(values),
-                ) => {
-                    for value in values {
-                        let values = match value {
-                            StructArrayInitializer::Element(values)
-                            | StructArrayInitializer::Designated { value: values, .. } => values,
-                        };
-                        self.validate_non_evaluating_struct_initializer_conversions(
-                            nested, values,
-                        )?;
-                    }
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_non_evaluating_double_initializer_expr(&self, expr: &Expr) -> CustResult<()> {
-        if self.expr_is_pointer_value(expr) {
-            return Err(CustError::new(
-                "cannot assign pointer expression to double value",
-            ));
-        }
-        if let Ok(type_name) = self.aggregate_expr_type_name(expr) {
-            return Err(CustError::new(format!(
-                "{} value used as scalar",
-                self.aggregate_kind_label(&type_name)
-            )));
-        }
-        Ok(())
+        self.validate_non_evaluating_generic_struct_initializers(type_name, initializers, &[])
     }
 
     fn validate_sizeof_binary_expression_depth(expr: &Expr) -> CustResult<()> {
@@ -44448,8 +47584,10 @@ impl Interpreter {
             {
                 return Err(CustError::new("double pointers are not supported"));
             }
-            if matches!(expr, Expr::Conditional { .. } | Expr::Comma(_, _))
-                && self.expr_is_unsupported_double_pointer(expr)
+            if matches!(
+                expr,
+                Expr::Call { .. } | Expr::Conditional { .. } | Expr::Comma(_, _)
+            ) && self.expr_is_unsupported_double_pointer(expr)
             {
                 return Err(CustError::new("double pointers are not supported"));
             }
@@ -44467,6 +47605,14 @@ impl Interpreter {
                     ..
                 } => {
                     self.validate_non_evaluating_array_initializers(init)?;
+                    for initializer in init {
+                        let value = match initializer {
+                            ArrayInitializer::Expr(value)
+                            | ArrayInitializer::Designated { value, .. } => value,
+                            ArrayInitializer::StringLiteral(_) => continue,
+                        };
+                        self.validate_non_evaluating_scalar_pointer_conversion(*elem_type, value)?;
+                    }
                     let len = len.unwrap_or_else(|| Self::infer_array_initializer_len(init));
                     Ok(len as i64 * elem_type.size())
                 }
@@ -44532,6 +47678,9 @@ impl Interpreter {
                     index,
                     fields,
                 } => {
+                    if self.expr_is_unsupported_double_pointer(expr) {
+                        return Err(CustError::new("double pointers are not supported"));
+                    }
                     let reverse_size = self.sizeof_scalar_field_reverse_subscript_field(
                         name,
                         array_fields,
@@ -44635,6 +47784,9 @@ impl Interpreter {
                     self.sizeof_struct_element_expr_array_indexed_value(name, index, fields)
                 }
                 Expr::StructPtrGet { pointer, fields } => {
+                    if self.expr_is_unsupported_double_pointer(expr) {
+                        return Err(CustError::new("double pointers are not supported"));
+                    }
                     self.sizeof_struct_pointer_field(pointer, fields)
                 }
                 Expr::StructPtrArrayGet {
@@ -44765,16 +47917,53 @@ impl Interpreter {
                     self.validate_non_evaluating_struct_initializer_conversions(type_name, init)?;
                     Ok(POINTER_SIZE)
                 }
-                Expr::AddressOfArray { index, .. }
-                | Expr::AddressOfStructElementField { index, .. }
-                | Expr::AddressOfStructArrayField { index, .. } => {
+                Expr::AddressOfStructArrayField {
+                    name,
+                    fields,
+                    index,
+                } => {
+                    match self.scalar_field_reverse_subscript_pointee_type(name, fields, index)? {
+                        Some(PointeeType::Void) => {
+                            return Err(CustError::new("cannot index pointer to void"));
+                        }
+                        Some(_) => {
+                            self.sizeof_expr(index)?;
+                        }
+                        None => self.validate_array_subscript(index)?,
+                    }
+                    Ok(POINTER_SIZE)
+                }
+                Expr::AddressOfStructElementField { name, index, .. } => {
+                    match self.scalar_variable_reverse_subscript_pointee_type(name, index)? {
+                        Some(PointeeType::Void) => {
+                            return Err(CustError::new("cannot index pointer to void"));
+                        }
+                        Some(_) => {
+                            self.sizeof_expr(index)?;
+                        }
+                        None => self.validate_array_subscript(index)?,
+                    }
+                    Ok(POINTER_SIZE)
+                }
+                Expr::AddressOfArray { index, .. } => {
                     self.validate_array_subscript(index)?;
                     Ok(POINTER_SIZE)
                 }
                 Expr::AddressOfStructElementArrayField {
-                    index, array_index, ..
+                    name,
+                    index,
+                    array_index,
+                    ..
                 } => {
-                    self.validate_array_subscript(index)?;
+                    match self.scalar_variable_reverse_subscript_pointee_type(name, index)? {
+                        Some(PointeeType::Void) => {
+                            return Err(CustError::new("cannot index pointer to void"));
+                        }
+                        Some(_) => {
+                            self.sizeof_expr(index)?;
+                        }
+                        None => self.validate_array_subscript(index)?,
+                    }
                     self.validate_array_subscript(array_index)?;
                     Ok(POINTER_SIZE)
                 }
@@ -44831,24 +48020,11 @@ impl Interpreter {
                     if self.expr_is_unsupported_double_pointer(value) {
                         return Err(CustError::new("double pointers are not supported"));
                     }
+                    let target_type =
+                        self.non_evaluating_generic_selection_type(&Expr::Var(name.clone()), &[])?;
+                    let value_type = self.non_evaluating_generic_selection_type(value, &[])?;
+                    self.validate_non_evaluating_assignment_type(&target_type, &value_type, value)?;
                     self.sizeof_expr(value)?;
-                    if matches!(
-                        self.find_variable(name),
-                        Some(Value::Scalar {
-                            ty: CType::Double,
-                            ..
-                        })
-                    ) && self.expr_is_pointer_value(value)
-                    {
-                        return Err(CustError::new(
-                            "cannot assign pointer expression to double value",
-                        ));
-                    }
-                    if matches!(self.find_variable(name), Some(Value::Pointer { .. }))
-                        && self.expr_is_double_value(value)
-                    {
-                        return Err(CustError::new("expected pointer expression"));
-                    }
                     self.sizeof_assignment_result(name)
                 }
                 Expr::CompoundAssign { name, op, value } => {
@@ -44902,6 +48078,9 @@ impl Interpreter {
                         self.validate_array_subscript(index)?;
                     }
                     self.sizeof_expr(value)?;
+                    if let Some(elem_type) = self.scalar_array_element_type(name) {
+                        self.validate_non_evaluating_scalar_pointer_conversion(elem_type, value)?;
+                    }
                     if let Some(size) = reverse_size {
                         Ok(size)
                     } else {
@@ -45146,6 +48325,9 @@ impl Interpreter {
                             "pointer to void arithmetic is not supported",
                         ));
                     }
+                    if self.aggregate_field_expr_is_array_designator(target) {
+                        return Err(CustError::new("invalid increment/decrement target"));
+                    }
                     let size = self.sizeof_expr(target)?;
                     self.validate_non_evaluating_aggregate_lvalue_mutable(target)?;
                     Ok(size)
@@ -45166,6 +48348,9 @@ impl Interpreter {
                     if self.expr_is_unsupported_double_pointer(inner) {
                         return Err(CustError::new("double pointers are not supported"));
                     }
+                    if self.expr_is_pointer_value(inner) && !matches!(ty, CType::Bool) {
+                        return Err(CustError::new("pointer value used as scalar"));
+                    }
                     self.reject_void_scalar_operand(inner)?;
                     self.sizeof_expr(inner)?;
                     Ok(ty.size())
@@ -45173,6 +48358,7 @@ impl Interpreter {
                 Expr::ScalarLiteral {
                     ty, init: inner, ..
                 } => {
+                    self.validate_non_evaluating_scalar_pointer_conversion(*ty, inner)?;
                     self.reject_void_scalar_operand(inner)?;
                     self.sizeof_expr(inner)?;
                     Ok(ty.size())
@@ -45408,6 +48594,9 @@ impl Interpreter {
                             "pointer to void arithmetic is not supported",
                         ));
                     }
+                    if self.expr_is_pointer_value(inner) {
+                        return Err(CustError::new("pointer value used as scalar"));
+                    }
                     self.reject_void_scalar_operand(inner)?;
                     self.sizeof_expr(inner)?;
                     if self.expr_is_double_value(inner) {
@@ -45420,6 +48609,17 @@ impl Interpreter {
                     if self.expr_is_unsupported_double_pointer(inner) {
                         return Err(CustError::new("double pointers are not supported"));
                     }
+                    if matches!(
+                        self.pointer_expr_pointee_type(inner)?,
+                        Some(PointeeType::Void)
+                    ) {
+                        return Err(CustError::new(
+                            "pointer to void arithmetic is not supported",
+                        ));
+                    }
+                    if self.expr_is_pointer_value(inner) {
+                        return Err(CustError::new("pointer value used as scalar"));
+                    }
                     self.reject_void_scalar_operand(inner)?;
                     self.sizeof_expr(inner)?;
                     if self.expr_is_double_value(inner) {
@@ -45431,6 +48631,9 @@ impl Interpreter {
                 Expr::BitwiseNot(inner) if self.expr_is_double_value(inner) => Err(CustError::new(
                     "bitwise operations on double values are not supported",
                 )),
+                Expr::BitwiseNot(inner) if self.expr_is_pointer_value(inner) => Err(
+                    CustError::new("pointer bitwise operations are not supported"),
+                ),
                 Expr::BitwiseNot(inner) | Expr::LogicalNot(inner) => {
                     if self.expr_is_unsupported_double_pointer(inner) {
                         return Err(CustError::new("double pointers are not supported"));
@@ -45643,7 +48846,19 @@ impl Interpreter {
                 Expr::Conditional { .. } => self.sizeof_conditional_expr(expr),
                 Expr::Comma(left, right) => {
                     self.validate_non_evaluating_discard_expr(left)?;
-                    self.sizeof_expr(right)
+                    let size = self.sizeof_expr(right)?;
+                    Ok(
+                        if self.is_aggregate_double_array_field_index_base(right)
+                            && matches!(
+                                self.pointer_expr_pointee_type(right),
+                                Ok(Some(PointeeType::Scalar(CType::Double)))
+                            )
+                        {
+                            POINTER_SIZE
+                        } else {
+                            size
+                        },
+                    )
                 }
             }
         })();
@@ -47613,7 +50828,35 @@ impl Interpreter {
         Ok(ExecFlow::None)
     }
 
+    fn expire_function_result_temporaries(&mut self) {
+        let call_depth = self.call_depth;
+        let mut expired = Vec::new();
+        self.function_result_temporaries
+            .retain(|(scope_id, name, depth)| {
+                if *depth == call_depth {
+                    expired.push((*scope_id, name.clone()));
+                    false
+                } else {
+                    true
+                }
+            });
+        for (scope_id, name) in expired {
+            if let Some(scope) = self.scopes.iter_mut().find(|scope| scope.id == scope_id) {
+                scope.values.remove(&name);
+            }
+            self.expired_full_expression_temporaries
+                .insert((scope_id, name));
+        }
+    }
+
     fn exec_stmt(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
+        self.expire_function_result_temporaries();
+        let result = self.exec_stmt_inner(stmt);
+        self.expire_function_result_temporaries();
+        result
+    }
+
+    fn exec_stmt_inner(&mut self, stmt: &Stmt) -> CustResult<ExecFlow> {
         match stmt {
             Stmt::Empty => Ok(ExecFlow::None),
             Stmt::Many(statements) => {
