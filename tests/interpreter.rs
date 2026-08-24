@@ -5681,17 +5681,156 @@ fn direct_double_struct_fields_preserve_pointer_array_and_const_boundaries() {
 }
 
 #[test]
+fn direct_double_typedef_aliases_preserve_supported_value_and_pointer_forms() {
+    let program = r#"
+typedef double Real;
+typedef Real Reading;
+typedef const Real ConstReal;
+typedef Reading Row[3];
+typedef const Reading ConstRow[2];
+typedef Real *RealPtr;
+typedef const Real *ConstRealPtr;
+typedef Real * const FixedRealPtr;
+
+struct Sample {
+    Reading scalar;
+    Row values;
+    RealPtr pointer;
+    ConstReal fixed;
+};
+
+Reading adjust(Real value) {
+    return value + 0.5;
+}
+
+RealPtr advance(RealPtr pointer) {
+    return pointer + 1;
+}
+
+Real sum(Row values) {
+    return values[0] + values[1] + values[2];
+}
+
+Real const_sum(ConstRow values) {
+    return values[0] + values[1];
+}
+
+int main(void) {
+    Row values = {1.0, 2.0, 3.0};
+    ConstRow fixed_values = {4.0, 5.0};
+    struct Sample sample = {6.0, {7.0, 8.0, 9.0}, values, 10.0};
+    RealPtr cursor = advance(sample.values);
+    ConstRealPtr view = fixed_values;
+    FixedRealPtr fixed_pointer = values;
+
+    *fixed_pointer += 0.25;
+    cursor[1] += 0.5;
+
+    return adjust(sample.scalar) == 6.5
+            && sum(values) == 6.25
+            && const_sum(fixed_values) == 9.0
+            && sample.values[2] == 9.5
+            && sample.pointer == values
+            && view[1] == 5.0
+            && sizeof(Row) == 3 * sizeof(Real)
+            && _Alignof(ConstRow) == _Alignof(Reading)
+            && sizeof(RealPtr) == sizeof(void *)
+            && _Generic(sample.scalar, Real: 1, default: 0)
+            && _Generic(cursor, RealPtr: 1, default: 0)
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_typedef_aliases_preserve_safety_boundaries() {
+    for (program, expected) in [
+        (
+            "typedef double Matrix[2][3]; int main(void) { return 0; }",
+            "double multidimensional array typedef aliases are not supported",
+        ),
+        (
+            "typedef double (*RowPointer)[3]; int main(void) { return 0; }",
+            "double pointer-to-row typedef aliases are not supported",
+        ),
+        (
+            "typedef double Row[3]; Row *make(void) { return 0; } int main(void) { return make() != 0; }",
+            "pointer-to-array return types are not supported",
+        ),
+        (
+            "typedef double Row[3]; struct Sample { Row *field; }; int main(void) { return 0; }",
+            "pointer-to-array struct fields are not supported",
+        ),
+        (
+            "typedef double *RealPtr; _Atomic(RealPtr) pointer; int main(void) { return pointer != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "typedef double *RealPtr; typedef RealPtr *RealPtrPtr; int main(void) { return 0; }",
+            "pointer-to-pointer typedef aliases are not supported",
+        ),
+        (
+            "typedef double Row[1]; int main(void) { return ((Row){1.5})[0] == 1.5; }",
+            "double array compound literals are not supported",
+        ),
+        (
+            "typedef double *RealPtr; union Choice { double value; int bits; }; int main(void) { union Choice choice = {.value = 1.0}; RealPtr pointer = &choice.value; return pointer != 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); typedef double Real; int main(void) { Real value = 1.0; memset(&value, 0, sizeof(value)); return 0; }",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+        (
+            "typedef const double *ConstRealPtr; int main(void) { const double value = 1.0; double *pointer = 0; ConstRealPtr view = &value; pointer = view; return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "typedef double *RealPtr; RealPtr escape(void) { double value = 1.0; return &value; } int main(void) { RealPtr pointer = escape(); return pointer[0] == 1.0; }",
+            "pointer to out-of-scope variable 'value'",
+        ),
+    ] {
+        let error = interpret(program).expect_err(program).to_string();
+        assert!(
+            error.starts_with(expected),
+            "expected {expected:?}, got {error:?} for {program}"
+        );
+    }
+}
+
+#[test]
+fn direct_double_typedef_pointer_slot_const_does_not_qualify_returned_pointee() {
+    let program = r#"
+typedef double * const FixedRealPtr;
+typedef double *RealPtr;
+double global_value;
+FixedRealPtr select(void) {
+    return &global_value;
+}
+int main(void) {
+    double *pointer = select();
+    double *cast_pointer = (const RealPtr)&global_value;
+    *pointer = 2.5;
+    *cast_pointer += 1.0;
+    return global_value == 3.5 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn direct_double_aggregate_array_fields_preserve_typedef_rank_boundaries() {
     for program in [
         "typedef double Matrix[2][3]; struct Sample { Matrix values; }; int main(void) { return 0; }",
         "typedef double Row[2]; struct Sample { Row values[3]; }; int main(void) { return 0; }",
     ] {
+        let error = interpret(program).expect_err(program).to_string();
         assert!(
-            interpret(program)
-                .expect_err(program)
-                .to_string()
-                .starts_with("double typedef aliases are not supported"),
-            "unexpected diagnostic for {program}"
+            error.contains("double") && error.contains("multidimensional"),
+            "unexpected diagnostic for {program}: {error}"
         );
     }
 }
@@ -13423,10 +13562,6 @@ fn rejects_unsupported_floating_point_forms_with_context() {
         (
             "int main(void) {\n    long double value;\n    return 0;\n}",
             "long double types are not supported at line 2, column 5",
-        ),
-        (
-            "typedef double Real;\nint main(void) { return 0; }",
-            "double typedef aliases are not supported at line 1, column 9",
         ),
         (
             "int main(void) { return (int)1.0f; }",

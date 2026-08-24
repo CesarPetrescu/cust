@@ -2,6 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-24 — Typedef-derived declarators and pointer qualification
+
+- A typedef name is not a textual macro: `typedef double Row[3]; Row *p` derives a pointer to the whole aliased array, not `double *`. Cust must reject that unsupported shape before `decl_type_to_pointee()` can collapse the array metadata in function-return and aggregate-field routes.
+- Likewise, `typedef double *RealPtr; const RealPtr` applies top-level const to the pointer slot, not to `double`. Function return values and cast rvalues discard that top-level slot qualification; only the alias's `points_to_const` metadata qualifies the pointee. Direct `const double *` remains represented by scalar base qualification plus an explicit star and is unchanged.
+- Alias expansion must reapply feature boundaries at derived-type consumers: `_Atomic(RealPtr)` remains unsupported under the direct-double atomic-pointer boundary, and a `Row` compound literal remains unsupported because direct double-array compound literals are not in Cust's bounded slice.
+- No external source was required. Existing C declarator semantics, warning-denied GCC/Clang compilation of the registered fixture, focused RED/GREEN, and independent minimized reproducers established the implementation decisions. See `references/cust-direct-double-typedef-aliases.md`.
+
 ## 2026-08-24 — v0.35.0 release consistency
 
 - Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.34.0`, then passed after Cargo/lock and both image tags moved to `0.35.0`. Cargo metadata and the built CLI report `cust 0.35.0`; local and remote annotated-tag preflight found no `v0.35.0` refs.

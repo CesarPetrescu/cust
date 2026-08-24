@@ -7860,6 +7860,18 @@ impl Parser {
                 } else {
                     if matches!(
                         decl_type,
+                        DeclType::Pointer {
+                            pointee: PointeeType::Scalar(CType::Double),
+                            ..
+                        }
+                    ) {
+                        return Err(Self::error_at(
+                            "double pointers are not supported".to_string(),
+                            &atomic_type_token,
+                        ));
+                    }
+                    if matches!(
+                        decl_type,
                         DeclType::Array(_, _) | DeclType::Array2D(_, _, _)
                     ) {
                         return Err(Self::error_at(
@@ -8389,12 +8401,6 @@ impl Parser {
                 &self.tokens[base_start],
             ));
         }
-        if matches!(base_type, DeclType::Scalar(CType::Double)) {
-            return Err(Self::error_at(
-                "double typedef aliases are not supported".to_string(),
-                &self.tokens[base_start],
-            ));
-        }
 
         loop {
             let (
@@ -8453,6 +8459,12 @@ impl Parser {
                 ));
             }
             if let DeclType::Scalar(elem_type) = base_type {
+                if elem_type == CType::Double {
+                    return Err(Self::error_at(
+                        "double pointer-to-row typedef aliases are not supported".to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 self.expect(Token::LParen)?;
                 self.expect(Token::Star)?;
                 let post_star_qualified = self.leading_type_qualifier_token().is_some();
@@ -8570,6 +8582,13 @@ impl Parser {
             let len = self.expect_array_len()?;
             self.expect_closing_bracket_after("typedef array length")?;
             alias = match alias {
+                TypeAlias::Scalar(CType::Double) if self.check(&Token::LBracket) => {
+                    return Err(Self::error_at(
+                        "double multidimensional array typedef aliases are not supported"
+                            .to_string(),
+                        self.peek_located(),
+                    ));
+                }
                 TypeAlias::Scalar(ty) if self.matches(&Token::LBracket) => {
                     let columns = self.expect_array_len()?;
                     self.expect_closing_bracket_after("second typedef array dimension")?;
@@ -9224,6 +9243,15 @@ impl Parser {
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("function return type")?;
         if self.matches(&Token::Star) {
+            if matches!(
+                decl_type,
+                DeclType::Array(_, _) | DeclType::Array2D(_, _, _)
+            ) {
+                return Err(Self::error_at(
+                    "pointer-to-array return types are not supported".to_string(),
+                    self.previous(),
+                ));
+            }
             if matches!(decl_type, DeclType::Pointer { .. }) || self.check(&Token::Star) {
                 return Err(Self::error_at(
                     "pointer-to-pointer return types are not supported".to_string(),
@@ -9247,7 +9275,7 @@ impl Parser {
             return Ok((
                 ReturnType::Pointer {
                     ty: pointee,
-                    points_to_const: leading_const || points_to_const,
+                    points_to_const,
                 },
                 false,
             ));
@@ -12633,6 +12661,17 @@ impl Parser {
                         self.peek_located(),
                     ));
                 }
+                if has_explicit_star
+                    && matches!(
+                        decl_type,
+                        DeclType::Array(_, _) | DeclType::Array2D(_, _, _)
+                    )
+                {
+                    return Err(Self::error_at(
+                        format!("pointer-to-array {keyword} fields are not supported"),
+                        self.previous(),
+                    ));
+                }
                 let is_pointer = has_explicit_star || matches!(decl_type, DeclType::Pointer { .. });
                 let (is_const, points_to_const) = if is_pointer {
                     if has_explicit_star {
@@ -12671,6 +12710,13 @@ impl Parser {
                     }
                     DeclType::Array(PointeeType::Struct(type_name), len) => {
                         StructFieldType::StructArray(type_name, len)
+                    }
+                    DeclType::Array2D(CType::Double, _, _) => {
+                        return Err(Self::error_at(
+                            "double multidimensional aggregate array fields are not supported"
+                                .to_string(),
+                            self.previous(),
+                        ));
                     }
                     DeclType::Array2D(ty, rows, columns) => {
                         StructFieldType::Array2D(ty, rows, columns)
@@ -12765,6 +12811,13 @@ impl Parser {
                         StructFieldType::Pointer(_) => {
                             return Err(Self::error_at(
                                 format!("pointer array {keyword} fields are not supported"),
+                                self.previous(),
+                            ));
+                        }
+                        StructFieldType::Array(CType::Double, _) => {
+                            return Err(Self::error_at(
+                                "double multidimensional aggregate array fields are not supported"
+                                    .to_string(),
                                 self.previous(),
                             ));
                         }
@@ -16357,7 +16410,7 @@ impl Parser {
                 self.reject_missing_cast_operand()?;
                 return Ok(Expr::PointerCast {
                     pointee,
-                    points_to_const: leading_const || points_to_const,
+                    points_to_const,
                     expr: Box::new(self.parse_unary()?),
                 });
             }
@@ -16369,6 +16422,12 @@ impl Parser {
                 if !self.check(&Token::LBrace) {
                     return Err(Self::error_at(
                         "pointer casts are not supported".to_string(),
+                        &type_token,
+                    ));
+                }
+                if matches!(pointee, PointeeType::Scalar(CType::Double)) {
+                    return Err(Self::error_at(
+                        "double array compound literals are not supported".to_string(),
                         &type_token,
                     ));
                 }

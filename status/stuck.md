@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.35.0 publication on 2026-08-24. Fresh independent complete-release-diff review returned `APPROVED`; the canonical local/no-cache-rebuilt-Docker gate, exact 2,057-test inventory, local/image version checks, runtime output `10`, diff hygiene, and added-line secret scans pass. Release commit `aa7fa4db3926c8add58d6d28f0a0c172ad293d3e` was accepted on `origin/main` before annotated tag object `b44e45ac36e53cb5e4f656c6863dc1f8bba5b939` was created and pushed; local and remote tag objects peel exactly to the release commit. There are no active blockers.
+None. Last reviewed after direct `double` typedef-alias completion on 2026-08-24. Final independent review returned `APPROVED`; focused interpreter/compiler-oracle checks, the canonical local/rebuilt-Docker gate, exact 2,060-test inventory, runtime output `10`, and diff hygiene pass. There are no active blockers.
 
 ## Resolved this run
+
+### 2026-08-24 — Direct-double typedef alias boundary bypasses
+
+- Failure: alias-spelled pointer-to-row function returns and aggregate fields collapsed to scalar pointers/arrays; `_Atomic(RealPtr)` bypassed the direct-double pointer boundary; `((Row){...})` enabled a forbidden double-array compound literal; and top-level pointer-slot `const` on alias-spelled function returns/casts incorrectly qualified the pointee.
+- Root cause: derived declarator parsing reused `decl_type_to_pointee()` before rejecting array aliases followed by `*`, while the atomic and array-compound-literal paths did not reapply direct-double boundaries after alias expansion. Function-return and cast lowering also merged top-level pointer-slot qualification with pointee qualification for an already-pointer `DeclType`.
+- RED/GREEN: focused safety and pointer-slot-const regressions reproduced every route. Narrow parser guards retain the existing unsupported shapes, and already-pointer return/cast lowering now preserves only alias pointee qualification. All focused tests are GREEN.
+- Verification: the registered native fixture passes GCC/Clang warnings-as-errors and the actual compiler oracle; final independent review returned `APPROVED`; all 2,060 local/rebuilt-Docker tests and runtime output `10` pass.
 
 ### 2026-08-24 — Static aggregate-pointer provenance laundering
 
