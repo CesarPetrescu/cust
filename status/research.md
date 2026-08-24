@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-24 — v0.35.0 release consistency
+
+- Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.34.0`, then passed after Cargo/lock and both image tags moved to `0.35.0`. Cargo metadata and the built CLI report `cust 0.35.0`; local and remote annotated-tag preflight found no `v0.35.0` refs.
+- Executable target-by-target listing reconciles 2,057 tests: 1,921 interpreter, 99 deterministic fuzz-safety, 33 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over shared-storage union bytes, direct double typedef aliases, and parser/property expansion because release closure is the sole unchecked authoritative package and packages reviewed behavior without widening semantics.
+- The aggregate-field pointer reference establishes the release boundary: scalar and one-dimensional-array fields in supported structs are addressable/decay-capable, while `double **`, pointer-to-row/multidimensional forms, whole-array addresses, raw-memory double object bytes, and every union-backed double-field address/decay remain rejected.
+- Publication must retain release-commit-first ordering: independent complete-diff review precedes the canonical gate; exact `origin/main` acceptance precedes annotated-tag creation; and local/remote tag objects plus peeled targets must match. Direct double typedef aliases are the next bounded language package after publication.
+- Fresh independent complete-release-diff review reported no findings and returned `APPROVED`. Formatting, warning-denied Clippy, all local tests, a no-cache Docker rebuild, all Docker tests, runtime output `10`, exact `cust 0.35.0` from Cargo/local CLI/both image services, `git diff --check`, and added-line secret scans pass. These checks verify the release commit candidate; publication remains deliberately pending until the commit is accepted on `origin/main`.
+- No external semantic research was required; executable version tests, Cargo/Compose metadata, `references/cust-direct-double-aggregate-field-pointers.md`, and the loaded release-closure consistency checklist establish the release surface.
+
 ## 2026-08-24 — Conservative aggregate-target joins
 
 - In non-evaluating union-provenance analysis, `aggregate_target: None` is a meaningful mixed/unknown identity once both control-flow paths have bindings; it is not missing metadata that may be filled from the other path.

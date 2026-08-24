@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after aggregate-field direct `double *` closure on 2026-08-24. The remaining static-local union-provenance regression is fixed, independent complete-diff review returned `APPROVED`, all 2,057 local and rebuilt-Docker tests pass, and the runtime image prints `10`. There are no active blockers.
+None. Last reviewed after bounded v0.35.0 release verification on 2026-08-24. Version-first CLI and Compose expectations pass after package/lock/image metadata moved to `0.35.0`; Cargo, local CLI, and both rebuilt image versions agree; the exact 2,057-test inventory reconciles; local/remote tag preflight is empty; fresh independent complete-release-diff review returned `APPROVED`; and the canonical local/no-cache-rebuilt-Docker gate, runtime output `10`, diff hygiene, and added-line secret scans pass. Release-commit-first push, exact `origin/main` acceptance, and annotated-tag publication remain ordinary release steps rather than blockers.
 
 ## Resolved this run
 
