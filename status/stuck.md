@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.35.0 release verification on 2026-08-24. Version-first CLI and Compose expectations pass after package/lock/image metadata moved to `0.35.0`; Cargo, local CLI, and both rebuilt image versions agree; the exact 2,057-test inventory reconciles; local/remote tag preflight is empty; fresh independent complete-release-diff review returned `APPROVED`; and the canonical local/no-cache-rebuilt-Docker gate, runtime output `10`, diff hygiene, and added-line secret scans pass. Release-commit-first push, exact `origin/main` acceptance, and annotated-tag publication remain ordinary release steps rather than blockers.
+None. Last reviewed after bounded v0.35.0 publication on 2026-08-24. Fresh independent complete-release-diff review returned `APPROVED`; the canonical local/no-cache-rebuilt-Docker gate, exact 2,057-test inventory, local/image version checks, runtime output `10`, diff hygiene, and added-line secret scans pass. Release commit `aa7fa4db3926c8add58d6d28f0a0c172ad293d3e` was accepted on `origin/main` before annotated tag object `b44e45ac36e53cb5e4f656c6863dc1f8bba5b939` was created and pushed; local and remote tag objects peel exactly to the release commit. There are no active blockers.
 
 ## Resolved this run
 
