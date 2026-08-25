@@ -2,6 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-25 — v0.36.0 release consistency
+
+- Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.35.0`, then passed after Cargo/lock and both image tags moved to `0.36.0`. Cargo metadata and the built CLI report `cust 0.36.0`; local and remote annotated-tag preflight found no `v0.36.0` refs.
+- Executable target-by-target listing reconciles 2,060 tests: 1,924 interpreter, 99 deterministic fuzz-safety, 33 CLI, 2 Docker metadata, 1 compiler-oracle harness, and 1 repository-license test. Candidate evaluation selected release closure over direct/typedef-backed double-array compound literals, shared-storage union bytes, and parser/property expansion because release closure was the sole unchecked authoritative package at selection time and packages reviewed behavior without widening runtime semantics.
+- The typedef-alias reference establishes the release boundary: supported scalar/const/array/adjusted-parameter/function/aggregate-field/one-level-pointer aliases preserve type, qualification, owner, lifetime, and bounds metadata; deeper pointers, arrays of pointers, pointer-to-row/multidimensional forms, whole-array addresses, union-backed pointer storage, atomic pointer aliases, double-array compound literals, and raw-memory double object bytes remain rejected.
+- Publication must retain release-commit-first ordering: independent complete-diff review precedes the canonical gate; exact `origin/main` acceptance precedes annotated-tag creation; and local/remote tag objects plus peeled targets must match. Direct and typedef-backed double-array compound literals are the next concrete language package after publication.
+- Initial release review found that README's central limitation still called all double typedef aliases and all double-array parameters unsupported. Removing the obsolete alias limitation and narrowing the array-parameter boundary to direct declarators preserves the supported typedef-adjusted `Row` parameter route. Fresh complete-diff re-review returned `APPROVED` with no findings.
+- Formatting, warning-denied Clippy, all 2,060 local tests, a no-cache Docker rebuild, all 2,060 rebuilt-Docker tests, runtime output `10`, exact `cust 0.36.0` from Cargo/local CLI/both image services, repeated empty tag preflight, and `git diff --check` pass. Publication remains deliberately pending until the release commit is accepted on exact `origin/main`.
+- No external semantic research was required; executable version tests, Cargo/Compose metadata, `references/cust-direct-double-typedef-aliases.md`, and the loaded release-closure consistency checklist establish the consistency surface.
+
 ## 2026-08-24 — Typedef-derived declarators and pointer qualification
 
 - A typedef name is not a textual macro: `typedef double Row[3]; Row *p` derives a pointer to the whole aliased array, not `double *`. Cust must reject that unsupported shape before `decl_type_to_pointee()` can collapse the array metadata in function-return and aggregate-field routes.
