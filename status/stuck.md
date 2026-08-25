@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed during bounded v0.36.0 release preparation on 2026-08-25. Review found and resolved one stale README typedef/array-parameter limitation; fresh complete-diff review returned `APPROVED`. Version-first RED/GREEN, exact 2,060-test inventory, formatting, warning-denied Clippy, all local tests, a no-cache Docker rebuild, all rebuilt-Docker tests, runtime output `10`, exact versions, tag preflight, and diff hygiene pass. There are no active blockers; release-commit-first publication remains pending.
+None. Last reviewed after bounded v0.36.0 publication on 2026-08-25. Review found and resolved one stale README typedef/array-parameter limitation; fresh complete-diff review returned `APPROVED`. Version-first RED/GREEN, exact 2,060-test inventory, formatting, warning-denied Clippy, all local tests, a no-cache Docker rebuild, all rebuilt-Docker tests, runtime output `10`, exact versions, release-commit-first publication, and exact local/remote tag-object and peeled-target verification pass. There are no active blockers.
 
 ## Resolved this run
 
