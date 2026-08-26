@@ -16425,12 +16425,6 @@ impl Parser {
                         &type_token,
                     ));
                 }
-                if matches!(pointee, PointeeType::Scalar(CType::Double)) {
-                    return Err(Self::error_at(
-                        "double array compound literals are not supported".to_string(),
-                        &type_token,
-                    ));
-                }
                 return match pointee {
                     PointeeType::Void => unreachable!("void arrays are rejected while parsing"),
                     PointeeType::Scalar(elem_type) => Ok(Expr::ArrayLiteral {
@@ -16462,12 +16456,6 @@ impl Parser {
             }
         };
         if self.matches(&Token::LBracket) {
-            if ty == CType::Double {
-                return Err(Self::error_at(
-                    "double array compound literals are not supported".to_string(),
-                    &type_token,
-                ));
-            }
             let len = if self.check(&Token::RBracket) {
                 None
             } else {

@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added direct and typedef-backed one-dimensional `double` array compound literals with fixed or inferred lengths, positional and designated initialization, zero fill, hidden-root pointer decay/index/update, const preservation, lexical lifetime checks, one-time evaluated initialization, and non-evaluating full-object/element type queries.
+
+### Diagnostics and verification
+
+- Retained exact multidimensional, whole-array-address/pointer-to-row, union-backed double-field decay, and raw-memory double-storage boundaries in evaluated and non-evaluating contexts. Focused direct/typedef valid and invalid fixtures cover const discard/write, expired hidden storage, deterministic size/alignment relationships, and warning-free GCC/Clang/compiler-oracle parity.
+
 ## v0.36.0 — 2026-08-25
 
 ### Language subset

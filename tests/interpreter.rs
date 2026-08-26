@@ -5745,6 +5745,126 @@ int main(void) {
 }
 
 #[test]
+fn supports_typedef_backed_double_array_compound_literals() {
+    let program = r#"
+typedef double Real;
+typedef Real Row[4];
+int main(void) {
+    Real *values = (Row){1.0, [2] = 3.5};
+    values[1] = 2.25;
+    values[3] += 4.75;
+    return values[0] == 1.0 && values[1] == 2.25
+            && values[2] == 3.5 && values[3] == 4.75
+        ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_array_compound_literal_fixture_covers_hidden_storage_and_types() {
+    let program = include_str!("fixtures/compat/valid/direct_double_array_compound_literals.c",);
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_array_compound_literal_sizeof_does_not_evaluate_initializers() {
+    let program = include_str!("fixtures/valid/direct_double_array_compound_literal_sizeof.c",);
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_array_compound_literal_rejects_const_discard() {
+    let program =
+        include_str!("fixtures/invalid/direct_double_array_compound_literal_const_discard.c",);
+
+    let error = interpret(program).unwrap_err().to_string();
+    assert_eq!(error, "cannot discard const qualifier from pointer target");
+}
+
+#[test]
+fn direct_double_array_compound_literal_rejects_expired_hidden_storage() {
+    let program = include_str!("fixtures/invalid/direct_double_array_compound_literal_expired.c",);
+
+    let error = interpret(program).unwrap_err().to_string();
+    assert!(
+        error.starts_with("pointer to out-of-scope variable '__cust_compound_array#"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn typedef_double_array_compound_literal_preserves_const_and_lifetime_boundaries() {
+    let const_discard =
+        include_str!("fixtures/invalid/typedef_double_array_compound_literal_const_discard.c",);
+    assert_eq!(
+        interpret(const_discard).unwrap_err().to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+
+    let const_write =
+        include_str!("fixtures/invalid/typedef_double_array_compound_literal_const_write.c",);
+    assert_eq!(
+        interpret(const_write).unwrap_err().to_string(),
+        "cannot assign through pointer to const"
+    );
+
+    let expired = include_str!("fixtures/invalid/typedef_double_array_compound_literal_expired.c",);
+    let error = interpret(expired).unwrap_err().to_string();
+    assert!(
+        error.starts_with("pointer to out-of-scope variable '__cust_compound_array#"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn direct_double_array_compound_literal_preserves_adjacent_unsupported_boundaries() {
+    for (program, expected) in [
+        (
+            "int main(void) { return ((double[1][2]){{1.0, 2.0}})[0][0] == 1.0; }",
+            "multidimensional array casts are not supported",
+        ),
+        (
+            "int main(void) { return sizeof((double[1][2]){{1.0, 2.0}}); }",
+            "multidimensional array casts are not supported",
+        ),
+        (
+            "int main(void) { return &(double[2]){1.0, 2.0} != 0; }",
+            "invalid address-of target",
+        ),
+        (
+            "int main(void) { return sizeof(&(double[2]){1.0, 2.0}); }",
+            "invalid address-of target",
+        ),
+        (
+            "union Choice { double values[2]; }; int main(void) { union Choice choice = {{3.0, 4.0}}; double *pointer = 0 ? (double[]){1.0, 2.0} : choice.values; return pointer[0] == 3.0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "union Choice { double values[2]; }; int main(void) { union Choice choice = {{3.0, 4.0}}; return sizeof(0 ? (double[]){1.0, 2.0} : choice.values); }",
+            "double pointers are not supported",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { memset((double[]){1.0, 2.0}, 0, sizeof(double)); return 0; }",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { return sizeof(memset((double[]){1.0, 2.0}, 0, sizeof(double))); }",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+    ] {
+        let error = interpret(program).expect_err(program).to_string();
+        assert!(
+            error.starts_with(expected),
+            "expected {expected:?}, got {error:?} for {program}"
+        );
+    }
+}
+
+#[test]
 fn direct_double_typedef_aliases_preserve_safety_boundaries() {
     for (program, expected) in [
         (
@@ -5770,10 +5890,6 @@ fn direct_double_typedef_aliases_preserve_safety_boundaries() {
         (
             "typedef double *RealPtr; typedef RealPtr *RealPtrPtr; int main(void) { return 0; }",
             "pointer-to-pointer typedef aliases are not supported",
-        ),
-        (
-            "typedef double Row[1]; int main(void) { return ((Row){1.5})[0] == 1.5; }",
-            "double array compound literals are not supported",
         ),
         (
             "typedef double *RealPtr; union Choice { double value; int bits; }; int main(void) { union Choice choice = {.value = 1.0}; RealPtr pointer = &choice.value; return pointer != 0; }",
@@ -7300,14 +7416,16 @@ int main(void) {
 }
 
 #[test]
-fn rejects_double_array_compound_literals() {
-    let program = "int main(void) { return ((double[1]){1.5})[0] == 1.5; }";
+fn supports_direct_double_array_compound_literals() {
+    let program = r#"
+int main(void) {
+    double *values = (double[3]){1.25, 2.5};
+    values[1] += 0.5;
+    return values[0] == 1.25 && values[1] == 3.0 && values[2] == 0.0 ? 0 : 1;
+}
+"#;
 
-    let err = interpret(program).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "double array compound literals are not supported at line 1, column 27"
-    );
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]

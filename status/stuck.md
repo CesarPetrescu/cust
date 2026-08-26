@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.36.0 publication on 2026-08-25. Review found and resolved one stale README typedef/array-parameter limitation; fresh complete-diff review returned `APPROVED`. Version-first RED/GREEN, exact 2,060-test inventory, formatting, warning-denied Clippy, all local tests, a no-cache Docker rebuild, all rebuilt-Docker tests, runtime output `10`, exact versions, release-commit-first publication, and exact local/remote tag-object and peeled-target verification pass. There are no active blockers.
+None. Last reviewed after direct and typedef-backed one-dimensional `double` array compound-literal closure on 2026-08-25. Fresh independent follow-up review returned `APPROVED`; focused direct/typedef const/lifetime/type-query and evaluated/non-evaluating boundary regressions, actual compiler-oracle coverage, GCC/Clang warnings-as-errors, formatting, warning-denied Clippy, all 2,067 local tests, the completed Docker Compose test run, runtime output `10`, and diff hygiene pass. The first foreground Compose attempt exceeded the 600-second wrapper during its second full test pass after the image-build test pass succeeded; the exact command was rerun as a tracked background process and exited `0`. There are no active blockers.
 
 ## Resolved this run
+
+### 2026-08-25 — Double-array compound-literal parser guards and review closure
+
+- Failure: direct and typedef-backed one-dimensional double-array compound literals stopped at explicit parser diagnostics even though typed hidden scalar-array storage already supported their runtime and metadata behavior.
+- Root cause: two feature-stage rejection guards remained in the direct scalar-array and alias-expanded `DeclType::Array` compound-literal branches.
+- RED/GREEN: one direct and one typedef-backed focused test each failed on its own guard before the guard was removed. Review-driven tests then proved typedef const discard/write and expired storage plus evaluated/non-evaluating multidimensional, whole-array/pointer-to-row, union-backed, and raw-memory boundaries.
+- Verification: fresh independent review returned `APPROVED`; eight focused tests, the actual compiler oracle, GCC/Clang warnings-as-errors, all local and Docker tests, runtime output `10`, formatting, Clippy, and diff hygiene pass.
 
 ### 2026-08-24 — Direct-double typedef alias boundary bypasses
 

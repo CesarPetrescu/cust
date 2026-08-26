@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-25 — Direct and typedef-backed `double` array compound literals
+
+- Parser decision: remove only the two `CType::Double` rejection guards in `Parser::parse_cast()`. Direct scalar array spellings and alias-expanded `DeclType::Array(PointeeType::Scalar(CType::Double), len)` then reuse the existing one-dimensional `Expr::ArrayLiteral` path; no new AST/runtime storage variant is needed.
+- Existing hidden scalar-array storage already captures the current lexical scope, root name, element type, mutability, and length once per evaluated literal. Existing pointer and non-evaluating classifiers preserve double pointee type, const discard/write diagnostics, expired-owner diagnostics, `_Generic`, `_Alignof`, and full-object/element `sizeof`.
+- Safety decision: prove evaluated and non-evaluating adjacent boundaries after opening a parser guard. Multidimensional suffixes remain rejected by `reject_multidimensional_array_cast_suffix()`, whole-array address/pointer-to-row construction remains an invalid address-of target, union-backed double-array decay remains unsupported, and exactly prototyped raw-memory calls continue to reject double object storage.
+- Native-oracle finding: the registered fixture compiles and exits `0` under both GCC and Clang with `-std=c11 -Wall -Wextra -Werror`. Keep side-effecting initializers beneath `sizeof` in Cust-only fixtures because Clang may warn about side effects in unevaluated operands; the warning-free oracle fixture instead proves ABI-independent `sizeof`/`_Alignof` relationships.
+- Verification decision: the Compose test service can exceed a 600-second foreground wrapper because it runs the complete suite while building and again in the created container. A foreground timeout is not evidence; rerun the exact `docker compose run --rm test` as a tracked background process and require exit `0`.
+- No external semantic research was required; focused RED/GREEN, existing scalar-array implementation metadata, the compiler oracles, and `references/cust-direct-double-array-compound-literals.md` establish the supported and unsupported boundaries.
+
 ## 2026-08-25 — v0.36.0 release consistency
 
 - Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.35.0`, then passed after Cargo/lock and both image tags moved to `0.36.0`. Cargo metadata and the built CLI report `cust 0.36.0`; local and remote annotated-tag preflight found no `v0.36.0` refs.
