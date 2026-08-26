@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.36.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.37.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -38,7 +38,7 @@ Expected output:
 cargo test
 ```
 
-The v0.36.0 executable inventory is 2,060 tests: 1,924 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+The v0.37.0 executable inventory is 2,067 tests: 1,931 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 
 ### Run inside Docker
 
@@ -71,7 +71,7 @@ The `test` service keeps a writable container overlay so Cargo can update `targe
 
 ## Current language subset
 
-The v0.36.0 package adds typedef aliases for bounded direct `double` values. On current `main`, direct and typedef-backed one-dimensional `double` array compound literals additionally preserve fixed/inferred length, positional/designated initialization, zero fill, hidden-root decay, const, lexical lifetime, and non-evaluating type metadata. Deeper pointers, arrays of pointers, pointer-to-row forms such as `double (*)[N]`, multidimensional arrays, whole-array addresses, union-backed double field addresses/decay, atomic double-pointer aliases, and raw-memory views over double storage remain unsupported. Release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
+The v0.37.0 package adds direct and typedef-backed one-dimensional `double` array compound literals with fixed or inferred length, positional and designated initialization, zero fill, scoped hidden-root decay/index/update, const preservation, lexical lifetime checks, one-time evaluated initialization, and non-evaluating full-object/element type metadata. Deeper pointers, arrays of pointers, pointer-to-row forms such as `double (*)[N]`, multidimensional double arrays, whole-array addresses, union-backed double field addresses/decay, atomic double-pointer aliases, and raw-memory views over double storage remain unsupported. Release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
 
 ```c
 int main() {
@@ -214,7 +214,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: prepare bounded v0.37.0 around the completed direct and typedef-backed one-dimensional `double` array compound-literal slice with synchronized version, documentation, inventory, Docker, and release evidence.
+- Next milestone: add a bounded first fixed two-dimensional direct `double[R][C]` object slice with nested initialization and zero fill, double-index scalar lvalues, deterministic type queries, exact const/bounds/rank/pointer boundaries, focused fixtures, and warning-free ABI-independent compiler-oracle relationships.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider multiple pointer levels and broader C conformance fixtures.
 

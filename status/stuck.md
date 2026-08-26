@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after direct and typedef-backed one-dimensional `double` array compound-literal closure on 2026-08-25. Fresh independent follow-up review returned `APPROVED`; focused direct/typedef const/lifetime/type-query and evaluated/non-evaluating boundary regressions, actual compiler-oracle coverage, GCC/Clang warnings-as-errors, formatting, warning-denied Clippy, all 2,067 local tests, the completed Docker Compose test run, runtime output `10`, and diff hygiene pass. The first foreground Compose attempt exceeded the 600-second wrapper during its second full test pass after the image-build test pass succeeded; the exact command was rerun as a tracked background process and exited `0`. There are no active blockers.
+None. Last reviewed after bounded v0.37.0 release preparation on 2026-08-26. Exact CLI and Compose version tests went RED against `0.36.0` and GREEN at `0.37.0`; Cargo metadata and the independently reconciled 2,067-test inventory agree; fresh complete-diff independent review returned `APPROVED`; formatting, warning-denied Clippy, all local/rebuilt-Docker tests, runtime output `10`, exact versions, and diff hygiene pass. Local and remote tag preflight is empty. There are no active blockers.
 
 ## Resolved this run
 

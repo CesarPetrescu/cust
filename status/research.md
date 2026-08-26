@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-26 — v0.37.0 release consistency
+
+- Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.36.0`, then passed after Cargo/lock and both image tags moved to `0.37.0`. Cargo metadata reports `cust 0.37.0`; local and remote annotated-tag preflight found no `v0.37.0` refs.
+- Executable listing independently reconciles 2,067 tests: 1,931 interpreter + 99 deterministic fuzz-safety + 33 CLI + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test.
+- README central inventory and release notes advertise fixed/inferred lengths, positional/designated initialization, zero fill, scoped hidden-root decay/index/update, const, lexical lifetime, one-time evaluated initialization, and non-evaluating full-object/element queries. They retain deeper/array-of-pointer/pointer-to-row/multidimensional/whole-array-address/union-backed/raw-memory boundaries and distinguish unsupported direct double-array parameters from supported typedef-backed array adjustment.
+- Candidate decision: package the already reviewed one-dimensional double-array compound-literal slice before opening another runtime surface. Direct fixed two-dimensional `double` objects are next because existing 2D scalar-array storage offers a bounded implementation path; deterministic double object bytes and shared union storage require separate representation/aliasing designs.
+- Fresh complete-diff independent release review returned `APPROVED`. Formatting, warning-denied Clippy, all 2,067 local tests, rebuilt-Docker tests, runtime output `10`, exact Cargo/local CLI/image versions, and diff hygiene pass. The annotated tag remains reserved for release-commit-first publication after exact `origin/main` acceptance.
+- No external semantic research was required; executable version tests, Cargo/Compose metadata, `references/cust-direct-double-array-compound-literals.md`, and the loaded release-closure consistency checklists establish the release surface.
+
 ## 2026-08-25 — Direct and typedef-backed `double` array compound literals
 
 - Parser decision: remove only the two `CType::Double` rejection guards in `Parser::parse_cast()`. Direct scalar array spellings and alias-expanded `DeclType::Array(PointeeType::Scalar(CType::Double), len)` then reuse the existing one-dimensional `Expr::ArrayLiteral` path; no new AST/runtime storage variant is needed.
