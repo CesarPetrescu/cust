@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-28 — v0.38.0 release consistency
+
+- Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.37.0`, then passed after Cargo/lock and both image tags moved to `0.38.0`. Cargo metadata and the built CLI report `cust 0.38.0`; local and remote annotated-tag preflight found no `v0.38.0` refs.
+- Executable listing independently reconciles 2,073 tests: 1,937 interpreter + 99 deterministic fuzz-safety + 33 CLI + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test.
+- README central inventory and release notes advertise direct fixed two-dimensional double objects at local/file-global/block-static scope, nested initialization/zero fill, double-index updates, one-time indexes, declaration lists, scalar `_Generic`, and deterministic object/row/element queries. They retain typedef-backed 2D, parameter, aggregate-field, compound-literal, pointer-to-row/row-address, three-dimensional, and raw-memory boundaries.
+- Candidate decision: package the already reviewed direct fixed two-dimensional double-object slice before widening runtime semantics. Alternatives were fixed 2D double typedef aliases, deterministic raw-memory double bytes, and shared union-byte storage. Release closure has bounded metadata risk and is the sole unchecked authoritative item at selection time; 2D double typedef aliases are the next coherent implementation because the parser currently has an exact rejection and direct typed 2D storage is mature. Raw-memory double bytes require a deterministic floating object representation, while union bytes require shared-storage aliasing.
+- Fresh complete-diff independent release review returned `APPROVED`. Formatting, warning-denied Clippy, all 2,073 local tests, rebuilt-Docker tests, runtime output `10`, exact Cargo/local CLI/runtime-image/test-image versions, repeated empty tag preflight, and diff hygiene pass. The annotated tag remains reserved until the verified release commit reaches exact `origin/main`.
+- No external semantic research was required; executable version tests, Cargo/Compose metadata, `references/cust-direct-fixed-two-dimensional-double-arrays.md`, and the loaded release consistency checklists establish the release surface.
+
 ## 2026-08-27 — Direct fixed two-dimensional `double` arrays
 
 - Existing `Value::Array` dimension metadata is sufficient for direct `double[R][C]` objects. Preserve scalar `Expr::Array2DGet` typing as `double`; classify only the whole dimensioned object, row-pointer arithmetic, and `AddressOfArray` row addresses as unsupported double row pointers.

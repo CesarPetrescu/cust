@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after direct fixed two-dimensional `double` completion on 2026-08-27. Review-found pointer-boundary, non-evaluating const, integer-arithmetic, and allocation-panic defects have focused GREEN regressions; later proposed blockers were disproved by exact parser/runtime probes. Formatting, warning-denied Clippy, all 2,073 local and rebuilt-Docker tests, runtime output `10`, the actual compiler oracle, and diff hygiene pass. There are no active blockers.
+None. Last reviewed after v0.38.0 release preparation on 2026-08-28. Version-first CLI and Compose tests are GREEN at `0.38.0`; Cargo/local CLI/both rebuilt-image versions and the executable inventory reconcile; fresh independent review returned `APPROVED`; formatting, strict Clippy, all local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass; and repeated local/remote tag preflight is empty. Release-commit-first publication remains an ordered release step, not a blocker.
 
 ## Resolved this run
 

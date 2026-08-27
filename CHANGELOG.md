@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.38.0 — 2026-08-28
+
+### Language subset
+
+- Added direct fixed two-dimensional `double[R][C]` objects at local, file-global, and block-static scope with nested positional initialization and zero fill, double-index reads and scalar replacement/compound/prefix/postfix updates, one-time row and column index evaluation, declaration lists, scalar `_Generic`, and deterministic full-object/row/element `sizeof` plus `_Alignof` relationships.
+
+### Diagnostics and verification
+
+- Retained targeted const, row/column bounds, incomplete-rank, pointer-to-row, parameter, aggregate-field, compound-literal, three-dimensional, and raw-memory boundaries in evaluated and non-evaluating contexts. Checked integer-constant folding, dimension multiplication, size calculation, and fallible backing-storage reservation convert source-controlled overflow or allocation failure into Cust diagnostics instead of Rust host panics. Six focused interpreter tests and one registered warning-free GCC/Clang compiler-oracle fixture cover the package.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.38.0`.
+- Reconciled an executable inventory of 2,073 tests: 1,937 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- The bounded `double` slice supports direct and typedef-backed scalar/function/one-dimensional-array/aggregate-field storage, direct and typedef-backed one-dimensional array compound literals, safe one-level pointers to standalone and supported struct-field scalar/one-dimensional-array storage, and direct fixed two-dimensional objects. `float`, `long double`, hexadecimal/suffixed/non-finite floating literals, deeper double pointers, arrays of double pointers, pointer-to-row forms such as `double (*)[N]`, whole-array and row addresses, union-backed double field addresses/decay, atomic double-pointer aliases, direct double-array parameter declarators, two-dimensional double typedef aliases/aggregate fields/compound literals, three-dimensional double arrays, and raw-memory operations over double storage remain unsupported. Complex runtime values, host floating ABI/promotion behavior, general pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
+
 ## v0.37.0 — 2026-08-26
 
 ### Language subset
