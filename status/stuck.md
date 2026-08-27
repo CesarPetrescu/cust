@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after v0.38.0 release preparation on 2026-08-28. Version-first CLI and Compose tests are GREEN at `0.38.0`; Cargo/local CLI/both rebuilt-image versions and the executable inventory reconcile; fresh independent review returned `APPROVED`; formatting, strict Clippy, all local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass; and repeated local/remote tag preflight is empty. Release-commit-first publication remains an ordered release step, not a blocker.
+None. Last reviewed after v0.38.0 publication on 2026-08-28. Version-first CLI and Compose tests are GREEN at `0.38.0`; Cargo/local CLI/both rebuilt-image versions and the executable inventory reconcile; fresh independent review returned `APPROVED`; formatting, strict Clippy, all local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. Release commit `94f68a54f242ff3563455746e9e99e136c5069ca` reached exact `origin/main` before annotated tag object `228c0510957dc98bcd56b607877279cf33e9d591` was published and verified to peel exactly to that commit. There are no active blockers.
 
 ## Resolved this run
 
