@@ -2,6 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-27 — Direct fixed two-dimensional `double` arrays
+
+- Existing `Value::Array` dimension metadata is sufficient for direct `double[R][C]` objects. Preserve scalar `Expr::Array2DGet` typing as `double`; classify only the whole dimensioned object, row-pointer arithmetic, and `AddressOfArray` row addresses as unsupported double row pointers.
+- Non-evaluating queries still validate constraints. `sizeof(values[0][0]++)` over a const 2D array must call the same 2D mutability guard as evaluated updates, while ordinary mutable updates remain non-evaluating and return `sizeof(double)`.
+- Rust debug overflow and `Vec` capacity panics are not acceptable guest diagnostics. Integer constant folding now uses checked additive/multiplicative/unary/shift operations with source locations; 2D allocation checks the dimension product and uses `try_reserve_exact()` before resize.
+- Native-oracle relationships remain ABI-independent: `sizeof(matrix) == R * C * sizeof(double)`, `sizeof(matrix[0]) == C * sizeof(double)`, and `_Alignof(double[R][C]) == _Alignof(double)`. The registered fixture passes GCC and Clang with `-std=c11 -Wall -Wextra -Werror`.
+- Independent review was useful but two later proposed blockers were invalid and required direct probes: zero-row arrays stop at `array length must be positive`, and `sizeof(values[0][0] + 1.0)` remains a valid scalar-double expression that exits `0`. See `references/cust-direct-fixed-two-dimensional-double-arrays.md`.
+
 ## 2026-08-26 — v0.37.0 release consistency
 
 - Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.36.0`, then passed after Cargo/lock and both image tags moved to `0.37.0`. Cargo metadata reports `cust 0.37.0`; local and remote annotated-tag preflight found no `v0.37.0` refs.

@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.37.0 publication on 2026-08-26. Exact CLI and Compose version tests went RED against `0.36.0` and GREEN at `0.37.0`; Cargo metadata and the independently reconciled 2,067-test inventory agree; fresh complete-diff independent review returned `APPROVED`; formatting, warning-denied Clippy, all local/rebuilt-Docker tests, runtime output `10`, exact versions, and diff hygiene pass. Release commit `b61dc95167158b0b1c4d1fa2ba90a4cb0219ea51` reached exact `origin/main` before annotated tag object `978fe0b12d5e44b26d73965d7304e6b479d14698`, whose local and remote refs peel exactly to that release commit. There are no active blockers.
+None. Last reviewed after direct fixed two-dimensional `double` completion on 2026-08-27. Review-found pointer-boundary, non-evaluating const, integer-arithmetic, and allocation-panic defects have focused GREEN regressions; later proposed blockers were disproved by exact parser/runtime probes. Formatting, warning-denied Clippy, all 2,073 local and rebuilt-Docker tests, runtime output `10`, the actual compiler oracle, and diff hygiene pass. There are no active blockers.
 
 ## Resolved this run
+
+### 2026-08-27 — Direct 2D double pointer, const, and resource boundaries
+
+- Failure: the initial slice evaluated row-pointer arithmetic instead of retaining the double pointer-to-row boundary; `sizeof` accepted row addresses and const element increments; source-controlled integer constant arithmetic and huge 2D allocation could panic the host.
+- Root cause: the unsupported-double-pointer classifier did not identify dimensioned double roots or row addresses across binary/non-evaluating wrappers, the `sizeof(Increment)` route omitted 2D mutability validation, integer constant folding used unchecked Rust arithmetic, and 2D zero storage used infallible `vec![0; len]` after only checking the element-count product.
+- RED/GREEN: focused tests first returned values or panicked under `catch_unwind`. Dimensioned-root/row-address classification, `ensure_two_dimensional_array_mutable()`, checked constant arithmetic, and fallible reserve-before-resize now preserve exact diagnostics. A proposed zero-row overflow reproducer was invalid because non-positive lengths are parser-rejected; a proposed scalar `sizeof(values[0][0] + 1.0)` regression was run and exits `0`.
+- Verification: all six focused feature tests, integer-constant and two-dimensional filters, the compiler oracle, formatting, strict Clippy, all local and rebuilt-Docker tests, runtime output `10`, and diff hygiene pass.
 
 ### 2026-08-25 — Double-array compound-literal parser guards and review closure
 

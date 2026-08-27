@@ -7211,6 +7211,186 @@ fn direct_double_arrays_support_fixed_initialization_and_indexed_reads() {
 }
 
 #[test]
+fn direct_fixed_two_dimensional_double_arrays_match_compiler_oracle_fixture() {
+    let program =
+        include_str!("fixtures/compat/valid/direct_fixed_two_dimensional_double_arrays.c",);
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_fixed_two_dimensional_double_array_declaration_lists_are_supported() {
+    let program = r#"
+int main(void) {
+    double first[1][2] = {{1.5, 2.5}}, second[2][1] = {{3.5}, {4.5}};
+    return first[0][1] == 2.5 && second[1][0] == 4.5 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_fixed_two_dimensional_double_array_dimension_overflow_is_diagnostic() {
+    for (program, expected) in [
+        (
+            "int main(void) { return sizeof(double[4294967296][4294967296]); }",
+            "array size overflow",
+        ),
+        (
+            "int main(void) { double values[4294967296][4294967296]; return 0; }",
+            "two-dimensional array element count overflow",
+        ),
+        (
+            "int main(void) { double values[1][1152921504606846976]; return 0; }",
+            "two-dimensional array storage is too large",
+        ),
+        (
+            "int main(void) { double values[1][9223372036854775807 + 1]; return 0; }",
+            "integer constant expression overflow",
+        ),
+        (
+            "int main(void) { return sizeof(double[1][4611686018427387904 * 2]); }",
+            "integer constant expression overflow",
+        ),
+    ] {
+        let result = std::panic::catch_unwind(|| interpret(program));
+        assert!(result.is_ok(), "dimension product panicked for {program}");
+        let error = result.unwrap().expect_err(program).to_string();
+        assert!(
+            error.contains(expected),
+            "expected {expected:?} for {program}, got {error:?}"
+        );
+    }
+}
+
+#[test]
+fn direct_fixed_two_dimensional_double_array_sizeof_preserves_pointer_and_const_boundaries() {
+    for (program, expected) in [
+        (
+            "int main(void) { double values[1][2] = {{1, 2}}; return sizeof(&values[0]); }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[1][2] = {{1, 2}}; return sizeof(1 ? &values[0] : &values[0]); }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { const double values[1][1] = {{1}}; return sizeof(values[0][0]++); }",
+            "cannot modify read-only array 'values'",
+        ),
+        (
+            "int main(void) { const double values[1][1] = {{1}}; return sizeof(++values[0][0]); }",
+            "cannot modify read-only array 'values'",
+        ),
+    ] {
+        let error = interpret(program).expect_err(program).to_string();
+        assert!(
+            error.contains(expected),
+            "expected {expected:?} for {program}, got {error:?}"
+        );
+    }
+}
+
+#[test]
+fn direct_fixed_two_dimensional_double_arrays_preserve_safety_boundaries() {
+    for (program, expected) in [
+        (
+            "int main(void) { const double values[1][2] = {{1, 2}}; values[0][0] = 3; return 0; }",
+            "cannot modify read-only array 'values'",
+        ),
+        (
+            "int main(void) { double values[1][1] = {{1}}; return sizeof(values[0][0] %= 1); }",
+            "integer-only compound assignment used with double value",
+        ),
+        (
+            "int main(void) { double values[1][1] = {{1}}; int scalar = 0; int *pointer = &scalar; return sizeof(values[0][0] = pointer); }",
+            "cannot assign pointer expression to double value",
+        ),
+        (
+            "int main(void) { const double values[1][1] = {{1}}; return sizeof(values[0][0] = 2); }",
+            "cannot modify read-only array 'values'",
+        ),
+        (
+            "int main(void) { double values[1][2] = {{1, 2}}; return values[1][0] == 0; }",
+            "array 'values' first dimension index 1 out of bounds for length 1",
+        ),
+        (
+            "int main(void) { double values[1][2] = {{1, 2}}; return values[0][2] == 0; }",
+            "array 'values' second dimension index 2 out of bounds for length 2",
+        ),
+        (
+            "int main(void) { double values[1][2][3]; return 0; }",
+            "arrays with more than two dimensions are not supported",
+        ),
+        (
+            "int take(double values[1][2]) { return 0; } int main(void) { return 0; }",
+            "double array parameters are not supported",
+        ),
+        (
+            "struct Box { double values[1][2]; }; int main(void) { return 0; }",
+            "double multidimensional aggregate array fields are not supported",
+        ),
+        (
+            "int main(void) { return ((double[1][2]){{1, 2}})[0][0] == 1; }",
+            "multidimensional array casts are not supported",
+        ),
+        (
+            "int main(void) { double values[1][2] = {{1, 2}}; double (*row)[2] = values; return 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[2][2] = {{1, 2}, {3, 4}}; (values + 1)[0][1] = 5.5; return 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[1][2] = {{1, 2}}; return sizeof(values + 0); }",
+            "double pointers are not supported",
+        ),
+        (
+            "int main(void) { double values[1][2] = {{1, 2}}; return values == 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "void *memset(void *, int, unsigned long); int main(void) { double values[1][2] = {{1, 2}}; memset(values[0], 0, sizeof(values[0])); return 0; }",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+    ] {
+        let error = interpret(program).expect_err(program).to_string();
+        assert!(
+            error.contains(expected),
+            "expected {expected:?} for {program}, got {error:?}"
+        );
+    }
+}
+
+#[test]
+fn direct_fixed_two_dimensional_double_array_sizeof_is_non_evaluating() {
+    let program = r#"
+int main(void) {
+    double values[2][3] = {{1, 2, 3}, {4, 5, 6}};
+    int row = 0;
+    int column = 0;
+    int full = sizeof(values);
+    int row_size = sizeof(values[row++]);
+    int element = sizeof(values[row++][column++]);
+    int update = sizeof(values[row++][column++] += 1.0);
+    int increment = sizeof(values[row++][column++]++);
+    return row == 0 && column == 0 && values[0][0] == 1.0
+            && full == 6 * sizeof(double)
+            && row_size == 3 * sizeof(double)
+            && element == sizeof(double)
+            && update == sizeof(double)
+            && increment == sizeof(double)
+        ? 0
+        : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn direct_double_arrays_support_inferred_storage_and_indexed_updates() {
     let program = r#"
 double globals[] = {1, [2] = 3.5};
@@ -7268,8 +7448,8 @@ fn direct_double_arrays_keep_const_bounds_pointer_and_rank_boundaries() {
             "integer-only compound assignment used with double value",
         ),
         (
-            "int main(void) { double values[1][2] = {{1.0, 2.0}}; return 0; }",
-            "double multidimensional arrays are not supported",
+            "int main(void) { double values[1][2][3]; return 0; }",
+            "arrays with more than two dimensions are not supported",
         ),
     ] {
         assert!(
@@ -7283,9 +7463,9 @@ fn direct_double_arrays_keep_const_bounds_pointer_and_rank_boundaries() {
 }
 
 #[test]
-fn double_array_invalid_fixture_keeps_rank_diagnostic() {
-    let program = include_str!("fixtures/invalid/double_multidimensional_array.c");
-    let expected = "double multidimensional arrays are not supported";
+fn double_array_invalid_fixture_keeps_rank_three_diagnostic() {
+    let program = include_str!("fixtures/invalid/double_three_dimensional_array.c");
+    let expected = "arrays with more than two dimensions are not supported";
     assert!(
         interpret(program)
             .expect_err(program)

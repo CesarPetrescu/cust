@@ -1106,7 +1106,11 @@ impl SizeOfType {
                     .map_err(|_| CustError::new("array length is too large"))?;
                 let columns = i64::try_from(*columns)
                     .map_err(|_| CustError::new("array length is too large"))?;
-                Ok(element_type.size() * rows * columns)
+                element_type
+                    .size()
+                    .checked_mul(rows)
+                    .and_then(|size| size.checked_mul(columns))
+                    .ok_or_else(|| CustError::new("array size overflow"))
             }
         }
     }
@@ -10934,12 +10938,6 @@ impl Parser {
                 let len = self.expect_array_len()?;
                 self.expect_closing_bracket_after("array length")?;
                 if self.matches(&Token::LBracket) {
-                    if ty == CType::Double {
-                        return Err(Self::error_at(
-                            "double multidimensional arrays are not supported".to_string(),
-                            self.previous(),
-                        ));
-                    }
                     let columns = self.expect_array_len()?;
                     self.expect_closing_bracket_after("second array dimension")?;
                     if self.check(&Token::LBracket) {
@@ -11439,12 +11437,6 @@ impl Parser {
                         let len = self.expect_array_len()?;
                         self.expect_closing_bracket_after("array length")?;
                         if self.matches(&Token::LBracket) {
-                            if ty == CType::Double {
-                                return Err(Self::error_at(
-                                    "double multidimensional arrays are not supported".to_string(),
-                                    self.previous(),
-                                ));
-                            }
                             let columns = self.expect_array_len()?;
                             self.expect_closing_bracket_after("second array dimension")?;
                             if self.check(&Token::LBracket) {
@@ -13391,9 +13383,29 @@ impl Parser {
                     &op_token,
                 ));
             }
+            let shift = u32::try_from(rhs).map_err(|_| {
+                Self::error_at(
+                    "shift count is too large in integer constant expression".to_string(),
+                    &op_token,
+                )
+            })?;
             match op {
-                Token::ShiftLeft => value <<= rhs,
-                Token::ShiftRight => value >>= rhs,
+                Token::ShiftLeft => {
+                    value = value.checked_shl(shift).ok_or_else(|| {
+                        Self::error_at(
+                            "shift count is too large in integer constant expression".to_string(),
+                            &op_token,
+                        )
+                    })?
+                }
+                Token::ShiftRight => {
+                    value = value.checked_shr(shift).ok_or_else(|| {
+                        Self::error_at(
+                            "shift count is too large in integer constant expression".to_string(),
+                            &op_token,
+                        )
+                    })?
+                }
                 _ => unreachable!("only shift operators are matched above"),
             }
         }
@@ -13409,15 +13421,22 @@ impl Parser {
             self.parse_integer_constant_multiplicative(local_constants, context)?;
         while self.matches(&Token::Plus) || self.matches(&Token::Minus) {
             let op = self.previous().kind.clone();
+            let op_token = self.previous().clone();
             let (rhs, _) = self.parse_integer_constant_multiplicative(
                 local_constants,
                 "expected integer constant in integer constant expression",
             )?;
-            match op {
-                Token::Plus => value += rhs,
-                Token::Minus => value -= rhs,
+            value = match op {
+                Token::Plus => value.checked_add(rhs),
+                Token::Minus => value.checked_sub(rhs),
                 _ => unreachable!("only plus/minus are matched above"),
             }
+            .ok_or_else(|| {
+                Self::error_at(
+                    "integer constant expression overflow".to_string(),
+                    &op_token,
+                )
+            })?;
         }
         Ok((value, first_token))
     }
@@ -13439,22 +13458,24 @@ impl Parser {
                 local_constants,
                 "expected integer constant in integer constant expression",
             )?;
-            match op {
-                Token::Star => value *= rhs,
-                Token::Slash => {
-                    if rhs == 0 {
-                        return Err(Self::error_at("division by zero".to_string(), &op_token));
-                    }
-                    value /= rhs;
+            value = match op {
+                Token::Star => value.checked_mul(rhs),
+                Token::Slash if rhs == 0 => {
+                    return Err(Self::error_at("division by zero".to_string(), &op_token));
                 }
-                Token::Percent => {
-                    if rhs == 0 {
-                        return Err(Self::error_at("division by zero".to_string(), &op_token));
-                    }
-                    value %= rhs;
+                Token::Slash => value.checked_div(rhs),
+                Token::Percent if rhs == 0 => {
+                    return Err(Self::error_at("division by zero".to_string(), &op_token));
                 }
+                Token::Percent => value.checked_rem(rhs),
                 _ => unreachable!("only multiplicative operators are matched above"),
             }
+            .ok_or_else(|| {
+                Self::error_at(
+                    "integer constant expression overflow".to_string(),
+                    &op_token,
+                )
+            })?;
         }
         Ok((value, first_token))
     }
@@ -13477,7 +13498,12 @@ impl Parser {
             )?;
             let value = match op_token.kind {
                 Token::Plus => value,
-                Token::Minus => -value,
+                Token::Minus => value.checked_neg().ok_or_else(|| {
+                    Self::error_at(
+                        "integer constant expression overflow".to_string(),
+                        &op_token,
+                    )
+                })?,
                 Token::Tilde => !value,
                 Token::Bang => i64::from(value == 0),
                 _ => unreachable!("only unary constant operators are matched above"),
@@ -16967,9 +16993,40 @@ impl Parser {
                     }
                     self.reject_function_type_suffix(&format!("function {operator} types"))?;
                     Ok(SizeOfType::Pointer)
-                } else if let Some(len) = self.parse_sizeof_array_type_len(operator)? {
-                    self.reject_function_type_suffix(&format!("function {operator} types"))?;
-                    Ok(SizeOfType::Array(PointeeType::Scalar(ty), len))
+                } else if self.matches(&Token::LBracket) {
+                    let rows = self.expect_array_len()?;
+                    self.expect_closing_bracket_after(&format!("{operator} array type"))?;
+                    if self.matches(&Token::LBracket) {
+                        let columns = self.expect_array_len()?;
+                        self.expect_closing_bracket_after(&format!(
+                            "{operator} second array dimension"
+                        ))?;
+                        if self.check(&Token::LBracket) {
+                            return Err(Self::error_at(
+                                format!(
+                                    "{operator} array types with more than two dimensions are not supported"
+                                ),
+                                self.peek_located(),
+                            ));
+                        }
+                        if self.check(&Token::Star) {
+                            return Err(Self::error_at(
+                                format!("pointer-to-array {operator} types are not supported"),
+                                self.peek_located(),
+                            ));
+                        }
+                        self.reject_function_type_suffix(&format!("function {operator} types"))?;
+                        Ok(SizeOfType::Array2D(ty, rows, columns))
+                    } else {
+                        if self.check(&Token::Star) {
+                            return Err(Self::error_at(
+                                format!("pointer-to-array {operator} types are not supported"),
+                                self.peek_located(),
+                            ));
+                        }
+                        self.reject_function_type_suffix(&format!("function {operator} types"))?;
+                        Ok(SizeOfType::Array(PointeeType::Scalar(ty), rows))
+                    }
                 } else {
                     Ok(SizeOfType::Scalar(ty))
                 }
@@ -18758,14 +18815,22 @@ impl ArrayValue {
         }
     }
 
-    fn mutable_zeroed_2d(rows: usize, columns: usize, elem_type: CType) -> Self {
-        Self {
-            elements: vec![0; rows * columns],
+    fn mutable_zeroed_2d(rows: usize, columns: usize, elem_type: CType) -> CustResult<Self> {
+        let len = rows
+            .checked_mul(columns)
+            .ok_or_else(|| CustError::new("two-dimensional array element count overflow"))?;
+        let mut elements = Vec::new();
+        elements
+            .try_reserve_exact(len)
+            .map_err(|_| CustError::new("two-dimensional array storage is too large"))?;
+        elements.resize(len, 0);
+        Ok(Self {
+            elements,
             elem_type,
             read_only: false,
             has_static_storage: false,
             dimensions: Some((rows, columns)),
-        }
+        })
     }
 
     fn read_only(elements: Vec<i64>) -> Self {
@@ -18895,6 +18960,11 @@ impl Interpreter {
                             matches!(pointee, Some(PointeeType::Scalar(CType::Double)))
                         })
             }
+            Expr::Array2DGet { name, .. }
+            | Expr::Array2DSet { name, .. }
+            | Expr::Array2DCompoundSet { name, .. } => self
+                .scalar_array_element_type(name)
+                .is_some_and(|ty| ty == CType::Double),
             Expr::StructGet { name, fields }
             | Expr::StructSet { name, fields, .. }
             | Expr::StructCompoundSet { name, fields, .. } => match self.find_variable(name) {
@@ -19102,11 +19172,8 @@ impl Interpreter {
             | Expr::ArrayLiteral { .. }
             | Expr::AggregateArrayLiteral { .. }
             | Expr::PointerCast { .. }
-            | Expr::Array2DSet { .. }
-            | Expr::Array2DCompoundSet { .. }
             | Expr::StructArray2DSet { .. }
             | Expr::StructArray2DCompoundSet { .. }
-            | Expr::Array2DGet { .. }
             | Expr::StructArray2DGet { .. }
             | Expr::StringGet { .. }
             | Expr::VoidCast(_)
@@ -19127,8 +19194,21 @@ impl Interpreter {
                 Some(Value::Array(array)) => array.borrow().elem_type == CType::Double,
                 _ => false,
             },
-            Expr::Var(_) | Expr::AddressOfScalarLiteral { .. } => false,
-            Expr::AddressOfArray { index, .. } => self.expr_is_unsupported_double_pointer(index),
+            Expr::Var(name) => matches!(
+                self.find_variable(name),
+                Some(Value::Array(array))
+                    if array.borrow().dimensions.is_some()
+                        && array.borrow().elem_type == CType::Double
+            ),
+            Expr::AddressOfScalarLiteral { .. } => false,
+            Expr::AddressOfArray { name, index } => {
+                matches!(
+                    self.find_variable(name),
+                    Some(Value::Array(array))
+                        if array.borrow().dimensions.is_some()
+                            && array.borrow().elem_type == CType::Double
+                ) || self.expr_is_unsupported_double_pointer(index)
+            }
             Expr::AddressOfStructField { name, fields } => match self.find_variable(name) {
                 Some(Value::Struct { type_name, .. })
                 | Some(Value::StructArray { type_name, .. }) => {
@@ -19293,7 +19373,9 @@ impl Interpreter {
                         .is_ok_and(|ty| ty == Some(PointeeType::Scalar(CType::Double))))
             }
             Expr::Binary(left, BinaryOp::Add | BinaryOp::Subscript | BinaryOp::Sub, right) => {
-                self.expr_is_unsupported_double_pointer(left)
+                self.array2d_row_pointer_element_type(left) == Some(CType::Double)
+                    || self.array2d_row_pointer_element_type(right) == Some(CType::Double)
+                    || self.expr_is_unsupported_double_pointer(left)
                     || self.expr_is_unsupported_double_pointer(right)
             }
             Expr::Conditional {
@@ -38752,7 +38834,7 @@ impl Interpreter {
         init: &Array2DInitializer,
         read_only: bool,
     ) -> CustResult<Value> {
-        let mut array = ArrayValue::mutable_zeroed_2d(rows, columns, elem_type);
+        let mut array = ArrayValue::mutable_zeroed_2d(rows, columns, elem_type)?;
         for (row_index, row) in init.iter().enumerate() {
             let mut next_column = 0usize;
             for initializer in row {
@@ -39117,7 +39199,7 @@ impl Interpreter {
                 })
             }
             StructFieldType::Array2D(elem_type, rows, columns) => {
-                let mut array = ArrayValue::mutable_zeroed_2d(*rows, *columns, *elem_type);
+                let mut array = ArrayValue::mutable_zeroed_2d(*rows, *columns, *elem_type)?;
                 array.read_only = field.is_const;
                 Ok(StructFieldValue::Array {
                     value: Rc::new(RefCell::new(array)),
@@ -47609,7 +47691,8 @@ impl Interpreter {
                 self.validate_nested_string_intrinsic_calls(expr)?;
             }
             if let Expr::Binary(left, _, right) = expr
-                && (self.expr_is_unsupported_double_pointer(left)
+                && (self.expr_is_unsupported_double_pointer(expr)
+                    || self.expr_is_unsupported_double_pointer(left)
                     || self.expr_is_unsupported_double_pointer(right))
             {
                 return Err(CustError::new("double pointers are not supported"));
@@ -47878,6 +47961,14 @@ impl Interpreter {
                             .ok_or_else(|| {
                                 CustError::new(format!("undefined struct type '{type_name}'"))
                             }),
+                        Some(Value::Array(array)) => {
+                            let array = array.borrow();
+                            if let Some((_, columns)) = array.dimensions {
+                                Ok(columns as i64 * array.elem_type.size())
+                            } else {
+                                Ok(array.elem_type.size())
+                            }
+                        }
                         _ => self.sizeof_indexed_value(name),
                     }
                 }
@@ -47895,6 +47986,8 @@ impl Interpreter {
                     self.validate_array_subscript(row)?;
                     self.validate_array_subscript(column)?;
                     self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.validate_non_evaluating_double_assignment(expr, value, None)?;
+                    self.ensure_two_dimensional_array_mutable(name)?;
                     self.sizeof_indexed_value(name)
                 }
                 Expr::Array2DCompoundSet {
@@ -47907,6 +48000,11 @@ impl Interpreter {
                     self.validate_array_subscript(row)?;
                     self.validate_array_subscript(column)?;
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
+                    if self.expr_is_double_value(expr) {
+                        Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                    }
+                    self.ensure_two_dimensional_array_mutable(name)?;
                     self.sizeof_indexed_value(name)
                 }
                 Expr::StructArray2DGet {
@@ -48376,6 +48474,9 @@ impl Interpreter {
                         return Err(CustError::new("invalid increment/decrement target"));
                     }
                     let size = self.sizeof_expr(target)?;
+                    if let Expr::Array2DGet { name, .. } = target.as_ref() {
+                        self.ensure_two_dimensional_array_mutable(name)?;
+                    }
                     self.validate_non_evaluating_aggregate_lvalue_mutable(target)?;
                     Ok(size)
                 }
@@ -49833,10 +49934,17 @@ impl Interpreter {
                 let (array, index) = self.checked_two_dimensional_array_index(name, row, column)?;
                 self.ensure_two_dimensional_array_mutable(name)?;
                 let current = array.borrow().elements[index];
-                let updated = array
-                    .borrow()
-                    .elem_type
-                    .normalize(Self::apply_increment_op(current, op));
+                let elem_type = array.borrow().elem_type;
+                let updated = if elem_type == CType::Double {
+                    let current_value = f64::from_bits(current as u64);
+                    let updated_value = match op {
+                        IncrementOp::Inc => current_value + 1.0,
+                        IncrementOp::Dec => current_value - 1.0,
+                    };
+                    updated_value.to_bits() as i64
+                } else {
+                    elem_type.normalize(Self::apply_increment_op(current, op))
+                };
                 let mut array = array.borrow_mut();
                 if array.read_only {
                     return Err(CustError::new(format!(
