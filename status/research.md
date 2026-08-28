@@ -2,6 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-29 — Deterministic binary64 object bytes
+
+- Cust's deterministic representation is explicit and host-independent: `f64::to_bits().to_le_bytes()` produces eight object bytes and `f64::from_bits(u64::from_le_bytes(bytes))` reconstructs partial/full writes. Native compiler fixtures must not assert host endianness or object bytes.
+- The existing `PointerValue::ObjectByte` model can safely extend to supported standalone scalar and one-dimensional-array `double` roots because it already preserves typed base identity, byte offsets, capacity, owner/lifetime/read-only metadata, overlap, byte arithmetic, and destination-aware canonicalization. Aggregate-field arrays are detected by live root/path identity and remain rejected; two-dimensional and union-backed double storage remain outside this slice.
+- Non-evaluating validation needs structural supported-root inference rather than evaluation. Conditional branches must both be provably supported, comma uses only its result operand, assignment uses its value, `_Generic` uses the selected association after type validation, and pointer addition recursively accepts the pointer-valued side. Helper-returned roots remain conservative when exact storage cannot be proven without evaluation.
+- Candidate decision: finish the inherited binary64 object-byte vertical slice before release or broader parser work. Bounded v0.40.0 release closure is next; shared union bytes remain deferred because they require true aliased member storage rather than serialization alone.
+- Initial independent complete-code review found no runtime/test blocker and required authoritative docs/status synchronization. A second review corrected the queue pointer, removed an incorrect non-evaluating capacity-validation claim, and fixed the focused-test filter; final complete-diff review returned `APPROVED`. Focused tests, formatting, strict Clippy, all 2,079 local/no-cache-rebuilt-Docker tests, runtime output `10`, and diff hygiene pass.
+
 ## 2026-08-28 — v0.39.0 release consistency
 
 - Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.38.0`, then passed after Cargo/lock and both image tags moved to `0.39.0`. Cargo metadata and the local CLI report `cust 0.39.0`; local and remote annotated-tag preflight found no `v0.39.0` refs.

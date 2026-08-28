@@ -21653,9 +21653,11 @@ impl Interpreter {
         let base = Self::object_byte_base(pointer);
         match self.pointer_value_type(base)? {
             Some(PointeeType::Scalar(CType::Double)) => {
-                return Err(CustError::new(format!(
-                    "function '{name}' does not yet support double object storage for argument {argument}"
-                )));
+                if !self.pointer_targets_supported_double_memory_object(base) {
+                    return Err(CustError::new(format!(
+                        "function '{name}' does not yet support double object storage for argument {argument}"
+                    )));
+                }
             }
             Some(PointeeType::Scalar(_)) => {
                 if self.memory_pointer_targets_union_field(pointer)? {
@@ -21680,6 +21682,25 @@ impl Interpreter {
             }
         }
         Ok(())
+    }
+
+    fn pointer_targets_supported_double_memory_object(&self, pointer: &PointerValue) -> bool {
+        match Self::object_byte_base(pointer) {
+            PointerValue::Scalar { .. } => true,
+            PointerValue::ArrayBase { array, .. } | PointerValue::ArrayElement { array, .. } => {
+                array.borrow().dimensions.is_none()
+                    && !self.array_pointer_targets_aggregate_field(array)
+            }
+            PointerValue::Null
+            | PointerValue::Struct { .. }
+            | PointerValue::StructElement { .. }
+            | PointerValue::StructFieldElement { .. }
+            | PointerValue::NestedStructArrayElement { .. }
+            | PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. }
+            | PointerValue::Array2DRow { .. }
+            | PointerValue::ObjectByte { .. } => false,
+        }
     }
 
     fn validate_whole_struct_memory_layout(
@@ -23072,6 +23093,25 @@ impl Interpreter {
                 })
             })
             .unwrap_or(false)
+    }
+
+    fn array_pointer_targets_aggregate_field(&self, array: &Rc<RefCell<ArrayValue>>) -> bool {
+        let value_contains_aggregate_array = |value: &Value| match value {
+            Value::Struct { fields, .. } => Self::fields_contain_array(fields, array),
+            Value::StructArray { elements, .. } => elements
+                .iter()
+                .any(|fields| Self::fields_contain_array(fields, array)),
+            Value::Scalar { .. } | Value::Array(_) | Value::Pointer { .. } => false,
+        };
+        self.scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.values.values())
+            .any(&value_contains_aggregate_array)
+            || self
+                .static_locals
+                .values()
+                .any(|storage| value_contains_aggregate_array(&storage.value))
     }
 
     fn unsupported_memory_copy_declaration_error(name: &str) -> CustError {
@@ -31372,12 +31412,160 @@ impl Interpreter {
         Ok(analysis)
     }
 
+    fn non_evaluating_current_pointer_value(&self, expr: &Expr) -> Option<PointerValue> {
+        match expr {
+            Expr::Var(name) => match self.find_variable(name) {
+                Some(Value::Pointer { pointer, .. }) => Some(pointer.clone()),
+                _ => None,
+            },
+            Expr::PointerCast { expr, .. } => self.non_evaluating_current_pointer_value(expr),
+            Expr::StructGet { name, fields } => match self.find_variable(name) {
+                Some(Value::Struct {
+                    type_name,
+                    fields: values,
+                }) => Self::nested_field_value(type_name, values, fields)
+                    .ok()
+                    .and_then(|(_, field)| match field {
+                        StructFieldValue::Pointer { pointer, .. } => Some(pointer.clone()),
+                        _ => None,
+                    }),
+                _ => None,
+            },
+            Expr::StructPtrGet { pointer, fields } => self
+                .non_evaluating_current_pointer_value(pointer)
+                .and_then(|pointer| self.find_struct_pointer_fields(&pointer).ok())
+                .and_then(|(type_name, values)| {
+                    match Self::nested_field_value(&type_name, values, fields) {
+                        Ok((_, StructFieldValue::Pointer { pointer, .. })) => Some(pointer.clone()),
+                        _ => None,
+                    }
+                }),
+            _ => None,
+        }
+    }
+
+    fn non_evaluating_expr_targets_supported_double_memory_object(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::AddressOf(name) => matches!(
+                self.find_variable(name),
+                Some(Value::Scalar {
+                    ty: CType::Double,
+                    ..
+                })
+            ),
+            Expr::Var(name) => match self.find_variable(name) {
+                Some(Value::Array(array)) => {
+                    let array = array.borrow();
+                    array.elem_type == CType::Double && array.dimensions.is_none()
+                }
+                Some(Value::Pointer { pointer, .. }) => {
+                    self.pointer_targets_supported_double_memory_object(pointer)
+                }
+                _ => false,
+            },
+            Expr::AddressOfArray { name, .. } => match self.find_variable(name) {
+                Some(Value::Array(array)) => {
+                    let array = array.borrow();
+                    array.elem_type == CType::Double && array.dimensions.is_none()
+                }
+                Some(Value::Pointer { pointer, .. }) => {
+                    self.pointer_targets_supported_double_memory_object(pointer)
+                }
+                _ => false,
+            },
+            Expr::AddressOfScalarLiteral {
+                ty: CType::Double, ..
+            } => true,
+            Expr::ArrayLiteral {
+                elem_type: CType::Double,
+                ..
+            } => true,
+            Expr::StructGet { name, fields } => {
+                match self.find_variable(name) {
+                    Some(Value::Struct {
+                        type_name,
+                        fields: values,
+                    }) => Self::nested_field_value(type_name, values, fields).is_ok_and(
+                        |(_, field)| match field {
+                            StructFieldValue::Pointer { pointer, .. } => {
+                                self.pointer_targets_supported_double_memory_object(pointer)
+                            }
+                            _ => false,
+                        },
+                    ),
+                    _ => false,
+                }
+            }
+            Expr::StructPtrGet { .. } => self
+                .non_evaluating_current_pointer_value(expr)
+                .is_some_and(|pointer| {
+                    self.pointer_targets_supported_double_memory_object(&pointer)
+                }),
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => match self.find_variable(name) {
+                Some(Value::StructArray {
+                    type_name,
+                    elements,
+                    ..
+                }) => Self::non_evaluating_array_index(index)
+                    .and_then(|index| elements.get(index))
+                    .is_some_and(|values| {
+                        Self::nested_field_value(type_name, values, fields).is_ok_and(
+                            |(_, field)| match field {
+                                StructFieldValue::Pointer { pointer, .. } => {
+                                    self.pointer_targets_supported_double_memory_object(pointer)
+                                }
+                                _ => false,
+                            },
+                        )
+                    }),
+                _ => false,
+            },
+            Expr::PointerCast { expr, .. } => {
+                self.non_evaluating_expr_targets_supported_double_memory_object(expr)
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.non_evaluating_expr_targets_supported_double_memory_object(then_expr)
+                    && self.non_evaluating_expr_targets_supported_double_memory_object(else_expr)
+            }
+            Expr::Comma(_, right) => {
+                self.non_evaluating_expr_targets_supported_double_memory_object(right)
+            }
+            Expr::Assign { value, .. } => {
+                self.non_evaluating_expr_targets_supported_double_memory_object(value)
+            }
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association_after_validation(expr)
+                .is_ok_and(|selected| {
+                    self.non_evaluating_expr_targets_supported_double_memory_object(selected)
+                }),
+            Expr::Binary(left, BinaryOp::Add, right) => {
+                self.non_evaluating_expr_targets_supported_double_memory_object(left)
+                    || self.non_evaluating_expr_targets_supported_double_memory_object(right)
+            }
+            Expr::Binary(left, BinaryOp::Sub, _) => {
+                self.non_evaluating_expr_targets_supported_double_memory_object(left)
+            }
+            _ => false,
+        }
+    }
+
     fn validate_non_evaluating_memory_double_storage(
         &self,
         name: &str,
         argument: usize,
         expr: &Expr,
     ) -> CustResult<()> {
+        if self.non_evaluating_expr_targets_supported_double_memory_object(expr) {
+            return Ok(());
+        }
         if self.current_expr_has_double_storage(expr)? {
             return Err(CustError::new(format!(
                 "function '{name}' does not yet support double object storage for argument {argument}"

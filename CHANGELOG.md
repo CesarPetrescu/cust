@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added deterministic eight-byte IEEE-754 binary64 little-endian object views for supported standalone scalar and one-dimensional-array `double` storage across exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr`.
+
+### Diagnostics and verification
+
+- Preserved destination-aware typed coercion, partial/full writes, zero count, const/lifetime/capacity/overlap/owner checks, aligned/interior `memchr` identity, and direct/nested non-evaluating validation without host addresses or host-libc execution. Aggregate-field, two-dimensional, union-backed, pointer-object, and unprovable helper-returned double storage retain exact boundaries. Three focused interpreter tests and one registered warning-free compiler-oracle fixture cover the package; deterministic endian assertions remain interpreter-only.
+
 ## v0.39.0 — 2026-08-28
 
 ### Language subset

@@ -5847,14 +5847,6 @@ fn direct_double_array_compound_literal_preserves_adjacent_unsupported_boundarie
             "union Choice { double values[2]; }; int main(void) { union Choice choice = {{3.0, 4.0}}; return sizeof(0 ? (double[]){1.0, 2.0} : choice.values); }",
             "double pointers are not supported",
         ),
-        (
-            "void *memset(void *, int, unsigned long int); int main(void) { memset((double[]){1.0, 2.0}, 0, sizeof(double)); return 0; }",
-            "function 'memset' does not yet support double object storage for argument 1",
-        ),
-        (
-            "void *memset(void *, int, unsigned long int); int main(void) { return sizeof(memset((double[]){1.0, 2.0}, 0, sizeof(double))); }",
-            "function 'memset' does not yet support double object storage for argument 1",
-        ),
     ] {
         let error = interpret(program).expect_err(program).to_string();
         assert!(
@@ -5862,10 +5854,24 @@ fn direct_double_array_compound_literal_preserves_adjacent_unsupported_boundarie
             "expected {expected:?}, got {error:?} for {program}"
         );
     }
+
+    assert_eq!(
+        interpret("void *memset(void *, int, unsigned long int); int main(void) { memset((double[]){1.0, 2.0}, 0, sizeof(double)); return 0; }").unwrap(),
+        0
+    );
+    assert_eq!(
+        interpret("void *memset(void *, int, unsigned long int); int main(void) { return sizeof(memset((double[]){1.0, 2.0}, 0, sizeof(double))); }").unwrap(),
+        8
+    );
 }
 
 #[test]
 fn direct_double_typedef_aliases_preserve_safety_boundaries() {
+    assert_eq!(
+        interpret("void *memset(void *, int, unsigned long int); typedef double Real; int main(void) { Real value = 1.0; memset(&value, 0, sizeof(value)); return value != 0.0; }").unwrap(),
+        0
+    );
+
     for (program, expected) in [
         (
             "typedef double (*RowPointer)[3]; int main(void) { return 0; }",
@@ -5890,10 +5896,6 @@ fn direct_double_typedef_aliases_preserve_safety_boundaries() {
         (
             "typedef double *RealPtr; union Choice { double value; int bits; }; int main(void) { union Choice choice = {.value = 1.0}; RealPtr pointer = &choice.value; return pointer != 0; }",
             "double pointers are not supported",
-        ),
-        (
-            "void *memset(void *, int, unsigned long int); typedef double Real; int main(void) { Real value = 1.0; memset(&value, 0, sizeof(value)); return 0; }",
-            "function 'memset' does not yet support double object storage for argument 1",
         ),
         (
             "typedef const double *ConstRealPtr; int main(void) { const double value = 1.0; double *pointer = 0; ConstRealPtr view = &value; pointer = view; return 0; }",
@@ -10448,8 +10450,9 @@ fn direct_double_pointers_retain_deeper_and_row_pointer_boundaries() {
 
 #[test]
 fn direct_double_pointer_non_evaluating_boundaries_remain_exact() {
-    let err = interpret(
-        r#"
+    assert_eq!(
+        interpret(
+            r#"
         void *memset(void *destination, int value, unsigned long count);
 
         int main(void) {
@@ -10457,11 +10460,9 @@ fn direct_double_pointer_non_evaluating_boundaries_remain_exact() {
             return sizeof(memset(&value, 0, sizeof(value)));
         }
         "#,
-    )
-    .expect_err("raw-memory access to double storage must remain unsupported under sizeof");
-    assert_eq!(
-        err.to_string(),
-        "function 'memset' does not yet support double object storage for argument 1"
+        )
+        .unwrap(),
+        8
     );
 
     let err = interpret(
@@ -10494,7 +10495,7 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_pointer_non_evaluating_source_boundaries_remain_exact() {
+fn direct_double_pointer_non_evaluating_sources_are_supported() {
     for (name, return_type, destination_type) in [
         ("memcpy", "void *", "void *"),
         ("memmove", "void *", "void *"),
@@ -10511,10 +10512,7 @@ int main(void) {{
 "#
         );
 
-        assert_eq!(
-            interpret(&program).expect_err(&program).to_string(),
-            format!("function '{name}' does not yet support double object storage for argument 2")
-        );
+        assert_eq!(interpret(&program).unwrap(), 8);
     }
 }
 
@@ -12989,10 +12987,10 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_pointer_review_rejects_raw_memory_through_void_pointers() {
-    for call in [
-        "memset(hidden, 0, sizeof(value)); return 0;",
-        "return sizeof(memset(hidden, 0, sizeof(value)));",
+fn direct_double_pointer_review_supports_raw_memory_through_void_pointers() {
+    for body in [
+        "memset(hidden, 0, sizeof(value)); return value != 0.0;",
+        "return sizeof(memset(hidden, 0, sizeof(value))) == sizeof(void *) && value == 1.0 ? 0 : 1;",
     ] {
         let program = format!(
             r#"
@@ -13000,17 +12998,11 @@ void *memset(void *destination, int value, unsigned long count);
 int main(void) {{
     double value = 1.0;
     void *hidden = &value;
-    {call}
+    {body}
 }}
 "#,
         );
-        let error = interpret(&program).unwrap_err().to_string();
-        assert!(
-            error.contains(
-                "function 'memset' does not yet support double object storage for argument 1"
-            ),
-            "unexpected error: {error}"
-        );
+        assert_eq!(interpret(&program).unwrap(), 0);
     }
 }
 
@@ -13037,10 +13029,7 @@ int main(void) {
 }
 "#,
     ] {
-        assert_eq!(
-            interpret(program).unwrap_err().to_string(),
-            "function 'memset' does not yet support double object storage for argument 1"
-        );
+        assert_eq!(interpret(program).unwrap(), 8);
     }
 }
 
@@ -13067,30 +13056,32 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_pointer_review_rejects_raw_memory_through_call_results() {
-    for call in [
-        "memcpy(identity(&value), source, 1); return 0;",
-        "return sizeof(memcpy(identity(&value), source, 1));",
-    ] {
-        let program = format!(
-            r#"
+fn direct_double_pointer_review_supports_evaluated_call_results_and_preserves_sizeof_validation() {
+    let runtime = r#"
 void *memcpy(void *destination, const void *source, unsigned long count);
-void *identity(void *pointer) {{ return pointer; }}
-int main(void) {{
+void *identity(void *pointer) { return pointer; }
+int main(void) {
     double value = 1.0;
-    char source[1] = {{0}};
-    {call}
-}}
-"#,
-        );
-        let error = interpret(&program).unwrap_err().to_string();
-        assert!(
-            error.contains(
-                "function 'memcpy' does not yet support double object storage for argument 1"
-            ),
-            "unexpected error: {error}"
-        );
-    }
+    char source[1] = {0};
+    memcpy(identity(&value), source, 1);
+    return 0;
+}
+"#;
+    assert_eq!(interpret(runtime).unwrap(), 0);
+
+    let non_evaluating = r#"
+void *memcpy(void *destination, const void *source, unsigned long count);
+void *identity(void *pointer) { return pointer; }
+int main(void) {
+    double value = 1.0;
+    char source[1] = {0};
+    return sizeof(memcpy(identity(&value), source, 1));
+}
+"#;
+    assert_eq!(
+        interpret(non_evaluating).unwrap_err().to_string(),
+        "function 'memcpy' does not yet support double object storage for argument 1"
+    );
 }
 
 #[test]
@@ -13792,20 +13783,17 @@ fn supports_double_pointer_generic_associations() {
 }
 
 #[test]
-fn bounded_memory_intrinsics_reject_double_object_storage() {
+fn bounded_memory_intrinsics_support_double_object_storage() {
     let program = r#"
 void *memset(void *, int, unsigned long int);
 int main(void) {
     double value = 1.5;
     memset(&value, 0, sizeof(value));
-    return 0;
+    return value != 0.0;
 }
 "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "function 'memset' does not yet support double object storage for argument 1"
-    );
+    assert_eq!(interpret(program).unwrap(), 0);
 }
 
 #[test]
@@ -15214,6 +15202,131 @@ fn bounded_memory_two_dimensional_scalar_object_rows_preserve_zero_count_and_siz
 #[test]
 fn bounded_memory_intrinsics_support_scalar_object_bytes() {
     let program = include_str!("fixtures/compat/valid/bounded_memory_scalar_object_bytes.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_intrinsics_support_standalone_double_object_bytes() {
+    let program = include_str!("fixtures/compat/valid/bounded_memory_double_object_bytes.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_double_object_bytes_preserve_safety_and_non_evaluation() {
+    let non_evaluating = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            double source = 1.25;
+            double destination = 2.5;
+            int marker = 0;
+            if (sizeof(memcpy(&destination, &source, marker++)) != sizeof(void *)) return 1;
+            if (sizeof(memset(&destination, marker++, sizeof(destination))) != sizeof(void *)) return 2;
+            if (sizeof(memcmp(&destination, &source, marker++)) != sizeof(int)) return 3;
+            if (sizeof(memchr(&source, marker++, sizeof(source))) != sizeof(void *)) return 4;
+            return marker != 0 || source != 1.25 || destination != 2.5;
+        }
+    "#;
+    assert_eq!(interpret(non_evaluating).unwrap(), 0);
+
+    let forwarded = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        int main(void) {
+            double source = 4.5;
+            double destination = -1.0;
+            double values[2] = {7.25, 8.5};
+            double *source_pointer = &source;
+            void *destination_pointer = &destination;
+            double *array_pointer = values + 1;
+            if (sizeof(memcpy(destination_pointer, source_pointer, sizeof(source))) != sizeof(void *)) return 1;
+            if (sizeof(memset(array_pointer, 0, sizeof(*array_pointer))) != sizeof(void *)) return 2;
+            if (destination != -1.0 || values[1] != 8.5) return 3;
+            if (memcpy(destination_pointer, source_pointer, sizeof(source)) != destination_pointer) return 4;
+            return destination == source ? 0 : 5;
+        }
+    "#;
+    assert_eq!(interpret(forwarded).unwrap(), 0);
+
+    let non_evaluating_derived_objects = r#"
+        void *memset(void *, int, unsigned long int);
+        int main(void) {
+            double values[2] = {1.25, 2.5};
+            double fallback = 3.75;
+            double *selected = values;
+            int marker = 0;
+            if (sizeof(memset(&(double){marker++}, 0, sizeof(double))) != sizeof(void *)) return 1;
+            if (sizeof(memset(values + marker++, 0, sizeof(double))) != sizeof(void *)) return 2;
+            if (sizeof(memset(marker ? values : &fallback, 0, sizeof(double))) != sizeof(void *)) return 3;
+            if (sizeof(memset((marker++, values), 0, sizeof(double))) != sizeof(void *)) return 4;
+            if (sizeof(memset(_Generic(values, double *: values, default: &fallback), 0, sizeof(double))) != sizeof(void *)) return 5;
+            if (sizeof(memset(selected = &fallback, 0, sizeof(double))) != sizeof(void *)) return 6;
+            return marker != 0 || values[0] != 1.25 || selected != values;
+        }
+    "#;
+    assert_eq!(interpret(non_evaluating_derived_objects).unwrap(), 0);
+
+    let non_evaluating_struct_pointer_field = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Holder { double *pointer; };
+        int main(void) {
+            double value = 1.0;
+            struct Holder holder = {&value};
+            struct Holder *holder_pointer = &holder;
+            return sizeof(memset(holder_pointer->pointer, 0, sizeof(value))) == sizeof(void *)
+                && value == 1.0
+                ? 0
+                : 1;
+        }
+    "#;
+    assert_eq!(interpret(non_evaluating_struct_pointer_field).unwrap(), 0);
+
+    let cases = [
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { double value = 1.0; memset(&value, 0, sizeof(value) + 1); return 0; }",
+            "destination argument 1 to function 'memset' requires 9 bytes, but only 8 bytes are available",
+        ),
+        (
+            "void *memmove(void *, const void *, unsigned long int); int main(void) { double values[2] = {1.0, 2.0}; memmove(values + 1, values, sizeof(values)); return 0; }",
+            "destination argument 1 to function 'memmove' requires 16 bytes, but only 8 bytes are available",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { const double value = 1.0; memset(&value, 0, sizeof(value)); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); void *saved; int main(void) { { double local = 0.0; saved = memchr(&local, 0, sizeof(local)); } return memchr(saved, 0, 1) != 0; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+    ];
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn bounded_memory_double_object_bytes_use_deterministic_binary64_little_endian_storage() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            double value = 0.0;
+            char one_bytes[8] = {0, 0, 0, 0, 0, 0, 240, 63};
+            if (memcpy(&value, one_bytes, sizeof(value)) != &value) return 1;
+            if (value != 1.0) return 2;
+
+            char *exponent_low = memchr(&value, 240, sizeof(value));
+            char *exponent_high = memchr(&value, 63, sizeof(value));
+            if (exponent_low == 0 || exponent_high - exponent_low != 1) return 3;
+            if (memset(exponent_low, 0, 2) != exponent_low) return 4;
+            return value == 0.0 ? 0 : 5;
+        }
+    "#;
 
     assert_eq!(interpret(program).unwrap(), 0);
 }

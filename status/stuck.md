@@ -4,9 +4,15 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after bounded v0.39.0 publication on 2026-08-28. Version-first CLI/Compose RED/GREEN, exact Cargo/local/rebuilt-image version `0.39.0`, independently reconciled 2,076-test inventory, fresh independent `APPROVED` review, formatting, strict Clippy, all local/rebuilt-Docker tests, runtime output `10`, diff hygiene, release-commit-first branch acceptance, and exact local/remote annotated-tag object plus peeled-target verification pass. There are no active blockers.
+None. Last reviewed 2026-08-29 after deterministic binary64 object-byte review closure. Final complete-diff independent review returned `APPROVED`; focused tests, formatting, warning-denied Clippy, all 2,079 local tests, no-cache rebuilt images, all 2,079 Docker tests, runtime output `10`, and diff hygiene pass. Bounded v0.40.0 release closure is the sole next concrete package after this verified feature commit.
 
 ## Resolved this run
+
+### 2026-08-29 — Nested non-evaluating standalone `double` roots
+
+- Failure: the inherited binary64 object-byte implementation passed evaluated standalone scalar/array routes, but `sizeof(memcpy(...))` rejected supported conditional, comma, selected `_Generic`, and assignment-wrapped roots as unsupported double storage.
+- Root cause: structural validation correctly detected double storage recursively but its positive supported-root classifier covered only direct literals/variables/casts/addition, so wrapper expressions fell through to the conservative rejection.
+- RED/GREEN: the focused regression failed first at the conditional route; conditional, comma, selected `_Generic`, and assignment value were added one vertical step at a time, with the same focused test rerun after each change until all wrappers passed without evaluating side effects. Existing helper-returned and aggregate/two-dimensional/union-backed boundaries remain rejected.
 
 ### 2026-08-28 — Two-dimensional double typedef return panic and parameter bypass
 
