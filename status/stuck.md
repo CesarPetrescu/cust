@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after fixed two-dimensional `double` typedef-alias canonical closure on 2026-08-28. Focused RED/GREEN, direct GCC/Clang execution, the actual compiler oracle, fresh independent complete-diff `APPROVED` re-review, formatting, strict Clippy, all 2,076 local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. There are no active blockers.
+None. Last reviewed after bounded v0.39.0 release-candidate canonical closure on 2026-08-28. Version-first CLI/Compose RED/GREEN, exact Cargo/local/rebuilt-image version `0.39.0`, independently reconciled 2,076-test inventory, empty local/remote annotated-tag preflight, fresh independent `APPROVED` review, formatting, strict Clippy, all local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. Release-commit-first publication and exact remote tag verification are pending workflow steps, not blockers.
 
 ## Resolved this run
 

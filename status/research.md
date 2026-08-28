@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-28 — v0.39.0 release consistency
+
+- Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.38.0`, then passed after Cargo/lock and both image tags moved to `0.39.0`. Cargo metadata and the local CLI report `cust 0.39.0`; local and remote annotated-tag preflight found no `v0.39.0` refs.
+- Executable target-by-target listing independently reconciles 2,076 tests: 1,940 interpreter + 99 deterministic fuzz-safety + 33 CLI + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test.
+- README central inventory and release notes advertise direct/chained/const fixed two-dimensional double aliases at local/file-global/block-static scope, nested initialization/zero fill, scalar updates, one-time indexes, declaration lists, scalar `_Generic`, and deterministic object/row/element/alias queries. They retain direct and alias-spelled parameter, array-return, pointer-to-row/array, aggregate-field, compound-literal, rank-above-two, and raw-memory boundaries.
+- Candidate decision: package the already reviewed fixed two-dimensional double-alias slice before widening runtime semantics. Deterministic IEEE-754 binary64 object-byte views over standalone/one-dimensional storage are next because mature typed storage and bounded raw-memory intrinsics provide a coherent vertical slice; shared union bytes require true storage aliasing, and parser/property expansion is lower priority.
+- Publication must retain release-commit-first ordering: independent complete-diff review precedes the canonical gate; exact `origin/main` acceptance precedes annotated-tag creation; and local/remote tag objects plus peeled targets must match. No external semantic research was required; executable version tests, Cargo/Compose metadata, `references/cust-fixed-two-dimensional-double-typedef-aliases.md`, and the loaded release-consistency checklists establish the release surface.
+- Fresh complete-diff independent release review returned `APPROVED`. Formatting, warning-denied Clippy, all 2,076 local tests, rebuilt-Docker tests, runtime output `10`, exact Cargo/local CLI/runtime-image/test-image versions, and diff hygiene pass. Publication remains deliberately pending until the verified release commit reaches exact `origin/main`.
+
 ## 2026-08-28 — Fixed two-dimensional `double` typedef aliases
 
 - Existing `TypeAlias::Array2D` and `DeclType::Array2D` metadata already preserves dimensions, element type, const qualification, object declarations, initialization, lvalues, and type queries. The feature implementation removes only the explicit `double` constructor guard in `parse_typedef_declarator()`.
