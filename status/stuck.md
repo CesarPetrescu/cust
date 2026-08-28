@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed after v0.38.0 publication on 2026-08-28. Version-first CLI and Compose tests are GREEN at `0.38.0`; Cargo/local CLI/both rebuilt-image versions and the executable inventory reconcile; fresh independent review returned `APPROVED`; formatting, strict Clippy, all local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. Release commit `94f68a54f242ff3563455746e9e99e136c5069ca` reached exact `origin/main` before annotated tag object `228c0510957dc98bcd56b607877279cf33e9d591` was published and verified to peel exactly to that commit. There are no active blockers.
+None. Last reviewed after fixed two-dimensional `double` typedef-alias canonical closure on 2026-08-28. Focused RED/GREEN, direct GCC/Clang execution, the actual compiler oracle, fresh independent complete-diff `APPROVED` re-review, formatting, strict Clippy, all 2,076 local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. There are no active blockers.
 
 ## Resolved this run
+
+### 2026-08-28 — Two-dimensional double typedef return panic and parameter bypass
+
+- Failure: opening `typedef double Matrix[R][C]` made direct objects work, but alias-spelled array parameters silently adjusted into supported row pointers and alias-spelled function returns reached an internal `unreachable!` panic.
+- Root cause: the direct double-parameter guard recognized only explicit bracket syntax, while `parse_function_return_type()` rejected only `DeclType::Array` before calling the return-type lowering helper.
+- RED/GREEN: a focused parameter test first returned `0`; a `catch_unwind` return regression reproduced the Rust-host panic. `parse_params()` now rejects `DeclType::Array2D(CType::Double, ...)` at the alias token, and return parsing rejects both one- and two-dimensional array aliases with the existing source-located diagnostic.
+- Verification: all three focused alias tests, direct GCC/Clang warnings-as-errors execution, the actual compiler oracle, fresh independent complete-diff re-review, formatting, strict Clippy, all 2,076 local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass.
 
 ### 2026-08-27 — Direct 2D double pointer, const, and resource boundaries
 

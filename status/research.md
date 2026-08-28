@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-28 — Fixed two-dimensional `double` typedef aliases
+
+- Existing `TypeAlias::Array2D` and `DeclType::Array2D` metadata already preserves dimensions, element type, const qualification, object declarations, initialization, lvalues, and type queries. The feature implementation removes only the explicit `double` constructor guard in `parse_typedef_declarator()`.
+- Every consumer newly reachable from `DeclType::Array2D(CType::Double, ...)` must be audited. Direct bracket-syntax parameter guards do not cover alias-spelled parameters, and return parsing formerly rejected only one-dimensional array aliases before an internal conversion helper; focused regressions closed both routes.
+- Native-oracle relationships remain ABI-independent: `sizeof(Matrix) == R * C * sizeof(double)`, row and element sizes match their corresponding double counts, and `_Alignof(Matrix) == _Alignof(double)`. The registered fixture exits `0` under both GCC and Clang with C11 warnings denied.
+- Candidate decision: fixed 2D double typedef aliases were selected over deterministic raw-memory double bytes, shared union storage, and lower-priority parser/property work because they were the sole unchecked authoritative package and reused mature typed 2D storage. Bounded v0.39.0 release closure is next; raw-memory double bytes still need a deterministic floating object representation, and shared union bytes still need true storage aliasing.
+- Fresh independent review first found a stale rejection and the return panic. Focused RED/GREEN closed both, and fresh complete-diff re-review returned `APPROVED` after auditing all reachable parser consumers and running all 2,076 local tests. The canonical rebuilt-Docker suite and runtime output `10` also pass. See `references/cust-fixed-two-dimensional-double-typedef-aliases.md`.
+- No external semantic research was required; existing repository declarator semantics, focused TDD, GCC/Clang compiler-oracle execution, and the independent route audit established the implementation boundary.
+
 ## 2026-08-28 — v0.38.0 release consistency
 
 - Exact CLI and Compose expectations failed while Cargo and image metadata remained at `0.37.0`, then passed after Cargo/lock and both image tags moved to `0.38.0`. Cargo metadata and the built CLI report `cust 0.38.0`; local and remote annotated-tag preflight found no `v0.38.0` refs.

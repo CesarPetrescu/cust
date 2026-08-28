@@ -8586,13 +8586,6 @@ impl Parser {
             let len = self.expect_array_len()?;
             self.expect_closing_bracket_after("typedef array length")?;
             alias = match alias {
-                TypeAlias::Scalar(CType::Double) if self.check(&Token::LBracket) => {
-                    return Err(Self::error_at(
-                        "double multidimensional array typedef aliases are not supported"
-                            .to_string(),
-                        self.peek_located(),
-                    ));
-                }
                 TypeAlias::Scalar(ty) if self.matches(&Token::LBracket) => {
                     let columns = self.expect_array_len()?;
                     self.expect_closing_bracket_after("second typedef array dimension")?;
@@ -9284,7 +9277,10 @@ impl Parser {
                 false,
             ));
         }
-        if matches!(decl_type, DeclType::Array(_, _)) {
+        if matches!(
+            decl_type,
+            DeclType::Array(_, _) | DeclType::Array2D(_, _, _)
+        ) {
             return Err(Self::error_at(
                 "array return types are not supported".to_string(),
                 self.previous(),
@@ -9440,6 +9436,12 @@ impl Parser {
                 || parameter_alias_pointee_is_qualified
                 || parameter_type_qualifier.is_some();
             let mut array_2d_param_type = match &decl_type {
+                DeclType::Array2D(CType::Double, _, _) => {
+                    return Err(Self::error_at(
+                        "double array parameters are not supported".to_string(),
+                        &parameter_type_token,
+                    ));
+                }
                 DeclType::Array2D(ty, _, columns) => Some((*ty, *columns)),
                 DeclType::Array2DPointer {
                     elem_type, columns, ..

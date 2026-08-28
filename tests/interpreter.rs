@@ -5868,10 +5868,6 @@ fn direct_double_array_compound_literal_preserves_adjacent_unsupported_boundarie
 fn direct_double_typedef_aliases_preserve_safety_boundaries() {
     for (program, expected) in [
         (
-            "typedef double Matrix[2][3]; int main(void) { return 0; }",
-            "double multidimensional array typedef aliases are not supported",
-        ),
-        (
             "typedef double (*RowPointer)[3]; int main(void) { return 0; }",
             "double pointer-to-row typedef aliases are not supported",
         ),
@@ -7216,6 +7212,66 @@ fn direct_fixed_two_dimensional_double_arrays_match_compiler_oracle_fixture() {
         include_str!("fixtures/compat/valid/direct_fixed_two_dimensional_double_arrays.c",);
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn fixed_two_dimensional_double_typedef_aliases_match_compiler_oracle_fixture() {
+    let program =
+        include_str!("fixtures/compat/valid/fixed_two_dimensional_double_typedef_aliases.c",);
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn fixed_two_dimensional_double_typedef_aliases_preserve_safety_boundaries() {
+    for (program, expected) in [
+        (
+            "typedef double Matrix[2][3]; int take(Matrix values) { return values[0][0] == 0; } int main(void) { return 0; }",
+            "double array parameters are not supported",
+        ),
+        (
+            "typedef double Matrix[2][3]; int main(void) { Matrix *pointer = 0; return pointer != 0; }",
+            "pointer-to-array declarations are not supported",
+        ),
+        (
+            "typedef double Matrix[2][3]; struct Box { Matrix values; }; int main(void) { return 0; }",
+            "double multidimensional aggregate array fields are not supported",
+        ),
+        (
+            "typedef double Matrix[2][3]; int main(void) { return ((Matrix){{1, 2, 3}, {4, 5, 6}})[0][0] == 1; }",
+            "multidimensional array casts are not supported",
+        ),
+        (
+            "void *memset(void *, int, unsigned long); typedef double Matrix[2][3]; int main(void) { Matrix values = {{1, 2, 3}, {4, 5, 6}}; memset(values[0], 0, sizeof(values[0])); return 0; }",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+        (
+            "typedef const double ConstMatrix[1][1]; int main(void) { ConstMatrix values = {{1}}; return sizeof(values[0][0]++); }",
+            "cannot modify read-only array 'values'",
+        ),
+        (
+            "typedef double Matrix[2][3]; typedef Matrix Cube[2]; int main(void) { return 0; }",
+            "array typedef aliases with more than two dimensions are not supported",
+        ),
+    ] {
+        let error = interpret(program).expect_err(program).to_string();
+        assert!(
+            error.contains(expected),
+            "expected {expected:?} for {program}, got {error:?}"
+        );
+    }
+}
+
+#[test]
+fn fixed_two_dimensional_double_typedef_alias_array_return_is_diagnostic() {
+    let program = "typedef double Matrix[2][3]; Matrix make(void) { Matrix values = {{0}}; return values; } int main(void) { return 0; }";
+    let result = std::panic::catch_unwind(|| interpret(program));
+
+    assert!(result.is_ok(), "array typedef return panicked the host");
+    assert_eq!(
+        result.unwrap().unwrap_err().to_string(),
+        "array return types are not supported at line 1, column 30"
+    );
 }
 
 #[test]
