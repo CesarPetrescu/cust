@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-29 after bounded v0.40.0 release review and canonical verification. Local and remote `v0.40.0` preflight refs are absent; version-first tests, fresh independent `APPROVED` review, formatting, warning-denied Clippy, all 2,079 local tests, a no-cache rebuild, all 2,079 rebuilt-Docker tests, runtime output `10`, exact image versions, and diff hygiene pass. Release-commit-first publication is the remaining ordinary closure step, not a blocker. Aggregate-field binary64 object bytes are the one next implementation package after publication.
+None. Last reviewed 2026-08-29 after bounded v0.40.0 publication. Version-first tests, fresh independent `APPROVED` review, formatting, warning-denied Clippy, all 2,079 local tests, a no-cache rebuild, all 2,079 rebuilt-Docker tests, runtime output `10`, exact image versions, and diff hygiene pass. Release commit `a0cbac98f7b3f5b3a4204c76d8b9c73f6a8130ba` reached exact `origin/main` before annotated tag `v0.40.0`; local and remote tag object `86b83200dd5f0842d4508fff52c11b0572e84e8d` peel exactly to the release commit. Aggregate-field binary64 object bytes are the one next implementation package.
 
 ## Resolved this run
 
