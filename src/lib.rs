@@ -21687,17 +21687,22 @@ impl Interpreter {
     fn pointer_targets_supported_double_memory_object(&self, pointer: &PointerValue) -> bool {
         match Self::object_byte_base(pointer) {
             PointerValue::Scalar { .. } => true,
-            PointerValue::ArrayBase { array, .. } | PointerValue::ArrayElement { array, .. } => {
+            array_pointer @ (PointerValue::ArrayBase { array, .. }
+            | PointerValue::ArrayElement { array, .. }) => {
                 array.borrow().dimensions.is_none()
-                    && !self.array_pointer_targets_aggregate_field(array)
+                    && self
+                        .memory_pointer_targets_union_field(array_pointer)
+                        .is_ok_and(|targets_union| !targets_union)
             }
+            field @ (PointerValue::StructField { .. }
+            | PointerValue::StructFieldElementField { .. }) => self
+                .memory_pointer_targets_union_field(field)
+                .is_ok_and(|targets_union| !targets_union),
             PointerValue::Null
             | PointerValue::Struct { .. }
             | PointerValue::StructElement { .. }
             | PointerValue::StructFieldElement { .. }
             | PointerValue::NestedStructArrayElement { .. }
-            | PointerValue::StructField { .. }
-            | PointerValue::StructFieldElementField { .. }
             | PointerValue::Array2DRow { .. }
             | PointerValue::ObjectByte { .. } => false,
         }
@@ -23093,25 +23098,6 @@ impl Interpreter {
                 })
             })
             .unwrap_or(false)
-    }
-
-    fn array_pointer_targets_aggregate_field(&self, array: &Rc<RefCell<ArrayValue>>) -> bool {
-        let value_contains_aggregate_array = |value: &Value| match value {
-            Value::Struct { fields, .. } => Self::fields_contain_array(fields, array),
-            Value::StructArray { elements, .. } => elements
-                .iter()
-                .any(|fields| Self::fields_contain_array(fields, array)),
-            Value::Scalar { .. } | Value::Array(_) | Value::Pointer { .. } => false,
-        };
-        self.scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.values.values())
-            .any(&value_contains_aggregate_array)
-            || self
-                .static_locals
-                .values()
-                .any(|storage| value_contains_aggregate_array(&storage.value))
     }
 
     fn unsupported_memory_copy_declaration_error(name: &str) -> CustError {
@@ -31444,6 +31430,67 @@ impl Interpreter {
         }
     }
 
+    fn non_evaluating_field_expr_targets_supported_double_memory_object(
+        &self,
+        expr: &Expr,
+    ) -> bool {
+        matches!(
+            self.pointer_expr_pointee_type(expr),
+            Ok(Some(PointeeType::Scalar(CType::Double)))
+        ) && self.array2d_row_pointer_element_type(expr).is_none()
+            && !self.aggregate_pointer_expr_has_union_container(expr)
+    }
+
+    fn non_evaluating_expr_targets_direct_double_array_field(&self, expr: &Expr) -> bool {
+        let is_direct_double_array = |metadata: Option<(StructFieldType, bool, bool)>| {
+            metadata.is_some_and(|(field_type, _, _)| {
+                matches!(field_type, StructFieldType::Array(CType::Double, _))
+            })
+        };
+        let targets_direct_double_array = match expr {
+            Expr::StructGet { name, fields }
+            | Expr::AddressOfStructArrayField { name, fields, .. } => {
+                match self.find_variable(name) {
+                    Some(Value::Struct { type_name, .. })
+                    | Some(Value::StructArray { type_name, .. }) => self
+                        .aggregate_type_field_metadata(type_name, fields)
+                        .is_ok_and(is_direct_double_array),
+                    _ => false,
+                }
+            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            }
+            | Expr::AddressOfStructElementArrayField {
+                name,
+                index,
+                fields,
+                ..
+            } => self
+                .struct_element_expr_field_metadata(name, index, fields)
+                .is_ok_and(is_direct_double_array),
+            Expr::StructPtrGet { pointer, fields }
+            | Expr::AddressOfStructPtrArrayField {
+                pointer, fields, ..
+            } => self
+                .struct_pointer_expr_field_metadata(pointer, fields)
+                .is_ok_and(is_direct_double_array),
+            Expr::AggregateFieldGet { aggregate, fields } => {
+                self.aggregate_literal_field_metadata(aggregate, fields)
+                    .is_ok_and(is_direct_double_array)
+                    && self
+                        .aggregate_expr_type_name(aggregate)
+                        .is_ok_and(|type_name| {
+                            !self.aggregate_type_field_path_has_union_container(&type_name, fields)
+                        })
+            }
+            _ => false,
+        };
+        targets_direct_double_array && !self.aggregate_pointer_expr_has_union_container(expr)
+    }
+
     fn non_evaluating_expr_targets_supported_double_memory_object(&self, expr: &Expr) -> bool {
         match expr {
             Expr::AddressOf(name) => matches!(
@@ -31480,50 +31527,84 @@ impl Interpreter {
                 elem_type: CType::Double,
                 ..
             } => true,
-            Expr::StructGet { name, fields } => {
-                match self.find_variable(name) {
-                    Some(Value::Struct {
-                        type_name,
-                        fields: values,
-                    }) => Self::nested_field_value(type_name, values, fields).is_ok_and(
-                        |(_, field)| match field {
-                            StructFieldValue::Pointer { pointer, .. } => {
-                                self.pointer_targets_supported_double_memory_object(pointer)
-                            }
-                            _ => false,
-                        },
-                    ),
-                    _ => false,
-                }
+            Expr::AddressOfStructField { .. }
+            | Expr::AddressOfStructElementField { .. }
+            | Expr::AddressOfStructPtrField { .. } => {
+                self.non_evaluating_field_expr_targets_supported_double_memory_object(expr)
             }
-            Expr::StructPtrGet { .. } => self
-                .non_evaluating_current_pointer_value(expr)
-                .is_some_and(|pointer| {
-                    self.pointer_targets_supported_double_memory_object(&pointer)
-                }),
-            Expr::StructElementGet {
-                name,
-                index,
-                fields,
-            } => match self.find_variable(name) {
-                Some(Value::StructArray {
-                    type_name,
-                    elements,
-                    ..
-                }) => Self::non_evaluating_array_index(index)
-                    .and_then(|index| elements.get(index))
-                    .is_some_and(|values| {
-                        Self::nested_field_value(type_name, values, fields).is_ok_and(
+            Expr::AddressOfAggregateField { aggregate, fields } => {
+                self.aggregate_literal_field_metadata(aggregate, fields)
+                    .is_ok_and(|metadata| {
+                        metadata.is_some_and(|(field_type, _, _)| {
+                            matches!(field_type, StructFieldType::Scalar(CType::Double))
+                        })
+                    })
+                    && self
+                        .aggregate_expr_type_name(aggregate)
+                        .is_ok_and(|type_name| {
+                            !self.aggregate_type_field_path_has_union_container(&type_name, fields)
+                        })
+            }
+            Expr::AddressOfStructArrayField { .. }
+            | Expr::AddressOfStructElementArrayField { .. }
+            | Expr::AddressOfStructPtrArrayField { .. } => {
+                self.non_evaluating_expr_targets_direct_double_array_field(expr)
+            }
+            Expr::AggregateFieldGet { .. } => {
+                self.non_evaluating_expr_targets_direct_double_array_field(expr)
+            }
+            Expr::StructGet { name, fields } => {
+                self.non_evaluating_expr_targets_direct_double_array_field(expr)
+                    || match self.find_variable(name) {
+                        Some(Value::Struct {
+                            type_name,
+                            fields: values,
+                        }) => Self::nested_field_value(type_name, values, fields).is_ok_and(
                             |(_, field)| match field {
                                 StructFieldValue::Pointer { pointer, .. } => {
                                     self.pointer_targets_supported_double_memory_object(pointer)
                                 }
                                 _ => false,
                             },
-                        )
-                    }),
-                _ => false,
-            },
+                        ),
+                        _ => false,
+                    }
+            }
+            Expr::StructPtrGet { .. } => {
+                self.non_evaluating_expr_targets_direct_double_array_field(expr)
+                    || self
+                        .non_evaluating_current_pointer_value(expr)
+                        .is_some_and(|pointer| {
+                            self.pointer_targets_supported_double_memory_object(&pointer)
+                        })
+            }
+            Expr::StructElementGet {
+                name,
+                index,
+                fields,
+            } => {
+                self.non_evaluating_expr_targets_direct_double_array_field(expr)
+                    || match self.find_variable(name) {
+                        Some(Value::StructArray {
+                            type_name,
+                            elements,
+                            ..
+                        }) => Self::non_evaluating_array_index(index)
+                            .and_then(|index| elements.get(index))
+                            .is_some_and(|values| {
+                                Self::nested_field_value(type_name, values, fields).is_ok_and(
+                                    |(_, field)| match field {
+                                        StructFieldValue::Pointer { pointer, .. } => self
+                                            .pointer_targets_supported_double_memory_object(
+                                                pointer,
+                                            ),
+                                        _ => false,
+                                    },
+                                )
+                            }),
+                        _ => false,
+                    }
+            }
             Expr::PointerCast { expr, .. } => {
                 self.non_evaluating_expr_targets_supported_double_memory_object(expr)
             }
@@ -48335,9 +48416,11 @@ impl Interpreter {
                     }
                     Ok(POINTER_SIZE)
                 }
-                Expr::AddressOf(_)
-                | Expr::AddressOfStructField { .. }
-                | Expr::AddressOfAggregateField { .. } => Ok(POINTER_SIZE),
+                Expr::AddressOf(_) | Expr::AddressOfStructField { .. } => Ok(POINTER_SIZE),
+                Expr::AddressOfAggregateField { aggregate, .. } => {
+                    self.sizeof_expr(aggregate)?;
+                    Ok(POINTER_SIZE)
+                }
                 Expr::PointerCast { expr: inner, .. } => {
                     self.sizeof_expr(inner)?;
                     Ok(POINTER_SIZE)

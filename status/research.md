@@ -2,6 +2,17 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-29 — Aggregate-field binary64 object bytes
+
+- Existing `PointerValue::StructField`, `StructFieldElementField`, and aggregate-backed `ArrayBase`/`ArrayElement` identities already preserve selected field storage, owner/path/index, byte capacity, overlap, const, and lexical lifetime. Runtime admission can therefore reuse the standalone `f64::to_bits().to_le_bytes()` representation without host layout or a new pointer target, provided union ancestry and dimensions remain explicit exclusions.
+- Non-evaluating validation must distinguish declared field shape from resulting pointer type. A direct `double values[N]` field is structurally supported, but a `double *pointer` field must consult its current stored pointer because it can target an unsupported row of `double[R][C]`. Checking only `pointer_expr_pointee_type() == double` launders that row boundary.
+- Direct array-field metadata alone is insufficient: `union Choice { double values[N]; }` has the same `StructFieldType::Array(CType::Double, N)` as a struct field. Metadata-only admission must additionally require `!aggregate_pointer_expr_has_union_container(expr)` so runtime and `sizeof(call)` agree.
+- Aggregate compound literals lower selected scalar addresses to `AddressOfAggregateField` and selected array decay to `AggregateFieldGet`; both require explicit metadata-only admission beneath `sizeof`, because no evaluated hidden root exists. Classify only declared scalar `double` or direct `double[N]` fields and retain union-ancestry rejection.
+- Generic aggregate-pointer provenance tracks pointer-bearing initializer paths, so it is not a sufficient union test for direct aggregate compound literals. For `AddressOfAggregateField`/`AggregateFieldGet`, derive the aggregate type with `aggregate_expr_type_name()` and check the selected path with `aggregate_type_field_path_has_union_container()`.
+- Metadata admission is not a substitute for expression constraint validation. `sizeof_expr(AddressOfAggregateField)` must recurse into the aggregate expression so `validate_non_evaluating_struct_initializer_conversions()` checks invalid scalar/array field initializers without executing them.
+- Native compiler-oracle coverage must avoid fixed endian and floating-object-representation assumptions. Same-type `memcpy`/`memmove`, `memcmp` equality, returned destination identity, and byte-level `memset`/`memchr` checks are warning-free and ABI-independent; do not read a `double` as a typed value after all-zero `memset`, because C11 does not guarantee that representation is positive zero. Exact `{0,0,0,0,0,0,240,63}` representation and partial byte reconstruction remain Cust-only.
+- Candidate decision: complete the queue-leading aggregate-field slice before selected 2D rows or shared union storage. A bounded v0.41.0 release is next because it packages a coherent independently reviewed feature; selected rows can reuse the dimensioned row model afterward, while union bytes still require true shared member storage. See `references/cust-bounded-memory-aggregate-double-object-bytes.md`.
+
 ## 2026-08-29 — v0.40.0 release consistency
 
 - Exact CLI and Compose version expectations failed while Cargo and image metadata remained at `0.39.0`, then passed after Cargo/lock and both Compose image tags moved to `0.40.0`. Cargo metadata and the built CLI report `cust 0.40.0`; local and remote annotated-tag preflight found no `v0.40.0` refs.

@@ -3781,10 +3781,6 @@ fn direct_double_aggregate_field_pointers_keep_exact_unsupported_boundaries() {
             "struct Item { double scalar; }; int main(void) { struct Item item = {1.0}; return sizeof((char *)&item.scalar); }",
             "double pointers are not supported",
         ),
-        (
-            "void *memset(void *, int, unsigned long); struct Item { double values[2]; }; int main(void) { struct Item item = {{1.0, 2.0}}; memset(item.values, 0, sizeof(item.values)); return 0; }",
-            "function 'memset' does not yet support double object storage for argument 1",
-        ),
     ] {
         assert_eq!(
             interpret(program).expect_err(program).to_string(),
@@ -5969,10 +5965,6 @@ fn direct_double_aggregate_array_fields_preserve_const_pointer_and_memory_bounda
             "struct Inner { double readings[2]; }; struct Outer { const struct Inner inner; }; int main(void) { struct Outer outer = {{{1.0, 2.0}}}; outer.inner.readings[0] += 1.0; return 0; }",
             "cannot modify read-only array 'readings'",
         ),
-        (
-            "void *memset(void *, int, unsigned long int); struct Sample { double readings[2]; }; int main(void) { struct Sample sample = {{1.0, 2.0}}; memset(sample.readings, 0, sizeof(sample.readings)); return 0; }",
-            "function 'memset' does not yet support double object storage for argument 1",
-        ),
     ] {
         assert_eq!(
             interpret(program).expect_err(program).to_string(),
@@ -7179,10 +7171,16 @@ int main(void) {{
 }
 
 #[test]
-fn direct_double_aggregate_field_memset_uses_intrinsic_diagnostic() {
-    for call in [
-        "memset(&sample.reading, 0, sizeof(sample.reading)); return 0;",
-        "return sizeof(memset(&sample.reading, 0, sizeof(sample.reading)));",
+fn direct_double_aggregate_field_memset_supports_runtime_and_sizeof_routes() {
+    for (body, expected) in [
+        (
+            "memset(&sample.reading, 0, sizeof(sample.reading)); return sample.reading == 0.0 ? 0 : 1;",
+            0,
+        ),
+        (
+            "return sizeof(memset(&sample.reading, 0, sizeof(sample.reading)));",
+            8,
+        ),
     ] {
         let program = format!(
             r#"
@@ -7190,14 +7188,11 @@ void *memset(void *, int, unsigned long int);
 struct Sample {{ double reading; }};
 int main(void) {{
     struct Sample sample = {{1.0}};
-    {call}
+    {body}
 }}
 "#
         );
-        assert_eq!(
-            interpret(&program).unwrap_err().to_string(),
-            "function 'memset' does not yet support double object storage for argument 1"
-        );
+        assert_eq!(interpret(&program).unwrap(), expected, "{body}");
     }
 }
 
@@ -15329,6 +15324,275 @@ fn bounded_memory_double_object_bytes_use_deterministic_binary64_little_endian_s
     "#;
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn aggregate_double_object_bytes_support_direct_scalar_fields() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memmove(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        struct Pair { double source; double destination; };
+        int main(void) {
+            struct Pair value = {1.5, -2.0};
+            if (memcpy(&value.destination, &value.source, sizeof(value.source)) !=
+                &value.destination) return 1;
+            if (value.destination != value.source) return 2;
+            if (memcmp(&value.destination, &value.source, sizeof(value.source)) != 0) return 3;
+            if (memset(&value.destination, 0, sizeof(value.destination)) !=
+                &value.destination) return 4;
+            if (value.destination != 0.0) return 5;
+            if (memchr(&value.destination, 0, sizeof(value.destination)) !=
+                &value.destination) return 6;
+            if (memmove(&value.destination, &value.source, sizeof(value.source)) !=
+                &value.destination) return 7;
+            return value.destination == value.source ? 0 : 8;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn aggregate_double_object_bytes_support_array_and_nested_field_routes() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memmove(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        struct Cell { double scalar; double values[2]; };
+        struct Nested { struct Cell inner; };
+        struct Row { double scalar; };
+        struct Grid { struct Row rows[2]; };
+        int main(void) {
+            struct Cell source = {1.5, {2.5, 3.5}};
+            struct Cell destination = {-1.0, {4.5, 5.5}};
+            struct Cell *pointer = &destination;
+            if (memcpy(pointer->values, source.values, sizeof(source.values)) !=
+                pointer->values) return 1;
+            if (memcmp(destination.values, source.values, sizeof(source.values)) != 0) return 2;
+            if (memmove(pointer->values + 1, pointer->values,
+                        sizeof(pointer->values[0])) != pointer->values + 1) return 3;
+            if (destination.values[1] != destination.values[0]) return 4;
+
+            struct Nested nested = {{6.5, {7.5, 8.5}}};
+            if (memset(&nested.inner.scalar, 0, sizeof(nested.inner.scalar)) !=
+                &nested.inner.scalar) return 5;
+            if (nested.inner.scalar != 0.0) return 6;
+
+            struct Grid grid = {{{9.5}, {10.5}}};
+            double *selected = memchr(&grid.rows[1].scalar, 0,
+                                      sizeof(grid.rows[1].scalar));
+            if (selected != &grid.rows[1].scalar) return 7;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn aggregate_double_object_bytes_are_non_evaluating_for_field_roots() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        struct Cell { double source; double destination; double values[2]; };
+        struct Nested { struct Cell inner; };
+        int main(void) {
+            struct Nested value = {{1.5, 2.5, {3.5, 4.5}}};
+            struct Nested *pointer = &value;
+            int marker = 0;
+            if (sizeof(memcpy(&pointer->inner.destination, &value.inner.source,
+                              marker++)) != sizeof(void *)) return 1;
+            if (sizeof(memset(pointer->inner.values + marker++, 0,
+                              sizeof(pointer->inner.values[0]))) != sizeof(void *)) return 2;
+            return marker != 0 || value.inner.destination != 2.5 ||
+                   value.inner.values[0] != 3.5;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn aggregate_double_object_bytes_are_non_evaluating_for_scalar_compound_literal_fields() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Cell { double value; };
+        int main(void) {
+            return sizeof(memset(&((struct Cell){1.5}).value, 0, sizeof(double)));
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn aggregate_double_object_bytes_are_non_evaluating_for_array_compound_literal_fields() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        struct Cell { double values[2]; };
+        int main(void) {
+            return sizeof(memset(((struct Cell){{1.5, 2.5}}).values, 0,
+                                 sizeof(((struct Cell){{3.5, 4.5}}).values)));
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 8);
+}
+
+#[test]
+fn aggregate_double_object_bytes_reject_non_evaluating_2d_row_pointer_fields() {
+    for call in [
+        "sizeof(memset(holder.pointer, 0, sizeof(matrix[0])))",
+        "sizeof(memset(slot->pointer, 0, sizeof(matrix[0])))",
+    ] {
+        let program = format!(
+            r#"
+void *memset(void *, int, unsigned long int);
+struct Holder {{ double *pointer; }};
+int main(void) {{
+    double matrix[2][2] = {{{{1.0, 2.0}}, {{3.0, 4.0}}}};
+    struct Holder holder = {{matrix[0]}};
+    struct Holder *slot = &holder;
+    return {call};
+}}
+"#
+        );
+        assert_eq!(
+            interpret(&program).expect_err(call).to_string(),
+            "function 'memset' does not yet support double object storage for argument 1",
+            "unexpected result for {call}"
+        );
+    }
+}
+
+#[test]
+fn aggregate_double_object_bytes_reject_non_evaluating_union_array_fields() {
+    let program = r#"
+void *memset(void *, int, unsigned long int);
+union Choice { double values[2]; };
+int main(void) {
+    union Choice choice = {{1.0, 2.0}};
+    return sizeof(memset(choice.values, 0, sizeof(choice.values)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("union-backed double array")
+            .to_string(),
+        "function 'memset' does not yet support double object storage for argument 1"
+    );
+}
+
+#[test]
+fn aggregate_double_object_bytes_validate_non_evaluating_scalar_compound_literal_initializers() {
+    let program = r#"
+void *memset(void *, int, unsigned long int);
+struct Cell { double value; };
+int main(void) {
+    int value = 1;
+    return sizeof(memset(&((struct Cell){&value}).value, 0, sizeof(double)));
+}
+"#;
+
+    assert_eq!(
+        interpret(program)
+            .expect_err("invalid double compound-literal initializer")
+            .to_string(),
+        "cannot assign pointer expression to double value"
+    );
+}
+
+#[test]
+fn aggregate_double_object_bytes_reject_non_evaluating_union_compound_literal_fields() {
+    for program in [
+        r#"
+void *memset(void *, int, unsigned long int);
+union Choice { double value; };
+int main(void) {
+    return sizeof(memset(&((union Choice){1.0}).value, 0, sizeof(double)));
+}
+"#,
+        r#"
+void *memset(void *, int, unsigned long int);
+union Choice { double values[2]; };
+int main(void) {
+    return sizeof(memset(((union Choice){{1.0, 2.0}}).values, 0,
+                         sizeof(((union Choice){{3.0, 4.0}}).values)));
+}
+"#,
+    ] {
+        assert_eq!(
+            interpret(program)
+                .expect_err("union-backed compound-literal double field")
+                .to_string(),
+            "function 'memset' does not yet support double object storage for argument 1"
+        );
+    }
+}
+
+#[test]
+fn aggregate_double_object_bytes_preserve_binary64_identity_and_safety_boundaries() {
+    let binary64 = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        struct Cell { double value; };
+        int main(void) {
+            struct Cell cell = {0.0};
+            char one_bytes[8] = {0, 0, 0, 0, 0, 0, 240, 63};
+            if (memcpy(&cell.value, one_bytes, sizeof(cell.value)) != &cell.value) return 1;
+            if (cell.value != 1.0) return 2;
+            char *low = memchr(&cell.value, 240, sizeof(cell.value));
+            char *high = memchr(&cell.value, 63, sizeof(cell.value));
+            if (low == 0 || high - low != 1) return 3;
+            if (memset(low, 0, 2) != low) return 4;
+            return cell.value == 0.0 ? 0 : 5;
+        }
+    "#;
+    assert_eq!(interpret(binary64).unwrap(), 0);
+
+    for (program, expected) in [
+        (
+            "void *memset(void *, int, unsigned long int); struct Inner { double value; }; struct Outer { struct Inner inner; }; int main(void) { const struct Outer item = {{1.0}}; memset(&item.inner.value, 0, sizeof(item.inner.value)); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); struct Buffer { double values[3]; }; int main(void) { struct Buffer item = {{1.0, 2.0, 3.0}}; memcpy(item.values + 1, item.values, sizeof(double) * 2); return 0; }",
+            "overlapping source and destination ranges passed to function 'memcpy'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Buffer { double values[2]; }; int main(void) { struct Buffer item = {{1.0, 2.0}}; memset(item.values + 1, 0, sizeof(item.values)); return 0; }",
+            "destination argument 1 to function 'memset' requires 16 bytes, but only 8 bytes are available",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); void *saved; struct Cell { double value; }; int main(void) { { struct Cell local = {0.0}; saved = memchr(&local.value, 0, sizeof(local.value)); } return memchr(saved, 0, 1) != 0; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Cell { double value; int alternate; }; int main(void) { union Cell item = {.value = 1.0}; memset(&item.value, 0, sizeof(item.value)); return 0; }",
+            "double pointers are not supported",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); typedef double Matrix[2][2]; struct Box { Matrix values; }; int main(void) { return 0; }",
+            "double multidimensional aggregate array fields are not supported",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Link { double value; double *pointer; }; int main(void) { double target = 2.0; struct Link item = {1.0, &target}; memset(&item, 0, sizeof(item)); return 0; }",
+            "function 'memset' does not yet support double object storage for argument 1",
+        ),
+    ] {
+        let error = interpret(program).expect_err(program).to_string();
+        assert!(
+            error.contains(expected),
+            "expected {expected:?} for {program}, got {error:?}"
+        );
+    }
 }
 
 #[test]

@@ -4,9 +4,19 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-29 after bounded v0.40.0 publication. Version-first tests, fresh independent `APPROVED` review, formatting, warning-denied Clippy, all 2,079 local tests, a no-cache rebuild, all 2,079 rebuilt-Docker tests, runtime output `10`, exact image versions, and diff hygiene pass. Release commit `a0cbac98f7b3f5b3a4204c76d8b9c73f6a8130ba` reached exact `origin/main` before annotated tag `v0.40.0`; local and remote tag object `86b83200dd5f0842d4508fff52c11b0572e84e8d` peel exactly to the release commit. Aggregate-field binary64 object bytes are the one next implementation package.
+None. Last reviewed 2026-08-29 after aggregate-field binary64 object-byte implementation and review closure. Focused RED/GREEN passes direct/arrow/nested/struct-array-element routes and exact 2D-row/union/non-evaluating boundaries; bounded v0.41.0 release closure is the one next package.
 
 ## Resolved this run
+
+### 2026-08-29 — Aggregate-field binary64 admission and non-evaluating provenance
+
+- Failure: all five bounded raw-memory intrinsics rejected direct scalar and one-dimensional-array `double` fields; after opening runtime admission, non-evaluating direct/arrow roots still failed. A first metadata shortcut then incorrectly accepted pointer-valued fields targeting 2D rows and union-backed direct array fields beneath `sizeof`.
+- Root cause: runtime admission categorized all aggregate-backed array pointers as unsupported and omitted scalar field pointer variants. Non-evaluating validation initially inferred only the resulting `double *` pointee type, losing whether the aggregate field was a direct fixed array, a pointer with current storage provenance, or union-backed storage.
+- RED/GREEN: direct scalar, array/nested, and non-evaluating field tests failed before runtime pointer admission and metadata-only field classification were added. Independent review supplied exact pointer-field-to-2D-row and union-array reproducers; both returned `Ok(8)` before `StructFieldType::Array(CType::Double, _)` classification plus union ancestry restored the exact unsupported double-storage diagnostic.
+- Boundary evidence: deterministic little-endian binary64 identity and partial writes, field-local capacity/overlap, recursive const, expired owners, whole unsupported layouts, union storage, 2D rows, and runtime/non-evaluating parity now have focused regressions; the registered native fixture uses only ABI-independent relationships.
+- Pre-commit review closure: `sizeof(memset(&((struct S){...}).scalar, ...))` and matching direct array-field decay were rejected despite evaluated parity. Two focused tests failed first, then aggregate-literal field metadata admitted only direct scalar/1D-array fields outside union ancestry. The same review found the native fixture read a `double` after all-zero `memset`; removing that typed read retains byte-level `memchr` coverage without assuming a portable all-zero floating representation. Fresh re-review confirmed both blockers closed and found only stale six-versus-eight focused-test wording, corrected before the canonical gate.
+- Follow-up review closure: after the wording correction, re-review showed that generic pointer-provenance analysis did not mark direct union compound literals, so `sizeof(memset(((union Choice){{...}}).values, ...))` returned `8`. A dedicated scalar/array union-compound-literal test failed first; direct aggregate type/path ancestry now guards both compound-literal admission branches and restores the exact unsupported double-storage diagnostic.
+- Final review closure: `sizeof(memset(&((struct Cell){&value}).value, ...))` returned `8` because `sizeof_expr(AddressOfAggregateField)` returned pointer size without validating the aggregate initializer. A focused test failed first; the address branch now sizes the aggregate expression non-evaluatingly, restoring `cannot assign pointer expression to double value` while preserving side-effect suppression.
 
 ### 2026-08-29 — Nested non-evaluating standalone `double` roots
 
