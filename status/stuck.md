@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-29 after bounded v0.41.0 release preparation. Version-first CLI/Compose RED/GREEN, the independently reconciled 2,089-test inventory, fresh `APPROVED` review, the complete local/no-cache-rebuilt-Docker gate, runtime output `10`, exact versions, and diff hygiene pass. Release-commit-first publication and annotated-tag verification remain normal acceptance work rather than blockers; selected two-dimensional binary64 rows are the post-release implementation package.
+None. Last reviewed 2026-08-29 after bounded v0.41.0 publication. Version-first CLI/Compose RED/GREEN, the independently reconciled 2,089-test inventory, fresh `APPROVED` review, the complete local/no-cache-rebuilt-Docker gate, runtime output `10`, exact versions, diff hygiene, release-commit-first publication, and annotated-tag verification pass. Selected two-dimensional binary64 rows are the single next implementation package.
 
 ## Resolved this run
 
