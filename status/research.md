@@ -2,6 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-29 — v0.40.0 release consistency
+
+- Exact CLI and Compose version expectations failed while Cargo and image metadata remained at `0.39.0`, then passed after Cargo/lock and both Compose image tags moved to `0.40.0`. Cargo metadata and the built CLI report `cust 0.40.0`; local and remote annotated-tag preflight found no `v0.40.0` refs.
+- Executable target-by-target listing independently reconciles 2,079 tests: 1,943 interpreter + 99 deterministic fuzz-safety + 33 CLI + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test.
+- README central inventory and release notes advertise deterministic eight-byte little-endian IEEE-754 binary64 object bytes for supported standalone scalar and one-dimensional-array `double` storage across all five bounded raw-memory intrinsics. They retain aggregate-field, two-dimensional, union-backed, pointer-object, and unprovable helper-returned double-storage boundaries and do not claim host endianness or ABI parity.
+- Candidate decision: package the independently reviewed standalone/one-dimensional binary64 byte slice before widening runtime semantics. Aggregate-field double object bytes are next because existing field owner/path/const/lifetime metadata and byte serialization provide a bounded vertical slice; selected two-dimensional rows are adjacent follow-up work, shared union bytes require true storage aliasing, and parser/property expansion is lower priority.
+- Publication must retain release-commit-first ordering: fresh complete-diff review before the canonical gate, exact `origin/main` acceptance before annotated-tag creation, and exact local/remote tag-object plus peeled-target verification. No external semantic research was required; executable version tests, Cargo/Compose metadata, the completed feature evidence, and the loaded release-consistency checklists establish this release surface.
+- Initial independent release review found the README's central limitation inventory omitted whole pointer-object storage and the distinction between supported evaluated helper results and conservatively rejected unprovable non-evaluating helper results. A direct evaluated helper probe returned `0`; the corrected complete diff received fresh `APPROVED` with no remaining findings.
+- The isolated final candidate passed formatting, warning-denied Clippy, all 2,079 local tests, a no-cache Docker rebuild, all 2,079 rebuilt-Docker tests, runtime output `10`, and diff hygiene. Cargo/local CLI and both rebuilt images report `0.40.0`; the candidate diff hash remained `1c1edc6a7fd6e5c17fea21d386a442d7e7693aefedda4d0ac1ab16fbb37f5149` throughout the canonical gate, while the shared checkout remained on cleanly owned `main` with the same tracked diff.
+
 ## 2026-08-29 — Deterministic binary64 object bytes
 
 - Cust's deterministic representation is explicit and host-independent: `f64::to_bits().to_le_bytes()` produces eight object bytes and `f64::from_bits(u64::from_le_bytes(bytes))` reconstructs partial/full writes. Native compiler fixtures must not assert host endianness or object bytes.

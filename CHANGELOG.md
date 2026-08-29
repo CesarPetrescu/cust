@@ -4,6 +4,8 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.40.0 — 2026-08-29
+
 ### Language subset
 
 - Added deterministic eight-byte IEEE-754 binary64 little-endian object views for supported standalone scalar and one-dimensional-array `double` storage across exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr`.
@@ -11,6 +13,16 @@ All notable changes to Cust are documented here. Cust is still a small education
 ### Diagnostics and verification
 
 - Preserved destination-aware typed coercion, partial/full writes, zero count, const/lifetime/capacity/overlap/owner checks, aligned/interior `memchr` identity, and direct/nested non-evaluating validation without host addresses or host-libc execution. Aggregate-field, two-dimensional, union-backed, pointer-object, and unprovable helper-returned double storage retain exact boundaries. Three focused interpreter tests and one registered warning-free compiler-oracle fixture cover the package; deterministic endian assertions remain interpreter-only.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.40.0`.
+- Reconciled an executable inventory of 2,079 tests: 1,943 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- The bounded raw-memory slice accepts standalone scalar and one-dimensional-array `double` storage under Cust's fixed eight-byte little-endian IEEE-754 binary64 representation. Aggregate-field, two-dimensional, union-backed, pointer-object, and unprovable helper-returned double storage remain unsupported. The broader bounded `double` language slice still excludes `float`, `long double`, hexadecimal/suffixed/non-finite floating literals, deeper double pointers, arrays of double pointers, pointer-to-row forms such as `double (*)[N]`, whole-array and row addresses, union-backed double field addresses/decay, atomic double-pointer aliases, direct one-dimensional double-array parameter declarators, direct and alias-spelled two-dimensional double array parameters, array returns, two-dimensional double aggregate fields/compound literals, and three-dimensional double arrays. Complex runtime values, host floating ABI/promotion behavior, general pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
 
 ## v0.39.0 — 2026-08-28
 

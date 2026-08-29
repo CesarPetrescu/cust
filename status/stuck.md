@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-29 after deterministic binary64 object-byte review closure. Final complete-diff independent review returned `APPROVED`; focused tests, formatting, warning-denied Clippy, all 2,079 local tests, no-cache rebuilt images, all 2,079 Docker tests, runtime output `10`, and diff hygiene pass. Bounded v0.40.0 release closure is the sole next concrete package after this verified feature commit.
+None. Last reviewed 2026-08-29 after bounded v0.40.0 release review and canonical verification. Local and remote `v0.40.0` preflight refs are absent; version-first tests, fresh independent `APPROVED` review, formatting, warning-denied Clippy, all 2,079 local tests, a no-cache rebuild, all 2,079 rebuilt-Docker tests, runtime output `10`, exact image versions, and diff hygiene pass. Release-commit-first publication is the remaining ordinary closure step, not a blocker. Aggregate-field binary64 object bytes are the one next implementation package after publication.
 
 ## Resolved this run
 
