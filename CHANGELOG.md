@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.41.0 — 2026-08-29
+
+### Language subset
+
+- Extended deterministic eight-byte IEEE-754 binary64 little-endian object views across exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` to scalar and fixed one-dimensional `double` array fields in supported non-union structs.
+
+### Diagnostics and verification
+
+- Preserved field-local capacity/overlap, owner/path/interior identity, recursive const and lexical-lifetime safety, partial/full destination-aware typed writes, aligned/interior `memchr` results, and direct/nested non-evaluating validation. Direct, arrow, nested, struct-array-element, and aggregate-compound-literal routes are covered; pointer-valued fields targeting two-dimensional rows, union-backed fields, unsupported whole layouts, and unprovable helper roots retain targeted rejection. Ten focused interpreter tests and one registered ABI-independent compiler-oracle fixture cover the package without host addresses, host-libc execution, or typed assumptions about all-zero floating representations.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.41.0`.
+- Reconciled an executable inventory of 2,089 tests: 1,953 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- The bounded raw-memory slice accepts standalone scalar/one-dimensional-array `double` storage and scalar/one-dimensional-array `double` fields in supported non-union structs under Cust's fixed eight-byte little-endian IEEE-754 binary64 representation. Two-dimensional and union-backed double storage, whole aggregates containing double fields, whole pointer-object storage, pointer-valued fields whose current target is not provably supported, and other unprovable helper-returned roots remain unsupported. The broader bounded `double` language slice still excludes `float`, `long double`, hexadecimal/suffixed/non-finite floating literals, deeper double pointers, arrays of double pointers, pointer-to-row forms such as `double (*)[N]`, whole-array and row addresses, union-backed double field addresses/decay, atomic double-pointer aliases, direct one-dimensional double-array parameter declarators, direct and alias-spelled two-dimensional double array parameters, array returns, two-dimensional double aggregate fields/compound literals, and three-dimensional double arrays. Complex runtime values, host floating ABI/promotion behavior, general pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
+
 ## v0.40.0 — 2026-08-29
 
 ### Language subset

@@ -2,6 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-29 — v0.41.0 release consistency
+
+- Version-first release TDD must change exact CLI and Compose expectations before metadata. Both focused tests failed against `0.40.0` and passed only after Cargo/lock plus both Compose tags moved to `0.41.0`.
+- Executable target listing, rather than source annotation counting, yields 2,089 tests: `interpreter` 1,953 + `fuzz_safety` 99 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
+- Central release claims must distinguish field-local binary64 views from whole-object traversal. Scalar and one-dimensional-array `double` fields in supported non-union structs are accepted as selected roots; whole aggregates containing double fields, two-dimensional rows, union-backed storage, whole pointer objects, and unprovable pointer-field/helper targets remain rejected.
+- The next bounded implementation slice is one selected row of supported two-dimensional `double` storage. It should reuse row-local capacity, overlap, identity, const/lifetime, and checked-index machinery already proven for character and non-character integer rows rather than flattening adjacent rows or introducing host layout.
+
 ## 2026-08-29 — Aggregate-field binary64 object bytes
 
 - Existing `PointerValue::StructField`, `StructFieldElementField`, and aggregate-backed `ArrayBase`/`ArrayElement` identities already preserve selected field storage, owner/path/index, byte capacity, overlap, const, and lexical lifetime. Runtime admission can therefore reuse the standalone `f64::to_bits().to_le_bytes()` representation without host layout or a new pointer target, provided union ancestry and dimensions remain explicit exclusions.
