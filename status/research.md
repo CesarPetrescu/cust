@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-30 — v0.42.0 release consistency
+
+- Version-first release TDD changed only the exact CLI and Compose expectations. Both focused tests failed against `0.41.0` and passed after Cargo/lock plus both Compose image tags moved to `0.42.0`.
+- Executable target listing yields 2,110 tests: `interpreter` 1,974 + `fuzz_safety` 99 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1. The previous 2,107 estimate predated the final three review regressions and must not be reused.
+- Central release claims must distinguish one selected row from a whole two-dimensional object. Direct decay, explicit row pointers, adjusted direct/typedef-backed parameters, and supported aggregate-field roots are accepted; adjacent-row flattening, whole two-dimensional objects, union-backed roots, row addresses, incompatible widths/casts, whole aggregate layouts containing double fields, and unprovable roots remain rejected.
+- Candidate decision: bounded v0.42.0 release closure outranks the focused short-circuit row-call composition regression because it atomically packages already reviewed behavior with exact executable assertions. Shared union bytes remain deferred until Cust has true aliased member storage.
+- Independent review caught two layers of stale release documentation. Fixed two-dimensional `double` aggregate fields are supported only when declared directly or through a complete two-dimensional alias; a one-dimensional array alias followed by another field array suffix remains rejected. Adjusted direct/complete-alias array parameters and explicit row-pointer objects are supported, while pointer-to-row typedef aliases and explicit pointer-to-row function parameter/return declarators remain rejected. Final re-review returned `APPROVED` after those distinctions were added to the README and changelog.
+- The canonical release gate passed formatting, warning-denied Clippy, all 2,110 local tests, a no-cache rebuild, all 2,110 rebuilt-Docker tests, runtime output `10`, exact `cust 0.42.0` from the local binary plus runtime/test images, and diff hygiene. Tag preflight remains empty before publication.
+
 ## 2026-08-30 — Selected two-dimensional binary64 row views
 
 - Fresh review confirmed that pointer casts must not preserve row metadata by source shape alone: the destination pointee type controls the cast result. Cust therefore retains selected-row metadata only for a same-element scalar cast and keeps incompatible casts rejected consistently in evaluated and `sizeof` routes.

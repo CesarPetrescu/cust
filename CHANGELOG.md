@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.42.0 — 2026-08-30
+
+### Language subset
+
+- Extended deterministic eight-byte IEEE-754 binary64 little-endian object views across exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` to one selected row of supported fixed two-dimensional `double[R][C]` storage through direct decay, explicit row-pointer indexing/dereference, adjusted direct and typedef-backed parameters, and supported aggregate-field roots.
+
+### Diagnostics and verification
+
+- Preserved row-local capacity/overlap, checked row and element arithmetic, owner/lifetime/recursive const, aligned/interior identity, zero count, one-time ordered evaluation, and direct/nested non-evaluation without flattening adjacent rows. Cross-row ranges, union-backed storage, whole two-dimensional objects and aggregate layouts containing double fields, row addresses, incompatible casts and row widths, and unprovable roots retain targeted rejection. Twenty-one focused interpreter regressions and one registered ABI-independent compiler-oracle fixture cover the package; the native fixture inspects zeroed storage only as bytes rather than assuming an all-zero floating representation.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.42.0`.
+- Reconciled an executable inventory of 2,110 tests: 1,974 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- The bounded raw-memory slice accepts selected rows but not a whole two-dimensional `double` object or adjacent-row flattening. Union-backed double storage, whole aggregates containing double fields, whole pointer-object storage, pointer-valued fields whose current target is not provably supported, unprovable helper-returned roots, and whole-array/row addresses remain unsupported. The broader bounded `double` language slice supports fixed two-dimensional aggregate fields declared directly or through complete two-dimensional aliases, adjusted direct/complete-alias array parameters, and explicit row-pointer objects with row-scaled arithmetic/indexing. It still excludes `float`, `long double`, hexadecimal/suffixed/non-finite floating literals, deeper double pointers, arrays of double pointers, union-backed double field addresses/decay, atomic double-pointer aliases, direct one-dimensional double-array parameter declarators, one-dimensional-array-alias-derived multidimensional aggregate fields, pointer-to-row typedef aliases, explicit pointer-to-row function parameters/returns, array returns, two-dimensional double array compound literals, and three-dimensional double arrays. Complex runtime values, host floating ABI/promotion behavior, general pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
+
 ## v0.41.0 — 2026-08-29
 
 ### Language subset

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-30 after selected two-dimensional binary64 row completion and the second independent review-fix cycle. Review-driven RED/GREEN, the exact 2,110-test inventory, formatting, strict Clippy, the complete local/rebuilt-Docker gate, runtime output `10`, GCC/Clang/compiler-oracle execution, and diff hygiene pass. Bounded v0.42.0 release closure is the single next package.
+None. Last reviewed 2026-08-30 after bounded v0.42.0 release review and canonical verification. Version-first CLI/Compose RED/GREEN, exact 2,110-test executable listing, two documentation review-fix cycles, final independent `APPROVED`, formatting, strict Clippy, all local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, diff hygiene, and empty local/remote tag preflight pass. Release-commit-first publication and exact remote ref verification are normal remaining release steps, not blockers.
 
 ## Resolved this run
 
