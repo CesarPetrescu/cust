@@ -3774,10 +3774,6 @@ fn direct_double_aggregate_field_pointers_keep_exact_unsupported_boundaries() {
             "double pointers are not supported",
         ),
         (
-            "struct Item { double values[2][3]; }; int main(void) { return 0; }",
-            "double multidimensional aggregate array fields are not supported at line 1, column 31",
-        ),
-        (
             "struct Item { double scalar; }; int main(void) { struct Item item = {1.0}; return sizeof((char *)&item.scalar); }",
             "double pointers are not supported",
         ),
@@ -5657,23 +5653,15 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_struct_fields_preserve_pointer_array_and_const_boundaries() {
-    for (program, expected) in [
-        (
-            "struct Sample { double readings[2][3]; }; int main(void) { return 0; }",
-            "double multidimensional aggregate array fields are not supported",
-        ),
-        (
-            "struct Sample { const double reading; }; int main(void) { struct Sample sample = {1.25}; sample.reading = 2.0; return 0; }",
-            "cannot assign to const struct field 'reading'",
-        ),
-    ] {
-        let error = interpret(program).expect_err(program);
-        assert!(
-            error.to_string().contains(expected),
-            "expected {expected:?}, got {error} for {program}"
-        );
-    }
+fn direct_double_struct_fields_preserve_const_boundaries() {
+    let program = "struct Sample { const double reading; }; int main(void) { struct Sample sample = {1.25}; sample.reading = 2.0; return 0; }";
+    let error = interpret(program).expect_err(program);
+    assert!(
+        error
+            .to_string()
+            .contains("cannot assign to const struct field 'reading'"),
+        "unexpected diagnostic: {error}"
+    );
 }
 
 #[test]
@@ -5932,17 +5920,16 @@ int main(void) {
 }
 
 #[test]
-fn direct_double_aggregate_array_fields_preserve_typedef_rank_boundaries() {
-    for program in [
-        "typedef double Matrix[2][3]; struct Sample { Matrix values; }; int main(void) { return 0; }",
-        "typedef double Row[2]; struct Sample { Row values[3]; }; int main(void) { return 0; }",
-    ] {
-        let error = interpret(program).expect_err(program).to_string();
-        assert!(
-            error.contains("double") && error.contains("multidimensional"),
-            "unexpected diagnostic for {program}: {error}"
-        );
-    }
+fn direct_double_aggregate_array_fields_support_two_dimensional_aliases() {
+    let supported = "typedef double Matrix[2][3]; struct Sample { Matrix values; }; int main(void) { struct Sample sample = {{{1, 2, 3}, {4, 5, 6}}}; return sample.values[1][2] == 6.0 ? 0 : 1; }";
+    assert_eq!(interpret(supported).unwrap(), 0);
+
+    let derived =
+        "typedef double Row[2]; struct Sample { Row values[3]; }; int main(void) { return 0; }";
+    assert_eq!(
+        interpret(derived).expect_err(derived).to_string(),
+        "double multidimensional aggregate array fields are not supported at line 1, column 50"
+    );
 }
 
 #[test]
@@ -7223,24 +7210,12 @@ fn fixed_two_dimensional_double_typedef_aliases_match_compiler_oracle_fixture() 
 fn fixed_two_dimensional_double_typedef_aliases_preserve_safety_boundaries() {
     for (program, expected) in [
         (
-            "typedef double Matrix[2][3]; int take(Matrix values) { return values[0][0] == 0; } int main(void) { return 0; }",
-            "double array parameters are not supported",
-        ),
-        (
             "typedef double Matrix[2][3]; int main(void) { Matrix *pointer = 0; return pointer != 0; }",
             "pointer-to-array declarations are not supported",
         ),
         (
-            "typedef double Matrix[2][3]; struct Box { Matrix values; }; int main(void) { return 0; }",
-            "double multidimensional aggregate array fields are not supported",
-        ),
-        (
             "typedef double Matrix[2][3]; int main(void) { return ((Matrix){{1, 2, 3}, {4, 5, 6}})[0][0] == 1; }",
             "multidimensional array casts are not supported",
-        ),
-        (
-            "void *memset(void *, int, unsigned long); typedef double Matrix[2][3]; int main(void) { Matrix values = {{1, 2, 3}, {4, 5, 6}}; memset(values[0], 0, sizeof(values[0])); return 0; }",
-            "function 'memset' does not yet support double object storage for argument 1",
         ),
         (
             "typedef const double ConstMatrix[1][1]; int main(void) { ConstMatrix values = {{1}}; return sizeof(values[0][0]++); }",
@@ -7377,36 +7352,8 @@ fn direct_fixed_two_dimensional_double_arrays_preserve_safety_boundaries() {
             "arrays with more than two dimensions are not supported",
         ),
         (
-            "int take(double values[1][2]) { return 0; } int main(void) { return 0; }",
-            "double array parameters are not supported",
-        ),
-        (
-            "struct Box { double values[1][2]; }; int main(void) { return 0; }",
-            "double multidimensional aggregate array fields are not supported",
-        ),
-        (
             "int main(void) { return ((double[1][2]){{1, 2}})[0][0] == 1; }",
             "multidimensional array casts are not supported",
-        ),
-        (
-            "int main(void) { double values[1][2] = {{1, 2}}; double (*row)[2] = values; return 0; }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { double values[2][2] = {{1, 2}, {3, 4}}; (values + 1)[0][1] = 5.5; return 0; }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { double values[1][2] = {{1, 2}}; return sizeof(values + 0); }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { double values[1][2] = {{1, 2}}; return values == 0; }",
-            "double pointers are not supported",
-        ),
-        (
-            "void *memset(void *, int, unsigned long); int main(void) { double values[1][2] = {{1, 2}}; memset(values[0], 0, sizeof(values[0])); return 0; }",
-            "function 'memset' does not yet support double object storage for argument 1",
         ),
     ] {
         let error = interpret(program).expect_err(program).to_string();
@@ -10420,26 +10367,18 @@ fn non_evaluating_return_storage_analysis_enforces_call_depth_limit() {
 }
 
 #[test]
-fn direct_double_pointers_retain_deeper_and_row_pointer_boundaries() {
-    for (program, expected) in [
-        (
-            "int main(void) { double **pointer; return 0; }",
-            "pointer-to-pointer declarations are not supported at line 1, column 26",
-        ),
-        (
-            "double (*global_row)[2]; int main(void) { return 0; }",
-            "double pointers are not supported at line 1, column 9",
-        ),
-        (
-            "int main(void) { double (*local_row)[2]; return 0; }",
-            "double pointers are not supported at line 1, column 26",
-        ),
+fn direct_double_pointers_retain_deeper_pointer_boundaries() {
+    let deeper = "int main(void) { double **pointer; return 0; }";
+    assert_eq!(
+        interpret(deeper).expect_err(deeper).to_string(),
+        "pointer-to-pointer declarations are not supported at line 1, column 26"
+    );
+
+    for program in [
+        "double (*global_row)[2]; int main(void) { return global_row != 0; }",
+        "int main(void) { double values[1][2] = {{1.0, 2.0}}; double (*local_row)[2] = values; return local_row[0][1] == 2.0 ? 0 : 1; }",
     ] {
-        assert_eq!(
-            interpret(program).expect_err(program).to_string(),
-            expected,
-            "unexpected diagnostic for {program}"
-        );
+        assert_eq!(interpret(program).unwrap(), 0, "{program}");
     }
 }
 
@@ -15114,6 +15053,461 @@ fn bounded_memory_intrinsics_support_two_dimensional_scalar_object_rows() {
 }
 
 #[test]
+fn bounded_memory_two_dimensional_double_rows_support_all_intrinsics() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memmove(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            double source[2][2] = {{1.5, 2.5}, {3.5, 4.5}};
+            double destination[2][2] = {{5.5, 6.5}, {7.5, 8.5}};
+            const double *source_row = source[1];
+            double *destination_row = destination[0];
+            if (memcpy(destination_row, source_row, sizeof(source[1])) != destination_row) return 1;
+            if (destination[0][0] != 3.5 || destination[0][1] != 4.5) return 2;
+            if (memcmp(destination_row, source_row, sizeof(source[1])) != 0) return 3;
+            if (memmove(destination_row + 1, destination_row, sizeof(destination[0][0])) !=
+                destination_row + 1) return 4;
+            if (destination[0][1] != 3.5) return 5;
+            if (memset(destination_row, 0, sizeof(destination[0][0])) != destination_row) return 6;
+            if (destination[0][0] != 0.0 || destination[0][1] != 3.5) return 7;
+            if (memchr(destination_row, 0, sizeof(destination[0])) != destination_row) return 8;
+            return destination[1][0] != 7.5 || destination[1][1] != 8.5;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_two_dimensional_double_rows_are_non_evaluating() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        int main(void) {
+            double rows[2][2] = {{1.5, 2.5}, {3.5, 4.5}};
+            int marker = 0;
+            if (sizeof(memset(rows[marker++], marker++, sizeof(rows[0]))) != sizeof(void *)) {
+                return 1;
+            }
+            return marker != 0 || rows[0][0] != 1.5 || rows[1][0] != 3.5;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_two_dimensional_double_dereferenced_rows_are_non_evaluating() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        int main(void) {
+            double values[2][2] = {{1.5, 2.5}, {3.5, 4.5}};
+            double (*rows)[2] = values;
+            int marker = 0;
+            if (sizeof(memset(*rows, marker++, sizeof(*rows))) != sizeof(void *)) return 1;
+            return marker != 0 || values[0][0] != 1.5;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn two_dimensional_double_row_addresses_remain_consistently_unsupported() {
+    for program in [
+        "int main(void) { double values[1][2] = {{0}}; return sizeof(&values[0]); }",
+        "struct Table { double rows[1][2]; }; int main(void) { struct Table table = {{{0}}}; return sizeof(&table.rows[0]); }",
+        "struct Table { double rows[1][2]; }; int main(void) { struct Table table = {{{0}}}; struct Table *pointer = &table; return sizeof(&pointer->rows[0]); }",
+        "struct Table { double rows[1][2]; }; int main(void) { struct Table tables[1] = {{{{0}}}}; return sizeof(&tables[0].rows[0]); }",
+        "struct Table { double rows[1][2]; }; int main(void) { return sizeof(&((struct Table){{{0}}}).rows[0]); }",
+        "struct Table { double rows[1][2]; }; int main(void) { struct Table table = {{{0}}}; double *pointer = &table.rows; return *pointer != 0.0; }",
+        "struct Table { double rows[1][2]; }; int main(void) { struct Table table = {{{0}}}; struct Table *owner = &table; double *pointer = &owner->rows; return *pointer != 0.0; }",
+        "struct Table { double rows[1][2]; }; int main(void) { struct Table tables[1] = {{{{0}}}}; double *pointer = &tables[0].rows; return *pointer != 0.0; }",
+        "struct Table { double rows[1][2]; }; int main(void) { double *pointer = &((struct Table){{{0}}}).rows; return *pointer != 0.0; }",
+    ] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "double pointers are not supported",
+            "{program}"
+        );
+    }
+}
+
+#[test]
+fn two_dimensional_double_row_conditionals_reject_mismatched_widths() {
+    let program = r#"
+        int main(void) {
+            double narrow[1][2] = {{1.0, 2.0}};
+            double wide[1][3] = {{3.0, 4.0, 5.0}};
+            double (*selected)[2] = 1 ? narrow : wide;
+            return selected[0][0] == 1.0 ? 0 : 1;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "conditional branches have incompatible expression types"
+    );
+}
+
+#[test]
+fn sizeof_two_dimensional_double_row_conditionals_rejects_mismatched_widths() {
+    let program = r#"
+        int main(void) {
+            double narrow[1][2] = {{1.0, 2.0}};
+            double wide[1][3] = {{3.0, 4.0, 5.0}};
+            return sizeof(1 ? narrow : wide);
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "conditional branches have incompatible expression types"
+    );
+}
+
+#[test]
+fn two_dimensional_double_row_casts_retain_pointer_type_boundaries_under_sizeof() {
+    let program =
+        "int main(void) { double rows[1][2] = {{1.0, 2.0}}; return sizeof((int *)rows); }";
+
+    assert_eq!(
+        interpret(program).expect_err(program).to_string(),
+        "double pointers are not supported"
+    );
+}
+
+#[test]
+fn two_dimensional_double_row_void_casts_retain_void_boundaries() {
+    for (expression, expected) in [
+        (
+            "sizeof(*(void *)rows)",
+            "cannot dereference pointer to void",
+        ),
+        ("sizeof(((void *)rows)[0])", "cannot index pointer to void"),
+        (
+            "sizeof((*(void *)rows)[0])",
+            "cannot dereference pointer to void",
+        ),
+        (
+            "sizeof((void *)rows + 1)",
+            "pointer to void arithmetic is not supported",
+        ),
+    ] {
+        let program = format!(
+            "int main(void) {{ double rows[1][2] = {{{{1.0, 2.0}}}}; return {expression}; }}"
+        );
+        assert_eq!(
+            interpret(&program).expect_err(expression).to_string(),
+            expected,
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn two_dimensional_double_row_pointer_differences_are_scalars() {
+    let program = r#"
+        int distance(double matrix[][3]) {
+            return (matrix + 2) - matrix;
+        }
+        int main(void) {
+            double values[3][3] = {{0}};
+            double (*rows)[3] = values;
+            if (distance(values) != 2) return 1;
+            return (rows + 2) - rows == 2 ? 0 : 2;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_two_dimensional_double_rows_in_embedded_aggregate_arrays_uses_row_width() {
+    let program = r#"
+        struct Leaf { double rows[2][2]; };
+        struct Outer { struct Leaf leaves[1]; };
+        int main(void) {
+            struct Outer outer = {{{{{1.5, 2.5}, {3.5, 4.5}}}}};
+            return sizeof(outer.leaves[0].rows[0]) ==
+                sizeof(double) * 2 ? 0 : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn two_dimensional_double_aggregate_updates_under_sizeof_preserve_const_safety() {
+    for expression in [
+        "sizeof(value.rows[0][0] = 2.5)",
+        "sizeof(value.rows[0][0] += 1.0)",
+        "sizeof(value.rows[0][0]++)",
+    ] {
+        let program = format!(
+            "struct Matrix {{ double rows[1][1]; }}; int main(void) {{ const struct Matrix value = {{{{{{1.5}}}}}}; return {expression}; }}"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot assign to const variable 'value'",
+            "{expression}"
+        );
+    }
+
+    for expression in [
+        "sizeof(pointer->nested.rows[0][0] = 2.5)",
+        "sizeof(pointer->nested.rows[0][0] += 1.0)",
+        "sizeof(pointer->nested.rows[0][0]++)",
+    ] {
+        let program = format!(
+            "struct Nested {{ double rows[1][1]; }}; struct Outer {{ const struct Nested nested; }}; int main(void) {{ struct Outer value = {{{{{{{{1.5}}}}}}}}; struct Outer *pointer = &value; return {expression}; }}"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot assign through pointer to const",
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn two_dimensional_double_const_element_parameters_keep_pointer_slots_mutable() {
+    let program = r#"
+        int advance(const double rows[][2]) {
+            rows += 1;
+            return rows[0][0] == 3.5 ? 0 : 1;
+        }
+        int main(void) {
+            double rows[2][2] = {{1.5, 2.5}, {3.5, 4.5}};
+            return advance(rows);
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn two_dimensional_double_bracket_const_parameters_keep_pointer_slots_read_only() {
+    let program = r#"
+        int advance(double rows[const 2][2]) {
+            rows += 1;
+            return 0;
+        }
+        int main(void) {
+            double rows[2][2] = {{1.5, 2.5}, {3.5, 4.5}};
+            return advance(rows);
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const variable 'rows'"
+    );
+}
+
+#[test]
+fn bounded_memory_two_dimensional_double_rows_support_adjusted_parameters() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        int copy_row(double destination[][3], const double source[][3]) {
+            if (sizeof(source[0]) != 3 * sizeof(double)) return 4;
+            (void)memcpy(destination[1], source[0], sizeof(source[0]));
+            if (destination[1][0] != 1.5 || destination[1][2] != 3.5) return 3;
+            return memcmp(destination[1], source[0], sizeof(source[0]));
+        }
+        int main(void) {
+            double source[2][3] = {{1.5, 2.5, 3.5}, {4.5, 5.5, 6.5}};
+            double destination[2][3] = {{7.5, 8.5, 9.5}, {10.5, 11.5, 12.5}};
+            int result = copy_row(destination, source);
+            if (result != 0) return result;
+            return destination[1][0] == 1.5 && destination[1][2] == 3.5 ? 0 : 2;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_two_dimensional_double_rows_support_typedef_adjusted_parameters() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        typedef double Matrix[2][3];
+        int copy_row(Matrix destination, const Matrix source) {
+            if (sizeof(source[0]) != 3 * sizeof(double)) return 4;
+            (void)memcpy(destination[1], source[0], sizeof(source[0]));
+            return memcmp(destination[1], source[0], sizeof(source[0]));
+        }
+        int main(void) {
+            Matrix source = {{1.5, 2.5, 3.5}, {4.5, 5.5, 6.5}};
+            Matrix destination = {{7.5, 8.5, 9.5}, {10.5, 11.5, 12.5}};
+            int result = copy_row(destination, source);
+            if (result != 0) return result;
+            return destination[1][0] == 1.5 && destination[1][2] == 3.5 ? 0 : 2;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_two_dimensional_double_rows_support_explicit_row_pointers() {
+    let program = r#"
+        void *memmove(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        int main(void) {
+            double values[2][3] = {{1.5, 2.5, 3.5}, {4.5, 5.5, 6.5}};
+            double (*rows)[3] = values;
+            (void)memset(rows[1], 0, sizeof(rows[1]));
+            if (values[1][0] != 0.0 || values[1][2] != 0.0) return 1;
+            double *found = memchr(rows[1], 0, sizeof(rows[1]));
+            double *expected = rows[1];
+            if (found != expected) return 2;
+            (void)memmove(rows[1], *rows, sizeof(*rows));
+            return values[1][0] == 1.5 && values[1][2] == 3.5 ? 0 : 3;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_two_dimensional_double_rows_support_aggregate_field_roots() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        struct Table { double values[2][2]; };
+        int main(void) {
+            struct Table table = {{{1.5, 2.5}, {3.5, 4.5}}};
+            struct Table *pointer = &table;
+            if (sizeof(table.values[0]) != 2 * sizeof(double)) return 3;
+            if (sizeof(pointer->values[0]) != 2 * sizeof(double)) return 4;
+            (void)memcpy(pointer->values[1], table.values[0], sizeof(table.values[0]));
+            if (memcmp(pointer->values[1], table.values[0], sizeof(table.values[0])) != 0) return 1;
+            (void)memset(table.values[0], 0, sizeof(table.values[0]));
+            if (table.values[0][1] != 0.0) return 5;
+            if (pointer->values[1][1] != 2.5) return 6;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn two_dimensional_double_aggregate_field_increment_preserves_binary64_semantics() {
+    let program = r#"
+        struct Table { double values[1][1]; };
+        int main(void) {
+            struct Table table = {{{1.5}}};
+            struct Table *pointer = &table;
+            double previous = pointer->values[0][0]++;
+            return previous == 1.5 && table.values[0][0] == 2.5 ? 0 : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn bounded_memory_two_dimensional_double_row_routes_match_compiler_oracle_fixture() {
+    let program =
+        include_str!("fixtures/compat/valid/bounded_memory_two_dimensional_double_rows.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn two_dimensional_double_row_indexed_addresses_preserve_row_bounds() {
+    for program in [
+        r#"
+            void *memset(void *, int, unsigned long int);
+            int main(void) {
+                double rows[2][2] = {{1.0, 2.0}, {3.0, 4.0}};
+                double *row = rows[0];
+                memset(&row[2], 0, sizeof(double));
+                return 0;
+            }
+        "#,
+        r#"
+            int memcmp(const void *, const void *, unsigned long int);
+            int main(void) {
+                double rows[2][2] = {{1.0, 2.0}, {3.0, 4.0}};
+                double *row = rows[0];
+                return memcmp(&row[2], rows[1], sizeof(double));
+            }
+        "#,
+    ] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "two-dimensional array row pointer index 2 out of bounds for row 0 with length 2",
+            "{program}"
+        );
+    }
+}
+
+#[test]
+fn bounded_memory_two_dimensional_double_rows_preserve_safety() {
+    let cases = [
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { double rows[2][2] = {{0}}; memset(rows[0] + 1, 0, sizeof(double) * 2); return 0; }",
+            "destination argument 1 to function 'memset' requires 16 bytes, but only 8 bytes are available",
+        ),
+        (
+            "int memcmp(const void *, const void *, unsigned long int); int main(void) { double rows[2][2] = {{0}}; return memcmp(rows[0] + 1, rows[1], sizeof(double) * 2); }",
+            "input argument 1 to function 'memcmp' requires 16 bytes, but only 8 bytes are available",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); int main(void) { double rows[1][3] = {{1.0, 2.0, 3.0}}; memcpy(rows[0] + 1, rows[0], sizeof(double) * 2); return 0; }",
+            "overlapping source and destination ranges passed to function 'memcpy'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { const double rows[1][2] = {{1.0, 2.0}}; memset(rows[0], 0, sizeof(double)); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); struct Nested { double rows[1][2]; }; struct Leaf { const struct Nested nested; }; struct Outer { struct Leaf leaves[1]; }; int main(void) { struct Outer outer = {{{{{{1.0, 2.0}}}}}}; memset(outer.leaves[0].nested.rows[0], 0, sizeof(double)); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); int main(void) { double rows[2][2] = {{0}}; double (*row)[2] = rows + 1; memset(row[9223372036854775807], 0, sizeof(double)); return 0; }",
+            "two-dimensional array row pointer index overflow during pointer arithmetic",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Matrix { double rows[2][2]; double alternate; } value = {{{1.0, 2.0}, {3.0, 4.0}}}; int main(void) { memset(value.rows[0], 0, sizeof(double)); return 0; }",
+            "unions with double storage and non-scalar fields are not supported",
+        ),
+    ];
+
+    for (index, (program, expected)) in cases.into_iter().enumerate() {
+        let error = match interpret(program) {
+            Ok(value) => panic!("case {index} unexpectedly returned {value}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.to_string(), expected, "case {index}");
+    }
+
+    let expired = r#"
+        void *memchr(const void *, int, unsigned long int);
+        double *expired(void) {
+            double rows[2][2] = {{1.0, 2.0}, {3.0, 4.0}};
+            return rows[1];
+        }
+        int main(void) { return memchr(expired(), 0, sizeof(double)) != 0; }
+    "#;
+    let error = interpret(expired).unwrap_err().to_string();
+    assert!(
+        error.contains("pointer to out-of-scope variable"),
+        "{error}"
+    );
+}
+
+#[test]
 fn bounded_memory_two_dimensional_scalar_object_row_routes_match_compiler_oracle_fixture() {
     let program =
         include_str!("fixtures/compat/valid/bounded_memory_two_dimensional_scalar_object_rows.c",);
@@ -15445,7 +15839,7 @@ fn aggregate_double_object_bytes_are_non_evaluating_for_array_compound_literal_f
 }
 
 #[test]
-fn aggregate_double_object_bytes_reject_non_evaluating_2d_row_pointer_fields() {
+fn aggregate_double_object_bytes_support_non_evaluating_2d_row_pointer_fields() {
     for call in [
         "sizeof(memset(holder.pointer, 0, sizeof(matrix[0])))",
         "sizeof(memset(slot->pointer, 0, sizeof(matrix[0])))",
@@ -15463,8 +15857,8 @@ int main(void) {{
 "#
         );
         assert_eq!(
-            interpret(&program).expect_err(call).to_string(),
-            "function 'memset' does not yet support double object storage for argument 1",
+            interpret(&program).unwrap(),
+            8,
             "unexpected result for {call}"
         );
     }
@@ -15577,10 +15971,6 @@ fn aggregate_double_object_bytes_preserve_binary64_identity_and_safety_boundarie
         (
             "void *memset(void *, int, unsigned long int); union Cell { double value; int alternate; }; int main(void) { union Cell item = {.value = 1.0}; memset(&item.value, 0, sizeof(item.value)); return 0; }",
             "double pointers are not supported",
-        ),
-        (
-            "void *memset(void *, int, unsigned long int); typedef double Matrix[2][2]; struct Box { Matrix values; }; int main(void) { return 0; }",
-            "double multidimensional aggregate array fields are not supported",
         ),
         (
             "void *memset(void *, int, unsigned long int); struct Link { double value; double *pointer; }; int main(void) { double target = 2.0; struct Link item = {1.0, &target}; memset(&item, 0, sizeof(item)); return 0; }",

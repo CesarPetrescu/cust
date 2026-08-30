@@ -9436,12 +9436,6 @@ impl Parser {
                 || parameter_alias_pointee_is_qualified
                 || parameter_type_qualifier.is_some();
             let mut array_2d_param_type = match &decl_type {
-                DeclType::Array2D(CType::Double, _, _) => {
-                    return Err(Self::error_at(
-                        "double array parameters are not supported".to_string(),
-                        &parameter_type_token,
-                    ));
-                }
                 DeclType::Array2D(ty, _, columns) => Some((*ty, *columns)),
                 DeclType::Array2DPointer {
                     elem_type, columns, ..
@@ -9631,13 +9625,6 @@ impl Parser {
                     }
                 }
             };
-            if matches!(decl_type, DeclType::Scalar(CType::Double)) && self.check(&Token::LBracket)
-            {
-                return Err(Self::error_at(
-                    "double array parameters are not supported".to_string(),
-                    self.peek_located(),
-                ));
-            }
             let mut array_parameter_const = false;
             let mut array_parameter_is_qualified = false;
             let kind = if is_character_pointer_output {
@@ -9681,6 +9668,7 @@ impl Parser {
                     ParamKind::Struct
                 }
             } else if self.matches(&Token::LBracket) {
+                let first_array_bracket = self.previous().clone();
                 (array_parameter_const, array_parameter_is_qualified) =
                     self.parse_array_parameter_length_and_qualifiers()?;
                 self.expect_closing_bracket_after("array parameter length")?;
@@ -9700,6 +9688,12 @@ impl Parser {
                     array_2d_param_type = Some((*ty, columns));
                     ParamKind::Array2D
                 } else {
+                    if matches!(decl_type, DeclType::Scalar(CType::Double)) {
+                        return Err(Self::error_at(
+                            "double array parameters are not supported".to_string(),
+                            &first_array_bracket,
+                        ));
+                    }
                     ParamKind::Pointer
                 }
             } else {
@@ -9722,7 +9716,8 @@ impl Parser {
                     (
                         explicit_row_pointer_param
                             .as_ref()
-                            .is_some_and(|(_, is_const)| *is_const),
+                            .is_some_and(|(_, is_const)| *is_const)
+                            || array_parameter_const,
                         leading_const,
                     )
                 }
@@ -11054,12 +11049,6 @@ impl Parser {
         points_to_const: bool,
         require_semi: bool,
     ) -> CustResult<Stmt> {
-        if elem_type == CType::Double {
-            return Err(Self::error_at(
-                "double pointers are not supported".to_string(),
-                &self.tokens[self.pos + 1],
-            ));
-        }
         self.expect(Token::LParen)?;
         self.expect(Token::Star)?;
         let is_const = self.consume_type_qualifiers();
@@ -12705,13 +12694,6 @@ impl Parser {
                     DeclType::Array(PointeeType::Struct(type_name), len) => {
                         StructFieldType::StructArray(type_name, len)
                     }
-                    DeclType::Array2D(CType::Double, _, _) => {
-                        return Err(Self::error_at(
-                            "double multidimensional aggregate array fields are not supported"
-                                .to_string(),
-                            self.previous(),
-                        ));
-                    }
                     DeclType::Array2D(ty, rows, columns) => {
                         StructFieldType::Array2D(ty, rows, columns)
                     }
@@ -12765,13 +12747,6 @@ impl Parser {
                             let rows = self.expect_array_len()?;
                             self.expect_closing_bracket_after("struct array field length")?;
                             if self.matches(&Token::LBracket) {
-                                if elem_type == CType::Double {
-                                    return Err(Self::error_at(
-                                        "double multidimensional aggregate array fields are not supported"
-                                            .to_string(),
-                                        self.previous(),
-                                    ));
-                                }
                                 let columns = self.expect_array_len()?;
                                 self.expect_closing_bracket_after(
                                     "second struct array field dimension",
@@ -16098,7 +16073,7 @@ impl Parser {
             let operator = self.previous().clone();
             self.reject_missing_unary_operand(&operator)?;
             let target = self.parse_unary()?;
-            Self::address_of_expr(target, &operator)
+            self.address_of_expr(target, &operator)
         } else if self.check(&Token::LParen) && self.starts_cast_type_after_lparen() {
             let expr = self.parse_cast()?;
             self.parse_postfix_suffix(expr)
@@ -16605,7 +16580,36 @@ impl Parser {
         Ok(())
     }
 
-    fn address_of_expr(target: Expr, operator: &LocatedToken) -> CustResult<Expr> {
+    fn aggregate_literal_field_is_two_dimensional_array(
+        &self,
+        aggregate: &Expr,
+        fields: &[String],
+    ) -> bool {
+        let Expr::AggregateLiteral { type_name, .. } = aggregate else {
+            return false;
+        };
+        let mut current_type = type_name.clone();
+        for (index, field_name) in fields.iter().enumerate() {
+            let Some(field) = self.struct_types.get(&current_type).and_then(|aggregate| {
+                aggregate
+                    .fields
+                    .iter()
+                    .find(|field| field.name == *field_name)
+            }) else {
+                return false;
+            };
+            if index + 1 == fields.len() {
+                return matches!(field.ty, StructFieldType::Array2D(_, _, _));
+            }
+            let StructFieldType::Struct(next_type) = &field.ty else {
+                return false;
+            };
+            current_type = next_type.clone();
+        }
+        false
+    }
+
+    fn address_of_expr(&self, target: Expr, operator: &LocatedToken) -> CustResult<Expr> {
         match target {
             Expr::Var(name) => Ok(Expr::AddressOf(name)),
             Expr::ArrayGet { name, index } => Ok(Expr::AddressOfArray { name, index }),
@@ -16694,9 +16698,20 @@ impl Parser {
                 index,
             )),
             Expr::Deref(pointer) => match *pointer {
-                Expr::Binary(left, BinaryOp::Subscript, right) => {
-                    Ok(Expr::Binary(left, BinaryOp::Add, right))
-                }
+                Expr::Binary(left, BinaryOp::Subscript, right) => match *left {
+                    Expr::AggregateFieldGet { aggregate, fields }
+                        if self.aggregate_literal_field_is_two_dimensional_array(
+                            &aggregate, &fields,
+                        ) =>
+                    {
+                        Ok(Expr::Binary(
+                            Box::new(Expr::AddressOfAggregateField { aggregate, fields }),
+                            BinaryOp::Add,
+                            right,
+                        ))
+                    }
+                    left => Ok(Expr::Binary(Box::new(left), BinaryOp::Add, right)),
+                },
                 pointer => Ok(pointer),
             },
             _ => Err(Self::error_at(
@@ -18954,19 +18969,26 @@ impl Interpreter {
             Expr::ArrayGet { name, index }
             | Expr::ArraySet { name, index, .. }
             | Expr::ArrayCompoundSet { name, index, .. } => {
-                self.scalar_array_element_type(name)
-                    .is_some_and(|ty| ty == CType::Double)
-                    || self
-                        .scalar_variable_reverse_subscript_pointee_type(name, index)
-                        .is_ok_and(|pointee| {
-                            matches!(pointee, Some(PointeeType::Scalar(CType::Double)))
-                        })
+                self.array2d_indexed_row_element_type(expr).is_none()
+                    && (self
+                        .scalar_array_element_type(name)
+                        .is_some_and(|ty| ty == CType::Double)
+                        || self
+                            .scalar_variable_reverse_subscript_pointee_type(name, index)
+                            .is_ok_and(|pointee| {
+                                matches!(pointee, Some(PointeeType::Scalar(CType::Double)))
+                            }))
             }
             Expr::Array2DGet { name, .. }
             | Expr::Array2DSet { name, .. }
             | Expr::Array2DCompoundSet { name, .. } => self
                 .scalar_array_element_type(name)
                 .is_some_and(|ty| ty == CType::Double),
+            Expr::StructArray2DGet { target, .. }
+            | Expr::StructArray2DSet { target, .. }
+            | Expr::StructArray2DCompoundSet { target, .. } => self
+                .non_evaluating_two_dimensional_struct_field_element_type(target, &[])
+                .is_ok_and(|ty| ty == Some(CType::Double)),
             Expr::StructGet { name, fields }
             | Expr::StructSet { name, fields, .. }
             | Expr::StructCompoundSet { name, fields, .. } => match self.find_variable(name) {
@@ -19076,9 +19098,14 @@ impl Interpreter {
                 }),
             Expr::Deref(pointer)
             | Expr::DerefSet { pointer, .. }
-            | Expr::DerefCompoundSet { pointer, .. } => self
-                .pointer_expr_pointee_type(pointer)
-                .is_ok_and(|pointee| matches!(pointee, Some(PointeeType::Scalar(CType::Double)))),
+            | Expr::DerefCompoundSet { pointer, .. } => {
+                self.array2d_row_pointer_element_type(pointer).is_none()
+                    && self
+                        .pointer_expr_pointee_type(pointer)
+                        .is_ok_and(|pointee| {
+                            matches!(pointee, Some(PointeeType::Scalar(CType::Double)))
+                        })
+            }
             Expr::StructFieldArrayElementGet {
                 name,
                 array_fields,
@@ -19174,9 +19201,6 @@ impl Interpreter {
             | Expr::ArrayLiteral { .. }
             | Expr::AggregateArrayLiteral { .. }
             | Expr::PointerCast { .. }
-            | Expr::StructArray2DSet { .. }
-            | Expr::StructArray2DCompoundSet { .. }
-            | Expr::StructArray2DGet { .. }
             | Expr::StringGet { .. }
             | Expr::VoidCast(_)
             | Expr::AggregateLiteral { .. }
@@ -19187,6 +19211,40 @@ impl Interpreter {
     }
 
     fn expr_is_unsupported_double_pointer(&self, expr: &Expr) -> bool {
+        if matches!(
+            expr,
+            Expr::Binary(left, BinaryOp::Sub, right)
+                if self.array2d_row_pointer_element_type(left) == Some(CType::Double)
+                    && self.array2d_row_pointer_element_type(right) == Some(CType::Double)
+        ) {
+            return false;
+        }
+        let is_two_dimensional_row_pointer = self.array2d_row_pointer_element_type(expr)
+            == Some(CType::Double)
+            || self.array2d_indexed_row_element_type(expr) == Some(CType::Double)
+            || matches!(
+                expr,
+                Expr::Deref(pointer)
+                    if self.array2d_row_pointer_element_type(pointer) == Some(CType::Double)
+            );
+        if matches!(
+            expr,
+            Expr::AddressOfArray { .. }
+                | Expr::AddressOfStructField { .. }
+                | Expr::AddressOfStructElementField { .. }
+                | Expr::AddressOfStructArrayField { .. }
+                | Expr::AddressOfStructElementArrayField { .. }
+                | Expr::AddressOfStructPtrField { .. }
+                | Expr::AddressOfStructPtrArrayField { .. }
+                | Expr::AddressOfAggregateField { .. }
+        ) && is_two_dimensional_row_pointer
+        {
+            return true;
+        }
+        if is_two_dimensional_row_pointer && !self.aggregate_pointer_expr_has_union_container(expr)
+        {
+            return false;
+        }
         match expr {
             Expr::AddressOf(name) => match self.find_variable(name) {
                 Some(Value::Pointer {
@@ -19798,8 +19856,7 @@ impl Interpreter {
                     param.name
                 )));
             }
-            if param.is_const || (matches!(param.kind, ParamKind::Array2D) && param.points_to_const)
-            {
+            if param.is_const {
                 const_params.insert(param.name.clone());
             }
         }
@@ -21687,13 +21744,15 @@ impl Interpreter {
     fn pointer_targets_supported_double_memory_object(&self, pointer: &PointerValue) -> bool {
         match Self::object_byte_base(pointer) {
             PointerValue::Scalar { .. } => true,
-            array_pointer @ (PointerValue::ArrayBase { array, .. }
-            | PointerValue::ArrayElement { array, .. }) => {
+            PointerValue::ArrayBase { array, .. } => {
                 array.borrow().dimensions.is_none()
                     && self
-                        .memory_pointer_targets_union_field(array_pointer)
+                        .memory_pointer_targets_union_field(pointer)
                         .is_ok_and(|targets_union| !targets_union)
             }
+            array_pointer @ PointerValue::ArrayElement { .. } => self
+                .memory_pointer_targets_union_field(array_pointer)
+                .is_ok_and(|targets_union| !targets_union),
             field @ (PointerValue::StructField { .. }
             | PointerValue::StructFieldElementField { .. }) => self
                 .memory_pointer_targets_union_field(field)
@@ -25020,7 +25079,7 @@ impl Interpreter {
                     DeclType::Pointer { pointee, .. } => match pointee {
                         PointeeType::Scalar(ty) => Ok(DeclType::Scalar(ty)),
                         PointeeType::Struct(type_name) => Ok(DeclType::Struct(type_name)),
-                        PointeeType::Void => Err(CustError::new("expected pointer expression")),
+                        PointeeType::Void => Err(Self::void_pointer_dereference_error(pointer)),
                     },
                     _ => Err(CustError::new("expected pointer expression")),
                 };
@@ -31492,6 +31551,18 @@ impl Interpreter {
     }
 
     fn non_evaluating_expr_targets_supported_double_memory_object(&self, expr: &Expr) -> bool {
+        let targets_two_dimensional_double_row = self.array2d_indexed_row_element_type(expr)
+            == Some(CType::Double)
+            || matches!(
+                expr,
+                Expr::Deref(pointer)
+                    if self.array2d_row_pointer_element_type(pointer) == Some(CType::Double)
+            );
+        if targets_two_dimensional_double_row
+            && !self.aggregate_pointer_expr_has_union_container(expr)
+        {
+            return true;
+        }
         match expr {
             Expr::AddressOf(name) => matches!(
                 self.find_variable(name),
@@ -34248,6 +34319,11 @@ impl Interpreter {
     }
 
     fn array2d_row_pointer_element_type(&self, expr: &Expr) -> Option<CType> {
+        if let Ok(Some(DeclType::Array2DPointer { elem_type, .. })) =
+            self.non_evaluating_aggregate_field_expr_type(expr, &[])
+        {
+            return Some(elem_type);
+        }
         match expr {
             Expr::Var(name) => {
                 if self.enum_constant_shadows_variable(name) {
@@ -34351,8 +34427,15 @@ impl Interpreter {
             | Expr::StructPtrSet { value, .. }
             | Expr::StructElementSet { value, .. }
             | Expr::StructFieldArrayElementSet { value, .. }
-            | Expr::AggregateFieldSet { value, .. }
-            | Expr::PointerCast { expr: value, .. } => self.array2d_row_pointer_element_type(value),
+            | Expr::AggregateFieldSet { value, .. } => self.array2d_row_pointer_element_type(value),
+            Expr::PointerCast {
+                pointee: PointeeType::Scalar(cast_type),
+                expr: value,
+                ..
+            } => self
+                .array2d_row_pointer_element_type(value)
+                .filter(|elem_type| elem_type == cast_type),
+            Expr::PointerCast { .. } => None,
             Expr::Increment { target, .. } => self.array2d_row_pointer_element_type(target),
             Expr::Call { name, .. } => self.functions.get(name).and_then(|function| {
                 if let ReturnType::Array2DPointer { elem_type, .. } = function.return_type {
@@ -45013,6 +45096,16 @@ impl Interpreter {
                     .ok_or_else(|| {
                         CustError::new("array pointer index overflow during pointer arithmetic")
                     })?;
+                if let Some((_, columns)) = array.borrow().dimensions {
+                    let row = *base_index / columns;
+                    let row_start = row * columns;
+                    let row_end = row_start + columns;
+                    if candidate < row_start as i64 || candidate >= row_end as i64 {
+                        return Err(CustError::new(format!(
+                            "two-dimensional array row pointer index {candidate} out of bounds for row {row} with length {columns}"
+                        )));
+                    }
+                }
                 let Ok(index) = usize::try_from(candidate) else {
                     return Err(CustError::new(format!(
                         "array pointer index {candidate} out of bounds for length {len}"
@@ -45287,10 +45380,13 @@ impl Interpreter {
                 }
             }
             Array2DFieldTarget::Pointer { pointer, fields } => {
-                let field_is_const = self
-                    .struct_pointer_expr_field_metadata(pointer, fields)?
-                    .is_some_and(|(_, is_const, _)| is_const);
-                if self.pointer_expr_points_to_const(pointer) || field_is_const {
+                let field_path_is_const = match self.pointer_expr_pointee_type(pointer)? {
+                    Some(PointeeType::Struct(type_name)) => {
+                        self.aggregate_type_field_path_is_const(&type_name, fields)
+                    }
+                    _ => false,
+                };
+                if self.pointer_expr_points_to_const(pointer) || field_path_is_const {
                     return Err(CustError::new("cannot assign through pointer to const"));
                 }
             }
@@ -46103,6 +46199,27 @@ impl Interpreter {
     }
 
     fn validate_double_conditional_expression(&self, expr: &Expr) -> CustResult<()> {
+        if let Expr::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } = expr
+        {
+            let has_row_branch = self.array2d_row_pointer_element_type(then_expr).is_some()
+                || self.array2d_row_pointer_element_type(else_expr).is_some();
+            if has_row_branch {
+                let then_type = self.non_evaluating_generic_selection_type(then_expr, &[])?;
+                let else_type = self.non_evaluating_generic_selection_type(else_expr, &[])?;
+                if matches!(then_type, DeclType::Array2DPointer { .. })
+                    || matches!(else_type, DeclType::Array2DPointer { .. })
+                {
+                    self.generic_conditional_expression_type_from_types(
+                        then_expr, else_expr, then_type, else_type,
+                    )?;
+                    return Ok(());
+                }
+            }
+        }
         let pointer_branches_require_type_validation = match expr {
             Expr::Conditional {
                 then_expr,
@@ -47981,7 +48098,8 @@ impl Interpreter {
                     | Expr::AddressOfScalarLiteral { .. }
                     | Expr::AddressOfAggregateField { .. }
             ) && self.expr_is_unsupported_double_pointer(expr))
-                || self.is_aggregate_double_array_field_pointer_arithmetic(expr)
+                || (self.is_aggregate_double_array_field_pointer_arithmetic(expr)
+                    && self.array2d_row_pointer_element_type(expr).is_none())
             {
                 return Err(CustError::new("double pointers are not supported"));
             }
@@ -47991,6 +48109,25 @@ impl Interpreter {
             ) && self.expr_is_unsupported_double_pointer(expr)
             {
                 return Err(CustError::new("double pointers are not supported"));
+            }
+            if let Some((base, index)) = Self::array2d_indexed_row_base(expr)
+                && self.array2d_row_pointer_element_type(&base).is_some()
+            {
+                self.validate_array_subscript(index)?;
+                let (elem_type, columns) = match self
+                    .non_evaluating_generic_selection_type(&base, &[])?
+                {
+                    DeclType::Array2D(elem_type, _, columns)
+                    | DeclType::Array2DPointer {
+                        elem_type, columns, ..
+                    } => (elem_type, columns),
+                    _ => {
+                        return Err(CustError::new("internal two-dimensional row type mismatch"));
+                    }
+                };
+                return (columns as i64)
+                    .checked_mul(elem_type.size())
+                    .ok_or_else(|| CustError::new("two-dimensional array row size overflow"));
             }
             match expr {
                 Expr::GenericSelection { .. } => {
@@ -48223,6 +48360,13 @@ impl Interpreter {
                         return Ok(size);
                     }
                     self.validate_array_subscript(index)?;
+                    if let Some((elem_type, columns)) = self.array2d_pointer_variable_type(name) {
+                        return (columns as i64)
+                            .checked_mul(elem_type.size())
+                            .ok_or_else(|| {
+                                CustError::new("two-dimensional array row size overflow")
+                            });
+                    }
                     match self.find_variable(name) {
                         Some(Value::StructArray { type_name, .. }) => self
                             .struct_types
@@ -48296,6 +48440,8 @@ impl Interpreter {
                     self.validate_array_subscript(row)?;
                     self.validate_array_subscript(column)?;
                     self.validate_non_evaluating_assignment_value(value, None)?;
+                    self.validate_non_evaluating_double_assignment(expr, value, None)?;
+                    self.ensure_two_dimensional_struct_field_target_mutable(target)?;
                     self.sizeof_two_dimensional_struct_field_element(target)
                 }
                 Expr::StructArray2DCompoundSet {
@@ -48308,6 +48454,11 @@ impl Interpreter {
                     self.validate_array_subscript(row)?;
                     self.validate_array_subscript(column)?;
                     self.validate_non_evaluating_assignment_value(value, Some(*op))?;
+                    self.validate_non_evaluating_double_assignment(expr, value, Some(*op))?;
+                    if self.expr_is_double_value(expr) {
+                        Self::apply_double_compound_op(0.0, *op, 1.0)?;
+                    }
+                    self.ensure_two_dimensional_struct_field_target_mutable(target)?;
                     self.sizeof_two_dimensional_struct_field_element(target)
                 }
                 Expr::StringGet { index, .. } => {
@@ -48750,6 +48901,9 @@ impl Interpreter {
                     if let Expr::Array2DGet { name, .. } = target.as_ref() {
                         self.ensure_two_dimensional_array_mutable(name)?;
                     }
+                    if let Expr::StructArray2DGet { target, .. } = target.as_ref() {
+                        self.ensure_two_dimensional_struct_field_target_mutable(target)?;
+                    }
                     self.validate_non_evaluating_aggregate_lvalue_mutable(target)?;
                     Ok(size)
                 }
@@ -49117,13 +49271,18 @@ impl Interpreter {
                             "pointer arithmetic requires an integer offset",
                         ));
                     }
-                    if matches!(
-                        self.pointer_expr_pointee_type(left)?,
-                        Some(PointeeType::Void)
-                    ) || matches!(
-                        self.pointer_expr_pointee_type(right)?,
-                        Some(PointeeType::Void)
-                    ) {
+                    let left_points_to_void = self.array2d_row_pointer_element_type(left).is_none()
+                        && matches!(
+                            self.pointer_expr_pointee_type(left)?,
+                            Some(PointeeType::Void)
+                        );
+                    let right_points_to_void =
+                        self.array2d_row_pointer_element_type(right).is_none()
+                            && matches!(
+                                self.pointer_expr_pointee_type(right)?,
+                                Some(PointeeType::Void)
+                            );
+                    if left_points_to_void || right_points_to_void {
                         return Err(CustError::new(
                             "pointer to void arithmetic is not supported",
                         ));
@@ -50021,6 +50180,16 @@ impl Interpreter {
             )?;
             return Ok(POINTER_SIZE);
         }
+        if self.array2d_row_pointer_element_type(pointer).is_some()
+            && let DeclType::Array2DPointer {
+                elem_type, columns, ..
+            } = self.non_evaluating_generic_selection_type(pointer, &[])?
+        {
+            self.sizeof_expr(pointer)?;
+            return (columns as i64)
+                .checked_mul(elem_type.size())
+                .ok_or_else(|| CustError::new("two-dimensional array row size overflow"));
+        }
         if let Some(ty) = self.pointer_expr_pointee_type(pointer)? {
             return match ty {
                 PointeeType::Void => Err(Self::void_pointer_dereference_error(pointer)),
@@ -50236,10 +50405,17 @@ impl Interpreter {
                 let (array, index) =
                     self.checked_two_dimensional_struct_field_index(target, row, column)?;
                 let current = array.borrow().elements[index];
-                let updated = array
-                    .borrow()
-                    .elem_type
-                    .normalize(Self::apply_increment_op(current, op));
+                let elem_type = array.borrow().elem_type;
+                let updated = if elem_type == CType::Double {
+                    let current_value = f64::from_bits(current as u64);
+                    let updated_value = match op {
+                        IncrementOp::Inc => current_value + 1.0,
+                        IncrementOp::Dec => current_value - 1.0,
+                    };
+                    updated_value.to_bits() as i64
+                } else {
+                    elem_type.normalize(Self::apply_increment_op(current, op))
+                };
                 let mut array = array.borrow_mut();
                 if array.read_only {
                     return Err(CustError::new("cannot modify read-only array field"));

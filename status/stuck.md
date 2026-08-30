@@ -4,9 +4,24 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-29 after bounded v0.41.0 publication. Version-first CLI/Compose RED/GREEN, the independently reconciled 2,089-test inventory, fresh `APPROVED` review, the complete local/no-cache-rebuilt-Docker gate, runtime output `10`, exact versions, diff hygiene, release-commit-first publication, and annotated-tag verification pass. Selected two-dimensional binary64 rows are the single next implementation package.
+None. Last reviewed 2026-08-30 after selected two-dimensional binary64 row completion and the second independent review-fix cycle. Review-driven RED/GREEN, the exact 2,110-test inventory, formatting, strict Clippy, the complete local/rebuilt-Docker gate, runtime output `10`, GCC/Clang/compiler-oracle execution, and diff hygiene pass. Bounded v0.42.0 release closure is the single next package.
 
 ## Resolved this run
+
+### 2026-08-30 — Double-row cast, conditional-width, and native-oracle review closure
+
+- Failure: fresh independent review showed that `(int *)rows` inherited double-row metadata beneath `sizeof`, conditional branches with different row widths were accepted in evaluated and non-evaluating contexts, and the native fixture read a `double` after byte-zeroing it.
+- Root causes: `array2d_row_pointer_element_type()` propagated row metadata through every non-void pointer cast; conditional validation compared only scalar pointee kinds and discarded `Array2DPointer` column counts; the fixture coupled deterministic Cust bytes to a representation not guaranteed by ISO C.
+- RED/GREEN: three focused tests first returned pointer size or success. Row metadata now survives only same-element scalar pointer casts, and conditional validation compares complete row types through `DeclType::Array2DPointer` before evaluation. The fixture compares the zeroed object representation against an unsigned-character byte array and never reads the byte-zeroed double value.
+- Full-gate correction: the initial conditional fix eagerly inferred both branches for every ternary and regressed the existing nested `strtol` non-evaluating linearity test with `cannot determine generic selection pointer type`. Guarding complete branch inference behind positive row-shape detection restored that exact regression while both width-mismatch tests remained GREEN.
+- Follow-up: combining the row-returning `memset` comparison and byte `memcmp` in one `||` expression exposed a separate composed-expression classifier limitation, so the warning-free oracle uses equivalent source-ordered `if` statements and the combined form is recorded as a concrete post-release regression package.
+
+### 2026-08-30 — Selected double-row bounds, qualification, and address boundaries
+
+- Failure: the inherited selected-row package admitted the expected direct/pointer/parameter/field bounded-memory routes, but independent review showed that `&row[columns]` could expose adjacent backing storage, leading `const` incorrectly froze an adjusted pointer slot, bracket `const` failed to freeze that slot, and an aggregate compound-literal row address returned pointer size instead of retaining the unsupported pointer-to-row boundary.
+- Root causes: `checked_pointer_value_index()` validated total backing allocation but omitted row-local width; runtime parameter binding conflated `points_to_const` with `is_const`; direct `Array2D` parameter lowering ignored bracket qualification; and generic address-of-subscript lowering erased `&` into pointer addition before double-row classification.
+- RED/GREEN: focused regressions first returned success or the wrong qualification result for `memset`/`memcmp` one-past row addresses, leading-const and bracket-const adjusted parameters, and `&((struct T){...}).rows[0]`. Row-local index validation, separated slot/pointee qualification, bracket-const propagation, and metadata-aware aggregate-literal address lowering restore exact diagnostics. The existing one-dimensional aggregate compound-literal indexed-address fixture remains GREEN.
+- Verification: the 27-test two-dimensional-double filter, adjacent aggregate-literal indexed addresses, registered fixture, actual compiler oracle, direct GCC/Clang warnings-as-errors execution, formatting, strict Clippy, all 2,107 local tests, all 2,107 rebuilt-Docker tests, runtime output `10`, and diff hygiene pass.
 
 ### 2026-08-29 — Aggregate-field binary64 admission and non-evaluating provenance
 

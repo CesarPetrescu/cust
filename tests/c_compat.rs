@@ -155,6 +155,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/bounded_memory_whole_struct_object_bytes.c",
     "tests/fixtures/compat/valid/bounded_memory_two_dimensional_character_rows.c",
     "tests/fixtures/compat/valid/bounded_memory_two_dimensional_scalar_object_rows.c",
+    "tests/fixtures/compat/valid/bounded_memory_two_dimensional_double_rows.c",
     "tests/fixtures/compat/valid/bounded_memory_scalar_object_bytes.c",
     "tests/fixtures/compat/valid/bounded_memory_double_object_bytes.c",
     "tests/fixtures/compat/valid/bounded_memory_aggregate_double_object_bytes.c",

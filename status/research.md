@@ -2,6 +2,19 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-30 — Selected two-dimensional binary64 row views
+
+- Fresh review confirmed that pointer casts must not preserve row metadata by source shape alone: the destination pointee type controls the cast result. Cust therefore retains selected-row metadata only for a same-element scalar cast and keeps incompatible casts rejected consistently in evaluated and `sizeof` routes.
+- Conditional compatibility must retain the complete pointer-to-row type, including column count. Comparing only the decayed scalar pointee (`double`) accepts incompatible `double (*)[2]` and `double (*)[3]` branches; route both evaluated and non-evaluating conditionals through `DeclType::Array2DPointer` compatibility.
+- Complete conditional branch inference must remain contextual. First detect that at least one branch is a row-pointer shape, then infer both complete row types; eagerly inferring every ternary regresses unrelated deep non-evaluating pointer-output expressions and unnecessary work.
+- ISO C does not guarantee that all-zero object bytes represent floating zero. Native compiler-oracle fixtures may inspect bytes through character storage or `memcmp`, but must not read a `double` after `memset(..., 0, sizeof(double))`.
+
+- Existing two-dimensional `ArrayBase`/`ArrayElement` metadata and deterministic `f64` byte serialization are sufficient for one selected `double` row. Preserve row/column dimensions, owner/lifetime/const, and aggregate provenance; compute byte capacity from the selected row width and never flatten adjacent rows.
+- Row-local bounds must be checked before whole-allocation bounds. An address such as `&row[columns]` is one-past the selected row but can still be inside the contiguous outer allocation; bounded-memory conversion must reject it before deriving object bytes.
+- C array-parameter qualification has two independent effects: `const double rows[][C]` qualifies elements and leaves the adjusted pointer slot mutable, while `double rows[const R][C]` qualifies the adjusted pointer slot. Cust therefore maps leading const to `points_to_const`, bracket const to `Param::is_const`, and inserts runtime `const_params` from `is_const` only. GCC and Clang both accept/reassign the former and reject reassignment of the latter with C11 warnings denied.
+- Address-of-subscript usually lowers to pointer addition, which erases pointer-to-row intent. For an aggregate compound literal with a parser-known two-dimensional field, preserve an `AddressOfAggregateField` marker beneath the addition so the existing unsupported double-row-pointer classifier fires. Keep ordinary one-dimensional aggregate-literal indexed field addresses on the old lowering path.
+- Candidate decision: finish the inherited selected-row package before release, shared union bytes, or parser/property expansion. Bounded v0.42.0 release closure is next; union object bytes still require true shared storage rather than a serialized-member shortcut. See `references/cust-bounded-memory-two-dimensional-double-rows.md`.
+
 ## 2026-08-29 — v0.41.0 release consistency
 
 - Publication ordering is verified: release commit `24d41c563c5261344abd19ffb69ccf12f184e02d` reached exact `origin/main` while local/remote `v0.41.0` refs were absent; annotated tag object `b469e7f5ef7900ec073e7153cd6db721a9abd688` was then created and pushed, and local/remote refs peel exactly to the release commit. This later status-only evidence update does not move or recreate the tag.
