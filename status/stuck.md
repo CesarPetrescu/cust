@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-30 after bounded v0.43.0 release review and canonical verification. Version-first CLI/Compose RED/GREEN, exact 2,111-test executable listing, fresh independent `APPROVED`, formatting, strict Clippy, all local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, diff hygiene, and repeated empty local/remote tag preflight pass. Release-commit-first publication and exact remote ref verification are normal remaining release steps, not blockers.
+None. Last reviewed 2026-08-30 after bounded v0.43.0 publication. Version-first CLI/Compose RED/GREEN, exact 2,111-test executable listing, fresh independent `APPROVED`, formatting, strict Clippy, all local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, diff hygiene, release-commit-first branch acceptance, and exact local/remote annotated-tag verification pass. True shared-member union object bytes are next.
 
 ## Resolved this run
 
