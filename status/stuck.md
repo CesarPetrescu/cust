@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-30 after final scalar-union full-width-carrier review closure. Fresh complete-diff review returned `APPROVED`; formatting, strict Clippy, all 2,117 local and Docker tests, runtime output `10`, compiler-oracle comparison, and diff hygiene pass. Bounded v0.44.0 release closure is next.
+None. Last reviewed 2026-08-30 after bounded v0.44.0 release-candidate verification. Version-first CLI/Compose RED/GREEN, the independently reconciled 2,117-test inventory, fresh `APPROVED` release review, formatting, strict Clippy, all local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, repeated empty tag preflight, and diff hygiene pass. Release-commit-first publication is pending; whole-object byte ranges for admitted scalar-only union layouts are the concrete post-release task.
 
 ## Resolved this run
 

@@ -2,6 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-30 — v0.44.0 release consistency
+
+- Version-first release TDD changed only the exact CLI and Compose expectations. Both focused tests failed against `0.43.0` and passed after Cargo/lock plus both Compose image tags moved to `0.44.0`.
+- Executable target listing yields 2,117 tests: `interpreter` 1,981 + `fuzz_safety` 99 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
+- Central release claims distinguish selected-member shared bytes from unsupported whole-union ranges and unsupported layouts. Canonical offset-zero identity, deterministic alias visibility, raw `_Bool` bytes, selected-member capacity, full-width writable-carrier admission, const/lifetime/overlap, array-element isolation, and non-evaluation stay explicit.
+- Candidate decision: bounded v0.44.0 release closure outranks whole-object scalar-union ranges, another property matrix, and parser-diagnostic expansion because it packages the reviewed feature with exact version assertions and bounded release risk. Whole-object ranges for already admitted scalar-only layouts are the concrete post-release task.
+- Fresh independent complete-diff review returned `APPROVED` with no findings. The canonical release gate passed formatting, warning-denied Clippy, all 2,117 local tests, a no-cache image rebuild, all 2,117 rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image `0.44.0` versions, repeated empty local/remote tag preflight, and diff hygiene. The annotated tag remains reserved until the verified release commit reaches exact `origin/main`.
+
 ## 2026-08-30 — Scalar-only shared union object bytes
 
 - A union member path is an access type, not a separate storage address. Canonical memory positions therefore use the enclosing aggregate root plus offset zero for every member, including nested scalar-only unions and union elements reached through aggregate arrays.

@@ -4,13 +4,25 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.44.0 — 2026-08-30
+
 ### Language subset
 
-- Added shared object-byte semantics for scalar-only unions across exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr`. Layouts containing at least one non-const full-width `int` or `char` storage carrier plus any non-`double` scalar members resolve to one canonical aggregate root at offset zero; deterministic little-endian writes through `int`, `char`, and `_Bool` views are visible through every aliasing member.
+- Added shared object-byte semantics for selected members of scalar-only unions across exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr`. Layouts containing at least one non-const full-width `int` or `char` storage carrier plus any non-`double` scalar members resolve to one canonical aggregate root at offset zero; deterministic little-endian writes through `int`, `char`, and `_Bool` views are visible through every aliasing member.
 
 ### Diagnostics and verification
 
-- Preserved raw object bytes beneath normalized `_Bool` value views, selected-member capacity, overlap detection across distinct union-member pointers, const and lexical-lifetime checks, zero-count identity, and direct/nested non-evaluation. All-`_Bool` unions, layouts without a non-const carrier as wide as the largest member, layouts containing arrays, pointers, `double`, or nested aggregates, and whole-union byte ranges retain targeted rejection. Six focused interpreter tests and one registered warning-free ABI-independent compiler-oracle fixture cover the slice.
+- Preserved raw object bytes beneath normalized `_Bool` value views, selected-member capacity, overlap detection across distinct union-member pointers, const and lexical-lifetime checks, array-element isolation, zero-count identity, and direct/nested non-evaluation. All-`_Bool` unions, layouts without a non-const carrier as wide as the largest member, layouts containing arrays, pointers, `double`, or nested aggregates, and whole-union byte ranges retain targeted rejection. Six focused interpreter tests and one registered warning-free ABI-independent compiler-oracle fixture cover the slice.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.44.0`.
+- Reconciled an executable inventory of 2,117 tests: 1,981 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Shared union object bytes are limited to selected scalar members in layouts with a non-const full-width `int` or `char` carrier. Whole-union byte ranges, all-`_Bool` layouts, layouts without a full-width writable carrier, and union layouts containing arrays, pointers, `double`, or nested aggregates remain unsupported. The selected member's own size bounds each operation even though all members share offset-zero identity. General pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and unsupported pragma semantics also remain outside the release.
 
 ## v0.43.0 — 2026-08-30
 
