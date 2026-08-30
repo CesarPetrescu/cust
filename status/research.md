@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-30 — v0.43.0 release consistency
+
+- Version-first release TDD changed only the exact CLI and Compose expectations. Both focused tests failed against `0.42.0` and passed after Cargo/lock plus both Compose image tags moved to `0.43.0`.
+- Executable target listing yields 2,111 tests: `interpreter` 1,975 + `fuzz_safety` 99 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
+- Central release claims describe the corrected composition route, not broader storage admission: a row-returning bounded-memory comparison may precede row-byte comparison in `||`; source order, one-time evaluation, sequential-`if` parity, and adjacent-row isolation remain explicit, while cross-row, whole-object, union-backed, row-address, incompatible-width/cast, and unprovable-root boundaries stay unchanged.
+- Candidate decision: bounded v0.43.0 release closure outranks shared union bytes and broader parser/property expansion because it atomically packages an already reviewed correctness fix with exact executable assertions and bounded release risk. True shared-member union byte storage is the one concrete post-release package; it must not serialize independent member values and call that aliasing.
+- Initial review found one stale v0.42-era “next” instruction in the current TODO queue. Rewriting it as explicitly historical/completed removed the contradiction; fresh complete-diff re-review returned `APPROVED` with no findings.
+- The canonical release gate passed formatting, warning-denied Clippy, all 2,111 local tests, a no-cache rebuild, all 2,111 rebuilt-Docker tests, runtime output `10`, exact `cust 0.43.0` from Cargo/local CLI/runtime image/test image, diff hygiene, and repeated empty local/remote tag preflight. Release-commit-first publication and exact local/remote tag-object plus peeled-target checks remain required.
+
 ## 2026-08-30 — Selected-row alias classification in composed memory calls
 
 - A selected `double` row represented as `PointerValue::Array2DRow` is valid bounded-memory storage even though Cust intentionally forbids decaying that row object through the generic scalar-pointer type path. Storage classification and language-level pointer conversion answer different questions and must not share the rejecting `pointer_value_type()` route blindly.

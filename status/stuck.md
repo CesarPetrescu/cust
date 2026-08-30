@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-30 after selected-row short-circuit composition closure. Focused RED/GREEN, warning-free GCC/Clang fixture execution, the actual compiler oracle, independent `APPROVED` review, exact 2,111-test executable listing, formatting, strict Clippy, all local/Docker tests, runtime output `10`, and diff hygiene pass. Bounded v0.43.0 release closure is next.
+None. Last reviewed 2026-08-30 after bounded v0.43.0 release review and canonical verification. Version-first CLI/Compose RED/GREEN, exact 2,111-test executable listing, fresh independent `APPROVED`, formatting, strict Clippy, all local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, diff hygiene, and repeated empty local/remote tag preflight pass. Release-commit-first publication and exact remote ref verification are normal remaining release steps, not blockers.
 
 ## Resolved this run
 

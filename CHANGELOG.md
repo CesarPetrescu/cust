@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.43.0 — 2026-08-30
+
+### Language subset
+
+- Completed short-circuit composition for selected two-dimensional binary64 row views: a row-returning bounded-memory comparison may be the left operand of `||` with a row-byte comparison on the right without losing selected-row storage identity.
+
+### Diagnostics and verification
+
+- Runtime alias analysis now classifies a live selected `double` row directly instead of routing it through intentionally unsupported scalar-pointer decay. Source order, one-time marker evaluation, sequential-`if` parity, and adjacent-row isolation remain covered while cross-row, union-backed, whole-object, row-address, incompatible-width/cast, and unprovable-root boundaries stay unchanged. One focused interpreter regression and the updated registered ABI-independent compiler-oracle fixture cover the release delta.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.43.0`.
+- Reconciled an executable inventory of 2,111 tests: 1,975 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Selected-row call composition does not widen raw-memory admission: whole two-dimensional `double` objects, adjacent-row flattening, union-backed storage, whole aggregates containing double fields, whole pointer-object storage, pointer-valued fields whose current target is not provably supported, unprovable helper-returned roots, and whole-array/row addresses remain unsupported. The broader bounded `double` language slice still excludes `float`, `long double`, hexadecimal/suffixed/non-finite floating literals, deeper double pointers, arrays of double pointers, union-backed double field addresses/decay, atomic double-pointer aliases, direct one-dimensional double-array parameter declarators, one-dimensional-array-alias-derived multidimensional aggregate fields, pointer-to-row typedef aliases, explicit pointer-to-row function parameters/returns, array returns, two-dimensional double array compound literals, and three-dimensional double arrays. Complex runtime values, host floating ABI/promotion behavior, general pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and other pragma semantics also remain outside the release.
+
 ## v0.42.0 — 2026-08-30
 
 ### Language subset
