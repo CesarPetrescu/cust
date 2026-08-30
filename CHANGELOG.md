@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added shared object-byte semantics for scalar-only unions across exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr`. Layouts containing at least one non-const full-width `int` or `char` storage carrier plus any non-`double` scalar members resolve to one canonical aggregate root at offset zero; deterministic little-endian writes through `int`, `char`, and `_Bool` views are visible through every aliasing member.
+
+### Diagnostics and verification
+
+- Preserved raw object bytes beneath normalized `_Bool` value views, selected-member capacity, overlap detection across distinct union-member pointers, const and lexical-lifetime checks, zero-count identity, and direct/nested non-evaluation. All-`_Bool` unions, layouts without a non-const carrier as wide as the largest member, layouts containing arrays, pointers, `double`, or nested aggregates, and whole-union byte ranges retain targeted rejection. Six focused interpreter tests and one registered warning-free ABI-independent compiler-oracle fixture cover the slice.
+
 ## v0.43.0 — 2026-08-30
 
 ### Language subset

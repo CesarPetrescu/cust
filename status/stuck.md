@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-30 after bounded v0.43.0 publication. Version-first CLI/Compose RED/GREEN, exact 2,111-test executable listing, fresh independent `APPROVED`, formatting, strict Clippy, all local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, diff hygiene, release-commit-first branch acceptance, and exact local/remote annotated-tag verification pass. True shared-member union object bytes are next.
+None. Last reviewed 2026-08-30 after final scalar-union full-width-carrier review closure. Fresh complete-diff review returned `APPROVED`; formatting, strict Clippy, all 2,117 local and Docker tests, runtime output `10`, compiler-oracle comparison, and diff hygiene pass. Bounded v0.44.0 release closure is next.
 
 ## Resolved this run
+
+### 2026-08-30 — Scalar-only shared union object bytes
+
+- Failure: distinct scalar member pointers compared unequal because identity included the selected field path, and bounded-memory validation rejected every union-backed scalar root.
+- Root cause: union initialization/assignment copied one numeric value into independent member slots, while field offsets and pointer equality followed struct-style declaration paths instead of union offset-zero storage identity.
+- RED/GREEN: the first focused test returned `1` before the intrinsic call. Canonical union offsets/equality exposed the expected runtime rejection, then scalar-only layout admission and deterministic byte synchronization made low-byte writes visible through every member. Review of the full interpreter target exposed stale rejection assertions and one non-scalar initializer regression; focused fixes retained array/pointer/double/nested boundaries. Independent review then found normalized `_Bool` views hid raw byte `2`, a native padding-byte assumption, and missing array-element/layout-wide veto coverage. A dedicated raw-byte test returned `2` before carrier-backed intrinsic access; array-element/isolation and selected-scalar-with-array-sibling tests plus an unsigned-character zero oracle close those findings. Fresh re-review then exposed const-carrier restoration corruption; a focused negative case first returned `cannot assign through pointer to const`, and admission now requires a non-const carrier before any validation mutation.
+- Final review closure: a narrow mutable carrier behind a wider const member could fabricate unavailable upper bytes. The exact regression first returned `Ok(0)`; admission now requires a non-const carrier exactly as wide as the largest member. Const-member, unsupported-layout equality, same-width alias/memmove, and deterministic seed checks were added. Fresh re-review returned `APPROVED`; all 2,117 local/Docker tests and runtime output `10` pass.
 
 ### 2026-08-30 — Selected-row short-circuit bounded-memory composition
 

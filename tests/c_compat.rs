@@ -152,6 +152,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/bounded_memory_copy_function.c",
     "tests/fixtures/compat/valid/bounded_memory_aggregate_character_array_fields.c",
     "tests/fixtures/compat/valid/bounded_memory_aggregate_scalar_object_bytes.c",
+    "tests/fixtures/compat/valid/bounded_memory_scalar_union_object_bytes.c",
     "tests/fixtures/compat/valid/bounded_memory_whole_struct_object_bytes.c",
     "tests/fixtures/compat/valid/bounded_memory_two_dimensional_character_rows.c",
     "tests/fixtures/compat/valid/bounded_memory_two_dimensional_scalar_object_rows.c",

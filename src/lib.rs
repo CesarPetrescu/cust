@@ -21717,7 +21717,9 @@ impl Interpreter {
                 }
             }
             Some(PointeeType::Scalar(_)) => {
-                if self.memory_pointer_targets_union_field(pointer)? {
+                if self.memory_pointer_targets_union_field(pointer)?
+                    && !self.memory_pointer_targets_supported_scalar_union(pointer)?
+                {
                     return Err(CustError::new(format!(
                         "function '{name}' does not yet support union-backed scalar object storage for argument {argument}"
                     )));
@@ -21739,6 +21741,145 @@ impl Interpreter {
             }
         }
         Ok(())
+    }
+
+    fn memory_pointer_targets_supported_scalar_union(
+        &self,
+        pointer: &PointerValue,
+    ) -> CustResult<bool> {
+        match Self::object_byte_base(pointer) {
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => {
+                let (_, type_name, _) =
+                    self.whole_struct_root_identity(*scope_id, name, *element_index)?;
+                self.aggregate_path_targets_supported_scalar_union(&type_name, fields)
+            }
+            PointerValue::StructFieldElementField { pointer, fields } => {
+                let (type_name, _) = self.find_struct_pointer_fields(pointer)?;
+                self.aggregate_path_targets_supported_scalar_union(&type_name, fields)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn aggregate_path_targets_supported_scalar_union(
+        &self,
+        type_name: &str,
+        path: &[String],
+    ) -> CustResult<bool> {
+        Ok(self.scalar_union_carrier_path(type_name, path)?.is_some())
+    }
+
+    fn scalar_union_carrier_path(
+        &self,
+        type_name: &str,
+        path: &[String],
+    ) -> CustResult<Option<Vec<String>>> {
+        let mut current_type = type_name;
+        for (index, selected_name) in path.iter().enumerate() {
+            let definition = self
+                .struct_types
+                .get(current_type)
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{current_type}'")))?;
+            if definition.kind == AggregateKind::Union {
+                if !definition.fields.iter().all(
+                    |field| matches!(field.ty, StructFieldType::Scalar(ty) if ty != CType::Double),
+                ) {
+                    return Ok(None);
+                }
+                if index + 1 != path.len()
+                    || !definition
+                        .fields
+                        .iter()
+                        .any(|field| &field.name == selected_name)
+                {
+                    return Ok(None);
+                }
+                let storage_size = definition
+                    .fields
+                    .iter()
+                    .filter_map(|field| match field.ty {
+                        StructFieldType::Scalar(ty) => Some(ty.size()),
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(0);
+                let Some(carrier) = definition
+                    .fields
+                    .iter()
+                    .filter_map(|field| match field.ty {
+                        StructFieldType::Scalar(ty)
+                            if ty != CType::Bool
+                                && !field.is_const
+                                && ty.size() == storage_size =>
+                        {
+                            Some((field, ty))
+                        }
+                        _ => None,
+                    })
+                    .max_by_key(|(_, ty)| ty.size())
+                else {
+                    return Ok(None);
+                };
+                let mut carrier_path = path[..index].to_vec();
+                carrier_path.push(carrier.0.name.clone());
+                return Ok(Some(carrier_path));
+            }
+            let selected = definition
+                .fields
+                .iter()
+                .find(|field| &field.name == selected_name)
+                .ok_or_else(|| {
+                    CustError::new(format!("unknown field '{selected_name}' in aggregate"))
+                })?;
+            if index + 1 == path.len() {
+                return Ok(None);
+            }
+            let StructFieldType::Struct(nested_type) = &selected.ty else {
+                return Ok(None);
+            };
+            current_type = nested_type;
+        }
+        Ok(None)
+    }
+
+    fn scalar_union_carrier_pointer(
+        &self,
+        pointer: &PointerValue,
+    ) -> CustResult<Option<PointerValue>> {
+        match Self::object_byte_base(pointer) {
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => {
+                let (_, type_name, _) =
+                    self.whole_struct_root_identity(*scope_id, name, *element_index)?;
+                Ok(self
+                    .scalar_union_carrier_path(&type_name, fields)?
+                    .map(|fields| PointerValue::StructField {
+                        scope_id: *scope_id,
+                        name: name.clone(),
+                        element_index: *element_index,
+                        fields,
+                    }))
+            }
+            PointerValue::StructFieldElementField { pointer, fields } => {
+                let (type_name, _) = self.find_struct_pointer_fields(pointer)?;
+                Ok(self
+                    .scalar_union_carrier_path(&type_name, fields)?
+                    .map(|fields| PointerValue::StructFieldElementField {
+                        pointer: pointer.clone(),
+                        fields,
+                    }))
+            }
+            _ => Ok(None),
+        }
     }
 
     fn pointer_targets_supported_double_memory_object(&self, pointer: &PointerValue) -> bool {
@@ -21857,6 +21998,12 @@ impl Interpreter {
             Some(PointeeType::Scalar(_)) => {
                 if count == 0 {
                     return Ok(());
+                }
+                if let Some(carrier) = self.scalar_union_carrier_pointer(pointer)? {
+                    let carrier_value = self.deref_pointer(&carrier)?;
+                    let selected_value = self.deref_pointer(pointer)?;
+                    self.assign_deref_pointer(pointer, selected_value)?;
+                    return self.assign_deref_pointer(&carrier, carrier_value);
                 }
                 let current = self.deref_pointer(pointer)?;
                 self.assign_deref_pointer(pointer, current)
@@ -22222,6 +22369,18 @@ impl Interpreter {
             );
         }
         let (cell_pointer, ty, within) = self.scalar_memory_cell_pointer(pointer, byte_offset)?;
+        if let Some(carrier) = self.scalar_union_carrier_pointer(&cell_pointer)? {
+            let carrier_type = match self.pointer_value_type(&carrier)? {
+                Some(PointeeType::Scalar(ty)) => ty,
+                _ => {
+                    return Err(CustError::new(
+                        "scalar union carrier does not reference scalar storage",
+                    ));
+                }
+            };
+            let value = self.deref_pointer(&carrier)?;
+            return Ok(Self::read_scalar_object_byte(value, carrier_type, within));
+        }
         let value = self.deref_pointer(&cell_pointer)?;
         Ok(Self::read_scalar_object_byte(value, ty, within))
     }
@@ -22258,6 +22417,19 @@ impl Interpreter {
             );
         }
         let (cell_pointer, ty, within) = self.scalar_memory_cell_pointer(pointer, byte_offset)?;
+        if let Some(carrier) = self.scalar_union_carrier_pointer(&cell_pointer)? {
+            let carrier_type = match self.pointer_value_type(&carrier)? {
+                Some(PointeeType::Scalar(ty)) => ty,
+                _ => {
+                    return Err(CustError::new(
+                        "scalar union carrier does not reference scalar storage",
+                    ));
+                }
+            };
+            let current = self.deref_pointer(&carrier)?;
+            let value = Self::write_scalar_object_byte(current, carrier_type, within, value);
+            return self.assign_deref_pointer(&carrier, value);
+        }
         let current = self.deref_pointer(&cell_pointer)?;
         let value = Self::write_scalar_object_byte(current, ty, within, value);
         self.assign_deref_pointer(&cell_pointer, value)
@@ -22920,10 +23092,12 @@ impl Interpreter {
                     selected = Some(field.ty.clone());
                     break;
                 }
-                offset = offset.saturating_add(
-                    usize::try_from(field.ty.size(&self.struct_types)?)
-                        .map_err(|_| CustError::new("whole-struct field size overflow"))?,
-                );
+                if definition.kind == AggregateKind::Struct {
+                    offset = offset.saturating_add(
+                        usize::try_from(field.ty.size(&self.struct_types)?)
+                            .map_err(|_| CustError::new("whole-struct field size overflow"))?,
+                    );
+                }
             }
             let field_type = selected.ok_or_else(|| {
                 CustError::new(format!("unknown field '{selected_name}' in struct"))
@@ -39519,8 +39693,8 @@ impl Interpreter {
         fields: &mut HashMap<String, StructFieldValue>,
         active_field: &str,
     ) -> CustResult<()> {
-        let active_value = match fields.get(active_field) {
-            Some(StructFieldValue::Scalar { value, .. }) => Some(*value),
+        let active = match fields.get(active_field) {
+            Some(StructFieldValue::Scalar { value, ty, .. }) => Some((*value, *ty)),
             Some(_) => None,
             None => {
                 return Err(CustError::new(format!(
@@ -39528,14 +39702,56 @@ impl Interpreter {
                 )));
             }
         };
-        if let Some(active_value) = active_value {
-            for field_value in fields.values_mut() {
-                if let StructFieldValue::Scalar { value, .. } = field_value {
-                    *value = active_value;
-                }
+        let Some((active_value, active_type)) = active else {
+            return Ok(());
+        };
+        let storage_size = fields
+            .values()
+            .filter_map(|field| match field {
+                StructFieldValue::Scalar { ty, .. } => Some(ty.size() as usize),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(active_type.size() as usize);
+        let mut bytes = vec![0u8; storage_size];
+        if let Some((_, StructFieldValue::Scalar { value, ty, .. })) = fields
+            .iter()
+            .filter(|(_, field)| {
+                matches!(field, StructFieldValue::Scalar { ty, .. } if ty.size() as usize == storage_size)
+            })
+            .min_by_key(|(name, _)| name.as_str())
+        {
+            Self::write_union_scalar_bytes(&mut bytes, *value, *ty);
+        }
+        Self::write_union_scalar_bytes(&mut bytes, active_value, active_type);
+        for field_value in fields.values_mut() {
+            if let StructFieldValue::Scalar { value, ty, .. } = field_value {
+                *value = Self::read_union_scalar_bytes(&bytes, *ty);
             }
         }
         Ok(())
+    }
+
+    fn write_union_scalar_bytes(bytes: &mut [u8], value: i64, ty: CType) {
+        match ty {
+            CType::Char => bytes[0] = value.rem_euclid(256) as u8,
+            CType::Bool => bytes[0] = u8::from(value != 0),
+            CType::Int | CType::Double => {
+                bytes[..ty.size() as usize].copy_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+
+    fn read_union_scalar_bytes(bytes: &[u8], ty: CType) -> i64 {
+        match ty {
+            CType::Char => i64::from(bytes[0]),
+            CType::Bool => i64::from(bytes[0] != 0),
+            CType::Int | CType::Double => {
+                let mut value = [0u8; 8];
+                value[..ty.size() as usize].copy_from_slice(&bytes[..ty.size() as usize]);
+                i64::from_le_bytes(value)
+            }
+        }
     }
 
     fn default_struct_field_value(
@@ -45767,6 +45983,15 @@ impl Interpreter {
         self.ensure_pointer_value_live(right)?;
         if matches!(left, PointerValue::Null) || matches!(right, PointerValue::Null) {
             return Ok(Self::pointer_eq(left, right));
+        }
+        if self.memory_pointer_targets_union_field(left)?
+            || self.memory_pointer_targets_union_field(right)?
+        {
+            let (left_identity, left_offset) = self.memory_pointer_position(left)?;
+            let (right_identity, right_offset) = self.memory_pointer_position(right)?;
+            return Ok(
+                Self::pointer_eq(&left_identity, &right_identity) && left_offset == right_offset
+            );
         }
         if matches!(left, PointerValue::ObjectByte { .. })
             || matches!(right, PointerValue::ObjectByte { .. })

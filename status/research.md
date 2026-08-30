@@ -2,6 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-30 — Scalar-only shared union object bytes
+
+- A union member path is an access type, not a separate storage address. Canonical memory positions therefore use the enclosing aggregate root plus offset zero for every member, including nested scalar-only unions and union elements reached through aggregate arrays.
+- Cust can keep its existing field maps while implementing one observable storage root by synchronizing member values through explicit deterministic bytes after every scalar union write. Seed from the widest `int`/`char` carrier, overwrite only the active member's declared width, then decode every scalar view; bounded intrinsic reads/writes must still route through that carrier so raw byte `2` remains visible beneath a normalized `_Bool` value of `1`.
+- Bounded capacity remains the selected member's size even though all members share an address. This rejects two-byte writes through a one-byte member while overlap detection correctly treats `&u.large` and `&u.small` as the same starting storage position.
+- Admission is deliberately layout-wide: every member must be a non-`double` scalar and at least one member must be a non-const `int` or `char` raw-byte carrier as wide as the largest member. A narrower carrier cannot preserve bytes at offsets admitted by a wider selected member, and a const-only full-width carrier cannot safely restore bytes after mutability validation; both layouts remain outside this first slice. All-`_Bool` unions, arrays, pointers, `double`, nested aggregates, and whole-union byte ranges remain unsupported until they have explicit persistent representation semantics.
+- Native oracle coverage uses same-type integer members and only ABI-independent relationships: equal member addresses after conversion to `void *`, whole-value copy/move comparisons, comparison against an explicitly zeroed unsigned-character array, and a guaranteed zero-byte search. A separately initialized integer cannot prove padding bytes are zero. Interpreter-only coverage proves deterministic little-endian mixed-width aliasing and raw bytes beneath canonical `_Bool` normalization.
+- Final review established that carrier writability alone is insufficient: the persistent carrier must be as wide as the union's largest member or reads through a wider const member can request bytes the carrier cannot represent. Carrier admission now requires exact maximum width, and equal-width seed selection is deterministic by field name.
+- Candidate decision: this queue-leading feature outranked additional row-property/parser work because it closes an architectural safety boundary with a bounded layout predicate and exact tests. Bounded v0.44.0 release closure is next.
+
 ## 2026-08-30 — v0.43.0 release consistency
 
 - Version-first release TDD changed only the exact CLI and Compose expectations. Both focused tests failed against `0.42.0` and passed after Cargo/lock plus both Compose image tags moved to `0.43.0`.
