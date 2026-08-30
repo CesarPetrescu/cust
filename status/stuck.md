@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-30 after bounded v0.42.0 release review and canonical verification. Version-first CLI/Compose RED/GREEN, exact 2,110-test executable listing, two documentation review-fix cycles, final independent `APPROVED`, formatting, strict Clippy, all local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, diff hygiene, and empty local/remote tag preflight pass. Release-commit-first publication and exact remote ref verification are normal remaining release steps, not blockers.
+None. Last reviewed 2026-08-30 after bounded v0.42.0 publication. Version-first CLI/Compose RED/GREEN, exact 2,110-test executable listing, two documentation review-fix cycles, final independent `APPROVED`, formatting, strict Clippy, all local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, diff hygiene, release-commit-first branch acceptance, and exact local/remote tag-object/peeled-target verification pass. The focused short-circuit row-call composition regression is the single next implementation task.
 
 ## Resolved this run
 
