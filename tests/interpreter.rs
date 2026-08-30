@@ -15082,6 +15082,46 @@ fn bounded_memory_two_dimensional_double_rows_support_all_intrinsics() {
 }
 
 #[test]
+fn bounded_memory_two_dimensional_double_row_calls_compose_in_short_circuit_or() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        int main(void) {
+            double combined_values[2][2] = {{1.5, 2.5}, {3.5, 4.5}};
+            double sequential_values[2][2] = {{1.5, 2.5}, {3.5, 4.5}};
+            double (*combined_rows)[2] = combined_values;
+            double (*sequential_rows)[2] = sequential_values;
+            unsigned char zero_bytes[sizeof(double)] = {0};
+            int combined_marker = 0;
+            int sequential_marker = 0;
+
+            int combined_result =
+                memset(*combined_rows, combined_marker++, sizeof((*combined_rows)[0])) !=
+                    *combined_rows ||
+                memcmp(*combined_rows, zero_bytes, sizeof((*combined_rows)[0])) != 0;
+
+            int sequential_result = 0;
+            if (memset(*sequential_rows, sequential_marker++, sizeof((*sequential_rows)[0])) !=
+                *sequential_rows) {
+                sequential_result = 1;
+            }
+            if (!sequential_result) {
+                if (memcmp(*sequential_rows, zero_bytes, sizeof((*sequential_rows)[0])) != 0) {
+                    sequential_result = 1;
+                }
+            }
+
+            if (combined_result != sequential_result) return 1;
+            if (combined_marker != 1 || sequential_marker != 1) return 2;
+            if (combined_values[1][0] != 3.5 || sequential_values[1][0] != 3.5) return 3;
+            return 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn bounded_memory_two_dimensional_double_rows_are_non_evaluating() {
     let program = r#"
         void *memset(void *, int, unsigned long int);

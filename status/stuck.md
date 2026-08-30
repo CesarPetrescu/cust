@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-30 after bounded v0.42.0 publication. Version-first CLI/Compose RED/GREEN, exact 2,110-test executable listing, two documentation review-fix cycles, final independent `APPROVED`, formatting, strict Clippy, all local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, diff hygiene, release-commit-first branch acceptance, and exact local/remote tag-object/peeled-target verification pass. The focused short-circuit row-call composition regression is the single next implementation task.
+None. Last reviewed 2026-08-30 after selected-row short-circuit composition closure. Focused RED/GREEN, warning-free GCC/Clang fixture execution, the actual compiler oracle, independent `APPROVED` review, exact 2,111-test executable listing, formatting, strict Clippy, all local/Docker tests, runtime output `10`, and diff hygiene pass. Bounded v0.43.0 release closure is next.
 
 ## Resolved this run
+
+### 2026-08-30 — Selected-row short-circuit bounded-memory composition
+
+- Failure: a valid `memset(*row, ...) != *row || memcmp(*row, ...) != 0` expression failed with `two-dimensional array 'combined_values' does not decay to a scalar pointer`, while equivalent nested statements isolated the failure to non-evaluating validation of the combined expression.
+- Root cause: runtime double-storage alias analysis called `pointer_value_type()` for `PointerValue::Array2DRow`. That generic type path intentionally rejects scalar-pointer decay, but alias analysis only needed to prove live double-backed row storage.
+- RED/GREEN: the focused interpreter regression failed with the exact decay diagnostic before production changes. `current_pointer_has_double_storage()` now validates row-owner liveness and checks the backing element type directly; combined/sequential results, source order, one-time markers, and adjacent-row preservation pass.
+- Closure: the registered fixture now uses the combined expression and passes Cust, GCC, Clang, and the compiler-oracle harness. Independent review returned `APPROVED`; formatting, strict Clippy, all 2,111 local/Docker tests, runtime output `10`, and diff hygiene pass.
 
 ### 2026-08-30 — Double-row cast, conditional-width, and native-oracle review closure
 

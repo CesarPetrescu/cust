@@ -27491,6 +27491,10 @@ impl Interpreter {
         if let PointerValue::ObjectByte { base, .. } = pointer {
             return self.current_pointer_has_double_storage(base);
         }
+        if let PointerValue::Array2DRow { array, owner, .. } = pointer {
+            self.ensure_array_pointer_owner_live(owner.as_ref())?;
+            return Ok(array.borrow().elem_type == CType::Double);
+        }
         Ok(match self.pointer_value_type(pointer)? {
             Some(PointeeType::Scalar(CType::Double)) => true,
             Some(PointeeType::Struct(type_name)) => {

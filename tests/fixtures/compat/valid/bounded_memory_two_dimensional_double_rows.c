@@ -40,8 +40,8 @@ int main(void) {
     if (memmove(*row + 1, *row, sizeof((*row)[0]) * 2) != *row + 1) return 3;
     if ((*row)[0] != 1.5 || (*row)[1] != 1.5 || (*row)[2] != 2.5) return 4;
     unsigned char zero_bytes[sizeof(double)] = {0};
-    if (memset(*row, 0, sizeof((*row)[0])) != *row) return 5;
-    if (memcmp(*row, zero_bytes, sizeof((*row)[0])) != 0) return 5;
+    if (memset(*row, 0, sizeof((*row)[0])) != *row ||
+        memcmp(*row, zero_bytes, sizeof((*row)[0])) != 0) return 5;
     if (memchr(*row, 0, sizeof((*row)[0])) != *row) return 6;
 
     struct Matrix matrix = {{{16.5, 17.5, 18.5}, {19.5, 20.5, 21.5}}};

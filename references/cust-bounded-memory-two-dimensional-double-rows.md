@@ -16,6 +16,7 @@ Cust admits one selected row of supported fixed two-dimensional `double[R][C]` s
 6. Separate array-parameter pointer-slot const from element const. Leading `const double rows[][C]` sets `points_to_const` but leaves the adjusted pointer slot assignable; `double rows[const R][C]` sets the adjusted pointer slot const. Runtime `const_params` must use `Param::is_const`, not `points_to_const`.
 7. Keep `&row`, `&matrix[i]`, and equivalent aggregate-row addresses outside the one-level safe pointer subset. Aggregate compound-literal subscript address lowering normally erases `&` to pointer addition; preserve an address marker only when parser metadata proves that the selected literal field is two-dimensional, while retaining existing one-dimensional aggregate-literal array-field address behavior.
 8. Non-evaluating `sizeof(call)` validation must classify the same supported roots and exact union/whole-aggregate/unprovable boundaries without executing indexes, initializers, or intrinsic calls.
+9. Runtime alias scans for a later operand in a composed expression may encounter an already evaluated `PointerValue::Array2DRow`. Classify that row as double-backed storage by checking owner liveness and the backing element type directly; do not call the generic scalar-pointer type resolver, which intentionally rejects two-dimensional row decay.
 
 ## TDD and review regressions
 
@@ -27,6 +28,7 @@ Cust admits one selected row of supported fixed two-dimensional `double[R][C]` s
 - Conditional branches with different row widths initially collapsed to scalar `double *` metadata and were accepted both when evaluated and beneath `sizeof`. Complete `Array2DPointer` type comparison now rejects the mismatch before selecting a branch.
 - Limit complete conditional branch inference to conditionals with a detected row branch. Eager inference across every ternary regressed nested non-evaluating `strtol` end-pointer validation; the existing linear-depth regression is the adjacent guard.
 - The first native fixture read a `double` after byte-zeroing it. The oracle now checks the resulting bytes with `memcmp` against unsigned-character storage and never assumes that all-zero bytes are a native floating zero.
+- A row-returning `memset` comparison followed by row-byte `memcmp` in short-circuit `||` initially failed because runtime alias validation sent `PointerValue::Array2DRow` through unsupported scalar-pointer decay. Direct live-row storage classification preserves source order, one-time evaluation, adjacent-row isolation, and parity with equivalent sequential `if` statements.
 
 ## Verification guidance
 

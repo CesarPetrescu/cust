@@ -2,6 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-30 — Selected-row alias classification in composed memory calls
+
+- A selected `double` row represented as `PointerValue::Array2DRow` is valid bounded-memory storage even though Cust intentionally forbids decaying that row object through the generic scalar-pointer type path. Storage classification and language-level pointer conversion answer different questions and must not share the rejecting `pointer_value_type()` route blindly.
+- Runtime alias scans may inspect an already evaluated current pointer while prevalidating a later short-circuit operand. For `Array2DRow`, validate owner liveness and the backing array's `CType::Double` element type directly; keep arbitrary row addresses, incompatible types, union-backed roots, and whole-object flattening on their existing rejected paths.
+- The tight regression should pair a pointer-returning `memset(*row, ...)` comparison with `memcmp(*row, ...)` in one `||`, then compare it with sequential control flow. Distinct side-effect markers prove source order and one-time evaluation; untouched adjacent-row values prove that classification did not widen byte capacity.
+- Candidate decision: close the queue-leading correctness defect before release closure, shared union-byte storage, or broader property expansion. Bounded v0.43.0 release closure is now the smallest coherent next package; shared union bytes still require true aliased member storage.
+
 ## 2026-08-30 — v0.42.0 release consistency
 
 - Version-first release TDD changed only the exact CLI and Compose expectations. Both focused tests failed against `0.41.0` and passed after Cargo/lock plus both Compose image tags moved to `0.42.0`.
