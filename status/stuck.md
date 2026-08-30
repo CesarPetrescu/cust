@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-30 after bounded v0.44.0 release-candidate verification. Version-first CLI/Compose RED/GREEN, the independently reconciled 2,117-test inventory, fresh `APPROVED` release review, formatting, strict Clippy, all local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, repeated empty tag preflight, and diff hygiene pass. Release-commit-first publication is pending; whole-object byte ranges for admitted scalar-only union layouts are the concrete post-release task.
+None. Last reviewed 2026-08-30 after bounded v0.44.0 publication. Release commit `5d0a53c5aa506342fe33c4380ecb7871f7ef4bf5` reached exact `origin/main` before annotated tag object `d956372daad25e8fb6a14d8555552cd3f48a45df`; local/remote refs peel exactly to the release commit. Whole-object byte ranges for admitted scalar-only union layouts are the single next implementation task.
 
 ## Resolved this run
 
