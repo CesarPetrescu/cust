@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-31 after exact v0.46.0 version RED/GREEN, strict-Clippy compatibility closure, fresh independent `APPROVED` review, complete local/no-cache-rebuilt-Docker verification, exact version/runtime checks, diff hygiene, and repeated empty local/remote tag preflight. Release-commit-first branch/tag publication remains.
+None. Last reviewed 2026-08-31 after exact v0.46.0 version RED/GREEN, strict-Clippy compatibility closure, fresh independent `APPROVED` review, complete local/no-cache-rebuilt-Docker verification, exact version/runtime checks, diff hygiene, release-commit-first publication, and exact local/remote annotated-tag verification.
 
 ## Resolved this run
 
