@@ -2,6 +2,17 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-31 — v0.46.0 release consistency
+
+- Version-first release TDD changed only the exact CLI and Compose expectations. Both focused tests failed against `0.45.0` and passed after Cargo/lock plus both Compose image tags moved to `0.46.0`; Cargo metadata and the built CLI report `0.46.0`.
+- Executable target listing yields 2,124 tests: `interpreter` 1,988 + `fuzz_safety` 99 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
+- Central release claims advertise canonical persistent bytes beneath normalized all-`_Bool` views while retaining member-local versus maximum-layout whole-object capacity, overlap, recursive const/lifetime, array-element isolation, zero count, typed results, and non-evaluation. All-const, pointer, double, array, nested-aggregate, and other missing-full-width-carrier layouts remain explicit boundaries.
+- Local and remote `v0.46.0` preflight were empty. The tag remains reserved until independent release review, canonical verification, and exact release-commit acceptance on `origin/main`.
+- The first strict-Clippy gate found a `collapsible_if` warning in the previous feature commit's persistent-byte initialization. Collapsing the nested presence guard and `if let` into the repository's existing Rust 2024 let-chain style is semantics-preserving; `cargo clippy -- -D warnings` and `cargo fmt --check` then pass.
+- Fresh independent complete-diff review returned `APPROVED` after checking all thirteen changed files, exact version surfaces, the let-chain semantics, inventory arithmetic, central support/limitation claims, pre-publication wording, queue truth, and secret absence.
+- The corrected canonical release gate passes formatting, warning-denied Clippy, all 2,124 local tests, a no-cache image rebuild, all 2,124 rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image `0.46.0` versions, repeated empty tag preflight, and diff hygiene. The annotated tag remains reserved until the verified release commit is accepted exactly on `origin/main`.
+- Candidate decision: release closure outranked broader carrierless union layouts, another deterministic property matrix, and parser-diagnostic expansion because it atomically packages already reviewed behavior with exact version assertions and bounded release risk. Remaining mutable scalar-only non-`double` layouts without a full-width writable carrier become the concrete post-publication task.
+
 ## 2026-08-31 — Persistent all-`_Bool` scalar-union bytes
 
 - `_Bool` is suitable as a normalized language view but not as the sole raw-byte carrier: decoding any nonzero byte yields `1`, so writing byte `2` and reconstructing storage from the member loses information.

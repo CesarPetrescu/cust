@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.45.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.46.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -38,7 +38,7 @@ Expected output:
 cargo test
 ```
 
-The v0.45.0 executable inventory is 2,121 tests: 1,985 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+The v0.46.0 executable inventory is 2,124 tests: 1,988 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 
 ### Run inside Docker
 
@@ -71,7 +71,7 @@ The `test` service keeps a writable container overlay so Cargo can update `targe
 
 ## Current language subset
 
-Current `main` extends v0.45.0's shared scalar-union object bytes with interpreter-owned persistent storage for all-`_Bool` unions that have at least one mutable member. Selected-member and whole-object `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` operations share one canonical aggregate root at offset zero; raw noncanonical bytes remain observable through character access while language `_Bool` reads normalize them to zero or one. Whole-object operations use the union's maximum layout size, selected-member operations retain that member's capacity, and overlap, recursive const/lifetime, array-element isolation, zero-count identity, typed results, and non-evaluation remain enforced. Other admitted scalar-only unions continue to use a deterministic non-const full-width `int` or `char` carrier. All-const scalar unions and layouts containing arrays, pointers, `double`, or nested aggregates retain targeted rejection. Release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
+Bounded v0.46.0 packages interpreter-owned persistent object bytes for all-`_Bool` unions that have at least one mutable member. Selected-member and whole-object `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` operations share one canonical aggregate root at offset zero; raw noncanonical bytes remain observable through character access while language `_Bool` reads normalize them to zero or one. Whole-object operations use the union's maximum layout size, selected-member operations retain that member's capacity, and overlap, recursive const/lifetime, array-element isolation, zero-count identity, typed results, and non-evaluation remain enforced. Other admitted scalar-only unions continue to use a deterministic non-const full-width `int` or `char` carrier. All-const scalar unions and layouts containing arrays, pointers, `double`, or nested aggregates retain targeted rejection. Release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
 
 ```c
 int main() {
@@ -214,7 +214,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: package persistent all-`_Bool` scalar-union bytes in bounded v0.46.0 after exact version/docs/inventory synchronization and release verification; broader pointer/double/array/nested union representations remain deferred.
+- Next milestone: generalize persistent bytes to scalar-only non-`double` unions that have mutable storage but lack either the all-`_Bool` shape or a non-const full-width `int`/`char` carrier; preserve the all-const, pointer, `double`, array, and nested-aggregate boundaries with focused selected/whole-object tests.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider multiple pointer levels and broader C conformance fixtures.
 

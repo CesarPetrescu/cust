@@ -40084,16 +40084,15 @@ impl Interpreter {
             Vec::len,
         );
         let mut bytes = persistent_bytes.unwrap_or_else(|| vec![0u8; storage_size]);
-        if !fields.contains_key(UNION_OBJECT_BYTES_FIELD) {
-            if let Some((_, StructFieldValue::Scalar { value, ty, .. })) = fields
+        if !fields.contains_key(UNION_OBJECT_BYTES_FIELD)
+            && let Some((_, StructFieldValue::Scalar { value, ty, .. })) = fields
                 .iter()
                 .filter(|(_, field)| {
                     matches!(field, StructFieldValue::Scalar { ty, .. } if ty.size() as usize == storage_size)
                 })
                 .min_by_key(|(name, _)| name.as_str())
-            {
-                Self::write_union_scalar_bytes(&mut bytes, *value, *ty);
-            }
+        {
+            Self::write_union_scalar_bytes(&mut bytes, *value, *ty);
         }
         Self::write_union_scalar_bytes(&mut bytes, active_value, active_type);
         if let Some(StructFieldValue::Array { value, .. }) =

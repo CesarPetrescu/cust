@@ -4,9 +4,15 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-31 after persistent all-`_Bool` scalar-union bytes passed focused, native, full local, and rebuilt-Docker verification with independent `APPROVED` review. Bounded v0.46.0 release closure is the single next task.
+None. Last reviewed 2026-08-31 after exact v0.46.0 version RED/GREEN, strict-Clippy compatibility closure, fresh independent `APPROVED` review, complete local/no-cache-rebuilt-Docker verification, exact version/runtime checks, diff hygiene, and repeated empty local/remote tag preflight. Release-commit-first branch/tag publication remains.
 
 ## Resolved this run
+
+### 2026-08-31 — Current Clippy rejected persistent-byte initialization shape
+
+- Failure: the first v0.46.0 canonical attempt stopped at `clippy::collapsible-if` in `sync_union_scalar_fields_from_active()` before tests or Docker ran.
+- Root cause: the previous all-`_Bool` feature commit nested the hidden-storage absence guard around an `if let`; current warning-denied Clippy requires the equivalent Rust 2024 let-chain already used elsewhere in the interpreter.
+- RED/GREEN: `cargo clippy -- -D warnings` reproduced the exact warning. Collapsing only those two conditions preserves selection and mutation semantics; strict Clippy and formatting then pass. Fresh independent review returned `APPROVED`, and the complete local/no-cache-rebuilt-Docker canonical gate passes.
 
 ### 2026-08-31 — Persistent all-`_Bool` scalar-union object bytes
 

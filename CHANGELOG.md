@@ -4,13 +4,27 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+No changes yet.
+
+## v0.46.0 — 2026-08-31
+
 ### Language subset
 
 - Added interpreter-owned persistent object bytes for scalar unions whose members are all `_Bool` and include at least one mutable member. Selected-member and whole-object `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` calls share canonical offset-zero storage while language reads remain normalized.
 
 ### Diagnostics and verification
 
-- Preserved raw noncanonical bytes beneath `_Bool` views, member-local versus whole-object capacity, overlap, const/lifetime, independent aggregate-array elements, zero-count identity, typed `memchr` results, and non-evaluation. All-const, pointer, `double`, array, and nested-aggregate union layouts retain targeted rejection. Three focused interpreter tests and the expanded ABI-independent GCC/Clang compiler-oracle fixture pass; the complete inventory is 2,124 tests (1,988 interpreter + 99 deterministic fuzz-safety + 33 CLI + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test).
+- Preserved raw noncanonical bytes beneath `_Bool` views, member-local versus whole-object capacity, overlap, const/lifetime, independent aggregate-array elements, zero-count identity, typed `memchr` results, and non-evaluation. All-const, pointer, `double`, array, and nested-aggregate union layouts retain targeted rejection. Three focused interpreter tests and the expanded ABI-independent GCC/Clang compiler-oracle fixture pass; a semantics-preserving Rust 2024 let-chain keeps the persistent-byte initialization path warning-free under current Clippy; the complete inventory is 2,124 tests (1,988 interpreter + 99 deterministic fuzz-safety + 33 CLI + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test).
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.46.0`.
+- Reconciled an executable inventory of 2,124 tests: 1,988 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Shared union object bytes remain limited to scalar-only non-`double` layouts that either have a non-const full-width `int`/`char` carrier or consist entirely of `_Bool` members with at least one mutable member. Other layouts without a full-width writable carrier, all-const scalar unions, and union layouts containing arrays, pointers, `double`, or nested aggregates remain unsupported. Selected-member operations retain that member's own capacity; complete-object operations use the union's maximum layout size. General pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and unsupported pragma semantics also remain outside the release.
 
 ## v0.45.0 — 2026-08-31
 
