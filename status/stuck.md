@@ -4,9 +4,17 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-30 after bounded v0.44.0 publication. Release commit `5d0a53c5aa506342fe33c4380ecb7871f7ef4bf5` reached exact `origin/main` before annotated tag object `d956372daad25e8fb6a14d8555552cd3f48a45df`; local/remote refs peel exactly to the release commit. Whole-object byte ranges for admitted scalar-only union layouts are the single next implementation task.
+None. Last reviewed 2026-08-31 after whole-object scalar-union byte-range completion. Fresh independent review returned `APPROVED`; all 2,121 local and rebuilt-Docker tests, runtime output `10`, formatting, warning-denied Clippy, compiler-oracle coverage, and diff hygiene pass. Bounded v0.45.0 release closure is the single next task.
 
 ## Resolved this run
+
+### 2026-08-31 — Whole-object scalar-union byte ranges
+
+- Failure: whole admitted scalar-union pointers were rejected by whole-struct validation before the existing shared carrier could serve byte operations.
+- Root cause: whole-aggregate traversal still modeled every union as sequential struct fields, so maximum-layout capacity, nested writeability, and typed byte-result canonicalization did not share the selected-member carrier semantics.
+- RED/GREEN: focused tests first reported `function 'memcpy' does not yet support union-backed whole-struct object storage for argument 1`. Whole-union validation/read/write now delegates to the admitted full-width writable carrier while preserving synchronization and all existing unsupported layouts.
+- Review closure: independent review found sequential typed-result lookup, nested member-order-dependent const rejection, stale whole-struct rejection tests, and then a same-type const member selected before the writable carrier. Exact regressions failed before expected-type-aware union lookup, nested admitted-union writeability, boundary-test reconciliation, and mutable-member preference made them GREEN. Fresh re-review returned `APPROVED`.
+- Verification: formatting, warning-denied Clippy, all 2,121 local tests, all 2,121 rebuilt-Docker tests, runtime output `10`, direct GCC/Clang strict fixture execution, compiler-oracle comparison, and diff hygiene pass.
 
 ### 2026-08-30 — Scalar-only shared union object bytes
 

@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-31 — Whole-object scalar-union byte ranges
+
+- Whole-object admission can safely reuse the selected-member scalar-union carrier only for layouts already proven to have a non-const full-width `int`/`char` carrier. The whole-union capacity is the aggregate's maximum member size, while selected-member pointers retain their narrower declared capacities.
+- Whole-union reads and writes must bypass sequential struct-field traversal. Read the carrier bytes directly; after each write, synchronize every scalar member view from the carrier so direct member reads and later selected-member intrinsic calls observe the same storage.
+- Nested writeability must treat an admitted union as one carrier-backed range after the containing field's own const qualifier is checked. Recursing over overlapping union members makes behavior depend on declaration order and can incorrectly reject a writable whole union because an inactive narrow member is const.
+- Typed `memchr` result coercion needs the expected pointee type while descending whole-object storage. At union offset zero, select a matching non-const scalar member before a const sibling of the same type; otherwise source declaration order can make a writable result spuriously read-only.
+- Native coverage remains ABI-independent: same-type whole-union copy/move/equality, returned destination identity, all-zero byte comparison, and guaranteed zero-byte search. Cust-only tests prove deterministic mixed-width carrier bytes, nested routes, exact diagnostics, and non-evaluation.
+- Candidate decision: this queue-leading feature outranked release work and lower-priority parser/property expansion because it completed the admitted scalar-union raw-memory model across all five intrinsics. Bounded v0.45.0 release closure is next.
+
 ## 2026-08-30 — v0.44.0 release consistency
 
 - Version-first release TDD changed only the exact CLI and Compose expectations. Both focused tests failed against `0.43.0` and passed after Cargo/lock plus both Compose image tags moved to `0.44.0`.

@@ -12,8 +12,11 @@ union Scalar {
 int main(void) {
     int source = 37;
     unsigned char zero_bytes[sizeof(int)] = {0};
+    unsigned char whole_zero_bytes[sizeof(union Scalar)] = {0};
     union Scalar value = {.first = 11};
     union Scalar copy = {.second = 19};
+    union Scalar whole_source = {.first = 41};
+    union Scalar whole_copy = {.second = 0};
 
     if ((void *)&value.first != (void *)&value.second) return 1;
     if (memcpy(&value.second, &source, sizeof(source)) != (void *)&value.first) return 2;
@@ -24,5 +27,12 @@ int main(void) {
     if (memset(&value.second, 0, sizeof(value.second)) != (void *)&value.first) return 6;
     if (memcmp(&value.first, zero_bytes, sizeof(zero_bytes)) != 0) return 7;
     if (memchr(&value.second, 0, sizeof(value.second)) != (void *)&value.first) return 8;
+
+    if (memcpy(&whole_copy, &whole_source, sizeof(whole_source)) != &whole_copy) return 9;
+    if (memcmp(&whole_copy, &whole_source, sizeof(whole_copy)) != 0) return 10;
+    if (memmove(&whole_copy, &whole_copy, sizeof(whole_copy)) != &whole_copy) return 11;
+    if (memset(&whole_copy, 0, sizeof(whole_copy)) != &whole_copy) return 12;
+    if (memcmp(&whole_copy, whole_zero_bytes, sizeof(whole_copy)) != 0) return 13;
+    if (memchr(&whole_copy, 0, sizeof(whole_copy)) != &whole_copy) return 14;
     return 0;
 }

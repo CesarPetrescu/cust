@@ -16327,6 +16327,139 @@ fn scalar_union_object_bytes_support_all_bounded_intrinsics() {
 }
 
 #[test]
+fn whole_scalar_union_object_bytes_support_all_bounded_intrinsics() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memmove(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        union Scalar { int whole; int alternate; char low; _Bool truth; };
+        int main(void) {
+            union Scalar source = {.whole = 0x1122334455667788};
+            union Scalar destination = {.whole = 0};
+            if (memcpy(&destination, &source, sizeof(source)) != &destination) return 1;
+            if (destination.whole != source.whole || destination.low != 0x88) return 2;
+            if (memcmp(&destination, &source, sizeof(source)) != 0) return 3;
+            if (memmove(&destination, &destination, sizeof(destination)) != &destination) return 4;
+            if (memset(&destination, 0xaa, sizeof(destination)) != &destination) return 5;
+            if (destination.whole != -6148914691236517206) return 6;
+            if (destination.low != 0xaa || destination.truth != 1) return 7;
+            char *found = memchr(&destination, 0xaa, sizeof(destination));
+            if (found == 0 || found - (char *)&destination != 0) return 8;
+            return memcmp(&destination, &source, sizeof(destination)) > 0 ? 0 : 9;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_scalar_union_object_bytes_support_nested_and_array_element_routes() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        union Scalar { int whole; char low; };
+        struct Box { char tag; union Scalar value; union Scalar items[2]; };
+        int main(void) {
+            union Scalar source = {.whole = 0x1122334455667788};
+            struct Box box = {1, {.whole = 0}, {{.whole = 0x11}, {.whole = 0x22}}};
+            if (memcpy(&box.value, &source, sizeof(source)) != &box.value) return 1;
+            if (box.value.whole != source.whole || box.value.low != 0x88) return 2;
+            if (memset(&box.items[1], 0xaa, sizeof(box.items[1])) !=
+                &box.items[1]) return 3;
+            return box.items[0].whole == 0x11 &&
+                           box.items[1].whole == -6148914691236517206
+                       ? 0
+                       : 4;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn whole_scalar_union_object_bytes_preserve_safety_and_non_evaluation() {
+    let cases = [
+        (
+            "void *memset(void *, int, unsigned long int); union Scalar { int whole; char low; }; int main(void) { const union Scalar value = {.whole = 1}; memset(&value, 0, sizeof(value)); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memcpy(void *, const void *, unsigned long int); union Scalar { int whole; char low; } value = {.whole = 1}; int main(void) { memcpy(&value, &value, sizeof(value)); return 0; }",
+            "overlapping source and destination ranges passed to function 'memcpy'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Scalar { int whole; char low; } value = {.whole = 1}; int main(void) { memset((char *)&value + 1, 0, sizeof(value)); return 0; }",
+            "destination argument 1 to function 'memset' requires 8 bytes, but only 7 bytes are available",
+        ),
+        (
+            "void *memchr(const void *, int, unsigned long int); const void *saved; union Scalar { int whole; char low; }; int main(void) { { union Scalar local = {.whole = 1}; saved = &local; } return memchr(saved, 1, sizeof(union Scalar)) != 0; }",
+            "pointer to out-of-scope variable 'local'",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Unsupported { int scalar; int *pointer; } value = {.scalar = 1}; int main(void) { memset(&value, 0, sizeof(value)); return 0; }",
+            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Unsupported { _Bool first; _Bool second; } value = {.first = 1}; int main(void) { memset(&value, 0, sizeof(value)); return 0; }",
+            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Unsupported { const int wide; char narrow; } value = {.narrow = 1}; int main(void) { memset(&value, 0, sizeof(value)); return 0; }",
+            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
+        ),
+    ];
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let zero_and_sizeof = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memmove(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        union Scalar { int whole; char low; } value = {.whole = 0x1234};
+        int marker;
+        int mark(void) { marker += 1; return 1; }
+        int main(void) {
+            if (sizeof(memcpy(&value, &value, mark())) != sizeof(void *)) return 1;
+            if (sizeof(memmove(&value, &value, mark())) != sizeof(void *)) return 2;
+            if (sizeof(memcmp(&value, &value, mark())) != sizeof(int)) return 3;
+            if (sizeof(memset(&value, mark(), mark())) != sizeof(void *)) return 4;
+            if (sizeof(memchr(&value, mark(), mark())) != sizeof(void *)) return 5;
+            if (marker != 0 || value.whole != 0x1234) return 6;
+            if (memset(&value, 0, 0) != &value) return 7;
+            return value.whole == 0x1234 ? 0 : 8;
+        }
+    "#;
+    assert_eq!(interpret(zero_and_sizeof).unwrap(), 0);
+}
+
+#[test]
+fn whole_scalar_union_object_bytes_canonicalize_typed_results_and_nested_writes() {
+    let program = r#"
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        union Scalar { const int guard; int whole; };
+        struct Box { char tag; union Scalar value; };
+        int main(void) {
+            union Scalar direct = {.whole = 0x1122};
+            int *found = memchr(&direct, 0x22, sizeof(direct));
+            if (found != &direct.whole) return 1;
+            *found = 0x5566;
+            if (direct.whole != 0x5566) return 2;
+            struct Box box = {1, {.whole = 0x3344}};
+            if (memset(&box, 0, sizeof(box)) != &box) return 3;
+            return box.tag == 0 && box.value.whole == 0 && box.value.guard == 0 ? 0 : 4;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn scalar_union_bool_views_preserve_raw_union_bytes() {
     let program = r#"
         void *memcpy(void *, const void *, unsigned long int);
@@ -16556,14 +16689,6 @@ fn whole_struct_object_bytes_preserve_safety_boundaries() {
         (
             "void *memset(void *, int, unsigned long int); struct Inner { const int fixed; }; struct Outer { int value; struct Inner inner; }; int main(void) { struct Outer item = {1, {2}}; memset(&item, 0, sizeof(item)); return 0; }",
             "cannot assign to const struct field 'fixed'",
-        ),
-        (
-            "void *memset(void *, int, unsigned long int); union Number { int whole; char byte; }; int main(void) { union Number value = {.whole = 1}; memset(&value, 0, sizeof(value)); return 0; }",
-            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
-        ),
-        (
-            "void *memset(void *, int, unsigned long int); union Number { int whole; char byte; }; struct Box { int tag; union Number number; }; int main(void) { struct Box value = {1, {.whole = 2}}; memset(&value, 0, sizeof(value)); return 0; }",
-            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
         ),
         (
             "void *memset(void *, int, unsigned long int); struct Link { int value; int *next; }; int main(void) { int target = 2; struct Link item = {1, &target}; memset(&item, 0, sizeof(item)); return 0; }",
@@ -17476,7 +17601,7 @@ fn whole_struct_review_canonicalizes_owned_fields_inside_struct_arrays() {
 fn whole_struct_review_rejects_character_views_of_unsupported_nested_layouts() {
     let programs = [
         (
-            "struct Bad { union { int left; int right; } value; }; int main(void) { struct Bad bad = {{1}}; return *(char *)&bad; }",
+            "struct Bad { union { _Bool left; _Bool right; } value; }; int main(void) { struct Bad bad = {{1}}; return *(char *)&bad; }",
             "character pointer casts do not support union-backed whole-struct object storage",
         ),
         (

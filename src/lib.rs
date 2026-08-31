@@ -21774,6 +21774,38 @@ impl Interpreter {
         Ok(self.scalar_union_carrier_path(type_name, path)?.is_some())
     }
 
+    fn scalar_union_carrier_field(definition: &StructTypeDef) -> Option<(&StructFieldDef, CType)> {
+        if definition.kind != AggregateKind::Union
+            || !definition
+                .fields
+                .iter()
+                .all(|field| matches!(field.ty, StructFieldType::Scalar(ty) if ty != CType::Double))
+        {
+            return None;
+        }
+        let storage_size = definition
+            .fields
+            .iter()
+            .filter_map(|field| match field.ty {
+                StructFieldType::Scalar(ty) => Some(ty.size()),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
+        definition
+            .fields
+            .iter()
+            .filter_map(|field| match field.ty {
+                StructFieldType::Scalar(ty)
+                    if ty != CType::Bool && !field.is_const && ty.size() == storage_size =>
+                {
+                    Some((field, ty))
+                }
+                _ => None,
+            })
+            .min_by_key(|(field, _)| field.name.as_str())
+    }
+
     fn scalar_union_carrier_path(
         &self,
         type_name: &str,
@@ -21786,11 +21818,6 @@ impl Interpreter {
                 .get(current_type)
                 .ok_or_else(|| CustError::new(format!("undefined struct type '{current_type}'")))?;
             if definition.kind == AggregateKind::Union {
-                if !definition.fields.iter().all(
-                    |field| matches!(field.ty, StructFieldType::Scalar(ty) if ty != CType::Double),
-                ) {
-                    return Ok(None);
-                }
                 if index + 1 != path.len()
                     || !definition
                         .fields
@@ -21799,34 +21826,11 @@ impl Interpreter {
                 {
                     return Ok(None);
                 }
-                let storage_size = definition
-                    .fields
-                    .iter()
-                    .filter_map(|field| match field.ty {
-                        StructFieldType::Scalar(ty) => Some(ty.size()),
-                        _ => None,
-                    })
-                    .max()
-                    .unwrap_or(0);
-                let Some(carrier) = definition
-                    .fields
-                    .iter()
-                    .filter_map(|field| match field.ty {
-                        StructFieldType::Scalar(ty)
-                            if ty != CType::Bool
-                                && !field.is_const
-                                && ty.size() == storage_size =>
-                        {
-                            Some((field, ty))
-                        }
-                        _ => None,
-                    })
-                    .max_by_key(|(_, ty)| ty.size())
-                else {
+                let Some((carrier, _)) = Self::scalar_union_carrier_field(definition) else {
                     return Ok(None);
                 };
                 let mut carrier_path = path[..index].to_vec();
-                carrier_path.push(carrier.0.name.clone());
+                carrier_path.push(carrier.name.clone());
                 return Ok(Some(carrier_path));
             }
             let selected = definition
@@ -21919,6 +21923,9 @@ impl Interpreter {
             .get(type_name)
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
         if definition.kind == AggregateKind::Union {
+            if Self::scalar_union_carrier_field(definition).is_some() {
+                return Ok(());
+            }
             return Err(CustError::new(format!(
                 "function '{name}' does not yet support union-backed whole-struct object storage for argument {argument}"
             )));
@@ -21959,6 +21966,9 @@ impl Interpreter {
             ));
         }
         if definition.kind == AggregateKind::Union {
+            if Self::scalar_union_carrier_field(definition).is_some() {
+                return Ok(());
+            }
             return Err(CustError::new(
                 "character pointer casts do not support union-backed whole-struct object storage",
             ));
@@ -22013,6 +22023,11 @@ impl Interpreter {
                     self.ensure_struct_pointer_target_mutable(base)?;
                 }
                 let (type_name, fields) = self.find_struct_pointer_fields(base)?;
+                if self.struct_types.get(&type_name).is_some_and(|definition| {
+                    Self::scalar_union_carrier_field(definition).is_some()
+                }) {
+                    return Ok(());
+                }
                 Self::ensure_whole_struct_range_writable(
                     &self.struct_types,
                     &type_name,
@@ -22045,6 +22060,9 @@ impl Interpreter {
         let definition = struct_types
             .get(type_name)
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        if Self::scalar_union_carrier_field(definition).is_some() {
+            return Ok(());
+        }
         let mut field_start = 0usize;
         for field_def in &definition.fields {
             let field_size = usize::try_from(field_def.ty.size(struct_types)?)
@@ -22464,6 +22482,17 @@ impl Interpreter {
         let definition = struct_types
             .get(type_name)
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        if let Some((carrier, carrier_type)) = Self::scalar_union_carrier_field(definition) {
+            let field = fields
+                .get(&carrier.name)
+                .ok_or_else(|| CustError::new(format!("missing union field '{}'", carrier.name)))?;
+            let StructFieldValue::Scalar { value, .. } = field else {
+                return Err(CustError::new(
+                    "internal scalar-union object-byte carrier layout mismatch",
+                ));
+            };
+            return Ok(Self::read_scalar_object_byte(*value, carrier_type, offset));
+        }
         for field_def in &definition.fields {
             let field_size = usize::try_from(field_def.ty.size(struct_types)?)
                 .map_err(|_| CustError::new("whole-struct field size overflow"))?;
@@ -22541,6 +22570,20 @@ impl Interpreter {
         let definition = struct_types
             .get(type_name)
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        if let Some((carrier, carrier_type)) = Self::scalar_union_carrier_field(definition) {
+            {
+                let field = fields.get_mut(&carrier.name).ok_or_else(|| {
+                    CustError::new(format!("missing union field '{}'", carrier.name))
+                })?;
+                let StructFieldValue::Scalar { value: current, .. } = field else {
+                    return Err(CustError::new(
+                        "internal scalar-union object-byte carrier layout mismatch",
+                    ));
+                };
+                *current = Self::write_scalar_object_byte(*current, carrier_type, offset, value);
+            }
+            return Self::sync_union_scalar_fields_from_active(fields, &carrier.name);
+        }
         for field_def in &definition.fields {
             let field_size = usize::try_from(field_def.ty.size(struct_types)?)
                 .map_err(|_| CustError::new("whole-struct field size overflow"))?;
@@ -38329,6 +38372,7 @@ impl Interpreter {
                         &self.struct_types,
                         &type_name,
                         offset,
+                        *expected_ty,
                         Vec::new(),
                     )?
                     && location.within == 0
@@ -38678,11 +38722,38 @@ impl Interpreter {
         struct_types: &HashMap<String, StructTypeDef>,
         type_name: &str,
         mut offset: usize,
+        expected_type: CType,
         prefix: Vec<String>,
     ) -> CustResult<Option<WholeStructScalarLocation>> {
         let definition = struct_types
             .get(type_name)
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        if Self::scalar_union_carrier_field(definition).is_some() {
+            let Some(field) = definition
+                .fields
+                .iter()
+                .find(|field| {
+                    !field.is_const
+                        && matches!(field.ty, StructFieldType::Scalar(ty) if ty == expected_type)
+                })
+                .or_else(|| {
+                    definition.fields.iter().find(|field| {
+                        matches!(field.ty, StructFieldType::Scalar(ty) if ty == expected_type)
+                    })
+                })
+            else {
+                return Ok(None);
+            };
+            let mut path = prefix;
+            path.push(field.name.clone());
+            return Ok(Some(WholeStructScalarLocation {
+                fields: path,
+                struct_arrays: Vec::new(),
+                array_index: None,
+                ty: expected_type,
+                within: offset,
+            }));
+        }
         for field in &definition.fields {
             let field_size = usize::try_from(field.ty.size(struct_types)?)
                 .map_err(|_| CustError::new("whole-struct field size overflow"))?;
@@ -38710,9 +38781,13 @@ impl Interpreter {
                         within: offset % cell_size,
                     }))
                 }
-                StructFieldType::Struct(nested_type) => {
-                    Self::whole_struct_scalar_location(struct_types, nested_type, offset, path)
-                }
+                StructFieldType::Struct(nested_type) => Self::whole_struct_scalar_location(
+                    struct_types,
+                    nested_type,
+                    offset,
+                    expected_type,
+                    path,
+                ),
                 StructFieldType::StructArray(nested_type, _) => {
                     let element_size = usize::try_from(
                         struct_types
@@ -38729,6 +38804,7 @@ impl Interpreter {
                         struct_types,
                         nested_type,
                         within,
+                        expected_type,
                         Vec::new(),
                     )?
                     else {
