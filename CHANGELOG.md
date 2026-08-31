@@ -4,6 +4,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.45.0 — 2026-08-31
+
+### Language subset
+
+- Extended shared scalar-union object bytes from selected members to complete union-object ranges across exactly prototyped bounded `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr`. Whole-object pointers reuse the canonical aggregate root at offset zero and expose the union's maximum layout size through the existing deterministic non-const full-width `int` or `char` carrier.
+
+### Diagnostics and verification
+
+- Preserved selected-member-local capacity, alias synchronization, nested and aggregate-array-element identity/isolation, recursive const and lexical-lifetime checks, overlap, zero-count identity, typed aligned/interior `memchr` results, and direct/nested non-evaluation. All-`_Bool` unions, layouts without a non-const carrier as wide as the largest member, and layouts containing arrays, pointers, `double`, or nested aggregates retain targeted rejection. Four focused interpreter tests and the expanded warning-free ABI-independent compiler-oracle fixture cover the release delta.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.45.0`.
+- Reconciled an executable inventory of 2,121 tests: 1,985 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Shared union object bytes remain limited to scalar-only non-`double` layouts with a non-const full-width `int` or `char` carrier. All-`_Bool` layouts, layouts without a full-width writable carrier, and union layouts containing arrays, pointers, `double`, or nested aggregates remain unsupported. Selected-member operations retain that member's own capacity; complete-object operations use the union's maximum layout size. General pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and unsupported pragma semantics also remain outside the release.
+
 ## v0.44.0 — 2026-08-30
 
 ### Language subset

@@ -2,6 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-31 — v0.45.0 release consistency
+
+- Version-first release TDD changed only the exact CLI and Compose expectations. Both focused tests failed against `0.44.0` and passed after Cargo/lock plus both Compose image tags moved to `0.45.0`; Cargo metadata and the built CLI report `0.45.0`.
+- Executable target listing yields 2,121 tests: `interpreter` 1,985 + `fuzz_safety` 99 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
+- Central release claims distinguish selected-member-local capacity from maximum-layout whole-object capacity. Canonical root/offset-zero identity, carrier-backed alias synchronization, recursive const/lifetime, overlap, nested/array-element isolation, zero count, typed `memchr` results, and non-evaluation remain explicit; all-`_Bool`, missing-full-width-writable-carrier, pointer, double, array, and nested-aggregate layouts remain targeted boundaries.
+- Candidate decision: bounded v0.45.0 release closure outranks persistent carrier-independent union bytes, another property matrix, and parser-diagnostic expansion because it packages an independently reviewed behavior slice with exact version assertions and bounded release risk. Persistent interpreter-owned bytes for all-`_Bool` scalar unions are the concrete post-release task.
+- Local and remote `v0.45.0` preflight are empty. The annotated tag remains reserved for creation only after fresh release review, canonical verification, and exact `origin/main` acceptance of the release commit.
+- Fresh independent complete-diff review returned `APPROVED` with no findings after checking all twelve changed files, version surfaces, arithmetic, central support/limitation claims, pre-publication wording, queue truth, and secret absence.
+- The canonical release gate passes formatting, warning-denied Clippy, all 2,121 local tests, a no-cache image rebuild, all 2,121 rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image `0.45.0` versions, and diff hygiene. Publication remains ordered release commit to `origin/main`, then annotated tag creation/push and exact object/peeled-target verification.
+
 ## 2026-08-31 — Whole-object scalar-union byte ranges
 
 - Whole-object admission can safely reuse the selected-member scalar-union carrier only for layouts already proven to have a non-const full-width `int`/`char` carrier. The whole-union capacity is the aggregate's maximum member size, while selected-member pointers retain their narrower declared capacities.

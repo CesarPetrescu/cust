@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-31 after whole-object scalar-union byte-range completion. Fresh independent review returned `APPROVED`; all 2,121 local and rebuilt-Docker tests, runtime output `10`, formatting, warning-denied Clippy, compiler-oracle coverage, and diff hygiene pass. Bounded v0.45.0 release closure is the single next task.
+None. Last reviewed 2026-08-31 after bounded v0.45.0 release preparation. Fresh independent review returned `APPROVED`; formatting, warning-denied Clippy, all 2,121 local and no-cache-rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image versions, and diff hygiene pass. Release-commit-first annotated-tag publication is the remaining release step.
 
 ## Resolved this run
 
