@@ -4,6 +4,14 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+### Language subset
+
+- Added interpreter-owned persistent object bytes for scalar unions whose members are all `_Bool` and include at least one mutable member. Selected-member and whole-object `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` calls share canonical offset-zero storage while language reads remain normalized.
+
+### Diagnostics and verification
+
+- Preserved raw noncanonical bytes beneath `_Bool` views, member-local versus whole-object capacity, overlap, const/lifetime, independent aggregate-array elements, zero-count identity, typed `memchr` results, and non-evaluation. All-const, pointer, `double`, array, and nested-aggregate union layouts retain targeted rejection. Three focused interpreter tests and the expanded ABI-independent GCC/Clang compiler-oracle fixture pass; the complete inventory is 2,124 tests (1,988 interpreter + 99 deterministic fuzz-safety + 33 CLI + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test).
+
 ## v0.45.0 — 2026-08-31
 
 ### Language subset

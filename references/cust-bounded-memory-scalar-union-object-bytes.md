@@ -11,7 +11,7 @@ Use this note when extending or reviewing bounded raw-memory operations over uni
 
 ## Required boundaries
 
-- Keep all-`_Bool` layouts, layouts whose only full-width carrier is const, arrays, pointers, `double`, and nested aggregate members rejected until each has an explicit persistent shared representation.
+- All-`_Bool` layouts with at least one mutable member use explicit persistent shared bytes. Keep all-const scalar unions, layouts whose only full-width non-boolean carrier is const, arrays, pointers, `double`, and nested aggregate members rejected until each has an explicit safe representation.
 - Preserve root and field const checks, lexical owner liveness, selected-member capacity, zero-count identity, and non-evaluating argument validation.
 - `memcpy` must reject ranges selected through two different members of the same union when they overlap; `memmove` may use the usual snapshot semantics.
 - Struct-contained scalar unions and scalar union elements reached through aggregate arrays reuse the same path-aware layout predicate and canonical root identity.
@@ -22,7 +22,7 @@ Use this note when extending or reviewing bounded raw-memory operations over uni
 2. RED the former blanket union-storage rejection after canonical identity is fixed.
 3. GREEN a narrow byte write that changes only the low byte of a wider member.
 4. Cover all five intrinsics, nested and aggregate-array-element routes, raw bytes beneath `_Bool` normalization, member-local capacity, const, lifetime, overlap, zero count, and `sizeof(call)` non-evaluation.
-5. Cover whole admitted union pointers with maximum-layout capacity, nested struct and aggregate-array-element routes, and selected-member alias visibility. Retain exact negative cases for pointer, double, array, nested-aggregate, all-`_Bool`, and full-width-const-only layouts.
+5. Cover whole admitted union pointers with maximum-layout capacity, nested struct and aggregate-array-element routes, and selected-member alias visibility. Retain exact negative cases for pointer, double, array, nested-aggregate, all-const, and full-width-const-only layouts.
 6. Register a warning-free native fixture using same-type integer members and ABI-independent relationships; keep mixed-width endian assertions interpreter-only.
 
 After review-driven production or test edits, rerun the focused scalar-union filter and obtain fresh independent review before the canonical gate.
@@ -33,3 +33,11 @@ After review-driven production or test edits, rerun the focused scalar-union fil
 - Nested range writeability must first honor the containing field's const qualifier, then treat an admitted union as one overlapping carrier-backed range. Iterating overlapping members makes acceptance depend on declaration order.
 - Typed byte-result coercion must carry the expected scalar type into whole-object descent. At union offset zero, prefer a matching non-const member over a const sibling of the same type so declaration order cannot make a writable result spuriously read-only.
 - Reconcile legacy whole-struct and character-view boundary tests when admission widens: admitted scalar-only unions become positive cases, while unsupported union layouts continue to assert the same targeted diagnostics.
+
+## Persistent all-`_Bool` extension
+
+- A normalized `_Bool` member cannot retain raw object byte `2`, so all-`_Bool` unions need a hidden interpreter-owned byte array rather than a language-visible carrier field. Keep the hidden key outside source spelling and include it in ordinary aggregate deep-copy storage.
+- Initialize persistent bytes before union initializer synchronization. Member assignment overwrites only that member's width in the persistent bytes, then refreshes every language-visible scalar view; bounded reads and writes consult the persistent bytes before carrier normalization.
+- Reuse canonical union root/path identity and selected-member capacity. Whole-union reads/writes use maximum layout size; typed results still select a compatible mutable source-visible member, never the hidden field.
+- Destination validation must check the selected field, aggregate ancestor, and lexical owner before bypassing the legacy carrier probe. All-const layouts remain unsupported; zero-count and `sizeof(call)` paths remain non-evaluating.
+- When widening admission, reconcile legacy exact-negative tests for both bounded whole-object calls and character views. Focused coverage must prove all five intrinsics, raw byte `2` beneath normalized reads, typed identity, member bounds, const, array-element isolation, and ABI-independent native zero-byte relationships.

@@ -16327,6 +16327,114 @@ fn scalar_union_object_bytes_support_all_bounded_intrinsics() {
 }
 
 #[test]
+fn persistent_all_bool_union_object_bytes_support_all_bounded_intrinsics() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memmove(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        union Flags { _Bool first; _Bool second; };
+        int main(void) {
+            union Flags source = {.first = 1};
+            union Flags destination = {.second = 0};
+            char copied = 0;
+            if ((void *)&destination.first != (void *)&destination.second) return 1;
+            if (memcpy(&destination.second, &source.first, 1) !=
+                (void *)&destination.first) return 2;
+            if (memcmp(&destination.first, &source.second, 1) != 0) return 3;
+            _Bool *found = memchr(&destination.second, 1, 1);
+            if (found != &destination.first) return 4;
+            if (memset(&destination.first, 2, 1) !=
+                (void *)&destination.second) return 5;
+            if (destination.first != 1 || destination.second != 1) return 6;
+            if (memcpy(&copied, &destination.second, 1) != &copied) return 7;
+            if (copied != 2) return 8;
+            if (memmove(&destination, &source, sizeof(destination)) !=
+                &destination) return 9;
+            if (memcmp(&destination, &source, sizeof(source)) != 0) return 10;
+            return destination.first == 1 && destination.second == 1 ? 0 : 11;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn persistent_all_bool_union_bytes_preserve_copy_and_array_element_isolation() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        union Flags { _Bool first; _Bool second; };
+        struct Box { int tag; union Flags items[2]; };
+        int main(void) {
+            struct Box box = {7, {{.first = 1}, {.second = 0}}};
+            if (memset(&box.items[1], 2, sizeof(box.items[1])) !=
+                &box.items[1]) return 1;
+            char first_raw = 0;
+            char second_raw = 0;
+            if (memcpy(&first_raw, &box.items[0].first, 1) != &first_raw) return 2;
+            if (memcpy(&second_raw, &box.items[1].second, 1) != &second_raw) return 3;
+            if (first_raw != 1 || second_raw != 2) return 4;
+            union Flags copy = {.first = 0};
+            if (memcpy(&copy, &box.items[1], sizeof(copy)) != &copy) return 5;
+            copy.first = 0;
+            char original_raw = 0;
+            if (memcpy(&original_raw, &box.items[1], 1) != &original_raw) return 6;
+            return original_raw == 2 && box.items[1].first == 1 &&
+                           box.items[1].second == 1 && copy.first == 0 && copy.second == 0
+                       ? 0
+                       : 7;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn persistent_all_bool_union_object_bytes_preserve_safety_and_non_evaluation() {
+    let cases = [
+        (
+            "void *memset(void *, int, unsigned long int); union Flags { const _Bool first; const _Bool second; } value = {.first = 1}; int main(void) { memset(&value, 0, sizeof(value)); return 0; }",
+            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Flags { _Bool first; const _Bool second; } value = {.first = 1}; int main(void) { memset(&value.second, 0, 1); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Flags { _Bool first; _Bool second; } value = {.first = 1}; int main(void) { memset(&value.first, 0, 2); return 0; }",
+            "destination argument 1 to function 'memset' requires 2 bytes, but only 1 bytes are available",
+        ),
+    ];
+    for (program, expected) in cases {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memmove(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        union Flags { _Bool first; _Bool second; } value = {.first = 1};
+        int marker;
+        int mark(void) { marker += 1; return 1; }
+        int main(void) {
+            if (sizeof(memcpy(&value.first, &value.second, mark())) != sizeof(void *)) return 1;
+            if (sizeof(memmove(&value, &value, mark())) != sizeof(void *)) return 2;
+            if (sizeof(memcmp(&value, &value, mark())) != sizeof(int)) return 3;
+            if (sizeof(memset(&value.second, mark(), mark())) != sizeof(void *)) return 4;
+            if (sizeof(memchr(&value, mark(), mark())) != sizeof(void *)) return 5;
+            if (marker != 0 || value.first != 1 || value.second != 1) return 6;
+            if (memset(&value, 0, 0) != &value) return 7;
+            return value.first == 1 && value.second == 1 ? 0 : 8;
+        }
+    "#;
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn whole_scalar_union_object_bytes_support_all_bounded_intrinsics() {
     let program = r#"
         void *memcpy(void *, const void *, unsigned long int);
@@ -16399,10 +16507,6 @@ fn whole_scalar_union_object_bytes_preserve_safety_and_non_evaluation() {
         ),
         (
             "void *memset(void *, int, unsigned long int); union Unsupported { int scalar; int *pointer; } value = {.scalar = 1}; int main(void) { memset(&value, 0, sizeof(value)); return 0; }",
-            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
-        ),
-        (
-            "void *memset(void *, int, unsigned long int); union Unsupported { _Bool first; _Bool second; } value = {.first = 1}; int main(void) { memset(&value, 0, sizeof(value)); return 0; }",
             "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
         ),
         (
@@ -17601,7 +17705,7 @@ fn whole_struct_review_canonicalizes_owned_fields_inside_struct_arrays() {
 fn whole_struct_review_rejects_character_views_of_unsupported_nested_layouts() {
     let programs = [
         (
-            "struct Bad { union { _Bool left; _Bool right; } value; }; int main(void) { struct Bad bad = {{1}}; return *(char *)&bad; }",
+            "struct Bad { union { const _Bool left; const _Bool right; } value; }; int main(void) { struct Bad bad = {{1}}; return *(char *)&bad; }",
             "character pointer casts do not support union-backed whole-struct object storage",
         ),
         (

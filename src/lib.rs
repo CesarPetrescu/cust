@@ -90,6 +90,7 @@ const INT_SIZE: i64 = 8;
 const CHAR_SIZE: i64 = 1;
 const DOUBLE_SIZE: i64 = 8;
 const POINTER_SIZE: i64 = 8;
+const UNION_OBJECT_BYTES_FIELD: &str = "\0cust-union-object-bytes";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Token {
@@ -21804,6 +21805,198 @@ impl Interpreter {
                 _ => None,
             })
             .min_by_key(|(field, _)| field.name.as_str())
+            .or_else(|| {
+                if Self::scalar_union_uses_persistent_bytes(definition) {
+                    definition
+                        .fields
+                        .iter()
+                        .filter(|field| !field.is_const)
+                        .min_by_key(|field| field.name.as_str())
+                        .map(|field| (field, CType::Bool))
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn scalar_union_uses_persistent_bytes(definition: &StructTypeDef) -> bool {
+        definition.kind == AggregateKind::Union
+            && !definition.fields.is_empty()
+            && definition
+                .fields
+                .iter()
+                .all(|field| matches!(field.ty, StructFieldType::Scalar(CType::Bool)))
+            && definition.fields.iter().any(|field| !field.is_const)
+    }
+
+    fn scalar_union_persistent_prefix(
+        &self,
+        type_name: &str,
+        path: &[String],
+    ) -> CustResult<Option<Vec<String>>> {
+        let mut current_type = type_name;
+        for (index, selected_name) in path.iter().enumerate() {
+            let definition = self
+                .struct_types
+                .get(current_type)
+                .ok_or_else(|| CustError::new(format!("undefined struct type '{current_type}'")))?;
+            if definition.kind == AggregateKind::Union {
+                return Ok((index + 1 == path.len()
+                    && definition
+                        .fields
+                        .iter()
+                        .any(|field| &field.name == selected_name)
+                    && Self::scalar_union_uses_persistent_bytes(definition))
+                .then(|| path[..index].to_vec()));
+            }
+            let selected = definition
+                .fields
+                .iter()
+                .find(|field| &field.name == selected_name)
+                .ok_or_else(|| {
+                    CustError::new(format!("unknown field '{selected_name}' in aggregate"))
+                })?;
+            if index + 1 == path.len() {
+                return Ok(None);
+            }
+            let StructFieldType::Struct(nested_type) = &selected.ty else {
+                return Ok(None);
+            };
+            current_type = nested_type;
+        }
+        Ok(None)
+    }
+
+    fn scalar_union_persistent_location(
+        &self,
+        pointer: &PointerValue,
+    ) -> CustResult<Option<(PointerValue, Vec<String>)>> {
+        match Self::object_byte_base(pointer) {
+            PointerValue::StructField {
+                scope_id,
+                name,
+                element_index,
+                fields,
+            } => {
+                let (_, type_name, _) =
+                    self.whole_struct_root_identity(*scope_id, name, *element_index)?;
+                let Some(prefix) = self.scalar_union_persistent_prefix(&type_name, fields)? else {
+                    return Ok(None);
+                };
+                let root = match element_index {
+                    Some(index) => PointerValue::StructElement {
+                        scope_id: *scope_id,
+                        name: name.clone(),
+                        index: *index,
+                    },
+                    None => PointerValue::Struct {
+                        scope_id: *scope_id,
+                        name: name.clone(),
+                    },
+                };
+                Ok(Some((root, prefix)))
+            }
+            PointerValue::StructFieldElementField { pointer, fields } => {
+                let (type_name, _) = self.find_struct_pointer_fields(pointer)?;
+                Ok(self
+                    .scalar_union_persistent_prefix(&type_name, fields)?
+                    .map(|prefix| ((**pointer).clone(), prefix)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn persistent_union_fields<'a>(
+        type_name: &str,
+        fields: &'a HashMap<String, StructFieldValue>,
+        prefix: &[String],
+    ) -> CustResult<&'a HashMap<String, StructFieldValue>> {
+        if prefix.is_empty() {
+            Ok(fields)
+        } else {
+            Self::nested_struct_field(type_name, fields, prefix).map(|(_, fields)| fields)
+        }
+    }
+
+    fn persistent_union_fields_mut<'a>(
+        type_name: &str,
+        fields: &'a mut HashMap<String, StructFieldValue>,
+        prefix: &[String],
+    ) -> CustResult<&'a mut HashMap<String, StructFieldValue>> {
+        if prefix.is_empty() {
+            Ok(fields)
+        } else {
+            Self::nested_struct_field_mut(type_name, fields, prefix).map(|(_, fields)| fields)
+        }
+    }
+
+    fn read_persistent_union_byte(
+        &self,
+        pointer: &PointerValue,
+        offset: usize,
+    ) -> CustResult<Option<i64>> {
+        let Some((root, prefix)) = self.scalar_union_persistent_location(pointer)? else {
+            return Ok(None);
+        };
+        let (type_name, fields) = self.find_struct_pointer_fields(&root)?;
+        let union_fields = Self::persistent_union_fields(&type_name, fields, &prefix)?;
+        let Some(StructFieldValue::Array { value, .. }) =
+            union_fields.get(UNION_OBJECT_BYTES_FIELD)
+        else {
+            return Err(CustError::new(
+                "internal persistent scalar-union byte storage is missing",
+            ));
+        };
+        let result = value.borrow().elements.get(offset).copied();
+        Ok(result)
+    }
+
+    fn write_persistent_union_byte(
+        &mut self,
+        pointer: &PointerValue,
+        offset: usize,
+        value: i64,
+    ) -> CustResult<bool> {
+        let Some((root, prefix)) = self.scalar_union_persistent_location(pointer)? else {
+            return Ok(false);
+        };
+        let (type_name, fields) = self.find_struct_pointer_fields_mut(&root)?;
+        let union_fields = Self::persistent_union_fields_mut(&type_name, fields, &prefix)?;
+        let bytes = match union_fields.get_mut(UNION_OBJECT_BYTES_FIELD) {
+            Some(StructFieldValue::Array { value: bytes, .. }) => {
+                let mut bytes = bytes.borrow_mut();
+                let slot = bytes.elements.get_mut(offset).ok_or_else(|| {
+                    CustError::new("persistent scalar-union byte offset out of bounds")
+                })?;
+                *slot = value.rem_euclid(256);
+                bytes.elements.clone()
+            }
+            _ => {
+                return Err(CustError::new(
+                    "internal persistent scalar-union byte storage is missing",
+                ));
+            }
+        };
+        Self::sync_union_scalar_views_from_bytes(union_fields, &bytes);
+        Ok(true)
+    }
+
+    fn sync_union_scalar_views_from_bytes(
+        fields: &mut HashMap<String, StructFieldValue>,
+        bytes: &[i64],
+    ) {
+        let bytes: Vec<u8> = bytes
+            .iter()
+            .map(|value| value.rem_euclid(256) as u8)
+            .collect();
+        for (name, field_value) in fields {
+            if name == UNION_OBJECT_BYTES_FIELD {
+                continue;
+            }
+            if let StructFieldValue::Scalar { value, ty, .. } = field_value {
+                *value = Self::read_union_scalar_bytes(&bytes, *ty);
+            }
+        }
     }
 
     fn scalar_union_carrier_path(
@@ -22007,6 +22200,38 @@ impl Interpreter {
         match self.pointer_value_type(base)? {
             Some(PointeeType::Scalar(_)) => {
                 if count == 0 {
+                    return Ok(());
+                }
+                if self.scalar_union_persistent_location(pointer)?.is_some() {
+                    match Self::object_byte_base(pointer) {
+                        PointerValue::StructField {
+                            scope_id,
+                            name,
+                            element_index,
+                            fields,
+                        } if self.struct_field_points_to_const(
+                            *scope_id,
+                            name,
+                            *element_index,
+                            fields,
+                        )? =>
+                        {
+                            return Err(CustError::new("cannot assign through pointer to const"));
+                        }
+                        PointerValue::StructFieldElementField {
+                            pointer: root,
+                            fields,
+                        } => {
+                            self.ensure_struct_pointer_target_mutable(root)?;
+                            let (_, root_fields) = self.find_struct_pointer_fields(root)?;
+                            if Self::nested_field_path_is_const(root_fields, fields)? {
+                                return Err(CustError::new(
+                                    "cannot assign through pointer to const",
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
                     return Ok(());
                 }
                 if let Some(carrier) = self.scalar_union_carrier_pointer(pointer)? {
@@ -22387,6 +22612,9 @@ impl Interpreter {
             );
         }
         let (cell_pointer, ty, within) = self.scalar_memory_cell_pointer(pointer, byte_offset)?;
+        if let Some(value) = self.read_persistent_union_byte(&cell_pointer, within)? {
+            return Ok(value);
+        }
         if let Some(carrier) = self.scalar_union_carrier_pointer(&cell_pointer)? {
             let carrier_type = match self.pointer_value_type(&carrier)? {
                 Some(PointeeType::Scalar(ty)) => ty,
@@ -22435,6 +22663,9 @@ impl Interpreter {
             );
         }
         let (cell_pointer, ty, within) = self.scalar_memory_cell_pointer(pointer, byte_offset)?;
+        if self.write_persistent_union_byte(&cell_pointer, within, value)? {
+            return Ok(());
+        }
         if let Some(carrier) = self.scalar_union_carrier_pointer(&cell_pointer)? {
             let carrier_type = match self.pointer_value_type(&carrier)? {
                 Some(PointeeType::Scalar(ty)) => ty,
@@ -22482,6 +22713,20 @@ impl Interpreter {
         let definition = struct_types
             .get(type_name)
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        if Self::scalar_union_uses_persistent_bytes(definition) {
+            let Some(StructFieldValue::Array { value, .. }) = fields.get(UNION_OBJECT_BYTES_FIELD)
+            else {
+                return Err(CustError::new(
+                    "internal persistent scalar-union byte storage is missing",
+                ));
+            };
+            return value
+                .borrow()
+                .elements
+                .get(offset)
+                .copied()
+                .ok_or_else(|| CustError::new("whole-union object byte offset out of bounds"));
+        }
         if let Some((carrier, carrier_type)) = Self::scalar_union_carrier_field(definition) {
             let field = fields
                 .get(&carrier.name)
@@ -22570,6 +22815,25 @@ impl Interpreter {
         let definition = struct_types
             .get(type_name)
             .ok_or_else(|| CustError::new(format!("undefined struct type '{type_name}'")))?;
+        if Self::scalar_union_uses_persistent_bytes(definition) {
+            let bytes = match fields.get_mut(UNION_OBJECT_BYTES_FIELD) {
+                Some(StructFieldValue::Array { value: bytes, .. }) => {
+                    let mut bytes = bytes.borrow_mut();
+                    let slot = bytes.elements.get_mut(offset).ok_or_else(|| {
+                        CustError::new("whole-union object byte offset out of bounds")
+                    })?;
+                    *slot = value.rem_euclid(256);
+                    bytes.elements.clone()
+                }
+                _ => {
+                    return Err(CustError::new(
+                        "internal persistent scalar-union byte storage is missing",
+                    ));
+                }
+            };
+            Self::sync_union_scalar_views_from_bytes(fields, &bytes);
+            return Ok(());
+        }
         if let Some((carrier, carrier_type)) = Self::scalar_union_carrier_field(definition) {
             {
                 let field = fields.get_mut(&carrier.name).ok_or_else(|| {
@@ -39746,6 +40010,18 @@ impl Interpreter {
         for field in &struct_type.fields {
             fields.insert(field.name.clone(), self.default_struct_field_value(field)?);
         }
+        if Self::scalar_union_uses_persistent_bytes(&struct_type) {
+            fields.insert(
+                UNION_OBJECT_BYTES_FIELD.to_string(),
+                StructFieldValue::Array {
+                    value: Rc::new(RefCell::new(ArrayValue::mutable_zeroed(
+                        struct_type.size(&self.struct_types)? as usize,
+                        CType::Char,
+                    ))),
+                    is_const: false,
+                },
+            );
+        }
         for initializer in init {
             let StructInitializer::Designated { field, value } = initializer else {
                 unreachable!("struct initializer parsing resolves positional entries to fields")
@@ -39781,26 +40057,54 @@ impl Interpreter {
         let Some((active_value, active_type)) = active else {
             return Ok(());
         };
-        let storage_size = fields
-            .values()
-            .filter_map(|field| match field {
-                StructFieldValue::Scalar { ty, .. } => Some(ty.size() as usize),
-                _ => None,
-            })
-            .max()
-            .unwrap_or(active_type.size() as usize);
-        let mut bytes = vec![0u8; storage_size];
-        if let Some((_, StructFieldValue::Scalar { value, ty, .. })) = fields
-            .iter()
-            .filter(|(_, field)| {
-                matches!(field, StructFieldValue::Scalar { ty, .. } if ty.size() as usize == storage_size)
-            })
-            .min_by_key(|(name, _)| name.as_str())
-        {
-            Self::write_union_scalar_bytes(&mut bytes, *value, *ty);
+        let persistent_bytes = fields.get(UNION_OBJECT_BYTES_FIELD).and_then(|field| {
+            let StructFieldValue::Array { value, .. } = field else {
+                return None;
+            };
+            Some(
+                value
+                    .borrow()
+                    .elements
+                    .iter()
+                    .map(|value| value.rem_euclid(256) as u8)
+                    .collect::<Vec<_>>(),
+            )
+        });
+        let storage_size = persistent_bytes.as_ref().map_or_else(
+            || {
+                fields
+                    .values()
+                    .filter_map(|field| match field {
+                        StructFieldValue::Scalar { ty, .. } => Some(ty.size() as usize),
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(active_type.size() as usize)
+            },
+            Vec::len,
+        );
+        let mut bytes = persistent_bytes.unwrap_or_else(|| vec![0u8; storage_size]);
+        if !fields.contains_key(UNION_OBJECT_BYTES_FIELD) {
+            if let Some((_, StructFieldValue::Scalar { value, ty, .. })) = fields
+                .iter()
+                .filter(|(_, field)| {
+                    matches!(field, StructFieldValue::Scalar { ty, .. } if ty.size() as usize == storage_size)
+                })
+                .min_by_key(|(name, _)| name.as_str())
+            {
+                Self::write_union_scalar_bytes(&mut bytes, *value, *ty);
+            }
         }
         Self::write_union_scalar_bytes(&mut bytes, active_value, active_type);
-        for field_value in fields.values_mut() {
+        if let Some(StructFieldValue::Array { value, .. }) =
+            fields.get_mut(UNION_OBJECT_BYTES_FIELD)
+        {
+            value.borrow_mut().elements = bytes.iter().map(|byte| i64::from(*byte)).collect();
+        }
+        for (name, field_value) in fields.iter_mut() {
+            if name == UNION_OBJECT_BYTES_FIELD {
+                continue;
+            }
             if let StructFieldValue::Scalar { value, ty, .. } = field_value {
                 *value = Self::read_union_scalar_bytes(&bytes, *ty);
             }

@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-08-31 — Persistent all-`_Bool` scalar-union bytes
+
+- `_Bool` is suitable as a normalized language view but not as the sole raw-byte carrier: decoding any nonzero byte yields `1`, so writing byte `2` and reconstructing storage from the member loses information.
+- Hidden interpreter-owned `char` array storage fits the existing aggregate field map and deep-copy machinery. A source-inexpressible NUL-prefixed field key prevents collision with C member names, while aggregate definition sizes and source-visible field lookup remain unchanged.
+- Persistent bytes must be installed before applying union initializers. Each language assignment overwrites the active member width in the persistent bytes and refreshes all scalar views; each bounded-memory byte write updates the backing first and then performs the same refresh.
+- Admission remains narrow: non-empty all-`_Bool` unions with at least one mutable member. All-const, pointer, `double`, array, nested-aggregate, and non-boolean layouts without a safe full-width carrier retain their prior boundaries.
+- Native coverage uses only same-object copy/move/equality, all-zero byte comparison/search, returned destination identity, and zero-valued `_Bool` reads; Cust-only coverage proves deterministic raw byte `2` beneath normalized views.
+- Candidate decision: persistent all-`_Bool` bytes outranked broader carrierless layouts and parser/property expansion because it was the queue-leading bounded representation gap and required no host ABI assumptions. Bounded v0.46.0 release closure is next.
+
 ## 2026-08-31 — v0.45.0 release consistency
 
 - Version-first release TDD changed only the exact CLI and Compose expectations. Both focused tests failed against `0.44.0` and passed after Cargo/lock plus both Compose image tags moved to `0.45.0`; Cargo metadata and the built CLI report `0.45.0`.

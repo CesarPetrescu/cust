@@ -4,9 +4,17 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-31 after bounded v0.45.0 publication. Release commit `361b8653884182c45ee8c2b5b50caaccef9b41ad` reached exact `origin/main` before annotated tag object `556f94e68324eab86ffcd6fed51958115b1c8d20`; remote refs peel exactly to the release commit. Persistent interpreter-owned bytes for all-`_Bool` scalar unions are the single next implementation task.
+None. Last reviewed 2026-08-31 after persistent all-`_Bool` scalar-union bytes passed focused, native, full local, and rebuilt-Docker verification with independent `APPROVED` review. Bounded v0.46.0 release closure is the single next task.
 
 ## Resolved this run
+
+### 2026-08-31 — Persistent all-`_Bool` scalar-union object bytes
+
+- Failure: the focused all-`_Bool` union regression stopped at `function 'memcpy' does not yet support union-backed scalar object storage for argument 1` because no normalized `_Bool` member could retain raw byte `2`.
+- Root cause: carrier-backed union storage assumes one language-visible scalar can losslessly encode every admitted object byte. `_Bool` canonicalization destroys that representation even though alias identity, capacity, and safety metadata were already available.
+- RED/GREEN: all-`_Bool` unions with at least one mutable member now receive hidden interpreter-owned character-byte storage. Initializers and language assignments update those bytes before synchronizing normalized member views; selected and whole bounded-memory reads/writes use the persistent bytes symmetrically. Three focused tests cover all five intrinsics, typed identity, raw bytes, member bounds, const, non-evaluation, zero count, copy isolation, and aggregate-array elements.
+- Review closure: independent review exposed stale whole-object and character-view all-`_Bool` rejection tests. Replacing them with current positive behavior and all-const boundaries made the full suite GREEN; fresh current-diff review returned `APPROVED`.
+- Verification: formatting, warning-denied Clippy, all 2,124 local tests, all 2,124 rebuilt-Docker tests, runtime output `10`, direct GCC/Clang warning-denied fixture execution, compiler-oracle comparison, and diff hygiene pass.
 
 ### 2026-08-31 — Whole-object scalar-union byte ranges
 
