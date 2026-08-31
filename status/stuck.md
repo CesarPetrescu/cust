@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-31 after bounded v0.45.0 release preparation. Fresh independent review returned `APPROVED`; formatting, warning-denied Clippy, all 2,121 local and no-cache-rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image versions, and diff hygiene pass. Release-commit-first annotated-tag publication is the remaining release step.
+None. Last reviewed 2026-08-31 after bounded v0.45.0 publication. Release commit `361b8653884182c45ee8c2b5b50caaccef9b41ad` reached exact `origin/main` before annotated tag object `556f94e68324eab86ffcd6fed51958115b1c8d20`; remote refs peel exactly to the release commit. Persistent interpreter-owned bytes for all-`_Bool` scalar unions are the single next implementation task.
 
 ## Resolved this run
 
