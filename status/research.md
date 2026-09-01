@@ -2,14 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-## 2026-09-01 — v0.49.0 release consistency
+## 2026-09-02 — v0.49.0 release consistency
 
 - Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.48.0` and passed after Cargo/lock plus both Compose image tags moved to `0.49.0`.
 - Executable target listing yields 2,131 tests: `interpreter` 1,993 + `fuzz_safety` 101 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
 - Central release claims describe the 22 aggregate-valued expression routes crossed with four consumers, stable identity-keyed totals, one-time evaluation, deep-copy isolation, exact nominal mismatch behavior, and unselected `_Generic` association validation.
 - Candidate evaluation considered queue-leading v0.49.0 release closure, a pointer classifier/evaluator parity matrix, parser-diagnostic expansion, and broader pointer work. Release closure was selected because it atomically packages an independently reviewed correctness package and executable coverage with bounded metadata risk. Pointer classifier/evaluator parity is the concrete post-release task.
-- The initial pre-gate complete-diff review returned `APPROVED` with no findings. Formatting, warning-denied Clippy, all 2,131 local tests, a no-cache image rebuild, all 2,131 rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image `0.49.0` versions, static safety scan, and diff hygiene pass.
-- Repeated local and remote `v0.49.0` tag preflight are empty. The annotated tag remains reserved for the resulting verified release commit after exact `origin/main` acceptance.
+- Initial pre-gate and final complete-diff reviews returned `APPROVED`. Formatting, warning-denied Clippy, all 2,131 local tests, a no-cache image rebuild, all 2,131 rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image `0.49.0` versions, static safety scan, and diff hygiene pass.
+- Local and remote `v0.49.0` preflight were empty immediately before commit. Release commit `e745ae0ac6202fdecd93bdb19e13bddfac1ea6c7` reached exact `origin/main` before annotated tag creation; tag object `defd137bfc1c714f1839dd071a7ed494891f5522` was then pushed explicitly. Local and remote unpeeled refs equal the tag object, and both peeled targets equal the release commit. This later status-only evidence update does not move or recreate the tag and is not the tagged release commit.
 
 ## 2026-09-01 — Aggregate classifier/evaluator parity modeling
 
@@ -18,7 +18,7 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Pointer-backed aggregate values must resolve their pointer/index expression once and deep-clone the resulting field map. Re-evaluation breaks marker/source-order guarantees; sharing the field map breaks C by-value isolation.
 - The matrix uses nested aggregate members and embedded aggregate-array elements in every successful result, then mutates the original after initialization/call/return to prove the copy is independent. Type-mismatch contexts retain exact nominal `struct Cell` versus `struct OtherCell` diagnostics.
 - Independent review exposed a third consumer-parity requirement: aggregate arguments must route `_Generic` through `eval_selected_generic()` rather than directly selecting one association, otherwise invalid unselected associations escape semantic validation. A focused regression first returned `Ok(7)` for an undefined unselected call and passes after using the shared validation wrapper.
-- Candidate decision: this queue-leading parity matrix outranked parser diagnostics, broader pointer work, and immediate release metadata because the prior release exposed a silent classifier/evaluator boundary defect. The package found two additional runtime/classifier mismatches plus one review-only validation bypass. Stable route/context identity, not loop position, must key exact matrix counters so duplicate or omitted entries become visible. Bounded v0.49.0 release closure follows this package. See `references/cust-aggregate-expression-classifier-evaluator-parity.md`.
+- Candidate decision: this queue-leading parity matrix outranked parser diagnostics, broader pointer work, and immediate release metadata because the prior release exposed a silent classifier/evaluator boundary defect. The package found two additional runtime/classifier mismatches plus one review-only validation bypass. Stable route/context identity, not loop position, must key exact matrix counters so duplicate or omitted entries become visible. Bounded v0.49.0 release closure followed this package and is published above. See `references/cust-aggregate-expression-classifier-evaluator-parity.md`.
 
 ## 2026-09-01 — v0.48.0 release consistency
 
