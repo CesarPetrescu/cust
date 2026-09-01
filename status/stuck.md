@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-08-31 after exact v0.46.0 version RED/GREEN, strict-Clippy compatibility closure, fresh independent `APPROVED` review, complete local/no-cache-rebuilt-Docker verification, exact version/runtime checks, diff hygiene, release-commit-first publication, and exact local/remote annotated-tag verification.
+None. Last reviewed 2026-09-01 after recovery completion of persistent carrierless scalar-union object bytes, focused/native/compiler-oracle verification, fresh independent no-blocker review, complete local/Docker verification, runtime output `10`, and diff hygiene.
 
 ## Resolved this run
+
+### 2026-09-01 — Persistent carrierless scalar-union object bytes
+
+- Recovery state: the run inherited uncommitted production, focused-test, and native-fixture changes for the queue-leading carrierless scalar-union package. The original feature RED is unavailable and is not re-claimed.
+- Root gap: the all-`_Bool` predicate installed hidden bytes only when every member normalized. Mixed-width layouts such as `union { const int wide; char low; _Bool truth; }` still lacked a non-const full-width language member even though the same hidden maximum-layout storage can preserve their complete deterministic representation.
+- Closure: persistent-byte admission now covers every nonempty mutable scalar-only non-`double` layout precisely when no non-boolean mutable full-width carrier exists. Canonical routing selects an actual mutable member and carries its real `CType`; hidden bytes remain authoritative and synchronize every typed view after language or intrinsic writes.
+- Verification: two focused carrierless tests, the broader 16-test scalar-union filter, direct GCC/Clang warnings-as-errors execution, and the actual compiler-oracle test pass. Fresh independent review exercised overlap, by-value copy, and const-owner probes and found no blockers. Formatting, strict Clippy, all 2,126 local/Docker tests, runtime output `10`, and diff hygiene pass.
 
 ### 2026-08-31 — Current Clippy rejected persistent-byte initialization shape
 

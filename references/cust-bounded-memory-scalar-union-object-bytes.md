@@ -41,3 +41,11 @@ After review-driven production or test edits, rerun the focused scalar-union fil
 - Reuse canonical union root/path identity and selected-member capacity. Whole-union reads/writes use maximum layout size; typed results still select a compatible mutable source-visible member, never the hidden field.
 - Destination validation must check the selected field, aggregate ancestor, and lexical owner before bypassing the legacy carrier probe. All-const layouts remain unsupported; zero-count and `sizeof(call)` paths remain non-evaluating.
 - When widening admission, reconcile legacy exact-negative tests for both bounded whole-object calls and character views. Focused coverage must prove all five intrinsics, raw byte `2` beneath normalized reads, typed identity, member bounds, const, array-element isolation, and ABI-independent native zero-byte relationships.
+
+## Persistent carrierless mixed-scalar extension
+
+- Generalize hidden storage to every nonempty mutable scalar-only non-`double` union only when no non-const non-boolean member is as wide as the maximum member. Keep the existing carrier-backed path authoritative when such a member exists.
+- `scalar_union_carrier_field()` still needs a source-visible canonical target. For hidden-byte layouts, choose a real mutable scalar member deterministically and return its actual `CType`; never retain the all-`_Bool` milestone's hard-coded `_Bool` type.
+- The hidden byte array remains maximum-layout-sized and authoritative. Narrow language assignments overwrite only their own width, preserve upper bytes, then refresh `int`/`char`/`_Bool` views; raw-memory writes update bytes first and use the same refresh.
+- Cover a mixed layout with a const wide `int` plus mutable narrow `char`/`_Bool`, direct selected-member and whole-object routes across all five intrinsics, const selected-member rejection, all-const rejection, zero-count/non-evaluation, aggregate-array-element isolation, and by-value deep-copy independence.
+- Native fixtures should restrict mixed-width checks to same-object address identity and one-byte operations. Keep deterministic little-endian full-width reconstruction and exact signed values interpreter-only.

@@ -14,6 +14,12 @@ union Flags {
     _Bool second;
 };
 
+union Carrierless {
+    const int wide;
+    char low;
+    _Bool truth;
+};
+
 int main(void) {
     int source = 37;
     unsigned char zero_bytes[sizeof(int)] = {0};
@@ -24,6 +30,8 @@ int main(void) {
     union Scalar whole_copy = {.second = 0};
     union Flags flags = {.first = 1};
     union Flags flags_copy = {.second = 0};
+    union Carrierless carrierless_source = {.low = 7};
+    union Carrierless carrierless_copy = {.low = 0};
     unsigned char bool_zero_bytes[sizeof(union Flags)] = {0};
 
     if ((void *)&value.first != (void *)&value.second) return 1;
@@ -49,5 +57,19 @@ int main(void) {
     if (memcmp(&flags_copy, bool_zero_bytes, sizeof(flags_copy)) != 0) return 19;
     if (memchr(&flags_copy, 0, sizeof(flags_copy)) != &flags_copy) return 20;
     if (flags_copy.first != 0 || flags_copy.second != 0) return 21;
+    if ((void *)&carrierless_source.wide != (void *)&carrierless_source.low ||
+        (void *)&carrierless_source.low != (void *)&carrierless_source.truth) return 22;
+    if (memcpy(&carrierless_copy.low, &carrierless_source.low,
+               sizeof(carrierless_source.low)) != (void *)&carrierless_copy.truth) return 23;
+    if (memcmp(&carrierless_copy.low, &carrierless_source.low,
+               sizeof(carrierless_copy.low)) != 0) return 24;
+    if (memmove(&carrierless_copy.low, &carrierless_copy.low,
+                sizeof(carrierless_copy.low)) != (void *)&carrierless_copy.wide) return 25;
+    if (memset(&carrierless_copy.truth, 0, sizeof(carrierless_copy.truth)) !=
+        (void *)&carrierless_copy.low) return 26;
+    if (memchr(&carrierless_source.low, 7, sizeof(carrierless_source.low)) !=
+        (void *)&carrierless_source.wide) return 27;
+    if (carrierless_copy.low != 0 || carrierless_copy.truth != 0 ||
+        sizeof(union Carrierless) < sizeof(int)) return 28;
     return 0;
 }

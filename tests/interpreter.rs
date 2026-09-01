@@ -16361,6 +16361,88 @@ fn persistent_all_bool_union_object_bytes_support_all_bounded_intrinsics() {
 }
 
 #[test]
+fn persistent_carrierless_scalar_union_object_bytes_support_all_bounded_intrinsics() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memmove(void *, const void *, unsigned long int);
+        int memcmp(const void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        void *memchr(const void *, int, unsigned long int);
+        union Scalar { const int wide; char low; _Bool truth; };
+        int main(void) {
+            union Scalar source = {.wide = 0x1122334455667788};
+            union Scalar destination = {.low = 0};
+            char copied = 0;
+            if ((void *)&destination.wide != (void *)&destination.low ||
+                (void *)&destination.low != (void *)&destination.truth) return 1;
+            if (memcpy(&destination.low, &source.low, 1) !=
+                (void *)&destination.truth) return 2;
+            if (destination.wide != 0x88 || destination.low != 0x88 ||
+                destination.truth != 1) return 3;
+            if (memcmp(&destination.low, &source.low, 1) != 0) return 4;
+            if (memmove(&destination.low, &destination.truth, 1) !=
+                (void *)&destination.wide) return 5;
+            char *found = memchr(&source, 0x66, sizeof(source));
+            if (found == 0 || found - (char *)&source != 2) return 6;
+            if (memset(&destination.truth, 2, 1) !=
+                (void *)&destination.low) return 7;
+            if (destination.wide != 2 || destination.low != 2 ||
+                destination.truth != 1) return 8;
+            if (memcpy(&copied, &destination.truth, 1) != &copied || copied != 2) return 9;
+            if (memcpy(&destination, &source, sizeof(source)) != &destination) return 10;
+            if (memcmp(&destination, &source, sizeof(source)) != 0) return 11;
+            if (memmove(&destination, &destination, sizeof(destination)) != &destination) return 12;
+            return destination.wide == 0x1122334455667788 &&
+                           destination.low == 0x88 && destination.truth == 1
+                       ? 0
+                       : 13;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn persistent_carrierless_scalar_union_bytes_preserve_const_views_and_array_isolation() {
+    let program = r#"
+        void *memcpy(void *, const void *, unsigned long int);
+        void *memset(void *, int, unsigned long int);
+        union Tiny { const char raw; _Bool truth; };
+        union Wide { const int wide; char low; };
+        struct Box { union Wide items[2]; };
+        int main(void) {
+            union Tiny tiny = {.raw = 2};
+            char copied = 0;
+            if (tiny.truth != 1) return 1;
+            if (memcpy(&copied, &tiny.truth, 1) != &copied || copied != 2) return 2;
+            if (memset(&tiny.truth, 3, 1) != (void *)&tiny.raw) return 3;
+            if (tiny.raw != 3 || tiny.truth != 1) return 4;
+
+            struct Box box = {{{.wide = 0x1122334455667788}, {.low = 0}}};
+            if (memset(&box.items[1], 0xaa, sizeof(box.items[1])) !=
+                &box.items[1]) return 5;
+            char first_raw = 0;
+            char second_raw = 0;
+            if (memcpy(&first_raw, &box.items[0].low, 1) != &first_raw) return 6;
+            if (memcpy(&second_raw, &box.items[1].low, 1) != &second_raw) return 7;
+            if (first_raw != 0x88 || second_raw != 0xaa) return 8;
+            union Wide copy = {.low = 0};
+            if (memcpy(&copy, &box.items[1], sizeof(copy)) != &copy) return 9;
+            copy.low = 0;
+            char original_raw = 0;
+            if (memcpy(&original_raw, &box.items[1], 1) != &original_raw) return 10;
+            return original_raw == 0xaa && box.items[0].wide == 0x1122334455667788 &&
+                           box.items[1].wide == -6148914691236517206 &&
+                           copy.wide == -6148914691236517376
+                       ? 0
+                       : 11;
+        }
+    "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn persistent_all_bool_union_bytes_preserve_copy_and_array_element_isolation() {
     let program = r#"
         void *memcpy(void *, const void *, unsigned long int);
@@ -16392,7 +16474,7 @@ fn persistent_all_bool_union_bytes_preserve_copy_and_array_element_isolation() {
 }
 
 #[test]
-fn persistent_all_bool_union_object_bytes_preserve_safety_and_non_evaluation() {
+fn persistent_scalar_union_object_bytes_preserve_safety_and_non_evaluation() {
     let cases = [
         (
             "void *memset(void *, int, unsigned long int); union Flags { const _Bool first; const _Bool second; } value = {.first = 1}; int main(void) { memset(&value, 0, sizeof(value)); return 0; }",
@@ -16406,6 +16488,14 @@ fn persistent_all_bool_union_object_bytes_preserve_safety_and_non_evaluation() {
             "void *memset(void *, int, unsigned long int); union Flags { _Bool first; _Bool second; } value = {.first = 1}; int main(void) { memset(&value.first, 0, 2); return 0; }",
             "destination argument 1 to function 'memset' requires 2 bytes, but only 1 bytes are available",
         ),
+        (
+            "void *memset(void *, int, unsigned long int); union Scalar { const int wide; char low; } value = {.low = 1}; int main(void) { memset(&value.wide, 0, sizeof(value.wide)); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "void *memset(void *, int, unsigned long int); union Scalar { const int wide; const char low; } value = {.wide = 1}; int main(void) { memset(&value, 0, sizeof(value)); return 0; }",
+            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
+        ),
     ];
     for (program, expected) in cases {
         assert_eq!(interpret(program).unwrap_err().to_string(), expected);
@@ -16418,6 +16508,7 @@ fn persistent_all_bool_union_object_bytes_preserve_safety_and_non_evaluation() {
         void *memset(void *, int, unsigned long int);
         void *memchr(const void *, int, unsigned long int);
         union Flags { _Bool first; _Bool second; } value = {.first = 1};
+        union Scalar { const int wide; char low; } scalar = {.wide = 0x1122334455667788};
         int marker;
         int mark(void) { marker += 1; return 1; }
         int main(void) {
@@ -16426,9 +16517,18 @@ fn persistent_all_bool_union_object_bytes_preserve_safety_and_non_evaluation() {
             if (sizeof(memcmp(&value, &value, mark())) != sizeof(int)) return 3;
             if (sizeof(memset(&value.second, mark(), mark())) != sizeof(void *)) return 4;
             if (sizeof(memchr(&value, mark(), mark())) != sizeof(void *)) return 5;
-            if (marker != 0 || value.first != 1 || value.second != 1) return 6;
-            if (memset(&value, 0, 0) != &value) return 7;
-            return value.first == 1 && value.second == 1 ? 0 : 8;
+            if (sizeof(memcpy(&scalar.low, &scalar.wide, mark())) != sizeof(void *)) return 6;
+            if (sizeof(memmove(&scalar, &scalar, mark())) != sizeof(void *)) return 7;
+            if (sizeof(memcmp(&scalar, &scalar, mark())) != sizeof(int)) return 8;
+            if (sizeof(memset(&scalar.low, mark(), mark())) != sizeof(void *)) return 9;
+            if (sizeof(memchr(&scalar.wide, mark(), mark())) != sizeof(void *)) return 10;
+            if (marker != 0 || value.first != 1 || value.second != 1 ||
+                scalar.wide != 0x1122334455667788) return 11;
+            if (memset(&value, 0, 0) != &value || memset(&scalar, 0, 0) != &scalar) return 12;
+            return value.first == 1 && value.second == 1 &&
+                           scalar.wide == 0x1122334455667788
+                       ? 0
+                       : 13;
         }
     "#;
     assert_eq!(interpret(program).unwrap(), 0);
@@ -16507,10 +16607,6 @@ fn whole_scalar_union_object_bytes_preserve_safety_and_non_evaluation() {
         ),
         (
             "void *memset(void *, int, unsigned long int); union Unsupported { int scalar; int *pointer; } value = {.scalar = 1}; int main(void) { memset(&value, 0, sizeof(value)); return 0; }",
-            "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
-        ),
-        (
-            "void *memset(void *, int, unsigned long int); union Unsupported { const int wide; char narrow; } value = {.narrow = 1}; int main(void) { memset(&value, 0, sizeof(value)); return 0; }",
             "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
         ),
     ];
@@ -16633,14 +16729,6 @@ fn scalar_union_object_bytes_preserve_safety_and_non_evaluation() {
         (
             "void *memset(void *, int, unsigned long int); union Unsupported { int scalar; char bytes[2]; } value = {.scalar = 1}; int main(void) { memset(&value.scalar, 0, sizeof(value.scalar)); return 0; }",
             "function 'memset' does not yet support union-backed scalar object storage for argument 1",
-        ),
-        (
-            "void *memset(void *, int, unsigned long int); union Unsupported { _Bool truth; const char raw; } value = {.raw = 2}; int main(void) { memset(&value.truth, 3, 1); return 0; }",
-            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
-        ),
-        (
-            "void *memchr(const void *, int, unsigned long int); union Unsupported { const int wide; char narrow; } value = {.narrow = 'x'}; int main(void) { return memchr(&value.wide, 0, sizeof(value.wide)) != 0; }",
-            "function 'memchr' does not yet support union-backed scalar object storage for argument 1",
         ),
         (
             "void *memset(void *, int, unsigned long int); union Unsupported { int scalar; double real; } value = {.scalar = 1}; int main(void) { memset(&value.scalar, 0, sizeof(value.scalar)); return 0; }",

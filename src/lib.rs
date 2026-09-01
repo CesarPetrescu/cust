@@ -21810,9 +21810,11 @@ impl Interpreter {
                     definition
                         .fields
                         .iter()
-                        .filter(|field| !field.is_const)
-                        .min_by_key(|field| field.name.as_str())
-                        .map(|field| (field, CType::Bool))
+                        .filter_map(|field| match field.ty {
+                            StructFieldType::Scalar(ty) if !field.is_const => Some((field, ty)),
+                            _ => None,
+                        })
+                        .min_by_key(|(field, _)| field.name.as_str())
                 } else {
                     None
                 }
@@ -21820,13 +21822,28 @@ impl Interpreter {
     }
 
     fn scalar_union_uses_persistent_bytes(definition: &StructTypeDef) -> bool {
-        definition.kind == AggregateKind::Union
-            && !definition.fields.is_empty()
-            && definition
+        if definition.kind != AggregateKind::Union
+            || definition.fields.is_empty()
+            || !definition
                 .fields
                 .iter()
-                .all(|field| matches!(field.ty, StructFieldType::Scalar(CType::Bool)))
-            && definition.fields.iter().any(|field| !field.is_const)
+                .all(|field| matches!(field.ty, StructFieldType::Scalar(ty) if ty != CType::Double))
+            || !definition.fields.iter().any(|field| !field.is_const)
+        {
+            return false;
+        }
+        let storage_size = definition
+            .fields
+            .iter()
+            .filter_map(|field| match field.ty {
+                StructFieldType::Scalar(ty) => Some(ty.size()),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
+        !definition.fields.iter().any(|field| {
+            matches!(field.ty, StructFieldType::Scalar(ty) if ty != CType::Bool && !field.is_const && ty.size() == storage_size)
+        })
     }
 
     fn scalar_union_persistent_prefix(

@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-01 — Persistent carrierless scalar-union bytes
+
+- The hidden-byte model introduced for all-`_Bool` unions generalizes safely to any nonempty mutable scalar-only non-`double` union that lacks a non-const non-boolean member as wide as the union. Maximum member size remains Cust's deterministic storage width; no host ABI layout or padding is inferred.
+- Admission must remain the complement of the existing full-width carrier path. Otherwise already supported carrier-backed layouts would needlessly switch representations and increase regression risk.
+- Canonical pointer routing still needs a source-visible mutable member even when hidden bytes are authoritative. Select a real mutable scalar member and preserve its actual `CType`; hard-coding `_Bool` corrupts typed identity for mixed `char`/`int` layouts.
+- Initializer and assignment synchronization already overwrite only the selected member width before decoding every view. This preserves upper bytes when a narrow member is written and allows a const wider view to observe the deterministic combined representation without writing through that const field.
+- Native coverage must avoid mixed-width byte-order assertions. Same-object member-address equality, one-byte copy/move/compare/set/search, return identity, and `sizeof(union) >= sizeof(int)` are ABI-independent; deterministic little-endian full-width values remain Cust-only assertions.
+- Recovery candidate decision: finishing the inherited carrierless package outranked immediate v0.47.0 release closure, another union property matrix, and parser diagnostics. The original RED cannot be reconstructed honestly; focused inherited tests were GREEN, and fresh independent review found no blockers. Bounded v0.47.0 release closure is now the sole next package.
+
 ## 2026-08-31 — v0.46.0 release consistency
 
 - Version-first release TDD changed only the exact CLI and Compose expectations. Both focused tests failed against `0.45.0` and passed after Cargo/lock plus both Compose image tags moved to `0.46.0`; Cargo metadata and the built CLI report `0.46.0`.
