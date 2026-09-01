@@ -6,6 +6,27 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.49.0 — 2026-09-01
+
+### Language subset
+
+- Closed aggregate classifier/evaluator parity gaps for `_Generic` aggregate arguments and aggregate-valued elements reached through struct pointers. Pointer/index expressions resolve once, selected field maps deep-clone by value, and declaration initialization, function arguments, and function returns preserve nested aggregate values and nominal type checks.
+
+### Diagnostics and verification
+
+- Added a deterministic 88-program matrix crossing all 22 aggregate-valued `Expr` routes with declaration-initializer, function-argument, function-return, and exact nominal type-mismatch consumers. Identity-keyed route/context totals, panic guards, nested fields, embedded aggregate-array elements, one-time marker evaluation, and post-copy mutation prove complete routing and isolation.
+- Restored semantic validation of unselected `_Generic` associations for aggregate arguments by routing selection through the shared validator and nesting-depth guard.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.49.0`.
+- Reconciled an executable inventory of 2,131 tests: 1,993 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Shared union object bytes remain limited to scalar-only non-`double` layouts with at least one mutable member. All-const scalar unions and union layouts containing arrays, pointers, `double`, or nested aggregates remain unsupported. Selected-member operations retain that member's own capacity; complete-object operations use the union's maximum layout size. General pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and unsupported pragma semantics also remain outside the release.
+
 ## v0.48.0 — 2026-09-01
 
 ### Language subset

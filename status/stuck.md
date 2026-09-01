@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-01 after aggregate classifier/evaluator parity closure. Focused RED/GREEN closed `_Generic` aggregate-argument classification, missing `Expr::StructPtrArrayGet` aggregate evaluation, unselected-association validation, and identity-keyed matrix coverage accounting. Fresh complete-diff re-review returned `APPROVED`; formatting, strict Clippy, all 2,131 local/Docker tests, runtime output `10`, static safety scan, and diff hygiene pass. No user input or external dependency is required; bounded v0.49.0 release closure is next.
+None. Last reviewed 2026-09-01 after bounded v0.49.0 initial pre-gate independent approval and canonical verification. Exact CLI and Compose expectations went RED at `0.48.0` and GREEN at `0.49.0`; all 2,131 local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, and diff hygiene pass. Repeated local/remote tag preflight are empty. Release-commit-first publication is the remaining normal acceptance step, not a blocker; no user input or external dependency is required.
 
 ## Resolved this run
 

@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.48.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.49.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -38,7 +38,7 @@ Expected output:
 cargo test
 ```
 
-The v0.48.0 executable inventory is 2,129 tests: 1,992 interpreter tests, 100 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+The v0.49.0 executable inventory is 2,131 tests: 1,993 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 
 ### Run inside Docker
 
@@ -71,9 +71,9 @@ The `test` service keeps a writable container overlay so Cargo can update `targe
 
 ## Current language subset
 
-Bounded v0.48.0 packages deterministic model-based coverage for carrierless scalar-union object bytes together with aggregate-value evaluator parity for embedded aggregate-array elements. Ninety exact routes cross three mixed mutable `int`/`char`/`_Bool` layouts, direct/nested/embedded-array-element owners, selected-member/whole-object roots, and all five bounded-memory intrinsics. Fixed-seed byte models assert typed return identity, source-ordered one-time evaluation, non-vacuous writes, by-value deep-copy and untouched-root isolation, exact route totals, and targeted all-const/pointer/`double`/array/nested-layout boundaries. The matrix exposed and closed a classifier/evaluator mismatch: embedded aggregate-array elements already had aggregate type metadata but could not be evaluated by value; they now resolve through interpreter-owned storage and deep-clone into aggregate initializers.
+Bounded v0.49.0 packages deterministic aggregate classifier/evaluator parity. Twenty-two aggregate-valued `Expr` routes each cross declaration-initializer, function-argument, function-return, and exact nominal type-mismatch consumers for 88 generated programs. Stable identity-keyed route/context counters, panic guards, nested fields, embedded aggregate-array elements, one-time markers, and post-copy mutation prove complete routing, source-order evaluation, and deep-copy isolation. The matrix closed missing `_Generic` aggregate-argument classification and missing `Expr::StructPtrArrayGet` runtime aggregate evaluation; review-driven coverage also restored semantic validation of unselected `_Generic` associations. Release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`.
 
-Persistent object bytes remain available for every mutable scalar-only non-`double` union. Layouts with a non-const full-width `int` or `char` retain their deterministic visible carrier; carrierless layouts use hidden maximum-layout bytes while canonical typed routing still selects an actual mutable source member. Selected-member and whole-object `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` operations share one aggregate root at offset zero; raw bytes remain observable while `int`, `char`, and `_Bool` views synchronize under Cust's deterministic scalar model. Whole-object operations use the union's maximum layout size, selected-member operations retain that member's capacity, and overlap, recursive const/lifetime, deep-copy and aggregate-array-element isolation, zero-count identity, typed results, and non-evaluation remain enforced. All-const scalar unions and layouts containing arrays, pointers, `double`, or nested aggregates retain targeted rejection. Release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
+Persistent object bytes remain available for every mutable scalar-only non-`double` union. Layouts with a non-const full-width `int` or `char` retain their deterministic visible carrier; carrierless layouts use hidden maximum-layout bytes while canonical typed routing still selects an actual mutable source member. Selected-member and whole-object `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` operations share one aggregate root at offset zero; raw bytes remain observable while `int`, `char`, and `_Bool` views synchronize under Cust's deterministic scalar model. Whole-object operations use the union's maximum layout size, selected-member operations retain that member's capacity, and overlap, recursive const/lifetime, deep-copy and aggregate-array-element isolation, zero-count identity, typed results, and non-evaluation remain enforced. All-const scalar unions and layouts containing arrays, pointers, `double`, or nested aggregates retain targeted rejection. Cust currently supports this C subset:
 
 ```c
 int main() {
@@ -215,7 +215,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 
 ## Roadmap
 
-- Next milestone: add a deterministic aggregate classifier/evaluator parity matrix over every aggregate-valued expression accepted by `aggregate_expr_type_name()`, with explicit route totals and initializer/argument/return, deep-copy, one-time evaluation, nested aggregate, aggregate-array-element, and exact type-mismatch assertions.
+- Post-publication next milestone: after v0.49.0 is published, add a deterministic pointer classifier/evaluator parity matrix over every pointer-valued expression admitted by `expr_is_pointer_value()`, with stable route totals and initializer/argument/return, owner/lifetime/const, one-time evaluation, non-evaluating `sizeof`, and exact incompatible-pointer assertions.
 - Parser quality: continue recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider multiple pointer levels and broader C conformance fixtures.

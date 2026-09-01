@@ -1,7 +1,7 @@
 services:
   cust:
     build: .
-    image: cust:v0.48.0
+    image: cust:v0.49.0
     pull_policy: build
     network_mode: "none"
     read_only: true
@@ -19,7 +19,7 @@ services:
     build:
       context: .
       target: build
-    image: cust-test:v0.48.0
+    image: cust-test:v0.49.0
     pull_policy: build
     network_mode: "none"
     security_opt:

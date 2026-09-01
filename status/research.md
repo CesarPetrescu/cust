@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-01 — v0.49.0 release consistency
+
+- Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.48.0` and passed after Cargo/lock plus both Compose image tags moved to `0.49.0`.
+- Executable target listing yields 2,131 tests: `interpreter` 1,993 + `fuzz_safety` 101 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
+- Central release claims describe the 22 aggregate-valued expression routes crossed with four consumers, stable identity-keyed totals, one-time evaluation, deep-copy isolation, exact nominal mismatch behavior, and unselected `_Generic` association validation.
+- Candidate evaluation considered queue-leading v0.49.0 release closure, a pointer classifier/evaluator parity matrix, parser-diagnostic expansion, and broader pointer work. Release closure was selected because it atomically packages an independently reviewed correctness package and executable coverage with bounded metadata risk. Pointer classifier/evaluator parity is the concrete post-release task.
+- The initial pre-gate complete-diff review returned `APPROVED` with no findings. Formatting, warning-denied Clippy, all 2,131 local tests, a no-cache image rebuild, all 2,131 rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image `0.49.0` versions, static safety scan, and diff hygiene pass.
+- Repeated local and remote `v0.49.0` tag preflight are empty. The annotated tag remains reserved for the resulting verified release commit after exact `origin/main` acceptance.
+
 ## 2026-09-01 — Aggregate classifier/evaluator parity modeling
 
 - The executable aggregate-valued surface currently has 22 distinct `Expr` route families. Crossing each with declaration initializer, function argument, function return, and exact nominal mismatch produces 88 deterministic programs; independent counters catch missing variants, contexts, or duplicate generation.
@@ -16,7 +25,7 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.47.0` and passed after Cargo/lock plus both Compose image tags moved to `0.48.0`; Cargo metadata and the built CLI report `cust 0.48.0`.
 - Executable target listing yields 2,129 tests: `interpreter` 1,992 + `fuzz_safety` 100 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
 - Central release claims describe the 90-route carrierless scalar-union property matrix and the real `Expr::StructArrayGet` classifier/evaluator mismatch it exposed. Aggregate-array elements now deep-clone by value; one-time evaluation, typed identity, deterministic bytes, isolation, and the existing all-const/pointer/`double`/array/nested-layout boundaries remain explicit.
-- Candidate decision: bounded release closure outranked parser-diagnostic expansion, broader pointer work, and immediate aggregate evaluator property expansion because it atomically packages a reviewed correctness fix and exact executable coverage with bounded release risk. The aggregate classifier/evaluator parity matrix is promoted as the concrete post-release package.
+- Candidate decision: bounded release closure outranked parser-diagnostic expansion, broader pointer work, and immediate aggregate evaluator property expansion because it atomically packaged a reviewed correctness fix and exact executable coverage with bounded release risk. The aggregate classifier/evaluator parity matrix was promoted as the concrete post-release package and is complete above.
 - Initial independent release review found one stale README next-milestone instruction. Promoting the aggregate classifier/evaluator parity matrix closed the queue contradiction; fresh complete-diff re-review returned `APPROVED`.
 - Formatting, warning-denied Clippy, all 2,129 local tests, a no-cache image rebuild, all 2,129 rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image `0.48.0` versions, and diff hygiene pass. Local and remote `v0.48.0` preflight were empty before edits, after the canonical gate, and immediately after exact branch acceptance.
 - Release commit `bc353b96d05ed8b573f49eb23370b921f4ca257c` reached exact `origin/main` while the tag remained absent. Annotated tag object `434a7dfd3733241a168c5b1868d1b232ce934366` was then created and pushed; local and remote refs peel exactly to the release commit. This later status-only publication-evidence update does not move or recreate the tag and is not the tagged release commit.
@@ -27,7 +36,7 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - Cust's deterministic `int = 8`, `char = 1`, `_Bool = 1`, little-endian object-byte model permits exact model assertions without claiming native ABI equivalence. The registered C fixture therefore restricts native checks to one-byte same-object operations, return identity, language-level copy isolation, and `sizeof(union) >= sizeof(int)`.
 - Distinct marker functions plus a shared decimal sequence prove both one-time evaluation and Cust's documented source-order intrinsic dispatch: destination/source/value/count sequences are `124`, `134`, or `234` according to the prototype shape.
 - A by-value snapshot is necessary to prove deep-copy isolation rather than merely checking that separate roots start with different seeds. Adding `union Candidate snapshot = holder.items[0]` exposed a classifier/evaluator mismatch: type inference covered `Expr::StructArrayGet`, but aggregate evaluation did not. Reusing the existing address-of aggregate-array-field pointer route evaluates the index once and allows `StructFieldValue::deep_clone_fields()` to preserve value semantics.
-- Candidate decision: this queue-leading matrix outranked parser-diagnostic expansion and broader pointer work because it directly stress-tests the newly released persistent-byte architecture and found a real aggregate evaluator defect. Bounded v0.48.0 release closure is next.
+- Candidate decision: this queue-leading matrix outranked parser-diagnostic expansion and broader pointer work because it directly stress-tested the newly released persistent-byte architecture and found a real aggregate evaluator defect. Bounded v0.48.0 release closure followed and is published above.
 
 ## 2026-09-01 — v0.47.0 release consistency
 
