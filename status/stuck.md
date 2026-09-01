@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-01 after bounded v0.48.0 release preparation received fresh independent `APPROVED` review and passed formatting, strict Clippy, all 2,129 local/no-cache-rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime/test-image versions, repeated empty tag preflight, and diff hygiene. No user input or external dependency is required; only release-commit-first branch/tag publication remains. The post-release task is the deterministic aggregate classifier/evaluator parity matrix.
+None. Last reviewed 2026-09-01 after bounded v0.48.0 publication. Release commit `bc353b96d05ed8b573f49eb23370b921f4ca257c` reached exact `origin/main` before annotated tag object `434a7dfd3733241a168c5b1868d1b232ce934366` was created and pushed; local and remote refs peel exactly to the release commit. Fresh independent approval, formatting, strict Clippy, all 2,129 local/no-cache-rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime/test-image versions, and diff hygiene pass. No user input or external dependency is required; the next task is the deterministic aggregate classifier/evaluator parity matrix.
 
 ## Resolved this run
 
