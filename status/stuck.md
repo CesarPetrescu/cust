@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-01 after bounded v0.47.0 release preparation: exact version RED/GREEN, the 2,126-test executable inventory, synchronized metadata/docs/status, fresh independent `APPROVED` re-review, the complete local/no-cache-rebuilt-Docker/runtime/version/diff gate, and repeated empty tag preflight pass. Release-commit-first publication and annotated-tag verification are the remaining ordered steps, not blockers.
+None. Last reviewed 2026-09-01 after bounded v0.47.0 publication: release commit `bf74fea72b9960e517ad8875e04a64f484121ae7` reached exact `origin/main` while the tag was absent; annotated tag object `f260abcc31da20fe24c820ae15846247ffd73b77` was then pushed and verified locally/remotely to peel exactly to the release commit. This status-only evidence update does not move or recreate the tag.
 
 ## Resolved this run
 
