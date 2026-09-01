@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.47.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.48.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -38,7 +38,7 @@ Expected output:
 cargo test
 ```
 
-The v0.47.0 executable inventory is 2,126 tests: 1,990 interpreter tests, 99 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+The v0.48.0 executable inventory is 2,129 tests: 1,992 interpreter tests, 100 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 
 ### Run inside Docker
 
@@ -71,7 +71,9 @@ The `test` service keeps a writable container overlay so Cargo can update `targe
 
 ## Current language subset
 
-Bounded v0.47.0 packages interpreter-owned persistent object bytes for every mutable scalar-only non-`double` union. Layouts with a non-const full-width `int` or `char` retain their deterministic visible carrier; carrierless layouts use hidden maximum-layout bytes while canonical typed routing still selects an actual mutable source member. Selected-member and whole-object `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` operations share one aggregate root at offset zero; raw bytes remain observable while `int`, `char`, and `_Bool` views synchronize under Cust's deterministic scalar model. Whole-object operations use the union's maximum layout size, selected-member operations retain that member's capacity, and overlap, recursive const/lifetime, deep-copy and aggregate-array-element isolation, zero-count identity, typed results, and non-evaluation remain enforced. All-const scalar unions and layouts containing arrays, pointers, `double`, or nested aggregates retain targeted rejection. Release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
+Bounded v0.48.0 packages deterministic model-based coverage for carrierless scalar-union object bytes together with aggregate-value evaluator parity for embedded aggregate-array elements. Ninety exact routes cross three mixed mutable `int`/`char`/`_Bool` layouts, direct/nested/embedded-array-element owners, selected-member/whole-object roots, and all five bounded-memory intrinsics. Fixed-seed byte models assert typed return identity, source-ordered one-time evaluation, non-vacuous writes, by-value deep-copy and untouched-root isolation, exact route totals, and targeted all-const/pointer/`double`/array/nested-layout boundaries. The matrix exposed and closed a classifier/evaluator mismatch: embedded aggregate-array elements already had aggregate type metadata but could not be evaluated by value; they now resolve through interpreter-owned storage and deep-clone into aggregate initializers.
+
+Persistent object bytes remain available for every mutable scalar-only non-`double` union. Layouts with a non-const full-width `int` or `char` retain their deterministic visible carrier; carrierless layouts use hidden maximum-layout bytes while canonical typed routing still selects an actual mutable source member. Selected-member and whole-object `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` operations share one aggregate root at offset zero; raw bytes remain observable while `int`, `char`, and `_Bool` views synchronize under Cust's deterministic scalar model. Whole-object operations use the union's maximum layout size, selected-member operations retain that member's capacity, and overlap, recursive const/lifetime, deep-copy and aggregate-array-element isolation, zero-count identity, typed results, and non-evaluation remain enforced. All-const scalar unions and layouts containing arrays, pointers, `double`, or nested aggregates retain targeted rejection. Release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`. Cust currently supports this C subset:
 
 ```c
 int main() {
@@ -213,8 +215,8 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 
 ## Roadmap
 
-- Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: prepare bounded v0.48.0 around the completed deterministic carrierless scalar-union matrix and embedded aggregate-array element aggregate-evaluation fix, with exact version, inventory, local/Docker verification, and annotated-tag publication checks.
+- Next milestone: add a deterministic aggregate classifier/evaluator parity matrix over every aggregate-valued expression accepted by `aggregate_expr_type_name()`, with explicit route totals and initializer/argument/return, deep-copy, one-time evaluation, nested aggregate, aggregate-array-element, and exact type-mismatch assertions.
+- Parser quality: continue recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider multiple pointer levels and broader C conformance fixtures.
 

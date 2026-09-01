@@ -6,6 +6,26 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.48.0 — 2026-09-01
+
+### Language subset
+
+- Added aggregate-value evaluator parity for embedded aggregate-array elements. Expressions such as `union Candidate snapshot = holder.items[index];` now resolve the selected interpreter-owned aggregate element and deep-clone its fields, matching the aggregate type classifier while preserving one-time index evaluation and by-value isolation.
+
+### Diagnostics and verification
+
+- Added a deterministic 90-route carrierless scalar-union matrix crossing three mixed mutable `int`/`char`/`_Bool` layouts, direct/nested/embedded-array-element owners, selected-member/whole-object roots, and exactly prototyped `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr`. Fixed-seed models verify raw bytes, typed return identity, non-vacuous writes, source-ordered one-time evaluation, deep-copy and untouched-root isolation, exact route totals, and targeted all-const/pointer/`double`/array/nested-layout rejection. The registered compiler-oracle fixture keeps native checks ABI-independent.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.48.0`.
+- Reconciled an executable inventory of 2,129 tests: 1,992 interpreter tests, 100 deterministic fuzz-safety tests, 33 CLI tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Shared union object bytes remain limited to scalar-only non-`double` layouts with at least one mutable member. All-const scalar unions and union layouts containing arrays, pointers, `double`, or nested aggregates remain unsupported. Selected-member operations retain that member's own capacity; complete-object operations use the union's maximum layout size. General pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and unsupported pragma semantics also remain outside the release.
+
 ## v0.47.0 — 2026-09-01
 
 ### Language subset

@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-01 after closing the carrierless scalar-union property matrix: fresh independent approval, focused interpreter/model/compiler-oracle and direct strict GCC/Clang checks, formatting, strict Clippy, all 2,129 local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. No user input or external dependency is required; bounded v0.48.0 release closure is next.
+None. Last reviewed 2026-09-01 after bounded v0.48.0 release preparation received fresh independent `APPROVED` review and passed formatting, strict Clippy, all 2,129 local/no-cache-rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime/test-image versions, repeated empty tag preflight, and diff hygiene. No user input or external dependency is required; only release-commit-first branch/tag publication remains. The post-release task is the deterministic aggregate classifier/evaluator parity matrix.
 
 ## Resolved this run
 

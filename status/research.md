@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-01 — v0.48.0 release consistency
+
+- Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.47.0` and passed after Cargo/lock plus both Compose image tags moved to `0.48.0`; Cargo metadata and the built CLI report `cust 0.48.0`.
+- Executable target listing yields 2,129 tests: `interpreter` 1,992 + `fuzz_safety` 100 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
+- Central release claims describe the 90-route carrierless scalar-union property matrix and the real `Expr::StructArrayGet` classifier/evaluator mismatch it exposed. Aggregate-array elements now deep-clone by value; one-time evaluation, typed identity, deterministic bytes, isolation, and the existing all-const/pointer/`double`/array/nested-layout boundaries remain explicit.
+- Candidate decision: bounded release closure outranked parser-diagnostic expansion, broader pointer work, and immediate aggregate evaluator property expansion because it atomically packages a reviewed correctness fix and exact executable coverage with bounded release risk. The aggregate classifier/evaluator parity matrix is promoted as the concrete post-release package.
+- Initial independent release review found one stale README next-milestone instruction. Promoting the aggregate classifier/evaluator parity matrix closed the queue contradiction; fresh complete-diff re-review returned `APPROVED`.
+- Formatting, warning-denied Clippy, all 2,129 local tests, a no-cache image rebuild, all 2,129 rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image `0.48.0` versions, and diff hygiene pass. Local and remote `v0.48.0` preflight were empty before edits and again after the canonical gate. Release preparation is complete; release-commit-first publication and exact annotated-tag verification remain before publication is claimed.
+
 ## 2026-09-01 — Carrierless scalar-union property modeling
 
 - The bounded matrix is the Cartesian product of three mutable carrierless layouts, three owner shapes (direct, nested, and embedded aggregate-array element), two roots (selected member and whole object), and five bounded-memory intrinsics: exactly 90 routes. Independent per-dimension and per-route counters prevent fixed-seed branch correlation from hiding cells.
