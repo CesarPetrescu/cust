@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-01 after recovery completion of persistent carrierless scalar-union object bytes, focused/native/compiler-oracle verification, fresh independent no-blocker review, complete local/Docker verification, runtime output `10`, and diff hygiene.
+None. Last reviewed 2026-09-01 after bounded v0.47.0 release preparation: exact version RED/GREEN, the 2,126-test executable inventory, synchronized metadata/docs/status, fresh independent `APPROVED` re-review, the complete local/no-cache-rebuilt-Docker/runtime/version/diff gate, and repeated empty tag preflight pass. Release-commit-first publication and annotated-tag verification are the remaining ordered steps, not blockers.
 
 ## Resolved this run
 

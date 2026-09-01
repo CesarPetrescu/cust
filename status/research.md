@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-01 — v0.47.0 release consistency
+
+- Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against `0.46.0` and passed after Cargo/lock plus both Compose image tags moved to `0.47.0`; Cargo metadata reports `cust 0.47.0`.
+- Executable target listing yields 2,126 tests: `interpreter` 1,990 + `fuzz_safety` 99 + `cli` 33 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
+- Central release claims cover every mutable scalar-only non-`double` union through either the existing visible full-width carrier or hidden maximum-layout bytes. Selected/whole capacity, canonical identity, typed synchronization, overlap, recursive const/lifetime, copy and array-element isolation, zero count, and non-evaluation remain explicit; all-const, pointer, double, array, and nested-aggregate layouts remain targeted boundaries.
+- Fresh independent complete-diff re-review returned `APPROVED` after two stale-history correction rounds. Formatting, warning-denied Clippy, all 2,126 local tests, a no-cache image rebuild, all 2,126 rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image `0.47.0` versions, and diff hygiene pass.
+- Local and remote `v0.47.0` preflight remain empty immediately before commit. The annotated tag remains reserved until exact `origin/main` accepts the verified release commit.
+- Candidate decision: release closure outranked another deterministic union matrix, parser-diagnostic expansion, and broader pointer work because it atomically packages already reviewed behavior with exact version assertions and bounded release risk. A fixed-seed carrierless scalar-union property matrix is the one post-release task.
+
 ## 2026-09-01 — Persistent carrierless scalar-union bytes
 
 - The hidden-byte model introduced for all-`_Bool` unions generalizes safely to any nonempty mutable scalar-only non-`double` union that lacks a non-const non-boolean member as wide as the union. Maximum member size remains Cust's deterministic storage width; no host ABI layout or padding is inferred.
