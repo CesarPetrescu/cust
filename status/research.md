@@ -2,6 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-01 — Carrierless scalar-union property modeling
+
+- The bounded matrix is the Cartesian product of three mutable carrierless layouts, three owner shapes (direct, nested, and embedded aggregate-array element), two roots (selected member and whole object), and five bounded-memory intrinsics: exactly 90 routes. Independent per-dimension and per-route counters prevent fixed-seed branch correlation from hiding cells.
+- Cust's deterministic `int = 8`, `char = 1`, `_Bool = 1`, little-endian object-byte model permits exact model assertions without claiming native ABI equivalence. The registered C fixture therefore restricts native checks to one-byte same-object operations, return identity, language-level copy isolation, and `sizeof(union) >= sizeof(int)`.
+- Distinct marker functions plus a shared decimal sequence prove both one-time evaluation and Cust's documented source-order intrinsic dispatch: destination/source/value/count sequences are `124`, `134`, or `234` according to the prototype shape.
+- A by-value snapshot is necessary to prove deep-copy isolation rather than merely checking that separate roots start with different seeds. Adding `union Candidate snapshot = holder.items[0]` exposed a classifier/evaluator mismatch: type inference covered `Expr::StructArrayGet`, but aggregate evaluation did not. Reusing the existing address-of aggregate-array-field pointer route evaluates the index once and allows `StructFieldValue::deep_clone_fields()` to preserve value semantics.
+- Candidate decision: this queue-leading matrix outranked parser-diagnostic expansion and broader pointer work because it directly stress-tests the newly released persistent-byte architecture and found a real aggregate evaluator defect. Bounded v0.48.0 release closure is next.
+
 ## 2026-09-01 — v0.47.0 release consistency
 
 - Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against `0.46.0` and passed after Cargo/lock plus both Compose image tags moved to `0.47.0`; Cargo metadata reports `cust 0.47.0`.

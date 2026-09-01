@@ -20,6 +20,11 @@ union Carrierless {
     _Bool truth;
 };
 
+struct CarrierlessBox {
+    union Carrierless value;
+    union Carrierless items[2];
+};
+
 int main(void) {
     int source = 37;
     unsigned char zero_bytes[sizeof(int)] = {0};
@@ -32,6 +37,11 @@ int main(void) {
     union Flags flags_copy = {.second = 0};
     union Carrierless carrierless_source = {.low = 7};
     union Carrierless carrierless_copy = {.low = 0};
+    struct CarrierlessBox carrierless_box = {
+        {.low = 9},
+        {{.low = 5}, {.low = 0}},
+    };
+    union Carrierless carrierless_snapshot = carrierless_box.items[0];
     unsigned char bool_zero_bytes[sizeof(union Flags)] = {0};
 
     if ((void *)&value.first != (void *)&value.second) return 1;
@@ -71,5 +81,18 @@ int main(void) {
         (void *)&carrierless_source.wide) return 27;
     if (carrierless_copy.low != 0 || carrierless_copy.truth != 0 ||
         sizeof(union Carrierless) < sizeof(int)) return 28;
+    if (memcpy(&carrierless_box.items[1].low, &carrierless_box.items[0].low, 1) !=
+        (void *)&carrierless_box.items[1].truth) return 29;
+    if (memcmp(&carrierless_box.items[1].low, &carrierless_box.items[0].low, 1) != 0)
+        return 30;
+    if (memmove(&carrierless_box.items[1].low, &carrierless_box.items[1].truth, 1) !=
+        (void *)&carrierless_box.items[1].wide) return 31;
+    if (memchr(&carrierless_box.value.low, 9, 1) !=
+        (void *)&carrierless_box.value.wide) return 32;
+    if (memset(&carrierless_box.items[1].truth, 0, 1) !=
+        (void *)&carrierless_box.items[1].low) return 33;
+    carrierless_snapshot.low = 1;
+    if (carrierless_box.items[0].low != 5 || carrierless_box.items[1].low != 0 ||
+        carrierless_box.value.low != 9 || carrierless_snapshot.low != 1) return 34;
     return 0;
 }

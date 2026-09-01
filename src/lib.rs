@@ -33497,6 +33497,7 @@ impl Interpreter {
             | Expr::StructPtrSet { .. }
             | Expr::StructElementGet { .. }
             | Expr::ArraySet { .. }
+            | Expr::StructArrayGet { .. }
             | Expr::StructArraySet { .. }
             | Expr::StructElementArrayGet { .. }
             | Expr::StructElementArraySet { .. }
@@ -51741,6 +51742,22 @@ impl Interpreter {
                         None => Err(CustError::new(format!("undefined variable '{name}'"))),
                     }
                 }
+            }
+            Expr::StructArrayGet {
+                name,
+                fields,
+                index,
+            } => {
+                let pointer = self.eval_pointer(&Expr::AddressOfStructArrayField {
+                    name: name.clone(),
+                    fields: fields.clone(),
+                    index: index.clone(),
+                })?;
+                let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
+                Ok(ReturnValue::Struct {
+                    type_name,
+                    fields: StructFieldValue::deep_clone_fields(fields),
+                })
             }
             Expr::StructElementArrayGet { .. } => {
                 let pointer = self.eval_pointer(expr)?;

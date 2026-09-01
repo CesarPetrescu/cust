@@ -28189,3 +28189,359 @@ fn ordinary_named_array_bounds_prefix(kind: FieldBackedPointeeKind) -> &'static 
         FieldBackedPointeeKind::Point | FieldBackedPointeeKind::Number => "struct array",
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+enum CarrierlessLayout {
+    CharAndBool,
+    BoolOnly,
+    CharOnly,
+}
+
+impl CarrierlessLayout {
+    const ALL: [Self; 3] = [Self::CharAndBool, Self::BoolOnly, Self::CharOnly];
+
+    fn fields(self) -> &'static str {
+        match self {
+            Self::CharAndBool => "const int wide; char low; _Bool truth;",
+            Self::BoolOnly => "const int wide; const char guard; _Bool truth;",
+            Self::CharOnly => "char low; const int wide; const _Bool truth;",
+        }
+    }
+
+    fn selected_member(self) -> &'static str {
+        match self {
+            Self::BoolOnly => "truth",
+            Self::CharAndBool | Self::CharOnly => "low",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CarrierlessOwner {
+    Direct,
+    Nested,
+    AggregateArrayElement,
+}
+
+impl CarrierlessOwner {
+    const ALL: [Self; 3] = [Self::Direct, Self::Nested, Self::AggregateArrayElement];
+
+    fn declarations(self, seed: i64, destination_seed: i64) -> String {
+        match self {
+            Self::Direct => format!(
+                "union Candidate source_value = {{.wide = {seed}}};\n\
+                 union Candidate destination_value = {{.wide = {destination_seed}}};\n\
+                 union Candidate untouched_value = {{.wide = {}}};",
+                seed + 1
+            ),
+            Self::Nested => format!(
+                "struct Holder {{ int tag; union Candidate value; }};\n\
+                 struct Holder source_holder = {{1, {{.wide = {seed}}}}};\n\
+                 struct Holder destination_holder = {{2, {{.wide = {destination_seed}}}}};\n\
+                 struct Holder untouched_holder = {{3, {{.wide = {}}}}};",
+                seed + 1
+            ),
+            Self::AggregateArrayElement => format!(
+                "struct Holder {{ union Candidate items[3]; }};\n\
+                 struct Holder holder = {{{{{{.wide = {seed}}}, {{.wide = {destination_seed}}}, {{.wide = {}}}}}}};",
+                seed + 1
+            ),
+        }
+    }
+
+    fn source_object(self) -> &'static str {
+        match self {
+            Self::Direct => "source_value",
+            Self::Nested => "source_holder.value",
+            Self::AggregateArrayElement => "holder.items[0]",
+        }
+    }
+
+    fn destination_object(self) -> &'static str {
+        match self {
+            Self::Direct => "destination_value",
+            Self::Nested => "destination_holder.value",
+            Self::AggregateArrayElement => "holder.items[1]",
+        }
+    }
+
+    fn untouched_object(self) -> &'static str {
+        match self {
+            Self::Direct => "untouched_value",
+            Self::Nested => "untouched_holder.value",
+            Self::AggregateArrayElement => "holder.items[2]",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CarrierlessRoot {
+    SelectedMember,
+    WholeObject,
+}
+
+impl CarrierlessRoot {
+    const ALL: [Self; 2] = [Self::SelectedMember, Self::WholeObject];
+
+    fn pointer(self, function: &str, layout: CarrierlessLayout) -> String {
+        match self {
+            Self::SelectedMember => format!("&{function}()->{}", layout.selected_member()),
+            Self::WholeObject => format!("{function}()"),
+        }
+    }
+
+    fn static_pointer(self, object: &str, layout: CarrierlessLayout) -> String {
+        match self {
+            Self::SelectedMember => format!("&{object}.{}", layout.selected_member()),
+            Self::WholeObject => format!("&{object}"),
+        }
+    }
+
+    fn count(self) -> &'static str {
+        match self {
+            Self::SelectedMember => "1",
+            Self::WholeObject => "sizeof(union Candidate)",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CarrierlessIntrinsic {
+    Memcpy,
+    Memmove,
+    Memcmp,
+    Memset,
+    Memchr,
+}
+
+impl CarrierlessIntrinsic {
+    const ALL: [Self; 5] = [
+        Self::Memcpy,
+        Self::Memmove,
+        Self::Memcmp,
+        Self::Memset,
+        Self::Memchr,
+    ];
+
+    fn destination_seed(self, root: CarrierlessRoot, source_seed: i64) -> i64 {
+        match self {
+            Self::Memcmp if matches!(root, CarrierlessRoot::WholeObject) => {
+                source_seed ^ 0x0000_0001_0000_0000
+            }
+            Self::Memcmp | Self::Memchr => source_seed,
+            Self::Memcpy | Self::Memmove | Self::Memset => 0x2233_4455_6677_8800,
+        }
+    }
+
+    fn call(
+        self,
+        layout: CarrierlessLayout,
+        owner: CarrierlessOwner,
+        root: CarrierlessRoot,
+        seed: i64,
+    ) -> String {
+        let destination = root.pointer("destination", layout);
+        let source = root.pointer("source", layout);
+        let expected_destination = root.static_pointer(owner.destination_object(), layout);
+        let source_root = root.static_pointer(owner.source_object(), layout);
+        let (needle, expected_source) = match root {
+            CarrierlessRoot::SelectedMember => (seed & 0xff, source_root),
+            CarrierlessRoot::WholeObject => (0x66, format!("((char *){source_root} + 2)")),
+        };
+        match self {
+            Self::Memcpy => format!(
+                "if (memcpy({destination}, {source}, count()) != (void *){expected_destination}) return 1;"
+            ),
+            Self::Memmove => format!(
+                "if (memmove({destination}, {source}, count()) != (void *){expected_destination}) return 1;"
+            ),
+            Self::Memcmp if matches!(root, CarrierlessRoot::SelectedMember) => {
+                format!("if (memcmp({destination}, {source}, count()) != 0) return 1;")
+            }
+            Self::Memcmp => {
+                format!("if (memcmp({destination}, {source}, count()) == 0) return 1;")
+            }
+            Self::Memset => format!(
+                "if (memset({destination}, fill(), count()) != (void *){expected_destination}) return 1;"
+            ),
+            Self::Memchr => format!(
+                "if (memchr({source}, value({needle}), count()) != (void *){expected_source}) return 1;"
+            ),
+        }
+    }
+
+    fn expected_counters(self) -> (i64, i64, i64, i64, i64) {
+        match self {
+            Self::Memcpy | Self::Memmove | Self::Memcmp => (1, 1, 0, 1, 124),
+            Self::Memset => (1, 0, 1, 1, 134),
+            Self::Memchr => (0, 1, 1, 1, 234),
+        }
+    }
+
+    fn expected_destination(
+        self,
+        root: CarrierlessRoot,
+        source_seed: i64,
+        destination_seed: i64,
+    ) -> i64 {
+        match self {
+            Self::Memcpy | Self::Memmove if matches!(root, CarrierlessRoot::WholeObject) => {
+                source_seed
+            }
+            Self::Memcpy | Self::Memmove => (destination_seed & !0xff) | (source_seed & 0xff),
+            Self::Memset if matches!(root, CarrierlessRoot::WholeObject) => 0x5a5a_5a5a_5a5a_5a5a,
+            Self::Memset => (destination_seed & !0xff) | 0x5a,
+            Self::Memcmp | Self::Memchr => destination_seed,
+        }
+    }
+}
+
+#[test]
+fn generated_carrierless_scalar_union_object_bytes_match_model_without_panics() {
+    let mut state = 0xC057_CA22_1E55_u64;
+    let mut layout_counts = [0; 3];
+    let mut owner_counts = [0; 3];
+    let mut root_counts = [0; 2];
+    let mut intrinsic_counts = [0; 5];
+    let mut route_counts = [0; 90];
+
+    for (layout_index, layout) in CarrierlessLayout::ALL.into_iter().enumerate() {
+        for (owner_index, owner) in CarrierlessOwner::ALL.into_iter().enumerate() {
+            for (root_index, root) in CarrierlessRoot::ALL.into_iter().enumerate() {
+                for (intrinsic_index, intrinsic) in
+                    CarrierlessIntrinsic::ALL.into_iter().enumerate()
+                {
+                    layout_counts[layout_index] += 1;
+                    owner_counts[owner_index] += 1;
+                    root_counts[root_index] += 1;
+                    intrinsic_counts[intrinsic_index] += 1;
+                    let route_index =
+                        layout_index * 30 + owner_index * 10 + root_index * 5 + intrinsic_index;
+                    route_counts[route_index] += 1;
+
+                    let source_seed =
+                        0x1122_3344_5566_7700 + 1 + (next_u64(&mut state) % 100) as i64;
+                    let source_object = owner.source_object();
+                    let destination_object = owner.destination_object();
+                    let untouched_object = owner.untouched_object();
+                    let destination_seed = intrinsic.destination_seed(root, source_seed);
+                    let declarations = owner.declarations(source_seed, destination_seed);
+                    let call = intrinsic.call(layout, owner, root, source_seed);
+                    let expected_destination =
+                        intrinsic.expected_destination(root, source_seed, destination_seed);
+                    let (destination_calls, source_calls, value_calls, count_calls, sequence) =
+                        intrinsic.expected_counters();
+                    let selected_member = layout.selected_member();
+                    let expected_snapshot = source_seed & !0xff;
+                    let source = format!(
+                        "void *memcpy(void *, const void *, unsigned long int);\n\
+                         void *memmove(void *, const void *, unsigned long int);\n\
+                         int memcmp(const void *, const void *, unsigned long int);\n\
+                         void *memset(void *, int, unsigned long int);\n\
+                         void *memchr(const void *, int, unsigned long int);\n\
+                         union Candidate {{ {} }};\n\
+                         {declarations}\n\
+                         int destination_calls; int source_calls; int value_calls; int count_calls; int sequence;\n\
+                         union Candidate *destination(void) {{ destination_calls += 1; sequence = sequence * 10 + 1; return &{destination_object}; }}\n\
+                         union Candidate *source(void) {{ source_calls += 1; sequence = sequence * 10 + 2; return &{source_object}; }}\n\
+                         int fill(void) {{ value_calls += 1; sequence = sequence * 10 + 3; return 0x5a; }}\n\
+                         int value(int expected) {{ value_calls += 1; sequence = sequence * 10 + 3; return expected; }}\n\
+                         unsigned long int count(void) {{ count_calls += 1; sequence = sequence * 10 + 4; return {}; }}\n\
+                         int main(void) {{\n\
+                             union Candidate snapshot = {source_object};\n\
+                             {call}\n\
+                             if (destination_calls != {destination_calls} || source_calls != {source_calls} ||\n\
+                                 value_calls != {value_calls} || count_calls != {count_calls} ||\n\
+                                 sequence != {sequence}) return 2;\n\
+                             snapshot.{selected_member} = 0;\n\
+                             if (snapshot.wide != {expected_snapshot} ||\n\
+                                 {source_object}.wide != {source_seed}) return 3;\n\
+                             if ({destination_object}.wide != {expected_destination}) return 4;\n\
+                             if ({untouched_object}.wide != {}) return 5;\n\
+                             return 0;\n\
+                         }}",
+                        layout.fields(),
+                        root.count(),
+                        source_seed + 1
+                    );
+
+                    assert_interpretation(
+                        &source,
+                        ExpectedInterpretation::Value(0),
+                        &format!(
+                            "carrierless union layout {layout:?}, owner {owner:?}, root {root:?}, intrinsic {intrinsic:?}, seed {source_seed}"
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    assert_eq!(layout_counts, [30; 3]);
+    assert_eq!(owner_counts, [30; 3]);
+    assert_eq!(root_counts, [45; 2]);
+    assert_eq!(intrinsic_counts, [18; 5]);
+    assert!(route_counts.into_iter().all(|count| count == 1));
+
+    for (name, fields, selected_member, selected_error) in [
+        (
+            "all-const",
+            "const int wide; const char low;",
+            "low",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "pointer",
+            "const int wide; char low; int *pointer;",
+            "low",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
+        ),
+        (
+            "double",
+            "const int wide; char low; double real;",
+            "low",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
+        ),
+        (
+            "array",
+            "const int wide; char low; char bytes[2];",
+            "low",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
+        ),
+        (
+            "nested",
+            "const int wide; char low; struct Inner nested;",
+            "low",
+            "function 'memset' does not yet support union-backed scalar object storage for argument 1",
+        ),
+    ] {
+        let nested_definition = if name == "nested" {
+            "struct Inner { int value; };"
+        } else {
+            ""
+        };
+        let selected_source = format!(
+            "void *memset(void *, int, unsigned long int); {nested_definition}\n\
+             union Unsupported {{ {fields} }} value = {{.wide = 1}};\n\
+             int main(void) {{ memset(&value.{selected_member}, 0, 1); return 0; }}"
+        );
+        assert_interpretation(
+            &selected_source,
+            ExpectedInterpretation::Error(selected_error),
+            &format!("carrierless union unsupported selected-member cell {name}"),
+        );
+
+        let whole_source = format!(
+            "void *memset(void *, int, unsigned long int); {nested_definition}\n\
+             union Unsupported {{ {fields} }} value = {{.wide = 1}};\n\
+             int main(void) {{ memset(&value, 0, sizeof(value)); return 0; }}"
+        );
+        assert_interpretation(
+            &whole_source,
+            ExpectedInterpretation::Error(
+                "function 'memset' does not yet support union-backed whole-struct object storage for argument 1",
+            ),
+            &format!("carrierless union unsupported whole-object cell {name}"),
+        );
+    }
+}

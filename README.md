@@ -214,7 +214,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 ## Roadmap
 
 - Near term: continue parser recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Next milestone: add a deterministic model-based carrierless scalar-union matrix crossing mixed `int`/`char`/`_Bool` layouts, selected versus whole-object roots, direct/nested/array-element ownership, copy/move/compare/fill/search routes, and exact all-const/pointer/`double`/array/nested boundaries.
+- Next milestone: prepare bounded v0.48.0 around the completed deterministic carrierless scalar-union matrix and embedded aggregate-array element aggregate-evaluation fix, with exact version, inventory, local/Docker verification, and annotated-tag publication checks.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider multiple pointer levels and broader C conformance fixtures.
 

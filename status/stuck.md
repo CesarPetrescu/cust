@@ -4,9 +4,15 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-01 after bounded v0.47.0 publication: release commit `bf74fea72b9960e517ad8875e04a64f484121ae7` reached exact `origin/main` while the tag was absent; annotated tag object `f260abcc31da20fe24c820ae15846247ffd73b77` was then pushed and verified locally/remotely to peel exactly to the release commit. This status-only evidence update does not move or recreate the tag.
+None. Last reviewed 2026-09-01 after closing the carrierless scalar-union property matrix: fresh independent approval, focused interpreter/model/compiler-oracle and direct strict GCC/Clang checks, formatting, strict Clippy, all 2,129 local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. No user input or external dependency is required; bounded v0.48.0 release closure is next.
 
 ## Resolved this run
+
+### 2026-09-01 — Carrierless union matrix exposed missing embedded-array aggregate evaluation
+
+- Failure: the new exact property matrix stopped at `union Candidate snapshot = holder.items[0];` with `expected struct expression`; the same focused regression reproduced independently without a bounded-memory call.
+- Root cause: `aggregate_expr_type_name()` already classified `Expr::StructArrayGet` as the aggregate element type, but `eval_struct_expr()` had no matching runtime arm. Embedded aggregate-array elements worked as assignment targets and pointer roots but not as by-value initializer expressions.
+- RED/GREEN: a focused interpreter test failed first. Runtime aggregate evaluation now resolves the existing `AddressOfStructArrayField` pointer target and deep-clones its field map, preserving one-time index evaluation and by-value isolation. The 90-route model and expanded native fixture then pass.
 
 ### 2026-09-01 — Persistent carrierless scalar-union object bytes
 

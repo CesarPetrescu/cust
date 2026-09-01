@@ -23772,6 +23772,50 @@ fn supports_embedded_aggregate_array_element_copy_assignment() {
 }
 
 #[test]
+fn copies_embedded_aggregate_array_elements_into_aggregate_initializers() {
+    let program = r#"
+union Candidate { const int wide; char low; };
+struct Holder { union Candidate items[2]; };
+struct Holder holder = {{{.wide = 0x1122334455667788}, {.wide = 9}}};
+int index_calls;
+int next_index(void) { index_calls += 1; return 0; }
+int main(void) {
+    union Candidate snapshot = holder.items[next_index()];
+    snapshot.low = 0;
+    if (snapshot.wide != 0x1122334455667700) return 1;
+    if (holder.items[0].wide != 0x1122334455667788) return 2;
+    if (index_calls != 1) return 3;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn copies_embedded_aggregate_array_elements_into_function_arguments() {
+    let program = r#"
+union Candidate { const int wide; char low; };
+struct Holder { union Candidate items[2]; };
+struct Holder holder = {{{.wide = 0x1122334455667788}, {.wide = 9}}};
+int index_calls;
+int next_index(void) { index_calls += 1; return 0; }
+int consume(union Candidate value) {
+    value.low = 0;
+    return value.wide == 0x1122334455667700;
+}
+int main(void) {
+    if (!consume(holder.items[next_index()])) return 1;
+    if (holder.items[0].wide != 0x1122334455667788) return 2;
+    if (index_calls != 1) return 3;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
 fn rejects_embedded_aggregate_array_element_assignment_type_mismatch() {
     let program = include_str!(
         "fixtures/invalid/embedded_aggregate_array_element_assignment_type_mismatch.c"
