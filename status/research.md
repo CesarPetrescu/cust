@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-01 — Aggregate classifier/evaluator parity modeling
+
+- The executable aggregate-valued surface currently has 22 distinct `Expr` route families. Crossing each with declaration initializer, function argument, function return, and exact nominal mismatch produces 88 deterministic programs; independent counters catch missing variants, contexts, or duplicate generation.
+- `_Generic` demonstrated that argument classification can diverge even when `aggregate_expr_type_name()` and `eval_struct_expr()` agree. `StructPtrArrayGet` demonstrated the inverse: type classification can admit a route that runtime aggregate evaluation omits.
+- Pointer-backed aggregate values must resolve their pointer/index expression once and deep-clone the resulting field map. Re-evaluation breaks marker/source-order guarantees; sharing the field map breaks C by-value isolation.
+- The matrix uses nested aggregate members and embedded aggregate-array elements in every successful result, then mutates the original after initialization/call/return to prove the copy is independent. Type-mismatch contexts retain exact nominal `struct Cell` versus `struct OtherCell` diagnostics.
+- Independent review exposed a third consumer-parity requirement: aggregate arguments must route `_Generic` through `eval_selected_generic()` rather than directly selecting one association, otherwise invalid unselected associations escape semantic validation. A focused regression first returned `Ok(7)` for an undefined unselected call and passes after using the shared validation wrapper.
+- Candidate decision: this queue-leading parity matrix outranked parser diagnostics, broader pointer work, and immediate release metadata because the prior release exposed a silent classifier/evaluator boundary defect. The package found two additional runtime/classifier mismatches plus one review-only validation bypass. Stable route/context identity, not loop position, must key exact matrix counters so duplicate or omitted entries become visible. Bounded v0.49.0 release closure follows this package. See `references/cust-aggregate-expression-classifier-evaluator-parity.md`.
+
 ## 2026-09-01 — v0.48.0 release consistency
 
 - Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.47.0` and passed after Cargo/lock plus both Compose image tags moved to `0.48.0`; Cargo metadata and the built CLI report `cust 0.48.0`.

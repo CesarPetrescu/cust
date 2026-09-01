@@ -28545,3 +28545,399 @@ fn generated_carrierless_scalar_union_object_bytes_match_model_without_panics() 
         );
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum AggregateValueRoute {
+    GenericSelection,
+    AggregateLiteral,
+    AggregateFieldGet,
+    Variable,
+    VariableAssignment,
+    AggregateArrayAssignment,
+    EmbeddedArrayAssignment,
+    EmbeddedArrayElement,
+    AggregateElementEmbeddedArrayElement,
+    AggregateElementEmbeddedArrayAssignment,
+    PointerEmbeddedArrayElement,
+    NestedField,
+    NestedFieldAssignment,
+    AggregateElementNestedField,
+    PointerNestedField,
+    PointerNestedFieldAssignment,
+    AggregateArrayElement,
+    Dereference,
+    DereferenceAssignment,
+    FunctionCall,
+    Conditional,
+    Comma,
+}
+
+impl AggregateValueRoute {
+    const COUNT: usize = 22;
+    const ALL: [Self; Self::COUNT] = [
+        Self::GenericSelection,
+        Self::AggregateLiteral,
+        Self::AggregateFieldGet,
+        Self::Variable,
+        Self::VariableAssignment,
+        Self::AggregateArrayAssignment,
+        Self::EmbeddedArrayAssignment,
+        Self::EmbeddedArrayElement,
+        Self::AggregateElementEmbeddedArrayElement,
+        Self::AggregateElementEmbeddedArrayAssignment,
+        Self::PointerEmbeddedArrayElement,
+        Self::NestedField,
+        Self::NestedFieldAssignment,
+        Self::AggregateElementNestedField,
+        Self::PointerNestedField,
+        Self::PointerNestedFieldAssignment,
+        Self::AggregateArrayElement,
+        Self::Dereference,
+        Self::DereferenceAssignment,
+        Self::FunctionCall,
+        Self::Conditional,
+        Self::Comma,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn expression(self) -> &'static str {
+        match self {
+            Self::GenericSelection => "_Generic(first, struct Cell: first)",
+            Self::AggregateLiteral => "(struct Cell){.value = 11, .values = {12}, .nested = {13}}",
+            Self::AggregateFieldGet => {
+                "((struct Layer){.cell = {.value = 12, .values = {13}, .nested = {14}}}).cell"
+            }
+            Self::Variable => "first",
+            Self::VariableAssignment => "(first = replacement)",
+            Self::AggregateArrayAssignment => "(elements[inner_index()] = replacement)",
+            Self::EmbeddedArrayAssignment => "(holder.items[inner_index()] = replacement)",
+            Self::EmbeddedArrayElement => "holder.items[inner_index()]",
+            Self::AggregateElementEmbeddedArrayElement => {
+                "holders[outer_index()].items[inner_index()]"
+            }
+            Self::AggregateElementEmbeddedArrayAssignment => {
+                "(holders[outer_index()].items[inner_index()] = replacement)"
+            }
+            Self::PointerEmbeddedArrayElement => "holder_pointer->items[inner_index()]",
+            Self::NestedField => "holder.layer.cell",
+            Self::NestedFieldAssignment => "(holder.layer.cell = replacement)",
+            Self::AggregateElementNestedField => "holders[outer_index()].layer.cell",
+            Self::PointerNestedField => "holder_pointer->layer.cell",
+            Self::PointerNestedFieldAssignment => "(holder_pointer->layer.cell = replacement)",
+            Self::AggregateArrayElement => "elements[inner_index()]",
+            Self::Dereference => "*cell_pointer",
+            Self::DereferenceAssignment => "(*cell_pointer = replacement)",
+            Self::FunctionCall => "make_cell()",
+            Self::Conditional => "flag ? first : second",
+            Self::Comma => "(touch(), first)",
+        }
+    }
+
+    fn expected_value(self) -> i64 {
+        match self {
+            Self::AggregateLiteral => 11,
+            Self::AggregateFieldGet => 12,
+            Self::Variable | Self::GenericSelection | Self::Conditional | Self::Comma => 10,
+            Self::VariableAssignment
+            | Self::AggregateArrayAssignment
+            | Self::EmbeddedArrayAssignment
+            | Self::AggregateElementEmbeddedArrayAssignment
+            | Self::NestedFieldAssignment
+            | Self::PointerNestedFieldAssignment
+            | Self::DereferenceAssignment => 30,
+            Self::EmbeddedArrayElement | Self::PointerEmbeddedArrayElement => 60,
+            Self::AggregateElementEmbeddedArrayElement => 71,
+            Self::NestedField | Self::PointerNestedField => 50,
+            Self::AggregateElementNestedField => 70,
+            Self::AggregateArrayElement | Self::Dereference => 40,
+            Self::FunctionCall => 90,
+        }
+    }
+
+    fn source_check(self) -> &'static str {
+        match self {
+            Self::VariableAssignment => "first.value == 30",
+            Self::AggregateArrayAssignment | Self::DereferenceAssignment => {
+                "elements[0].value == 30"
+            }
+            Self::EmbeddedArrayAssignment => "holder.items[0].value == 30",
+            Self::AggregateElementEmbeddedArrayAssignment => "holders[0].items[0].value == 30",
+            Self::NestedFieldAssignment | Self::PointerNestedFieldAssignment => {
+                "holder.layer.cell.value == 30"
+            }
+            Self::EmbeddedArrayElement | Self::PointerEmbeddedArrayElement => {
+                "holder.items[0].value == 60"
+            }
+            Self::AggregateElementEmbeddedArrayElement => "holders[0].items[0].value == 71",
+            Self::NestedField | Self::PointerNestedField => "holder.layer.cell.value == 50",
+            Self::AggregateElementNestedField => "holders[0].layer.cell.value == 70",
+            Self::AggregateArrayElement | Self::Dereference => "elements[0].value == 40",
+            Self::GenericSelection
+            | Self::AggregateLiteral
+            | Self::AggregateFieldGet
+            | Self::Variable
+            | Self::FunctionCall
+            | Self::Conditional
+            | Self::Comma => "first.value == 10",
+        }
+    }
+
+    fn copied_storage_source_check(self) -> &'static str {
+        match self {
+            Self::VariableAssignment => "first.values[0] == 31 && first.nested.value == 32",
+            Self::AggregateArrayAssignment | Self::DereferenceAssignment => {
+                "elements[0].values[0] == 31 && elements[0].nested.value == 32"
+            }
+            Self::EmbeddedArrayAssignment => {
+                "holder.items[0].values[0] == 31 && holder.items[0].nested.value == 32"
+            }
+            Self::AggregateElementEmbeddedArrayAssignment => {
+                "holders[0].items[0].values[0] == 31 && holders[0].items[0].nested.value == 32"
+            }
+            Self::NestedFieldAssignment | Self::PointerNestedFieldAssignment => {
+                "holder.layer.cell.values[0] == 31 && holder.layer.cell.nested.value == 32"
+            }
+            Self::EmbeddedArrayElement | Self::PointerEmbeddedArrayElement => {
+                "holder.items[0].values[0] == 61 && holder.items[0].nested.value == 62"
+            }
+            Self::AggregateElementEmbeddedArrayElement => {
+                "holders[0].items[0].values[0] == 72 && holders[0].items[0].nested.value == 73"
+            }
+            Self::NestedField | Self::PointerNestedField => {
+                "holder.layer.cell.values[0] == 51 && holder.layer.cell.nested.value == 52"
+            }
+            Self::AggregateElementNestedField => {
+                "holders[0].layer.cell.values[0] == 71 && holders[0].layer.cell.nested.value == 72"
+            }
+            Self::AggregateArrayElement | Self::Dereference => {
+                "elements[0].values[0] == 41 && elements[0].nested.value == 42"
+            }
+            Self::GenericSelection | Self::Variable | Self::Conditional | Self::Comma => {
+                "first.values[0] == 11 && first.nested.value == 12"
+            }
+            Self::AggregateLiteral | Self::AggregateFieldGet | Self::FunctionCall => "1",
+        }
+    }
+
+    fn expected_sequence(self) -> i64 {
+        match self {
+            Self::AggregateElementEmbeddedArrayElement
+            | Self::AggregateElementEmbeddedArrayAssignment => 12,
+            Self::AggregateElementNestedField => 1,
+            Self::AggregateArrayAssignment
+            | Self::EmbeddedArrayAssignment
+            | Self::EmbeddedArrayElement
+            | Self::PointerEmbeddedArrayElement
+            | Self::AggregateArrayElement => 2,
+            Self::FunctionCall => 3,
+            Self::Comma => 4,
+            Self::GenericSelection
+            | Self::AggregateLiteral
+            | Self::AggregateFieldGet
+            | Self::Variable
+            | Self::VariableAssignment
+            | Self::NestedField
+            | Self::NestedFieldAssignment
+            | Self::PointerNestedField
+            | Self::PointerNestedFieldAssignment
+            | Self::Dereference
+            | Self::DereferenceAssignment
+            | Self::Conditional => 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum AggregateValueContext {
+    Initializer,
+    Argument,
+    Return,
+    TypeMismatch,
+}
+
+impl AggregateValueContext {
+    const COUNT: usize = 4;
+    const ALL: [Self; Self::COUNT] = [
+        Self::Initializer,
+        Self::Argument,
+        Self::Return,
+        Self::TypeMismatch,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn program(self, route: AggregateValueRoute) -> String {
+        let expression = route.expression();
+        let expected_value = route.expected_value();
+        let source_check = route.source_check();
+        let copied_storage_source_check = route.copied_storage_source_check();
+        let expected_sequence = route.expected_sequence();
+        let body = match self {
+            Self::Initializer => format!(
+                "int main(void) {{ struct Cell result = {expression};\n\
+                 if (result.value != {expected_value}) return 1;\n\
+                 result.value = 99;\n\
+                 result.values[0] = 98;\n\
+                 result.nested.value = 97;\n\
+                 if (!({source_check})) return 2;\n\
+                 if (!({copied_storage_source_check})) return 3;\n\
+                 if (sequence != {expected_sequence}) return 4;\n\
+                 return 0; }}"
+            ),
+            Self::Argument => format!(
+                "int main(void) {{ int observed = consume({expression});\n\
+                 if (observed != {expected_value}) return 1;\n\
+                 if (!({source_check})) return 2;\n\
+                 if (!({copied_storage_source_check})) return 3;\n\
+                 if (sequence != {expected_sequence}) return 4;\n\
+                 return 0; }}"
+            ),
+            Self::Return => format!(
+                "struct Cell route_value(void) {{ return {expression}; }}\n\
+                 int main(void) {{ struct Cell result = route_value();\n\
+                 if (result.value != {expected_value}) return 1;\n\
+                 result.value = 99;\n\
+                 result.values[0] = 98;\n\
+                 result.nested.value = 97;\n\
+                 if (!({source_check})) return 2;\n\
+                 if (!({copied_storage_source_check})) return 3;\n\
+                 if (sequence != {expected_sequence}) return 4;\n\
+                 return 0; }}"
+            ),
+            Self::TypeMismatch => {
+                format!("int main(void) {{ return consume_other({expression}); }}")
+            }
+        };
+        format!("{AGGREGATE_VALUE_PREAMBLE}\n{body}\n")
+    }
+
+    fn expected(self) -> ExpectedInterpretation {
+        match self {
+            Self::Initializer | Self::Argument | Self::Return => ExpectedInterpretation::Value(0),
+            Self::TypeMismatch => ExpectedInterpretation::Error(
+                "function 'consume_other' struct parameter 'cell' expected struct 'OtherCell', got struct 'Cell'",
+            ),
+        }
+    }
+}
+
+const AGGREGATE_VALUE_PREAMBLE: &str = r#"
+struct NestedValue { int value; };
+struct Cell { int value; int values[1]; struct NestedValue nested; };
+struct OtherCell { int value; int values[1]; struct NestedValue nested; };
+struct Layer { struct Cell cell; };
+struct Holder {
+    struct Layer layer;
+    struct Cell items[2];
+    struct Cell *cursor;
+};
+struct Cell first = {.value = 10, .values = {11}, .nested = {12}};
+struct Cell second = {.value = 20, .values = {21}, .nested = {22}};
+struct Cell replacement = {.value = 30, .values = {31}, .nested = {32}};
+struct Cell elements[2] = {
+    {.value = 40, .values = {41}, .nested = {42}},
+    {.value = 41, .values = {42}, .nested = {43}}
+};
+struct Holder holder = {
+    .layer = {.cell = {.value = 50, .values = {51}, .nested = {52}}},
+    .items = {
+        {.value = 60, .values = {61}, .nested = {62}},
+        {.value = 61, .values = {62}, .nested = {63}}
+    },
+    .cursor = elements
+};
+struct Holder holders[2] = {
+    {
+        .layer = {.cell = {.value = 70, .values = {71}, .nested = {72}}},
+        .items = {
+            {.value = 71, .values = {72}, .nested = {73}},
+            {.value = 72, .values = {73}, .nested = {74}}
+        },
+        .cursor = elements
+    },
+    {
+        .layer = {.cell = {.value = 80, .values = {81}, .nested = {82}}},
+        .items = {
+            {.value = 81, .values = {82}, .nested = {83}},
+            {.value = 82, .values = {83}, .nested = {84}}
+        },
+        .cursor = elements
+    }
+};
+struct Holder *holder_pointer = &holder;
+struct Cell *cell_pointer = elements;
+int flag = 1;
+int sequence;
+int outer_index(void) { sequence = sequence * 10 + 1; return 0; }
+int inner_index(void) { sequence = sequence * 10 + 2; return 0; }
+struct Cell make_cell(void) {
+    sequence = sequence * 10 + 3;
+    return (struct Cell){.value = 90, .values = {91}, .nested = {92}};
+}
+int touch(void) { sequence = sequence * 10 + 4; return 0; }
+int consume(struct Cell cell) {
+    int value = cell.value;
+    cell.value = 99;
+    cell.values[0] = 98;
+    cell.nested.value = 97;
+    return value;
+}
+int consume_other(struct OtherCell cell) { return cell.value; }
+"#;
+
+#[test]
+fn generated_aggregate_classifier_and_evaluator_routes_stay_in_parity() {
+    let mut route_counts = [0; AggregateValueRoute::COUNT];
+    let mut context_counts = [0; AggregateValueContext::COUNT];
+    let mut cell_counts = [0; AggregateValueRoute::COUNT * AggregateValueContext::COUNT];
+
+    for route in AggregateValueRoute::ALL {
+        for context in AggregateValueContext::ALL {
+            let route_index = route.index();
+            let context_index = context.index();
+            route_counts[route_index] += 1;
+            context_counts[context_index] += 1;
+            cell_counts[route_index * AggregateValueContext::COUNT + context_index] += 1;
+            assert_interpretation(
+                &context.program(route),
+                context.expected(),
+                &format!("aggregate classifier/evaluator route {route:?}, context {context:?}"),
+            );
+        }
+    }
+
+    assert_eq!(route_counts, [4; 22]);
+    assert_eq!(context_counts, [22; 4]);
+    assert!(cell_counts.into_iter().all(|count| count == 1));
+
+    for (name, source) in [
+        (
+            "scalar generic selection",
+            "struct Cell { int value; };\n\
+             int consume(struct Cell cell) { return cell.value; }\n\
+             int main(void) { return consume(_Generic(0, int: 1)); }",
+        ),
+        (
+            "scalar pointer field subscript",
+            "struct Cell { int value; }; struct Holder { int *values; };\n\
+             int consume(struct Cell cell) { return cell.value; }\n\
+             int main(void) { int values[1] = {1}; struct Holder holder = {values};\n\
+             struct Holder *holder_pointer = &holder; return consume(holder_pointer->values[0]); }",
+        ),
+    ] {
+        assert_interpretation(
+            source,
+            ExpectedInterpretation::Error(
+                "function 'consume' struct parameter 'cell' requires a struct argument",
+            ),
+            &format!("aggregate argument classifier preserves {name} diagnostic"),
+        );
+    }
+}

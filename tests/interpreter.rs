@@ -19482,6 +19482,24 @@ fn generic_selection_validates_unselected_const_assignments() {
 }
 
 #[test]
+fn aggregate_argument_generic_selection_validates_unselected_function_calls() {
+    let program = r#"
+        struct Cell { int value; };
+        int consume(struct Cell cell) { return cell.value; }
+
+        int main(void) {
+            struct Cell first = {.value = 7};
+            return consume(_Generic(1, int: first, default: missing()));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "undefined function 'missing'"
+    );
+}
+
+#[test]
 fn generic_selection_rejects_unsupported_two_dimensional_array_controls() {
     let program = r#"
         int main(void) {

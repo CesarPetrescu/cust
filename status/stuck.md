@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-01 after bounded v0.48.0 publication. Release commit `bc353b96d05ed8b573f49eb23370b921f4ca257c` reached exact `origin/main` before annotated tag object `434a7dfd3733241a168c5b1868d1b232ce934366` was created and pushed; local and remote refs peel exactly to the release commit. Fresh independent approval, formatting, strict Clippy, all 2,129 local/no-cache-rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime/test-image versions, and diff hygiene pass. No user input or external dependency is required; the next task is the deterministic aggregate classifier/evaluator parity matrix.
+None. Last reviewed 2026-09-01 after aggregate classifier/evaluator parity closure. Focused RED/GREEN closed `_Generic` aggregate-argument classification, missing `Expr::StructPtrArrayGet` aggregate evaluation, unselected-association validation, and identity-keyed matrix coverage accounting. Fresh complete-diff re-review returned `APPROVED`; formatting, strict Clippy, all 2,131 local/Docker tests, runtime output `10`, static safety scan, and diff hygiene pass. No user input or external dependency is required; bounded v0.49.0 release closure is next.
 
 ## Resolved this run
+
+### 2026-09-01 — Aggregate classifier/evaluator route divergence
+
+- Failure: the new exact 88-route property matrix first stopped on a `_Generic` aggregate argument with `expected struct expression`; after that narrow fix, it stopped on a pointer-reached embedded aggregate-array element with the same diagnostic.
+- Root causes: `eval_struct_argument()` omitted `Expr::GenericSelection` although aggregate type inference and runtime aggregate evaluation supported it; separately, `aggregate_expr_type_name()` accepted `Expr::StructPtrArrayGet` while `eval_struct_expr()` omitted that variant.
+- RED/GREEN: argument classification now accepts `_Generic`, and aggregate evaluation resolves `StructPtrArrayGet` through its existing pointer once before deep-cloning the selected fields. All 22 variants pass declaration, argument, return, and exact mismatch contexts with one-time evaluation and by-value isolation.
+- Review closure: direct selected-association recursion initially let an undefined function in an unselected `_Generic` association return `Ok(7)`; routing through `eval_selected_generic()` restores shared semantic validation and nesting-depth handling. A later review showed iteration-position counters could not detect duplicate/omitted route identities; stable enum IDs now index all route, context, and cell totals.
 
 ### 2026-09-01 — Carrierless union matrix exposed missing embedded-array aggregate evaluation
 

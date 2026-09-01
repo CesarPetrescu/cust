@@ -33489,6 +33489,26 @@ impl Interpreter {
                     }
                 }
             }
+            Expr::GenericSelection { .. } => {
+                return self.eval_selected_generic(arg_expr, |interpreter, selected| {
+                    interpreter.eval_struct_argument(
+                        function_name,
+                        param_name,
+                        expected_type,
+                        selected,
+                    )
+                });
+            }
+            Expr::StructPtrArrayGet { .. } => {
+                if self.aggregate_expr_type_name(arg_expr).is_err() {
+                    None
+                } else {
+                    match self.eval_struct_expr(arg_expr)? {
+                        ReturnValue::Struct { type_name, fields } => Some((type_name, fields)),
+                        ReturnValue::Scalar(_) | ReturnValue::Pointer { .. } => None,
+                    }
+                }
+            }
             Expr::Deref(_)
             | Expr::DerefSet { .. }
             | Expr::Assign { .. }
@@ -51759,7 +51779,7 @@ impl Interpreter {
                     fields: StructFieldValue::deep_clone_fields(fields),
                 })
             }
-            Expr::StructElementArrayGet { .. } => {
+            Expr::StructElementArrayGet { .. } | Expr::StructPtrArrayGet { .. } => {
                 let pointer = self.eval_pointer(expr)?;
                 let (type_name, fields) = self.find_struct_pointer_fields(&pointer)?;
                 Ok(ReturnValue::Struct {
