@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-02 after bounded v0.49.0 publication. Exact CLI and Compose expectations went RED at `0.48.0` and GREEN at `0.49.0`; all 2,131 local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, and diff hygiene pass. Release commit `e745ae0ac6202fdecd93bdb19e13bddfac1ea6c7` and annotated tag object `defd137bfc1c714f1839dd071a7ed494891f5522` are remotely verified; the tag peels to that release commit. No user input or external dependency is required; pointer classifier/evaluator parity is next.
+None. Last reviewed 2026-09-02 after pointer classifier/evaluator parity closure. Review-driven focused RED/GREEN closed aggregate-array element-address metadata plus ordinary/field/static pointer pre-evaluation type validation. Final independent review returned `APPROVED`; formatting, strict Clippy, all 2,137 local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. No user input or external dependency is required; bounded v0.50.0 release closure is next.
 
 ## Resolved this run
+
+### 2026-09-02 — Pointer classifier/evaluator parity review closure
+
+- Failure: inherited pointer parity tests were GREEN, but independent probes exposed aggregate-array element addresses with missing pointee/const metadata and incompatible pointer assignments/static-local initializers that evaluated `trap()` before rejecting their types.
+- Root causes: `AddressOfArray` metadata handled scalar arrays but omitted `Value::StructArray`; evaluated assignment and static-local initialization paths performed runtime pointer evaluation before the metadata-only type conversion check already used by automatic declarations and `sizeof`.
+- RED/GREEN: the aggregate-array route first reported `division by zero`, and its const route reported the wrong struct-to-int mismatch. Ordinary, five field-backed assignment routes, and static-local initialization likewise first reported `division by zero`. Struct-array pointee/read-only metadata plus shared pre-evaluation conversion checks now produce exact incompatible-pointer or const-discard diagnostics without running side effects.
+- Verification: final independent review returned `APPROVED`; six pointer-parity tests, all 2,137 local/rebuilt-Docker tests, formatting, warning-denied Clippy, runtime output `10`, and diff hygiene pass.
 
 ### 2026-09-01 — Aggregate classifier/evaluator route divergence
 

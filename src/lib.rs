@@ -19747,6 +19747,7 @@ impl Interpreter {
                     if self.expr_is_unsupported_double_pointer(arg_expr) {
                         return Err(CustError::new("double pointers are not supported"));
                     }
+                    self.ensure_pointer_expr_type_matches(&ty, arg_expr)?;
                     let pointer = self.eval_pointer(arg_expr)?;
                     let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
                     self.ensure_pointer_type_matches(&ty, &pointer)?;
@@ -34546,6 +34547,9 @@ impl Interpreter {
                 Some(Value::Array(array)) => {
                     Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
                 }
+                Some(Value::StructArray { type_name, .. }) => {
+                    Ok(Some(PointeeType::Struct(type_name.clone())))
+                }
                 Some(Value::Pointer { ty, .. }) => Ok(Some(ty.clone())),
                 Some(Value::Scalar { .. }) => {
                     let Expr::AddressOfArray { index, .. } = expr else {
@@ -34728,6 +34732,9 @@ impl Interpreter {
                     _,
                     _,
                 )) => Ok(Some(PointeeType::Scalar(elem_type))),
+                Some((StructFieldType::StructArray(type_name, _), _, _)) => {
+                    Ok(Some(PointeeType::Struct(type_name)))
+                }
                 _ => Ok(None),
             },
             Expr::StringLiteral(_) => Ok(Some(PointeeType::Scalar(CType::Char))),
@@ -38099,6 +38106,7 @@ impl Interpreter {
             },
             Expr::AddressOfArray { name, index } => match self.find_variable(name) {
                 Some(Value::Array(array)) => array.borrow().read_only,
+                Some(Value::StructArray { read_only, .. }) => *read_only,
                 Some(Value::Pointer {
                     points_to_const, ..
                 }) => *points_to_const,
@@ -39129,10 +39137,55 @@ impl Interpreter {
         expected: &PointeeType,
         pointer: &PointerValue,
     ) -> CustResult<()> {
+        if matches!(expected, PointeeType::Void)
+            && let PointerValue::Array2DRow { owner, .. } = pointer
+        {
+            self.ensure_array_pointer_owner_live(owner.as_ref())?;
+            return Ok(());
+        }
         let Some(actual) = self.pointer_value_type(pointer)? else {
             return Ok(());
         };
         self.ensure_pointer_conversion_type_matches(expected, &actual)
+    }
+
+    fn ensure_pointer_expr_type_matches(
+        &self,
+        expected: &PointeeType,
+        expr: &Expr,
+    ) -> CustResult<()> {
+        // Row pointers carry a column count outside `PointeeType`; reject
+        // conversions to ordinary typed pointers before evaluating operands,
+        // while retaining Cust's qualification-preserving `void *` conversion.
+        if let Some(elem_type) = self.array2d_row_pointer_element_type(expr) {
+            if !matches!(expected, PointeeType::Void) {
+                if let Expr::Var(name) = expr
+                    && matches!(
+                        self.find_variable(name),
+                        Some(Value::Array(array)) if array.borrow().dimensions.is_some()
+                    )
+                {
+                    return Err(CustError::new(format!(
+                        "two-dimensional array '{name}' does not decay to a scalar pointer"
+                    )));
+                }
+                let elem_label = match elem_type {
+                    CType::Int => "int",
+                    CType::Char => "char",
+                    CType::Bool => "_Bool",
+                    CType::Double => "double",
+                };
+                return Err(CustError::new(format!(
+                    "cannot convert pointer to two-dimensional {elem_label} row to pointer to {}",
+                    self.pointee_label(expected)
+                )));
+            }
+            return Ok(());
+        }
+        if let Some(actual) = self.pointer_expr_pointee_type(expr)? {
+            self.ensure_pointer_conversion_type_matches(expected, &actual)?;
+        }
+        Ok(())
     }
 
     fn ensure_pointer_conversion_type_matches(
@@ -39783,18 +39836,14 @@ impl Interpreter {
         let Value::Array(array) = self.make_array_value(len, elem_type, init, read_only)? else {
             unreachable!("make_array_value always returns Value::Array")
         };
-        let owner = if elem_type == CType::Double {
-            let scope_id = self
-                .scopes
-                .last()
-                .expect("compound literal evaluation requires a current scope")
-                .id;
-            let name = format!("__cust_compound_array#{}", self.next_compound_literal_id);
-            self.next_compound_literal_id += 1;
-            Some(ArrayPointerOwner { scope_id, name })
-        } else {
-            None
-        };
+        let scope_id = self
+            .scopes
+            .last()
+            .expect("compound literal evaluation requires a current scope")
+            .id;
+        let name = format!("__cust_compound_array#{}", self.next_compound_literal_id);
+        self.next_compound_literal_id += 1;
+        let owner = Some(ArrayPointerOwner { scope_id, name });
         Ok(PointerValue::ArrayBase {
             array,
             source_name: None,
@@ -43874,6 +43923,7 @@ impl Interpreter {
                     return Err(CustError::new("double pointers are not supported"));
                 }
                 self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
+                self.ensure_pointer_expr_type_matches(&expected_ty, value)?;
                 let pointer = self.eval_pointer(value)?;
                 let pointer = self.coerce_object_byte_pointer(&expected_ty, pointer)?;
                 self.ensure_pointer_type_matches(&expected_ty, &pointer)?;
@@ -43935,6 +43985,9 @@ impl Interpreter {
                     self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
                     if self.expr_is_unsupported_double_pointer(value) {
                         return Err(CustError::new("double pointers are not supported"));
+                    }
+                    if self.array2d_pointer_variable_type(name).is_none() {
+                        self.ensure_pointer_expr_type_matches(&ty, value)?;
                     }
                     let pointer = self.eval_pointer(value)?;
                     let pointer = self.attach_array_pointer_owner(pointer);
@@ -44102,6 +44155,9 @@ impl Interpreter {
                     self.struct_pointer_field_points_to_const(name, fields),
                     value,
                 )?;
+                if let Some(expected_ty) = self.direct_struct_pointer_field_type(name, fields)? {
+                    self.ensure_pointer_expr_type_matches(&expected_ty, value)?;
+                }
                 let pointer = self.eval_pointer(value)?;
                 self.assign_direct_struct_pointer_field(name, fields, pointer.clone())?;
                 Ok(pointer)
@@ -44113,6 +44169,9 @@ impl Interpreter {
             } => {
                 if self.expr_is_unsupported_double_pointer(value) {
                     return Err(CustError::new("double pointers are not supported"));
+                }
+                if let Some(expected_ty) = self.pointer_expr_pointee_type(expr)? {
+                    self.ensure_pointer_expr_type_matches(&expected_ty, value)?;
                 }
                 let target_pointer = self.eval_pointer(pointer)?;
                 let target_points_to_const =
@@ -44142,10 +44201,12 @@ impl Interpreter {
                     index,
                     fields,
                 )?;
-                let Some((StructFieldType::Pointer(_), _, points_to_const)) = metadata else {
+                let Some((StructFieldType::Pointer(expected_ty), _, points_to_const)) = metadata
+                else {
                     return Err(CustError::new("expected pointer expression"));
                 };
                 self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
+                self.ensure_pointer_expr_type_matches(&expected_ty, value)?;
                 let value_pointer = self.eval_pointer(value)?;
                 let target_pointer =
                     self.struct_field_array_element_assignment_pointer(name, array_fields, index)?;
@@ -44165,12 +44226,13 @@ impl Interpreter {
                 if self.expr_is_unsupported_double_pointer(value) {
                     return Err(CustError::new("double pointers are not supported"));
                 }
-                let Some((StructFieldType::Pointer(_), _, points_to_const)) =
+                let Some((StructFieldType::Pointer(expected_ty), _, points_to_const)) =
                     self.struct_element_expr_field_metadata(name, index, fields)?
                 else {
                     return Err(CustError::new("expected pointer expression"));
                 };
                 self.ensure_pointer_conversion_preserves_const(points_to_const, value)?;
+                self.ensure_pointer_expr_type_matches(&expected_ty, value)?;
                 let value_pointer = self.eval_pointer(value)?;
                 let element_pointer = self.find_struct_element_assignment_pointer(name, index)?;
                 self.assign_struct_pointer_pointer_field(
@@ -46078,11 +46140,12 @@ impl Interpreter {
             | Expr::ArrayLiteral { .. }
             | Expr::AggregateArrayLiteral { .. }
             | Expr::PointerCast { .. } => true,
-            Expr::Var(name) | Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
-                matches!(
-                    self.find_variable(name),
-                    Some(Value::Pointer { .. } | Value::Array(_) | Value::StructArray { .. })
-                )
+            Expr::Var(name) => matches!(
+                self.find_variable(name),
+                Some(Value::Pointer { .. } | Value::Array(_) | Value::StructArray { .. })
+            ),
+            Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
+                matches!(self.find_variable(name), Some(Value::Pointer { .. }))
             }
             Expr::StructGet { name, fields } => self.struct_field_decays_to_pointer(name, fields),
             Expr::StructElementGet {
@@ -51841,6 +51904,7 @@ impl Interpreter {
                 if self.expr_is_unsupported_double_pointer(expr) {
                     return Err(CustError::new("double pointers are not supported"));
                 }
+                self.ensure_pointer_expr_type_matches(&ty, expr)?;
                 let pointer = self.eval_pointer(expr)?;
                 let pointer = self.attach_array_pointer_owner(pointer);
                 let pointer = self.coerce_object_byte_pointer(&ty, pointer)?;
@@ -51944,6 +52008,7 @@ impl Interpreter {
                     ));
                 }
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
+                self.ensure_pointer_expr_type_matches(ty, expr)?;
                 let pointer = self.eval_pointer(expr)?;
                 let pointer = self.attach_array_pointer_owner(pointer);
                 if !self.pointer_target_has_static_storage(&pointer) {
@@ -52166,6 +52231,7 @@ impl Interpreter {
                     return Err(CustError::new("double pointers are not supported"));
                 }
                 self.ensure_pointer_conversion_preserves_const(*points_to_const, expr)?;
+                self.ensure_pointer_expr_type_matches(ty, expr)?;
                 let pointer = self.eval_pointer(expr)?;
                 let pointer = self.coerce_object_byte_pointer(ty, pointer)?;
                 self.ensure_pointer_type_matches(ty, &pointer)?;
@@ -52379,6 +52445,9 @@ impl Interpreter {
                         self.ensure_pointer_conversion_preserves_const(points_to_const, expr)?;
                         if self.expr_is_unsupported_double_pointer(expr) {
                             return Err(CustError::new("double pointers are not supported"));
+                        }
+                        if self.array2d_pointer_variable_type(name).is_none() {
+                            self.ensure_pointer_expr_type_matches(&ty, expr)?;
                         }
                         let pointer = self.eval_pointer(expr)?;
                         let pointer = self.attach_array_pointer_owner(pointer);

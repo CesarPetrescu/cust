@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-02 — Pointer classifier/evaluator parity decisions
+
+- Recovery candidates were finishing the inherited pointer parity package, immediate v0.50.0 release closure, parser-diagnostic expansion, and broader pointer work. Recovery priority selected the existing substantial queue-leading package; bounded v0.50.0 release closure is next.
+- The exact generated surface is 69 stable pointer route identities × eight consumers = 552 programs, plus seven explicit const-preservation routes. Route/context/cell counters are identity keyed rather than iteration-position-only.
+- C pointer conversion constraints are semantic and must be checked before runtime operand evaluation. Cust therefore applies metadata-only pointee/qualification checks before evaluating incompatible initializer, argument, return, assignment-expression, aggregate-field assignment, and static-local initializer operands.
+- C block-scope compound literals have enclosing-block storage duration. Hidden scalar-array compound-literal roots now receive lexical owners for every element type, allowing same-block library use while preserving exact escaped-pointer lifetime diagnostics.
+- Executable target listing independently reconciles 2,137 tests: `interpreter` 1,993 + `fuzz_safety` 101 + `cli` 33 + `pointer_classifier_parity` 6 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
+- Independent reviews found aggregate-array element address type/const omissions and two pre-evaluation validation groups; focused RED/GREEN closed all findings. Final complete-diff review returned `APPROVED`; formatting, strict Clippy, all local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass.
+
 ## 2026-09-02 — v0.49.0 release consistency
 
 - Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.48.0` and passed after Cargo/lock plus both Compose image tags moved to `0.49.0`.

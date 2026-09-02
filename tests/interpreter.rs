@@ -34739,7 +34739,7 @@ int main(void) {
     let err = interpret(escaped_compound_literal).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "function 'strtol' cannot retain an end pointer into ownerless character storage"
+        "pointer to out-of-scope variable '__cust_compound_array#0'"
     );
 
     let read_only = r#"
@@ -35207,7 +35207,7 @@ fn preserves_strtok_mutability_lifetime_and_input_boundaries() {
 }
 
 #[test]
-fn strtok_rejects_character_storage_without_a_tracked_lifetime() {
+fn strtok_tracks_block_scope_array_compound_literal_lifetime() {
     let program = r#"
 char *strtok(char *string, const char *delimiters);
 int main(void) {
@@ -35215,10 +35215,7 @@ int main(void) {
 }
 "#;
 
-    assert_eq!(
-        interpret(program).unwrap_err().to_string(),
-        "function 'strtok' requires character storage with a tracked lifetime"
-    );
+    assert_eq!(interpret(program).unwrap(), 1);
 }
 
 #[test]
