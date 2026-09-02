@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-02 after bounded v0.50.0 release preparation received fresh independent `APPROVED` review and passed formatting, strict Clippy, all 2,137 local tests, a no-cache image rebuild, all 2,137 rebuilt-Docker tests, runtime output `10`, exact version probes, static safety scan, and diff hygiene. Repeated local/remote tag preflight are empty. Release-commit-first publication is the remaining normal acceptance step, not a blocker; no user input or external dependency is required.
+None. Last reviewed 2026-09-02 after bounded v0.50.0 received fresh independent `APPROVED` review and passed formatting, strict Clippy, all 2,137 local tests, a no-cache image rebuild, all 2,137 rebuilt-Docker tests, runtime output `10`, exact version probes, static safety scan, and diff hygiene. Release commit `6335a1fdc0b4f67df47f36cc186edca25cb0cc77` reached `origin/main` before annotated tag creation; remote `v0.50.0` object `e6ae36718e014b010fa17026c7f5a762fdd4baff` peels to the release commit. The later status-only evidence commit does not move or recreate the tag. The next tracked `int **` package has no user-input or external-dependency blocker.
 
 ## Resolved this run
 
