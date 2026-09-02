@@ -6,6 +6,28 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.50.0 — 2026-09-02
+
+### Language subset
+
+- Kept pointer classification, pointee/qualification inference, runtime evaluation, and initializer/argument/return/assignment consumers in parity across 69 pointer-valued expression routes. Aggregate-array element addresses now retain their aggregate pointee and const metadata, and block-scope scalar-array compound literals retain lexical owners without extending escaped lifetimes.
+- Pointer conversion constraints are validated from metadata before evaluating assignment and static-local initializer operands, so incompatible conversions report their type or const diagnostic without executing rejected side effects.
+
+### Diagnostics and verification
+
+- Added a deterministic 552-program matrix crossing 69 stable route identities with compatible initializer, argument, return, and non-evaluating `sizeof` consumers plus incompatible initializer, argument, return, and assignment consumers. Identity-keyed route/context/cell totals, panic guards, one-time markers, owner/lifetime checks, exact diagnostics, and seven const-preservation routes protect the complete modeled surface.
+- Added six dedicated pointer-classifier parity tests covering two-dimensional-row `void *` conversion, static pointer-returning call non-evaluation, aggregate-array element addresses, lexical compound-array owners, pointer assignment RHS prevalidation across ordinary and aggregate-field routes, and static-local pointer initialization.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.50.0`.
+- Reconciled an executable inventory of 2,137 tests: 1,993 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Shared union object bytes remain limited to scalar-only non-`double` layouts with at least one mutable member. All-const scalar unions and union layouts containing arrays, pointers, `double`, or nested aggregates remain unsupported. Selected-member operations retain that member's own capacity; complete-object operations use the union's maximum layout size. General pointer levels beyond the narrow tracked unqualified `char **` model, variable-length arrays, arrays with more than two dimensions, flexible array members, bit-fields, `goto`, system headers, and unsupported pragma semantics also remain outside the release.
+
 ## v0.49.0 — 2026-09-01
 
 ### Language subset

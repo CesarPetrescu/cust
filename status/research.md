@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-02 — v0.50.0 release consistency
+
+- Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.49.0` and passed after Cargo/lock plus both Compose image tags moved to `0.50.0`.
+- Executable target listing yields 2,137 tests: `interpreter` 1,993 + `fuzz_safety` 101 + `cli` 33 + `pointer_classifier_parity` 6 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1.
+- Central release claims describe 69 stable pointer-valued route identities crossed with eight compatible/incompatible consumers for 552 programs, seven const-preservation routes, one-time evaluation, lexical owners/lifetimes, aggregate-array element-address metadata, and pointer conversion checks before rejected side effects.
+- Candidate evaluation considered queue-leading v0.50.0 release closure, a first safe tracked unqualified `int **` package, parser-diagnostic expansion, and further pointer property coverage. Release closure was selected because it atomically packages an independently reviewed correctness package and exact executable coverage with bounded metadata risk. The `int **` object/output-parameter slice is the concrete post-release task.
+- Initial independent review found that the README limitations could be read as rejecting all pointer-to-row aliases/functions despite the supported generic scalar forms. Restricting that sentence to `double` forms resolved the contradiction; fresh complete-diff re-review returned `APPROVED`.
+- Formatting, warning-denied Clippy, all 2,137 local tests, a no-cache image rebuild, all 2,137 rebuilt-Docker tests, runtime output `10`, exact Cargo/local/runtime-image/test-image `0.50.0` versions, static safety scan, and diff hygiene pass. Repeated local and remote `v0.50.0` tag preflight are empty. Release-commit-first publication and exact tag-object/peeled-target verification remain.
+
 ## 2026-09-02 — Pointer classifier/evaluator parity decisions
 
 - Recovery candidates were finishing the inherited pointer parity package, immediate v0.50.0 release closure, parser-diagnostic expansion, and broader pointer work. Recovery priority selected the existing substantial queue-leading package; bounded v0.50.0 release closure is next.

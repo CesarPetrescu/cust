@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-02 after pointer classifier/evaluator parity closure. Review-driven focused RED/GREEN closed aggregate-array element-address metadata plus ordinary/field/static pointer pre-evaluation type validation. Final independent review returned `APPROVED`; formatting, strict Clippy, all 2,137 local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. No user input or external dependency is required; bounded v0.50.0 release closure is next.
+None. Last reviewed 2026-09-02 after bounded v0.50.0 release preparation received fresh independent `APPROVED` review and passed formatting, strict Clippy, all 2,137 local tests, a no-cache image rebuild, all 2,137 rebuilt-Docker tests, runtime output `10`, exact version probes, static safety scan, and diff hygiene. Repeated local/remote tag preflight are empty. Release-commit-first publication is the remaining normal acceptance step, not a blocker; no user input or external dependency is required.
 
 ## Resolved this run
 
