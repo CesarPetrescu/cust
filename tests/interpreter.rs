@@ -26588,25 +26588,25 @@ fn rejects_array_return_types_with_context() {
 
 #[test]
 fn rejects_pointer_to_pointer_parameters_with_context() {
-    let program = "int load(int **value) { return **value; }\nint main() { return 0; }\n";
+    let program = "int load(_Bool **value) { return **value; }\nint main() { return 0; }\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "pointer-to-pointer parameters are not supported at line 1, column 15"
+        "pointer-to-pointer parameters are not supported at line 1, column 17"
     );
 }
 
 #[test]
 fn rejects_pointer_to_pointer_declarations_with_context() {
-    let program = "int main() {\nint x = 1;\nint **value = &x;\nreturn 0;\n}\n";
+    let program = "int main() {\n_Bool x = 1;\n_Bool **value = &x;\nreturn 0;\n}\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "pointer-to-pointer declarations are not supported at line 3, column 6"
+        "pointer-to-pointer declarations are not supported at line 3, column 8"
     );
 }
 
@@ -28043,6 +28043,1255 @@ int main(void) {
     }
     forward_end(&end, text + 1);
     return end[0] == '2' ? 0 : 4;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn pointer_output_generic_controlling_expressions_are_rejected_exactly() {
+    for output_type in ["int **", "char **"] {
+        let program = format!(
+            "int main(void) {{ {output_type}output = 0; return _Generic(output, _Bool: 1, default: 0); }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "pointer output generic controlling expressions are not supported",
+            "output type: {output_type}"
+        );
+    }
+}
+
+#[test]
+fn pointer_output_generic_values_validate_unselected_association_constraints() {
+    let program = r#"
+int main(void) {
+    int *slot = 0;
+    char *wrong_slot = 0;
+    int **output = &slot;
+    char **wrong = &wrong_slot;
+    int **selected = _Generic(0, int: output, default: (output = wrong));
+    return selected != output;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "int pointer object 'output' assignment requires null, another compatible pointer output object, or the address of a mutable int pointer variable"
+    );
+}
+
+#[test]
+fn pointer_output_generic_association_values_are_supported_under_sizeof() {
+    let program = r#"
+int main(void) {
+    int **output = 0;
+    return sizeof(_Generic(0, int: output, default: output)) == sizeof(output) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_objects_read_write_and_forward_local_slots() {
+    let program = r#"
+void set_output(int **output, int *value) {
+    *output = value;
+}
+
+void forward_output(int **output, int *value) {
+    set_output(output, value);
+}
+
+int main(void) {
+    int values[3] = {4, 5, 6};
+    int *slot = 0;
+    int **output = &slot;
+    int **alias = output;
+
+    forward_output(alias, values + 1);
+    **output = 9;
+    return slot == values + 1 && values[1] == 9 && alias == output ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_output_writes_coerce_aligned_object_byte_results() {
+    let program = r#"
+void *memchr(const void *input, int value, int count);
+
+int main(void) {
+    int value = 7;
+    int *slot = 0;
+    int **output = &slot;
+    *output = (int *)memchr(&value, 7, sizeof(value));
+    return slot == &value ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_output_writes_validate_rhs_before_evaluation() {
+    let program = r#"
+char *bad(void) {
+    int zero = 0;
+    int marker = 1 / zero;
+    return marker ? "bad" : "bad";
+}
+
+int main(void) {
+    int *slot = 0;
+    int **output = &slot;
+    *output = bad();
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot convert pointer to char to pointer to int"
+    );
+}
+
+#[test]
+fn integer_pointer_output_writes_validate_nested_pointer_assignments_before_lhs_evaluation() {
+    let program = r#"
+int trap(void) {
+    return 1 / 0;
+}
+
+int main(void) {
+    int *slot = 0;
+    int **output = &slot;
+    int *temporary = 0;
+    char *wrong = 0;
+    *(trap(), output) = (temporary = wrong);
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot convert pointer to char to pointer to int"
+    );
+}
+
+#[test]
+fn integer_pointer_output_writes_validate_nested_rhs_constraints_before_lhs_evaluation() {
+    for value in [
+        "identity(wrong)",
+        "(int *)identity(wrong)",
+        "(identity(wrong), &value)",
+    ] {
+        let program = format!(
+            r#"
+int trap(void) {{
+    return 1 / 0;
+}}
+
+int *identity(int *input) {{
+    return input;
+}}
+
+int main(void) {{
+    int value = 0;
+    int *slot = 0;
+    int **output = &slot;
+    char *wrong = 0;
+    *(trap(), output) = {value};
+    return 0;
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot convert pointer to char to pointer to int",
+            "value: {value}"
+        );
+    }
+}
+
+#[test]
+fn integer_pointer_output_writes_use_conditional_composite_void_pointer_types() {
+    let program = r#"
+int main(void) {
+    int value = 7;
+    int *slot = 0;
+    int **output = &slot;
+    char *wrong = 0;
+    void *view = &value;
+
+    *output = 0 ? wrong : view;
+    return **output == 7 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_output_writes_validate_unselected_conditional_pointer_types() {
+    let program = r#"
+int main(void) {
+    int *slot = 0;
+    int **output = &slot;
+    char *wrong = 0;
+    *output = 1 ? 0 : wrong;
+    return slot != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot convert pointer to char to pointer to int"
+    );
+}
+
+#[test]
+fn integer_pointer_output_writes_reject_nested_escaping_local_owners() {
+    let programs = [
+        r#"
+void publish(int **output, int choose) {
+    int local = 4;
+    *output = choose ? &local : 0;
+}
+
+int main(void) {
+    int *saved = 0;
+    publish(&saved, 1);
+    return 0;
+}
+"#,
+        r#"
+void publish(int **output) {
+    int local = 4;
+    *output = (0, &local);
+}
+
+int main(void) {
+    int *saved = 0;
+    publish(&saved);
+    return 0;
+}
+"#,
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "pointer to out-of-scope variable 'local'"
+        );
+    }
+}
+
+#[test]
+fn integer_pointer_output_writes_reject_nested_escaping_parameter_owners_at_call_boundary() {
+    let program = r#"
+void publish(int **output, int value, int choose) {
+    *output = choose ? &value : 0;
+}
+
+int main(void) {
+    int *saved = 0;
+    publish(&saved, 4, 1);
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to out-of-scope variable 'value'"
+    );
+}
+
+#[test]
+fn integer_pointer_output_writes_validate_conditional_conditions_before_lhs_evaluation() {
+    let evaluated = r#"
+int trap(void) {
+    return 1 / 0;
+}
+
+void no_value(void) {}
+
+int main(void) {
+    int value = 0;
+    int *slot = 0;
+    int **output = &slot;
+    *(trap(), output) = no_value() ? &value : &value;
+    return 0;
+}
+"#;
+    let non_evaluating = r#"
+void no_value(void) {}
+
+int main(void) {
+    int value = 0;
+    int *slot = 0;
+    int **output = &slot;
+    return sizeof(*output = (no_value() ? &value : &value));
+}
+"#;
+
+    for program in [evaluated, non_evaluating] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "void function 'no_value' used as scalar expression"
+        );
+    }
+}
+
+#[test]
+fn integer_pointer_output_writes_validate_aggregate_conditions_before_lhs_evaluation() {
+    let program = r#"
+struct Box {
+    int value;
+};
+
+int trap(void) {
+    return 1 / 0;
+}
+
+int main(void) {
+    int *slot = 0;
+    int **output = &slot;
+    struct Box box = {1};
+    *(trap(), output) = box ? 0 : 0;
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "struct value used as scalar expression"
+    );
+}
+
+#[test]
+fn integer_pointer_output_writes_accept_zero_enum_constants() {
+    let program = r#"
+enum { ZERO = 0 };
+
+int main(void) {
+    int value = 7;
+    int *slot = &value;
+    int **output = &slot;
+    *output = ZERO;
+    return slot == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_outputs_reject_runtime_scalar_wrappers() {
+    let cases = [
+        (
+            "int **output = condition ? 0 : 0;",
+            "int pointer object 'output' initializer requires null, another compatible pointer output object, or the address of a mutable int pointer variable",
+        ),
+        (
+            "int **output = (condition, 0);",
+            "int pointer object 'output' initializer requires null, another compatible pointer output object, or the address of a mutable int pointer variable",
+        ),
+        (
+            "int *slot = 0; int **output = &slot; *output = condition ? 0 : 0;",
+            "expected pointer expression",
+        ),
+    ];
+
+    for (statement, expected) in cases {
+        let program = format!("int main(void) {{ int condition = 1; {statement} return 0; }}\n");
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            expected,
+            "statement: {statement}"
+        );
+    }
+
+    let call = r#"
+void accept(int **output) {}
+int main(void) {
+    int condition = 1;
+    accept((condition, 0));
+    return 0;
+}
+"#;
+    assert_eq!(
+        interpret(call).unwrap_err().to_string(),
+        "function 'accept' parameter 'output' requires an int pointer slot address"
+    );
+}
+
+#[test]
+fn sizeof_bool_calls_accept_pointer_output_arguments_without_evaluation() {
+    let program = r#"
+int truth(_Bool value) {
+    return value;
+}
+
+int main(void) {
+    int **output = 0;
+    return sizeof(truth(output)) == sizeof(int) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_scalar_calls_reject_integer_pointer_output_arguments() {
+    let program = r#"
+int sink(int value) {
+    return value;
+}
+int main(void) {
+    int **output = 0;
+    return sizeof(sink(output));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer value used as scalar"
+    );
+}
+
+#[test]
+fn missing_integer_pointer_output_semicolons_use_integer_context() {
+    let program = "int main(void) {\n    int **output = 0\n    return 0;\n}\n";
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "expected ';' after integer pointer object declaration, found Return at line 3, column 5"
+    );
+}
+
+#[test]
+fn malformed_integer_pointer_output_declarations_use_integer_context() {
+    let program = "int main(void) { int **output = ; return 0; }\n";
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "expected initializer expression after '=' in integer pointer object declaration, found Semi at line 1, column 33"
+    );
+}
+
+#[test]
+fn integer_pointer_outputs_accept_floating_constants_immediately_cast_to_integer_null() {
+    let program = r#"
+int main(void) {
+    int **output = (int)0.5;
+    return output == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_outputs_accept_supported_null_pointer_constant_expressions() {
+    let program = r#"
+int main(void) {
+    int value = 7;
+    int *slot = &value;
+    int **output = &slot;
+    int **empty = 0;
+    *output = (int)0;
+    return slot == 0 && empty == (1 - 1) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_outputs_accept_null_void_pointer_initializers() {
+    let program = r#"
+int main(void) {
+    int **output = (void *)0;
+    return output == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_outputs_reject_const_void_pointer_null_initializers() {
+    let program = r#"
+int main(void) {
+    int **output = (const void *)0;
+    return output == 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn integer_pointer_outputs_reject_const_void_pointer_assignments() {
+    let program = r#"
+int main(void) {
+    int **output = 0;
+    output = (const void *)0;
+    return output == 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from pointer target"
+    );
+}
+
+#[test]
+fn integer_pointer_outputs_accept_null_void_pointers_across_static_assignment_and_call_routes() {
+    let program = r#"
+int **global_output = (void *)0;
+
+int is_null(int **output) {
+    return output == 0;
+}
+
+int main(void) {
+    static int **static_output = (void *)0;
+    int **local_output = 0;
+    local_output = (void *)0;
+    return global_output == 0 && static_output == 0 && local_output == 0 &&
+                   is_null((void *)0)
+               ? 0
+               : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_outputs_accept_folded_null_constants_across_object_routes() {
+    let program = r#"
+int **global_output = 1 - 1;
+
+int is_null(int **output) {
+    return output == 0;
+}
+
+int main(void) {
+    int **output = 2 * 0;
+    output = 3 - 3;
+    return global_output == 0 && output == 0 && is_null(4 / 2 - 2) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_outputs_allow_comma_operators_in_unselected_null_constant_subexpressions() {
+    let program = r#"
+int main(void) {
+    int **output = 1 ? 0 : (1, 2);
+    return output == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_output_null_constants_respect_short_circuit_evaluation() {
+    let program = r#"
+int main(void) {
+    int value = 7;
+    int *slot = &value;
+    int **output = &slot;
+    *output = 0 && (1 / 0);
+    *output = 1 ? 0 : (1 / 0);
+    return slot == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_output_null_constants_reject_variables_in_unevaluated_branches() {
+    for expression in ["0 && variable", "1 ? 0 : variable"] {
+        let program = format!(
+            r#"
+int main(void) {{
+    int variable = 0;
+    int *slot = 0;
+    int **output = &slot;
+    *output = {expression};
+    return 0;
+}}
+"#
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "expected pointer expression",
+            "expression: {expression}"
+        );
+    }
+}
+
+#[test]
+fn integer_pointer_output_null_constant_folding_is_depth_bounded() {
+    let mut expression = "0".to_string();
+    for _ in 0..300 {
+        expression = format!("{expression} + 0");
+    }
+    let program = format!(
+        "int main(void) {{ int *slot = 0; int **output = &slot; *output = {expression}; return 0; }}\n"
+    );
+
+    assert_eq!(
+        interpret(&program).unwrap_err().to_string(),
+        "sizeof expression nesting limit of 128 exceeded"
+    );
+}
+
+#[test]
+fn integer_pointer_output_null_constants_reject_undefined_signed_shifts() {
+    let program = r#"
+int main(void) {
+    int value = 7;
+    int *slot = &value;
+    int **output = &slot;
+    *output = (-1 << 1) + 2;
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "expected pointer expression"
+    );
+}
+
+#[test]
+fn sizeof_integer_pointer_output_writes_accepts_void_pointer_conversions() {
+    let program = r#"
+int main(void) {
+    int *slot = 0;
+    int **output = &slot;
+    int marker = 0;
+    int size = sizeof(*output = (marker++, (void *)0));
+    return size == sizeof(int *) && marker == 0 && slot == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_integer_pointer_output_writes_bound_nested_constant_expressions() {
+    let mut value = "0".to_string();
+    for _ in 0..256 {
+        value = format!("{value} + 0");
+    }
+    let program = format!(
+        "int main(void) {{ int *slot = 0; int **output = &slot; return sizeof(*output = {value}); }}\n"
+    );
+
+    assert_eq!(
+        interpret(&program).unwrap_err().to_string(),
+        "sizeof expression nesting limit of 128 exceeded"
+    );
+}
+
+#[test]
+fn mixed_pointer_output_equality_validates_types_before_evaluation() {
+    let program = r#"
+int trap(void) {
+    return 1 / 0;
+}
+
+int main(void) {
+    int *integer_slot = 0;
+    char *character_slot = 0;
+    int **integer_output = &integer_slot;
+    char **character_output = &character_slot;
+    return (trap(), integer_output) == character_output;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer output equality requires compatible pointee types"
+    );
+}
+
+#[test]
+fn mixed_conditional_pointer_output_equality_validates_types_before_evaluation() {
+    let program = r#"
+int trap(void) {
+    return 1 / 0;
+}
+
+int main(void) {
+    int *integer_slot = 0;
+    char *character_slot = 0;
+    int **integer_output = &integer_slot;
+    char **character_output = &character_slot;
+    return (trap(), integer_output) == (0 ? integer_output : character_output);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer output equality requires compatible pointee types"
+    );
+}
+
+#[test]
+fn integer_pointer_output_equality_validates_nested_assignments_before_evaluation() {
+    let program = r#"
+int trap(void) {
+    return 1 / 0;
+}
+
+int main(void) {
+    int *integer_slot = 0;
+    char *character_slot = 0;
+    int **integer_output = &integer_slot;
+    char **character_output = &character_slot;
+    return (trap(), integer_output) == (integer_output = character_output);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "int pointer object 'integer_output' assignment requires null, another compatible pointer output object, or the address of a mutable int pointer variable"
+    );
+}
+
+#[test]
+fn integer_pointer_output_void_equality_prevalidates_output_assignment() {
+    let program = r#"
+void *trap_pointer(void) {
+    int zero = 0;
+    int marker = 1 / zero;
+    return marker ? (void *)0 : (void *)0;
+}
+
+int main(void) {
+    int *integer_slot = 0;
+    char *character_slot = 0;
+    int **integer_output = &integer_slot;
+    char **character_output = &character_slot;
+    return trap_pointer() == (integer_output = character_output);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "int pointer object 'integer_output' assignment requires null, another compatible pointer output object, or the address of a mutable int pointer variable"
+    );
+}
+
+#[test]
+fn integer_pointer_output_equality_rejects_nonconstant_integers_before_evaluation() {
+    let program = r#"
+int trap(void) {
+    return 1 / 0;
+}
+
+int main(void) {
+    int **output = 0;
+    return output == (trap(), 1);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot compare pointer with nonzero integer"
+    );
+}
+
+#[test]
+fn sizeof_integer_pointer_output_equality_rejects_nonzero_integers() {
+    let program = r#"
+int main(void) {
+    int **output = 0;
+    return sizeof(output == 1);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot compare pointer with nonzero integer"
+    );
+}
+
+#[test]
+fn integer_pointer_output_equality_accepts_null_void_pointers() {
+    let program = r#"
+int main(void) {
+    int **output = 0;
+    return output == (void *)0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn sizeof_integer_pointer_output_equality_accepts_void_pointers() {
+    let program = r#"
+int main(void) {
+    int **output = 0;
+    return sizeof(output == (void *)0) == sizeof(int) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn pointer_output_void_pointer_equality_rejects_expired_targets() {
+    for (output_type, slot_type) in [("int **", "int *"), ("char **", "char *")] {
+        for (initializer, comparison) in [
+            ("0", "output == dangling"),
+            ("0", "dangling == output"),
+            ("&slot", "output == dangling"),
+            ("&slot", "dangling == output"),
+        ] {
+            let program = format!(
+                r#"
+void *dangling;
+
+void capture(void) {{
+    int local = 0;
+    dangling = &local;
+}}
+
+int main(void) {{
+    {slot_type}slot = 0;
+    {output_type}output = {initializer};
+    capture();
+    return {comparison};
+}}
+"#
+            );
+
+            assert_eq!(
+                interpret(&program).unwrap_err().to_string(),
+                "pointer to out-of-scope variable 'local'",
+                "output type: {output_type}, initializer: {initializer}, comparison: {comparison}"
+            );
+        }
+    }
+}
+
+#[test]
+fn integer_pointer_output_equality_validates_incompatible_pointers_before_evaluation() {
+    let program = r#"
+int trap(void) {
+    return 1 / 0;
+}
+
+int main(void) {
+    int **output = 0;
+    int *wrong = 0;
+    return output == (trap(), wrong);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer output equality requires compatible pointee types"
+    );
+}
+
+#[test]
+fn integer_pointer_output_equality_respects_enum_shadowing() {
+    let program = r#"
+enum { zero = 0 };
+
+int main(void) {
+    int zero = 0;
+    int **output = 0;
+    return sizeof(output == zero);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot compare pointer with nonzero integer"
+    );
+}
+
+#[test]
+fn integer_pointer_output_preflight_preserves_call_depth_diagnostics() {
+    let program = r#"
+int recurse(int remaining, int **output) {
+    if (!remaining) {
+        char *wrong = 0;
+        return recurse(0, &wrong);
+    }
+    return recurse(remaining - 1, output);
+}
+
+int main(void) {
+    int *slot = 0;
+    return recurse(22, &slot);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function call depth limit exceeded while calling 'recurse'"
+    );
+}
+
+#[test]
+fn integer_pointer_output_calls_validate_all_arguments_before_evaluation() {
+    let program = r#"
+int trap(void) {
+    return 1 / 0;
+}
+
+void sink(int first, int **output) {
+    (void)first;
+    (void)output;
+}
+
+int main(void) {
+    char *wrong = 0;
+    sink(trap(), &wrong);
+    return 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'sink' parameter 'output' requires the address of a mutable int pointer variable"
+    );
+}
+
+#[test]
+fn integer_pointer_output_dereferences_preserve_int_pointees_in_logical_expressions() {
+    let program = r#"
+int main(void) {
+    int value = 7;
+    int *slot = &value;
+    int **output = &slot;
+    return 1 && (*output == slot) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_output_expression_statements_are_valid() {
+    let program = r#"
+int main(void) {
+    int *slot = 0;
+    int **output = &slot;
+    output;
+    return output == &slot ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_output_assignment_arguments_preserve_expected_pointee_type() {
+    let program = r#"
+int inspect(int **output) {
+    return output != 0;
+}
+
+int main(void) {
+    char *slot = 0;
+    char **wrong = &slot;
+    return sizeof(inspect(wrong = &slot));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'inspect' parameter 'output' requires an int pointer slot address"
+    );
+}
+
+#[test]
+fn integer_pointer_output_assignment_initializers_preserve_expected_pointee_type() {
+    let program = r#"
+int main(void) {
+    char *slot = 0;
+    char **wrong = &slot;
+    int **output = (wrong = &slot);
+    return output != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "int pointer object 'output' initializer requires null, another compatible pointer output object, or the address of a mutable int pointer variable"
+    );
+}
+
+#[test]
+fn sizeof_integer_pointer_output_calls_validate_argument_compatibility() {
+    let program = r#"
+int inspect(int **output) {
+    return output != 0;
+}
+
+int main(void) {
+    char *wrong = 0;
+    return sizeof(inspect(&wrong));
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'inspect' parameter 'output' requires the address of a mutable int pointer variable"
+    );
+}
+
+#[test]
+fn sizeof_integer_pointer_output_conditionals_is_non_evaluating() {
+    let program = r#"
+int main(void) {
+    int *slot = 0;
+    int **output = &slot;
+    int marker = 0;
+    return sizeof(marker++ ? output : 0) == sizeof(int *) && marker == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_objects_preserve_null_truthiness() {
+    let program = r#"
+int is_non_null(int **output) {
+    return output ? 1 : 0;
+}
+
+int main(void) {
+    int value = 7;
+    int *slot = &value;
+    int **output = &slot;
+    int **empty = 0;
+
+    return is_non_null(output) == 1 && is_non_null(empty) == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn integer_pointer_objects_match_the_compiler_oracle_fixture() {
+    let program = include_str!("fixtures/compat/valid/integer_pointer_objects.c");
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn static_integer_pointer_objects_reject_automatic_slot_addresses_exactly() {
+    let program = r#"
+int inspect(void) {
+    int *slot = 0;
+    static int **output = &slot;
+    return output != 0;
+}
+
+int main(void) {
+    return inspect();
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "static integer pointer object initializer requires an int pointer slot with static storage duration"
+    );
+}
+
+#[test]
+fn taking_the_address_of_integer_pointer_objects_is_rejected_exactly() {
+    let program = r#"
+int main(void) {
+    int *slot = 0;
+    int **output = &slot;
+    return &output != 0;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "taking the address of an integer pointer output object is not supported"
+    );
+}
+
+#[test]
+fn integer_pointer_output_compound_reassignment_is_rejected_exactly() {
+    for operation in [
+        "output += 1",
+        "output++",
+        "++output",
+        "sizeof(output += 1)",
+        "sizeof(output++)",
+    ] {
+        let program = format!(
+            "int inspect(int **output) {{ {operation}; return 0; }}\nint main(void) {{ int *slot = 0; int **output = &slot; return inspect(output); }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "integer pointer output parameter reassignment is not supported",
+            "operation: {operation}"
+        );
+    }
+}
+
+#[test]
+fn integer_pointer_objects_reject_arithmetic_and_ordering_exactly() {
+    for (expression, expected) in [
+        (
+            "output + 1",
+            "integer pointer output arithmetic is not supported",
+        ),
+        (
+            "sizeof(output - 1)",
+            "integer pointer output arithmetic is not supported",
+        ),
+        (
+            "+output",
+            "integer pointer output arithmetic is not supported",
+        ),
+        (
+            "sizeof(-output)",
+            "integer pointer output arithmetic is not supported",
+        ),
+        (
+            "output < other",
+            "integer pointer output ordering comparisons are not supported",
+        ),
+        (
+            "sizeof(output >= other)",
+            "integer pointer output ordering comparisons are not supported",
+        ),
+    ] {
+        let program = format!(
+            "int main(void) {{ int *first = 0; int *second = 0; int **output = &first; int **other = &second; return {expression}; }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            expected,
+            "expression: {expression}"
+        );
+    }
+}
+
+#[test]
+fn integer_pointer_output_parameters_preserve_stored_pointer_lifetimes() {
+    let program = r#"
+void capture_local(int **output) {
+    {
+        int values[2] = {4, 5};
+        *output = values + 1;
+    }
+}
+
+int main(void) {
+    int *slot = 0;
+    capture_local(&slot);
+    return *slot;
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to out-of-scope variable 'values'"
+    );
+}
+
+#[test]
+fn integer_pointer_output_qualified_forms_have_source_locations() {
+    for parameter in [
+        "volatile int **output",
+        "const int **output",
+        "int *volatile *output",
+        "int *const *output",
+        "int **volatile output",
+        "int **const output",
+        "_Atomic(int) **output",
+    ] {
+        let program =
+            format!("void set_output({parameter}) {{}}\nint main(void) {{ return 0; }}\n");
+        let error = interpret(&program).unwrap_err().to_string();
+        assert!(
+            error.starts_with(
+                "qualified integer pointer output parameters are not supported at line 1, column "
+            ),
+            "parameter: {parameter}; error: {error}"
+        );
+    }
+
+    for declaration in [
+        "const int **output = 0;",
+        "int * const *output = 0;",
+        "int ** const output = 0;",
+    ] {
+        let program = format!("{declaration}\nint main(void) {{ return 0; }}\n");
+        let error = interpret(&program).unwrap_err().to_string();
+        assert!(
+            error.starts_with(
+                "qualified integer pointer objects are not supported at line 1, column "
+            ),
+            "declaration: {declaration}; error: {error}"
+        );
+    }
+
+    let alias_program = "typedef volatile int VolatileInt;\nvoid set_output(VolatileInt **output) {}\nint main(void) { return 0; }\n";
+    assert!(
+        interpret(alias_program)
+            .unwrap_err()
+            .to_string()
+            .starts_with(
+                "qualified integer pointer output parameters are not supported at line 2, column "
+            )
+    );
+}
+
+#[test]
+fn integer_pointer_outputs_support_unqualified_scalar_typedef_spellings() {
+    let program = r#"
+typedef int Integer;
+
+void set_output(Integer **output, Integer *value) {
+    *output = value;
+}
+
+int main(void) {
+    Integer value = 7;
+    Integer *slot = 0;
+    Integer **output = &slot;
+    set_output(output, &value);
+    return **output == 7 ? 0 : 1;
 }
 "#;
 

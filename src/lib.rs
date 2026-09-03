@@ -784,6 +784,12 @@ enum DeclType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum GenericAssociationType {
+    Decl(DeclType),
+    PointerOutput,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct StructTypeDef {
     fields: Vec<StructFieldDef>,
     kind: AggregateKind,
@@ -1048,6 +1054,22 @@ impl CType {
     fn alignment(self) -> i64 {
         self.size()
     }
+
+    fn name(self) -> &'static str {
+        match self {
+            CType::Int => "int",
+            CType::Char => "char",
+            CType::Bool => "_Bool",
+            CType::Double => "double",
+        }
+    }
+
+    fn indefinite_article(self) -> &'static str {
+        match self {
+            CType::Int => "an",
+            CType::Char | CType::Bool | CType::Double => "a",
+        }
+    }
 }
 
 impl PointeeType {
@@ -1253,6 +1275,7 @@ enum Stmt {
     },
     CharacterPointerOutputDecl {
         name: String,
+        pointee: CType,
         expr: Expr,
     },
     Array2DPointerDecl {
@@ -9516,35 +9539,46 @@ impl Parser {
                     self.previous(),
                 ));
             }
-            let is_character_pointer_output = if has_explicit_star
-                && matches!(decl_type, DeclType::Scalar(CType::Char))
+            let pointer_output_pointee = if has_explicit_star
+                && matches!(decl_type, DeclType::Scalar(CType::Char | CType::Int))
                 && self.check(&Token::Star)
             {
+                let DeclType::Scalar(pointee) = decl_type else {
+                    unreachable!("guard requires a scalar pointer output type")
+                };
+                let pointer_output_label = if pointee == CType::Char {
+                    "character"
+                } else {
+                    "integer"
+                };
                 if parameter_alias_is_qualified {
                     return Err(Self::error_at(
-                        "qualified character pointer output parameters are not supported"
-                            .to_string(),
+                        format!(
+                            "qualified {pointer_output_label} pointer output parameters are not supported"
+                        ),
                         &parameter_type_token,
                     ));
                 }
                 if let Some(qualifier) = parameter_type_qualifier.or(post_star_qualifier) {
                     return Err(Self::error_at(
-                        "qualified character pointer output parameters are not supported"
-                            .to_string(),
+                        format!(
+                            "qualified {pointer_output_label} pointer output parameters are not supported"
+                        ),
                         &qualifier,
                     ));
                 }
                 self.expect(Token::Star)?;
                 if let Some(qualifier) = self.leading_type_qualifier_token() {
                     return Err(Self::error_at(
-                        "qualified character pointer output parameters are not supported"
-                            .to_string(),
+                        format!(
+                            "qualified {pointer_output_label} pointer output parameters are not supported"
+                        ),
                         &qualifier,
                     ));
                 }
-                true
+                Some(pointee)
             } else {
-                false
+                None
             };
             if has_explicit_star && self.check(&Token::Star) {
                 return Err(Self::error_at(
@@ -9628,7 +9662,7 @@ impl Parser {
             };
             let mut array_parameter_const = false;
             let mut array_parameter_is_qualified = false;
-            let kind = if is_character_pointer_output {
+            let kind = if pointer_output_pointee.is_some() {
                 if self.check(&Token::LBracket) {
                     return Err(Self::error_at(
                         "pointer array parameters are not supported".to_string(),
@@ -10493,19 +10527,27 @@ impl Parser {
         };
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
         if has_explicit_star
-            && matches!(decl_type, DeclType::Scalar(CType::Char))
+            && matches!(decl_type, DeclType::Scalar(CType::Char | CType::Int))
             && self.check(&Token::Star)
         {
+            let DeclType::Scalar(pointee) = decl_type else {
+                unreachable!("guard requires a scalar pointer output type")
+            };
+            let pointer_output_label = if pointee == CType::Char {
+                "character"
+            } else {
+                "integer"
+            };
             if let Some(qualifier) = declaration_base_qualifier.clone().or(post_star_qualifier) {
                 return Err(Self::error_at(
-                    "qualified character pointer objects are not supported".to_string(),
+                    format!("qualified {pointer_output_label} pointer objects are not supported"),
                     &qualifier,
                 ));
             }
             self.expect(Token::Star)?;
             if let Some(qualifier) = self.leading_type_qualifier_token() {
                 return Err(Self::error_at(
-                    "qualified character pointer objects are not supported".to_string(),
+                    format!("qualified {pointer_output_label} pointer objects are not supported"),
                     &qualifier,
                 ));
             }
@@ -10515,7 +10557,7 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            let stmt = self.parse_character_pointer_output_declarator_tail()?;
+            let stmt = self.parse_character_pointer_output_declarator_tail(pointee)?;
             if require_semi && self.matches(&Token::Comma) {
                 return self.parse_declarator_list_tail_with_base_qualifier(
                     stmt,
@@ -10525,7 +10567,12 @@ impl Parser {
                 );
             }
             if require_semi {
-                self.expect_semicolon_after("character pointer object declaration")?;
+                let declaration_kind = if pointee == CType::Char {
+                    "character pointer object declaration"
+                } else {
+                    "integer pointer object declaration"
+                };
+                self.expect_semicolon_after(declaration_kind)?;
             }
             return Ok(stmt);
         }
@@ -11125,8 +11172,18 @@ impl Parser {
         Ok(Stmt::Many(declarations))
     }
 
-    fn parse_character_pointer_output_declarator_tail(&mut self) -> CustResult<Stmt> {
-        let name = self.parse_declarator_name("character pointer object name after '**'")?;
+    fn parse_character_pointer_output_declarator_tail(
+        &mut self,
+        pointee: CType,
+    ) -> CustResult<Stmt> {
+        let pointer_output_label = if pointee == CType::Char {
+            "character"
+        } else {
+            "integer"
+        };
+        let name = self.parse_declarator_name(&format!(
+            "{pointer_output_label} pointer object name after '**'"
+        ))?;
         if self.check(&Token::LBracket) {
             return Err(Self::error_at(
                 "pointer array declarations are not supported".to_string(),
@@ -11135,17 +11192,23 @@ impl Parser {
         }
         let expr = if self.matches(&Token::Assign) {
             self.last_decl_had_initializer = true;
-            self.reject_missing_declaration_initializer_expr(
-                "character pointer object declaration",
-            )?;
+            self.reject_missing_declaration_initializer_expr(&format!(
+                "{pointer_output_label} pointer object declaration"
+            ))?;
             self.parse_assignment_expr()?
         } else if matches!(self.peek(), Token::Semi | Token::Comma) {
             Expr::Number(0)
         } else {
-            self.expect_assign_after("character pointer object declaration")?;
+            self.expect_assign_after(&format!(
+                "{pointer_output_label} pointer object declaration"
+            ))?;
             unreachable!("expect_assign_after only returns Ok after consuming '='")
         };
-        Ok(Stmt::CharacterPointerOutputDecl { name, expr })
+        Ok(Stmt::CharacterPointerOutputDecl {
+            name,
+            pointee,
+            expr,
+        })
     }
 
     fn parse_additional_declarator(
@@ -11174,12 +11237,20 @@ impl Parser {
         };
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
         if has_explicit_star
-            && matches!(base_type, DeclType::Scalar(CType::Char))
+            && matches!(base_type, DeclType::Scalar(CType::Char | CType::Int))
             && self.check(&Token::Star)
         {
+            let DeclType::Scalar(pointee) = base_type else {
+                unreachable!("guard requires a scalar pointer output type")
+            };
+            let pointer_output_label = if pointee == CType::Char {
+                "character"
+            } else {
+                "integer"
+            };
             if base_qualifier.is_some() || leading_const || post_star_qualifier.is_some() {
                 return Err(Self::error_at(
-                    "qualified character pointer objects are not supported".to_string(),
+                    format!("qualified {pointer_output_label} pointer objects are not supported"),
                     base_qualifier
                         .or(post_star_qualifier.as_ref())
                         .unwrap_or_else(|| self.peek_located()),
@@ -11188,7 +11259,7 @@ impl Parser {
             self.expect(Token::Star)?;
             if let Some(qualifier) = self.leading_type_qualifier_token() {
                 return Err(Self::error_at(
-                    "qualified character pointer objects are not supported".to_string(),
+                    format!("qualified {pointer_output_label} pointer objects are not supported"),
                     &qualifier,
                 ));
             }
@@ -11198,7 +11269,7 @@ impl Parser {
                     self.peek_located(),
                 ));
             }
-            return self.parse_character_pointer_output_declarator_tail();
+            return self.parse_character_pointer_output_declarator_tail(pointee);
         }
         if matches!(
             base_type,
@@ -18447,8 +18518,35 @@ struct Scope {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CharacterPointerOutput {
-    Null,
-    Slot { scope_id: usize, name: String },
+    Null {
+        pointee: CType,
+    },
+    Slot {
+        scope_id: usize,
+        name: String,
+        pointee: CType,
+    },
+}
+
+impl CharacterPointerOutput {
+    fn pointee(&self) -> CType {
+        match self {
+            CharacterPointerOutput::Null { pointee }
+            | CharacterPointerOutput::Slot { pointee, .. } => *pointee,
+        }
+    }
+
+    fn address_of_error_message(&self) -> &'static str {
+        match self.pointee() {
+            CType::Char => {
+                "taking the address of a character pointer output parameter is not supported"
+            }
+            CType::Int => "taking the address of an integer pointer output object is not supported",
+            CType::Bool | CType::Double => {
+                unreachable!("unsupported pointer output pointee type")
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18899,8 +18997,15 @@ impl Interpreter {
 
     fn eval_scalar_conversion(&mut self, ty: CType, expr: &Expr) -> CustResult<i64> {
         if ty == CType::Bool && self.expr_is_character_pointer_output_value(expr) {
-            let output =
-                self.eval_character_pointer_output_argument("boolean conversion", "value", expr)?;
+            let pointee = self
+                .character_pointer_output_expr_pointee(expr)
+                .unwrap_or(CType::Char);
+            let output = self.eval_character_pointer_output_argument_typed(
+                "boolean conversion",
+                "value",
+                pointee,
+                expr,
+            )?;
             return Ok(i64::from(matches!(
                 output,
                 CharacterPointerOutput::Slot { .. }
@@ -19706,6 +19811,23 @@ impl Interpreter {
             )));
         }
 
+        for (param, arg_expr) in function.params.iter().zip(arg_exprs) {
+            if param.kind == ParamKind::CharacterPointerOutput {
+                let ParamType::Scalar(pointee) = param.ty else {
+                    return Err(CustError::new(
+                        "internal pointer output parameter type mismatch",
+                    ));
+                };
+                self.validate_character_pointer_output_argument_typed_with_liveness(
+                    name,
+                    &param.name,
+                    pointee,
+                    arg_expr,
+                    false,
+                )?;
+            }
+        }
+
         let function_name_array = Rc::clone(
             self.function_name_arrays
                 .entry(name.to_string())
@@ -19758,8 +19880,17 @@ impl Interpreter {
                     }
                 }
                 ParamKind::CharacterPointerOutput => {
-                    let output =
-                        self.eval_character_pointer_output_argument(name, &param.name, arg_expr)?;
+                    let ParamType::Scalar(pointee) = param.ty else {
+                        return Err(CustError::new(
+                            "internal pointer output parameter type mismatch",
+                        ));
+                    };
+                    let output = self.eval_character_pointer_output_argument_typed(
+                        name,
+                        &param.name,
+                        pointee,
+                        arg_expr,
+                    )?;
                     let is_non_null = matches!(output, CharacterPointerOutput::Slot { .. });
                     character_pointer_outputs.insert(param.name.clone(), output);
                     Value::Scalar {
@@ -19863,6 +19994,19 @@ impl Interpreter {
             }
         }
 
+        let pointer_output_arguments = function
+            .params
+            .iter()
+            .filter_map(|param| {
+                character_pointer_outputs
+                    .get(&param.name)
+                    .filter(|output| {
+                        matches!(output, CharacterPointerOutput::Slot { .. })
+                            && output.pointee() == CType::Int
+                    })
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
         self.call_depth += 1;
         self.return_type_stack.push(function.return_type.clone());
         self.push_scope_with_values_and_consts(param_scope, const_params);
@@ -19918,7 +20062,13 @@ impl Interpreter {
         self.pop_scope();
         self.return_type_stack.pop();
         self.call_depth -= 1;
-        result
+        result.and_then(|value| {
+            for output in &pointer_output_arguments {
+                let pointer = self.read_character_pointer_output(output)?;
+                self.ensure_pointer_value_live(&pointer)?;
+            }
+            Ok(value)
+        })
     }
 
     fn has_integer_absolute_value_prototype(&self, name: &str) -> bool {
@@ -25396,13 +25546,27 @@ impl Interpreter {
                         args.len()
                     )));
                 }
-                for (param, argument) in signature.params.iter().zip(args) {
+                for (index, (param, argument)) in signature.params.iter().zip(args).enumerate() {
                     let actual_type =
                         self.non_evaluating_generic_selection_type(argument, aliases)?;
-                    if matches!(
-                        param.kind,
-                        ParamKind::CharacterPointerOutput | ParamKind::Array2D
-                    ) {
+                    if param.kind == ParamKind::CharacterPointerOutput {
+                        let ParamType::Scalar(pointee) = param.ty else {
+                            return Err(CustError::new(
+                                "internal pointer output parameter type mismatch",
+                            ));
+                        };
+                        let param_name = self
+                            .functions
+                            .get(name)
+                            .and_then(|function| function.params.get(index))
+                            .map(|param| param.name.as_str())
+                            .unwrap_or("argument");
+                        self.validate_character_pointer_output_argument_typed_with_liveness(
+                            name, param_name, pointee, argument, false,
+                        )?;
+                        continue;
+                    }
+                    if param.kind == ParamKind::Array2D {
                         continue;
                     }
                     if let (
@@ -25544,8 +25708,11 @@ impl Interpreter {
             }
             Expr::Deref(pointer) => {
                 if self.expr_is_character_pointer_output_value(pointer) {
+                    let pointee = self
+                        .character_pointer_output_expr_pointee(pointer)
+                        .unwrap_or(CType::Char);
                     return Ok(DeclType::Pointer {
-                        pointee: PointeeType::Scalar(CType::Char),
+                        pointee: PointeeType::Scalar(pointee),
                         points_to_const: false,
                     });
                 }
@@ -25585,8 +25752,11 @@ impl Interpreter {
             }
             Expr::DerefSet { pointer, value } => {
                 if self.expr_is_character_pointer_output_value(pointer) {
+                    let pointee = self
+                        .character_pointer_output_expr_pointee(pointer)
+                        .unwrap_or(CType::Char);
                     let target_type = DeclType::Pointer {
-                        pointee: PointeeType::Scalar(CType::Char),
+                        pointee: PointeeType::Scalar(pointee),
                         points_to_const: false,
                     };
                     let value_type = self.non_evaluating_generic_selection_type(value, aliases)?;
@@ -25861,14 +26031,32 @@ impl Interpreter {
                 let right_is_output = self.expr_is_character_pointer_output_value(right);
                 if left_is_output || right_is_output {
                     if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+                        if left_is_output && right_is_output {
+                            let expected = self
+                                .character_pointer_output_expr_pointee(left)
+                                .or_else(|| self.character_pointer_output_expr_pointee(right))
+                                .unwrap_or(CType::Char);
+                            if !self.character_pointer_output_expr_matches_pointee(left, expected)
+                                || !self
+                                    .character_pointer_output_expr_matches_pointee(right, expected)
+                            {
+                                return Err(CustError::new(
+                                    "pointer output equality requires compatible pointee types",
+                                ));
+                            }
+                        }
                         for (operand, is_output) in [
                             (left.as_ref(), left_is_output),
                             (right.as_ref(), right_is_output),
                         ] {
                             if is_output {
-                                self.validate_character_pointer_output_argument_with_liveness(
-                                    "character pointer output equality",
+                                let pointee = self
+                                    .character_pointer_output_expr_pointee(operand)
+                                    .unwrap_or(CType::Char);
+                                self.validate_character_pointer_output_argument_typed_with_liveness(
+                                    "pointer output equality",
                                     "operand",
+                                    pointee,
                                     operand,
                                     false,
                                 )?;
@@ -25880,7 +26068,22 @@ impl Interpreter {
                                         "cannot compare pointer with double value",
                                     ));
                                 }
-                                DeclType::Scalar(CType::Bool | CType::Int | CType::Char) => {}
+                                DeclType::Scalar(CType::Bool | CType::Int | CType::Char) => {
+                                    if !self.generic_expr_is_null_pointer_constant(operand) {
+                                        return Err(CustError::new(
+                                            "cannot compare pointer with nonzero integer",
+                                        ));
+                                    }
+                                }
+                                DeclType::Pointer {
+                                    pointee: PointeeType::Void,
+                                    ..
+                                } => {}
+                                DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
+                                    return Err(CustError::new(
+                                        "pointer output equality requires compatible pointee types",
+                                    ));
+                                }
                                 _ => {
                                     return Err(CustError::new(
                                         "character pointer output equality requires another output or an integer null pointer constant",
@@ -25894,9 +26097,10 @@ impl Interpreter {
                         op,
                         BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
                     ) {
-                        return Err(CustError::new(
-                            "character pointer output ordering comparisons are not supported",
-                        ));
+                        let kind = self.pointer_output_binary_kind_label(left, right);
+                        return Err(CustError::new(format!(
+                            "{kind} pointer output ordering comparisons are not supported"
+                        )));
                     }
                 }
                 let left_type = self.non_evaluating_generic_selection_type(left, aliases)?;
@@ -31021,7 +31225,7 @@ impl Interpreter {
                         );
                     DoubleStorageAnalysis::default()
                 }
-                Stmt::CharacterPointerOutputDecl { name, expr } => {
+                Stmt::CharacterPointerOutputDecl { name, expr, .. } => {
                     self.update_double_storage_aliases_from_expr(
                         expr,
                         visited_functions,
@@ -32614,9 +32818,10 @@ impl Interpreter {
             )));
         }
         if self.find_character_pointer_output(name).is_some() {
-            return Err(CustError::new(
-                "character pointer output arithmetic is not supported",
-            ));
+            let kind = self.pointer_output_object_kind_label(name);
+            return Err(CustError::new(format!(
+                "{kind} pointer output arithmetic is not supported"
+            )));
         }
         Err(CustError::new(format!("undefined variable '{name}'")))
     }
@@ -32849,10 +33054,8 @@ impl Interpreter {
                 }
             }
             Expr::AddressOf(name) => {
-                if self.find_character_pointer_output(name).is_some() {
-                    return Err(CustError::new(
-                        "taking the address of a character pointer output parameter is not supported",
-                    ));
+                if let Some(output) = self.find_character_pointer_output(name) {
+                    return Err(CustError::new(output.address_of_error_message()));
                 }
                 if self.identifier_resolves_to_enum_constant(name) {
                     return Err(CustError::new(format!(
@@ -33122,25 +33325,62 @@ impl Interpreter {
             function
                 .params
                 .iter()
-                .map(|param| (param.ty.clone(), param.kind, param.points_to_const))
+                .map(|param| {
+                    (
+                        param.ty.clone(),
+                        param.kind,
+                        param.points_to_const,
+                        Some(param.name.clone()),
+                    )
+                })
                 .collect::<Vec<_>>()
         } else if let Some(signature) = self.prototypes.get(name) {
             signature
                 .params
                 .iter()
-                .map(|param| (param.ty.clone(), param.kind, param.points_to_const))
+                .map(|param| (param.ty.clone(), param.kind, param.points_to_const, None))
                 .collect::<Vec<_>>()
         } else {
             return Ok(());
         };
 
-        for ((expected_type, expected_kind, expected_points_to_const), argument) in
+        for ((expected_type, expected_kind, expected_points_to_const, param_name), argument) in
             params.iter().zip(args)
         {
-            if matches!(
-                expected_kind,
-                ParamKind::CharacterPointerOutput | ParamKind::Array2D
-            ) {
+            if *expected_kind == ParamKind::CharacterPointerOutput {
+                let ParamType::Scalar(pointee) = expected_type else {
+                    return Err(CustError::new(
+                        "internal pointer output parameter type mismatch",
+                    ));
+                };
+                self.validate_character_pointer_output_argument_typed_with_liveness(
+                    name,
+                    param_name.as_deref().unwrap_or("argument"),
+                    *pointee,
+                    argument,
+                    false,
+                )?;
+                continue;
+            }
+            if *expected_kind == ParamKind::Scalar
+                && self.expr_is_character_pointer_output_value(argument)
+            {
+                if matches!(expected_type, ParamType::Scalar(CType::Bool)) {
+                    let pointee = self
+                        .character_pointer_output_expr_pointee(argument)
+                        .unwrap_or(CType::Char);
+                    self.validate_character_pointer_output_argument_typed_with_liveness(
+                        name,
+                        param_name.as_deref().unwrap_or("argument"),
+                        pointee,
+                        argument,
+                        false,
+                    )?;
+                    continue;
+                }
+                return Err(CustError::new("pointer value used as scalar"));
+            }
+            if *expected_kind == ParamKind::Array2D {
                 continue;
             }
             if self.expr_is_void_value(argument) {
@@ -33229,6 +33469,20 @@ impl Interpreter {
                     points_to_const,
                 },
             ) if expected_points_to_const || !points_to_const => {}
+            (
+                ParamKind::Pointer,
+                ParamType::Scalar(expected),
+                DeclType::Pointer {
+                    pointee: PointeeType::Scalar(actual),
+                    ..
+                },
+            ) if expected != &actual => {
+                return Err(CustError::new(format!(
+                    "cannot convert pointer to {} to pointer to {}",
+                    self.pointee_label(&PointeeType::Scalar(actual)),
+                    self.pointee_label(&PointeeType::Scalar(*expected))
+                )));
+            }
             (ParamKind::Pointer, _, DeclType::Scalar(_))
                 if self.generic_expr_is_null_pointer_constant(argument) => {}
             (ParamKind::Pointer, _, _) => {
@@ -33606,6 +33860,101 @@ impl Interpreter {
         }
     }
 
+    fn character_pointer_output_expr_pointee(&self, expr: &Expr) -> Option<CType> {
+        match expr {
+            Expr::Var(name) => self
+                .find_character_pointer_output(name)
+                .map(CharacterPointerOutput::pointee),
+            Expr::AddressOf(name) => self
+                .find_character_pointer_slot_address(name)
+                .as_ref()
+                .map(CharacterPointerOutput::pointee),
+            Expr::Assign { name, .. } => self
+                .find_character_pointer_output(name)
+                .map(CharacterPointerOutput::pointee),
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .ok()
+                .and_then(|selected| self.character_pointer_output_expr_pointee(selected)),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => self
+                .character_pointer_output_expr_pointee(then_expr)
+                .or_else(|| self.character_pointer_output_expr_pointee(else_expr)),
+            Expr::Comma(_, right) => self.character_pointer_output_expr_pointee(right),
+            _ => None,
+        }
+    }
+
+    fn character_pointer_output_expr_matches_pointee(&self, expr: &Expr, expected: CType) -> bool {
+        match expr {
+            Expr::Var(name) => self
+                .find_character_pointer_output(name)
+                .is_some_and(|output| output.pointee() == expected),
+            Expr::AddressOf(name) => self
+                .find_character_pointer_slot_address(name)
+                .is_some_and(|output| output.pointee() == expected),
+            Expr::Assign { name, .. } => self
+                .find_character_pointer_output(name)
+                .is_some_and(|output| output.pointee() == expected),
+            Expr::GenericSelection { .. } => {
+                self.selected_generic_association(expr)
+                    .is_ok_and(|selected| {
+                        self.character_pointer_output_expr_matches_pointee(selected, expected)
+                    })
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => [then_expr.as_ref(), else_expr.as_ref()]
+                .into_iter()
+                .filter(|branch| self.expr_is_character_pointer_output_value(branch))
+                .all(|branch| self.character_pointer_output_expr_matches_pointee(branch, expected)),
+            Expr::Comma(_, right) => {
+                self.character_pointer_output_expr_matches_pointee(right, expected)
+            }
+            _ => true,
+        }
+    }
+
+    fn pointer_output_object_kind_label(&self, name: &str) -> &'static str {
+        match self
+            .find_character_pointer_output(name)
+            .map(CharacterPointerOutput::pointee)
+            .unwrap_or(CType::Char)
+        {
+            CType::Char => "character",
+            CType::Int => "integer",
+            CType::Bool | CType::Double => {
+                unreachable!("unsupported pointer output pointee type")
+            }
+        }
+    }
+
+    fn pointer_output_kind_label(&self, expr: &Expr) -> &'static str {
+        match self
+            .character_pointer_output_expr_pointee(expr)
+            .unwrap_or(CType::Char)
+        {
+            CType::Char => "character",
+            CType::Int => "integer",
+            CType::Bool | CType::Double => {
+                unreachable!("unsupported pointer output pointee type")
+            }
+        }
+    }
+
+    fn pointer_output_binary_kind_label(&self, left: &Expr, right: &Expr) -> &'static str {
+        if self.expr_is_character_pointer_output_value(left) {
+            self.pointer_output_kind_label(left)
+        } else {
+            self.pointer_output_kind_label(right)
+        }
+    }
+
     fn find_character_pointer_slot_address(&self, name: &str) -> Option<CharacterPointerOutput> {
         for scope in self.scopes.iter().rev() {
             if scope.enum_constants.contains_key(name) {
@@ -33614,7 +33963,7 @@ impl Interpreter {
             if let Some(value) = scope.values.get(name) {
                 return match value {
                     Value::Pointer {
-                        ty: PointeeType::Scalar(CType::Char),
+                        ty: PointeeType::Scalar(pointee @ (CType::Char | CType::Int)),
                         points_to_const: false,
                         ..
                     } if !scope.const_variables.contains(name)
@@ -33624,6 +33973,7 @@ impl Interpreter {
                         Some(CharacterPointerOutput::Slot {
                             scope_id: scope.id,
                             name: name.to_string(),
+                            pointee: *pointee,
                         })
                     }
                     _ => None,
@@ -33636,7 +33986,7 @@ impl Interpreter {
             {
                 return match &storage.value {
                     Value::Pointer {
-                        ty: PointeeType::Scalar(CType::Char),
+                        ty: PointeeType::Scalar(pointee @ (CType::Char | CType::Int)),
                         points_to_const: false,
                         ..
                     } if !storage.is_const
@@ -33646,6 +33996,7 @@ impl Interpreter {
                         Some(CharacterPointerOutput::Slot {
                             scope_id: storage.scope_id,
                             name: name.to_string(),
+                            pointee: *pointee,
                         })
                     }
                     _ => None,
@@ -33667,20 +34018,6 @@ impl Interpreter {
         false
     }
 
-    fn validate_character_pointer_output_argument(
-        &self,
-        function_name: &str,
-        param_name: &str,
-        expr: &Expr,
-    ) -> CustResult<CharacterPointerOutput> {
-        self.validate_character_pointer_output_argument_with_liveness(
-            function_name,
-            param_name,
-            expr,
-            true,
-        )
-    }
-
     fn validate_character_pointer_output_argument_with_liveness(
         &self,
         function_name: &str,
@@ -33688,92 +34025,121 @@ impl Interpreter {
         expr: &Expr,
         check_liveness: bool,
     ) -> CustResult<CharacterPointerOutput> {
+        self.validate_character_pointer_output_argument_typed_with_liveness(
+            function_name,
+            param_name,
+            CType::Char,
+            expr,
+            check_liveness,
+        )
+    }
+
+    fn validate_character_pointer_output_argument_typed_with_liveness(
+        &self,
+        function_name: &str,
+        param_name: &str,
+        expected_pointee: CType,
+        expr: &Expr,
+        check_liveness: bool,
+    ) -> CustResult<CharacterPointerOutput> {
         match expr {
-            Expr::GenericSelection { .. } => self
-                .validate_character_pointer_output_argument_with_liveness(
+            _ if self.generic_expr_is_scalar_null_pointer_constant(expr) => {
+                self.sizeof_expr(expr)?;
+                Ok(CharacterPointerOutput::Null {
+                    pointee: expected_pointee,
+                })
+            }
+            Expr::PointerCast {
+                pointee: PointeeType::Void,
+                points_to_const,
+                expr: inner,
+            } if self.generic_expr_is_null_pointer_constant(inner) => {
+                self.sizeof_expr(expr)?;
+                if *points_to_const {
+                    return Err(CustError::new(
+                        "cannot discard const qualifier from pointer target",
+                    ));
+                }
+                Ok(CharacterPointerOutput::Null {
+                    pointee: expected_pointee,
+                })
+            }
+            Expr::GenericSelection { .. } => {
+                let (selected, _) = self.selected_generic_association_with_type(expr)?;
+                self.validate_character_pointer_output_argument_typed_with_liveness(
                     function_name,
                     param_name,
-                    self.selected_generic_association(expr)?,
+                    expected_pointee,
+                    selected,
                     check_liveness,
-                ),
-            Expr::Number(0) => Ok(CharacterPointerOutput::Null),
+                )
+            }
+            Expr::Number(0) => Ok(CharacterPointerOutput::Null {
+                pointee: expected_pointee,
+            }),
             Expr::Var(name)
                 if self.identifier_resolves_to_enum_constant(name)
                     && self.find_enum_constant(name) == Some(0) =>
             {
-                Ok(CharacterPointerOutput::Null)
+                Ok(CharacterPointerOutput::Null {
+                    pointee: expected_pointee,
+                })
             }
             Expr::Var(name) => {
                 let output = self.find_character_pointer_output(name).ok_or_else(|| {
                     CustError::new(format!(
-                        "function '{function_name}' parameter '{param_name}' requires a char pointer slot address"
+                        "function '{function_name}' parameter '{param_name}' requires {} {} pointer slot address",
+                        expected_pointee.indefinite_article(),
+                        expected_pointee.name()
                     ))
                 })?;
+                if output.pointee() != expected_pointee {
+                    return Err(CustError::new(format!(
+                        "function '{function_name}' parameter '{param_name}' requires {} {} pointer slot address",
+                        expected_pointee.indefinite_article(),
+                        expected_pointee.name()
+                    )));
+                }
                 if check_liveness && matches!(output, CharacterPointerOutput::Slot { .. }) {
                     self.read_character_pointer_output(output)?;
                 }
                 Ok(output.clone())
             }
             Expr::AddressOf(name) => {
-                for scope in self.scopes.iter().rev() {
-                    if scope.enum_constants.contains_key(name) {
-                        return Err(CustError::new(format!(
-                            "function '{function_name}' parameter '{param_name}' requires the address of a mutable char pointer variable"
-                        )));
+                if let Some(output) = self.find_character_pointer_slot_address(name) {
+                    if output.pointee() == expected_pointee {
+                        return Ok(output);
                     }
-                    if let Some(value) = scope.values.get(name) {
-                        return match value {
-                            Value::Pointer {
-                                ty: PointeeType::Scalar(CType::Char),
-                                points_to_const: false,
-                                ..
-                            } if !scope.const_variables.contains(name)
-                                && !scope.qualified_pointer_variables.contains(name)
-                                && !scope.array2d_pointer_types.contains_key(name) =>
-                            {
-                                Ok(CharacterPointerOutput::Slot {
-                                    scope_id: scope.id,
-                                    name: name.clone(),
-                                })
-                            }
-                            _ => Err(CustError::new(format!(
-                                "function '{function_name}' parameter '{param_name}' requires the address of a mutable char pointer variable"
-                            ))),
-                        };
-                    }
-                    if let Some(storage) = scope
-                        .static_local_ids
-                        .get(name)
-                        .and_then(|id| self.static_locals.get(id))
-                    {
-                        return match &storage.value {
-                            Value::Pointer {
-                                ty: PointeeType::Scalar(CType::Char),
-                                points_to_const: false,
-                                ..
-                            } if !storage.is_const
-                                && !storage.pointer_is_qualified
-                                && !scope.array2d_pointer_types.contains_key(name) =>
-                            {
-                                Ok(CharacterPointerOutput::Slot {
-                                    scope_id: storage.scope_id,
-                                    name: name.clone(),
-                                })
-                            }
-                            _ => Err(CustError::new(format!(
-                                "function '{function_name}' parameter '{param_name}' requires the address of a mutable char pointer variable"
-                            ))),
-                        };
-                    }
+                    return Err(CustError::new(format!(
+                        "function '{function_name}' parameter '{param_name}' requires the address of a mutable {} pointer variable",
+                        expected_pointee.name()
+                    )));
                 }
-                Err(CustError::new(format!("undefined variable '{name}'")))
+                if self.find_variable(name).is_none()
+                    && !self.identifier_resolves_to_enum_constant(name)
+                {
+                    return Err(CustError::new(format!("undefined variable '{name}'")));
+                }
+                Err(CustError::new(format!(
+                    "function '{function_name}' parameter '{param_name}' requires the address of a mutable {} pointer variable",
+                    expected_pointee.name()
+                )))
             }
             Expr::Assign { name, value } if self.find_character_pointer_output(name).is_some() => {
-                self.validate_character_pointer_output_object_assignment_with_liveness(
-                    name,
-                    value,
-                    check_liveness,
-                )
+                let output = self
+                    .validate_character_pointer_output_object_assignment_with_liveness(
+                        name,
+                        value,
+                        check_liveness,
+                    )?;
+                if output.pointee() != expected_pointee {
+                    return Err(CustError::new(format!(
+                        "function '{function_name}' parameter '{param_name}' requires {} {} pointer slot address",
+                        expected_pointee.indefinite_article(),
+                        expected_pointee.name()
+                    )));
+                }
+                Ok(output)
             }
             Expr::Conditional {
                 cond,
@@ -33781,15 +34147,27 @@ impl Interpreter {
                 else_expr,
             } => {
                 self.validate_non_evaluating_scalar_condition(cond)?;
-                let then_output = self.validate_character_pointer_output_argument_with_liveness(
+                if !self.expr_is_character_pointer_output_value(expr)
+                    && !self.expr_is_pointer_value(expr)
+                {
+                    return Err(CustError::new(format!(
+                        "function '{function_name}' parameter '{param_name}' requires {} {} pointer slot address",
+                        expected_pointee.indefinite_article(),
+                        expected_pointee.name()
+                    )));
+                }
+                let then_output = self
+                    .validate_character_pointer_output_argument_typed_with_liveness(
+                        function_name,
+                        param_name,
+                        expected_pointee,
+                        then_expr,
+                        false,
+                    )?;
+                self.validate_character_pointer_output_argument_typed_with_liveness(
                     function_name,
                     param_name,
-                    then_expr,
-                    false,
-                )?;
-                self.validate_character_pointer_output_argument_with_liveness(
-                    function_name,
-                    param_name,
+                    expected_pointee,
                     else_expr,
                     false,
                 )?;
@@ -33797,15 +34175,26 @@ impl Interpreter {
             }
             Expr::Comma(left, right) => {
                 self.validate_non_evaluating_discard_expr(left)?;
-                self.validate_character_pointer_output_argument_with_liveness(
+                if !self.expr_is_character_pointer_output_value(expr)
+                    && !self.expr_is_pointer_value(expr)
+                {
+                    return Err(CustError::new(format!(
+                        "function '{function_name}' parameter '{param_name}' requires {} {} pointer slot address",
+                        expected_pointee.indefinite_article(),
+                        expected_pointee.name()
+                    )));
+                }
+                self.validate_character_pointer_output_argument_typed_with_liveness(
                     function_name,
                     param_name,
+                    expected_pointee,
                     right,
                     check_liveness,
                 )
             }
             _ => Err(CustError::new(format!(
-                "function '{function_name}' parameter '{param_name}' requires a char pointer slot address"
+                "function '{function_name}' parameter '{param_name}' requires a {} pointer slot address",
+                expected_pointee.name()
             ))),
         }
     }
@@ -33815,9 +34204,13 @@ impl Interpreter {
             return Err(CustError::new("double pointers are not supported"));
         }
         if self.expr_is_character_pointer_output_value(expr) {
-            self.validate_character_pointer_output_argument_with_liveness(
+            let pointee = self
+                .character_pointer_output_expr_pointee(expr)
+                .unwrap_or(CType::Char);
+            self.validate_character_pointer_output_argument_typed_with_liveness(
                 "scalar condition",
                 "value",
+                pointee,
                 expr,
                 false,
             )?;
@@ -33890,27 +34283,50 @@ impl Interpreter {
         param_name: &str,
         expr: &Expr,
     ) -> CustResult<CharacterPointerOutput> {
-        self.validate_character_pointer_output_argument_with_liveness(
+        self.eval_character_pointer_output_argument_typed(
             function_name,
             param_name,
+            CType::Char,
             expr,
-            false,
-        )?;
-        self.eval_validated_character_pointer_output_argument(function_name, param_name, expr)
+        )
     }
 
-    fn eval_validated_character_pointer_output_argument(
+    fn eval_character_pointer_output_argument_typed(
         &mut self,
         function_name: &str,
         param_name: &str,
+        expected_pointee: CType,
+        expr: &Expr,
+    ) -> CustResult<CharacterPointerOutput> {
+        self.validate_character_pointer_output_argument_typed_with_liveness(
+            function_name,
+            param_name,
+            expected_pointee,
+            expr,
+            false,
+        )?;
+        self.eval_validated_character_pointer_output_argument_typed(
+            function_name,
+            param_name,
+            expected_pointee,
+            expr,
+        )
+    }
+
+    fn eval_validated_character_pointer_output_argument_typed(
+        &mut self,
+        function_name: &str,
+        param_name: &str,
+        expected_pointee: CType,
         expr: &Expr,
     ) -> CustResult<CharacterPointerOutput> {
         match expr {
             Expr::GenericSelection { .. } => {
                 let selected = self.selected_generic_association(expr)?.clone();
-                self.eval_validated_character_pointer_output_argument(
+                self.eval_validated_character_pointer_output_argument_typed(
                     function_name,
                     param_name,
+                    expected_pointee,
                     &selected,
                 )
             }
@@ -33924,43 +34340,63 @@ impl Interpreter {
                 } else {
                     else_expr
                 };
-                self.eval_validated_character_pointer_output_argument(
+                self.eval_validated_character_pointer_output_argument_typed(
                     function_name,
                     param_name,
+                    expected_pointee,
                     selected,
                 )
             }
             Expr::Comma(left, right) => {
                 self.eval_discard(left)?;
-                self.eval_validated_character_pointer_output_argument(
+                self.eval_validated_character_pointer_output_argument_typed(
                     function_name,
                     param_name,
+                    expected_pointee,
                     right,
                 )
             }
             Expr::Assign { name, value } if self.find_character_pointer_output(name).is_some() => {
                 self.assign_character_pointer_output_object(name, value)
             }
-            _ => self.validate_character_pointer_output_argument(function_name, param_name, expr),
+            _ => self.validate_character_pointer_output_argument_typed_with_liveness(
+                function_name,
+                param_name,
+                expected_pointee,
+                expr,
+                true,
+            ),
         }
     }
 
     fn eval_character_pointer_output_initializer(
         &mut self,
         name: &str,
+        pointee: CType,
         expr: &Expr,
     ) -> CustResult<CharacterPointerOutput> {
-        self.eval_character_pointer_output_argument(
-            "character pointer object initializer",
+        self.eval_character_pointer_output_argument_typed(
+            "pointer object initializer",
             name,
+            pointee,
             expr,
         )
         .map_err(|error| {
-            if error.message.starts_with("pointer to out-of-scope variable") {
+            if error.message.starts_with("pointer to out-of-scope variable")
+                || error.message.as_ref() == "cannot discard const qualifier from pointer target"
+                || (error.message.contains(" pointer object '")
+                    && error.message.contains(" assignment requires null"))
+            {
                 error
-            } else {
+            } else if pointee == CType::Char {
                 CustError::new(format!(
                     "character pointer object '{name}' initializer requires null, another character pointer output object, or the address of a mutable char pointer variable"
+                ))
+            } else {
+                CustError::new(format!(
+                    "{} pointer object '{name}' initializer requires null, another compatible pointer output object, or the address of a mutable {} pointer variable",
+                    pointee.name(),
+                    pointee.name()
                 ))
             }
         })
@@ -33971,10 +34407,15 @@ impl Interpreter {
         name: &str,
         expr: &Expr,
     ) -> CustResult<CharacterPointerOutput> {
+        let pointee = self
+            .find_character_pointer_output(name)
+            .map(CharacterPointerOutput::pointee)
+            .unwrap_or(CType::Char);
         self.validate_character_pointer_output_object_assignment_with_liveness(name, expr, false)?;
-        let output = self.eval_validated_character_pointer_output_argument(
-            "character pointer object assignment",
+        let output = self.eval_validated_character_pointer_output_argument_typed(
+            "pointer object assignment",
             name,
+            pointee,
             expr,
         )?;
 
@@ -34019,18 +34460,31 @@ impl Interpreter {
         expr: &Expr,
         check_liveness: bool,
     ) -> CustResult<CharacterPointerOutput> {
-        self.validate_character_pointer_output_argument_with_liveness(
-            "character pointer object assignment",
+        let pointee = self
+            .find_character_pointer_output(name)
+            .map(CharacterPointerOutput::pointee)
+            .unwrap_or(CType::Char);
+        self.validate_character_pointer_output_argument_typed_with_liveness(
+            "pointer object assignment",
             name,
+            pointee,
             expr,
             check_liveness,
         )
         .map_err(|error| {
-            if error.message.starts_with("pointer to out-of-scope variable") {
+            if error.message.starts_with("pointer to out-of-scope variable")
+                || error.message.as_ref() == "cannot discard const qualifier from pointer target"
+            {
                 error
-            } else {
+            } else if pointee == CType::Char {
                 CustError::new(format!(
                     "character pointer object '{name}' assignment requires null, another character pointer output object, or the address of a mutable char pointer variable"
+                ))
+            } else {
+                CustError::new(format!(
+                    "{} pointer object '{name}' assignment requires null, another compatible pointer output object, or the address of a mutable {} pointer variable",
+                    pointee.name(),
+                    pointee.name()
                 ))
             }
         })
@@ -34081,27 +34535,34 @@ impl Interpreter {
     }
 
     fn character_pointer_output_initializer_is_static_constant(&self, expr: &Expr) -> bool {
-        match expr {
-            Expr::Number(0) | Expr::AddressOf(_) => true,
-            Expr::Var(name) => {
-                self.identifier_resolves_to_enum_constant(name)
-                    && self.find_enum_constant(name) == Some(0)
-            }
-            _ => false,
-        }
+        matches!(expr, Expr::AddressOf(_))
+            || self.generic_expr_is_scalar_null_pointer_constant(expr)
+            || self.generic_expr_is_null_void_pointer(expr)
     }
 
-    fn static_character_pointer_output_initializer_error() -> CustError {
-        CustError::new(
-            "static character pointer object initializer must be null or the address of a mutable char pointer variable with static storage duration",
-        )
+    fn static_character_pointer_output_initializer_error(pointee: CType) -> CustError {
+        let (kind, type_name) = match pointee {
+            CType::Char => ("character", "char"),
+            CType::Int => ("integer", "int"),
+            CType::Bool | CType::Double => {
+                unreachable!("unsupported pointer output pointee type")
+            }
+        };
+        CustError::new(format!(
+            "static {kind} pointer object initializer must be null or the address of a mutable {type_name} pointer variable with static storage duration"
+        ))
     }
 
     fn read_character_pointer_output(
         &self,
         output: &CharacterPointerOutput,
     ) -> CustResult<PointerValue> {
-        let CharacterPointerOutput::Slot { scope_id, name } = output else {
+        let CharacterPointerOutput::Slot {
+            scope_id,
+            name,
+            pointee,
+        } = output
+        else {
             return Err(CustError::new("null pointer dereference"));
         };
         if !self.live_scope_ids.contains(scope_id) {
@@ -34118,9 +34579,9 @@ impl Interpreter {
         match value {
             Some(Value::Pointer {
                 pointer,
-                ty: PointeeType::Scalar(CType::Char),
+                ty: PointeeType::Scalar(actual_pointee),
                 points_to_const: false,
-            }) => Ok(pointer.clone()),
+            }) if actual_pointee == pointee => Ok(pointer.clone()),
             _ => Err(CustError::new(format!(
                 "pointer to out-of-scope variable '{name}'"
             ))),
@@ -34132,16 +34593,27 @@ impl Interpreter {
         output_expr: &Expr,
         value: &Expr,
     ) -> CustResult<PointerValue> {
-        let output = self.eval_character_pointer_output_argument(
-            "character pointer output assignment",
+        let pointee = self
+            .character_pointer_output_expr_pointee(output_expr)
+            .unwrap_or(CType::Char);
+        self.validate_character_pointer_output_assignment_expr(pointee, value)?;
+        let output = self.eval_character_pointer_output_argument_typed(
+            "pointer output assignment",
             "output",
+            pointee,
             output_expr,
         )?;
 
         self.ensure_pointer_conversion_preserves_const(false, value)?;
-        let pointer = self.eval_pointer(value)?;
+        let pointer = if self.generic_expr_is_null_pointer_constant(value) {
+            PointerValue::Null
+        } else {
+            self.eval_pointer(value)?
+        };
         let pointer = self.attach_array_pointer_owner(pointer);
-        self.ensure_pointer_type_matches(&PointeeType::Scalar(CType::Char), &pointer)?;
+        let expected = PointeeType::Scalar(pointee);
+        let pointer = self.coerce_object_byte_pointer(&expected, pointer)?;
+        self.ensure_pointer_type_matches(&expected, &pointer)?;
 
         self.write_character_pointer_output(output, pointer)
     }
@@ -34151,7 +34623,12 @@ impl Interpreter {
         output: CharacterPointerOutput,
         pointer: PointerValue,
     ) -> CustResult<PointerValue> {
-        let CharacterPointerOutput::Slot { scope_id, name } = output else {
+        let CharacterPointerOutput::Slot {
+            scope_id,
+            name,
+            pointee,
+        } = output
+        else {
             return Err(CustError::new("null pointer dereference"));
         };
         if !self.live_scope_ids.contains(&scope_id) {
@@ -34164,9 +34641,9 @@ impl Interpreter {
             return match scope.values.get_mut(&name) {
                 Some(Value::Pointer {
                     pointer: slot,
-                    ty: PointeeType::Scalar(CType::Char),
+                    ty: PointeeType::Scalar(actual_pointee),
                     points_to_const: false,
-                }) if !scope.const_variables.contains(&name) => {
+                }) if *actual_pointee == pointee && !scope.const_variables.contains(&name) => {
                     *slot = pointer.clone();
                     Ok(pointer)
                 }
@@ -34178,9 +34655,9 @@ impl Interpreter {
         match self.static_value_by_scope_mut(scope_id, &name) {
             Some(Value::Pointer {
                 pointer: slot,
-                ty: PointeeType::Scalar(CType::Char),
+                ty: PointeeType::Scalar(actual_pointee),
                 points_to_const: false,
-            }) => {
+            }) if *actual_pointee == pointee => {
                 *slot = pointer.clone();
                 Ok(pointer)
             }
@@ -34424,29 +34901,65 @@ impl Interpreter {
         Ok(None)
     }
 
-    fn validate_character_pointer_output_assignment_expr(&self, value: &Expr) -> CustResult<()> {
-        if let Expr::Conditional {
-            then_expr,
-            else_expr,
-            ..
-        } = value
-        {
-            self.validate_character_pointer_output_assignment_expr(then_expr)?;
-            self.validate_character_pointer_output_assignment_expr(else_expr)?;
+    fn validate_character_pointer_output_assignment_expr(
+        &self,
+        expected_pointee: CType,
+        value: &Expr,
+    ) -> CustResult<()> {
+        if self.generic_expr_is_scalar_null_pointer_constant(value) {
+            self.sizeof_expr(value)?;
             return Ok(());
         }
+        if self.generic_expr_is_null_void_pointer(value) {
+            self.sizeof_expr(value)?;
+            if matches!(
+                value,
+                Expr::PointerCast {
+                    points_to_const: true,
+                    ..
+                }
+            ) {
+                return Err(CustError::new(
+                    "cannot discard const qualifier from pointer target",
+                ));
+            }
+            return Ok(());
+        }
+        if let Expr::Conditional {
+            cond,
+            then_expr,
+            else_expr,
+        } = value
+        {
+            self.validate_non_evaluating_scalar_condition(cond)?;
+            if !self.expr_is_character_pointer_output_value(value)
+                && !self.expr_is_pointer_value(value)
+            {
+                return Err(CustError::new("expected pointer expression"));
+            }
+            if matches!(
+                self.generic_conditional_expression_type(then_expr, else_expr),
+                Ok(DeclType::Pointer {
+                    pointee: PointeeType::Void,
+                    ..
+                })
+            ) {
+                self.sizeof_expr(value)?;
+                self.ensure_pointer_conversion_preserves_const(false, value)?;
+                return Ok(());
+            }
+            self.validate_character_pointer_output_assignment_expr(expected_pointee, then_expr)?;
+            self.validate_character_pointer_output_assignment_expr(expected_pointee, else_expr)?;
+            return Ok(());
+        }
+        self.sizeof_expr(value)?;
         self.ensure_pointer_conversion_preserves_const(false, value)?;
         match self.pointer_expr_pointee_type(value)? {
-            Some(PointeeType::Scalar(CType::Char)) => Ok(()),
-            Some(actual) => Err(CustError::new(format!(
-                "cannot convert pointer to {} to pointer to char",
-                self.pointee_label(&actual)
-            ))),
-            None if matches!(value, Expr::Number(0))
-                || matches!(value, Expr::Var(name) if self.identifier_resolves_to_enum_constant(name) && self.find_enum_constant(name) == Some(0)) =>
-            {
-                Ok(())
-            }
+            Some(actual) => self.ensure_pointer_conversion_type_matches(
+                &PointeeType::Scalar(expected_pointee),
+                &actual,
+            ),
+            None if self.generic_expr_is_null_pointer_constant(value) => Ok(()),
             None => Err(CustError::new("expected pointer expression")),
         }
     }
@@ -34467,38 +34980,76 @@ impl Interpreter {
                     .map(PointeeType::Scalar))
             }
             Expr::Deref(pointer) if self.expr_is_character_pointer_output_value(pointer) => {
-                self.validate_character_pointer_output_argument_with_liveness(
-                    "character pointer output dereference",
-                    "output",
-                    pointer,
-                    false,
+                let pointee = self
+                    .character_pointer_output_expr_pointee(pointer)
+                    .unwrap_or(CType::Char);
+                let operation = if pointee == CType::Char {
+                    "character pointer output dereference"
+                } else {
+                    "pointer output dereference"
+                };
+                self.validate_character_pointer_output_argument_typed_with_liveness(
+                    operation, "output", pointee, pointer, false,
                 )?;
-                Ok(Some(PointeeType::Scalar(CType::Char)))
+                Ok(Some(PointeeType::Scalar(pointee)))
             }
             Expr::DerefSet { pointer, value }
                 if self.expr_is_character_pointer_output_value(pointer) =>
             {
-                self.validate_character_pointer_output_argument_with_liveness(
-                    "character pointer output dereference",
-                    "output",
-                    pointer,
-                    false,
+                let pointee = self
+                    .character_pointer_output_expr_pointee(pointer)
+                    .unwrap_or(CType::Char);
+                let operation = if pointee == CType::Char {
+                    "character pointer output dereference"
+                } else {
+                    "pointer output dereference"
+                };
+                self.validate_character_pointer_output_argument_typed_with_liveness(
+                    operation, "output", pointee, pointer, false,
                 )?;
-                self.validate_character_pointer_output_assignment_expr(value)?;
-                Ok(Some(PointeeType::Scalar(CType::Char)))
+                self.validate_character_pointer_output_assignment_expr(pointee, value)?;
+                Ok(Some(PointeeType::Scalar(pointee)))
             }
-            Expr::Var(name) | Expr::Assign { name, .. } | Expr::CompoundAssign { name, .. } => {
-                match self.find_variable(name) {
-                    Some(Value::Pointer { ty, .. }) => Ok(Some(ty.clone())),
-                    Some(Value::Array(array)) => {
-                        Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
+            Expr::Assign { name, value } => match self.find_variable(name) {
+                Some(Value::Pointer {
+                    ty,
+                    points_to_const,
+                    ..
+                }) => {
+                    self.ensure_variable_mutable(name)?;
+                    self.ensure_pointer_conversion_preserves_const(*points_to_const, value)?;
+                    if self.expr_is_unsupported_double_pointer(value) {
+                        return Err(CustError::new("double pointers are not supported"));
                     }
-                    Some(Value::StructArray { type_name, .. }) => {
-                        Ok(Some(PointeeType::Struct(type_name.clone())))
+                    if self.array2d_pointer_variable_type(name).is_none() {
+                        match self.pointer_expr_pointee_type(value)? {
+                            Some(actual) => {
+                                self.ensure_pointer_conversion_type_matches(ty, &actual)?;
+                            }
+                            None if self.generic_expr_is_null_pointer_constant(value) => {}
+                            None => return Err(CustError::new("expected pointer expression")),
+                        }
                     }
-                    _ => Ok(None),
+                    Ok(Some(ty.clone()))
                 }
-            }
+                Some(Value::Array(array)) => {
+                    Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
+                }
+                Some(Value::StructArray { type_name, .. }) => {
+                    Ok(Some(PointeeType::Struct(type_name.clone())))
+                }
+                _ => Ok(None),
+            },
+            Expr::Var(name) | Expr::CompoundAssign { name, .. } => match self.find_variable(name) {
+                Some(Value::Pointer { ty, .. }) => Ok(Some(ty.clone())),
+                Some(Value::Array(array)) => {
+                    Ok(Some(PointeeType::Scalar(array.borrow().elem_type)))
+                }
+                Some(Value::StructArray { type_name, .. }) => {
+                    Ok(Some(PointeeType::Struct(type_name.clone())))
+                }
+                _ => Ok(None),
+            },
             Expr::AddressOf(name) => match self.find_variable(name) {
                 Some(Value::Scalar { ty, .. }) => Ok(Some(PointeeType::Scalar(*ty))),
                 Some(Value::Struct { type_name, .. }) => {
@@ -43576,10 +44127,8 @@ impl Interpreter {
 
     fn address_of_scalar(&self, name: &str) -> CustResult<PointerValue> {
         for scope in self.scopes.iter().rev() {
-            if scope.character_pointer_outputs.contains_key(name) {
-                return Err(CustError::new(
-                    "taking the address of a character pointer output parameter is not supported",
-                ));
+            if let Some(output) = scope.character_pointer_outputs.get(name) {
+                return Err(CustError::new(output.address_of_error_message()));
             }
             if let Some(value) = scope.values.get(name) {
                 return match value {
@@ -43607,10 +44156,8 @@ impl Interpreter {
                 .get(name)
                 .and_then(|id| self.static_locals.get(id))
             {
-                if storage.character_pointer_output.is_some() {
-                    return Err(CustError::new(
-                        "taking the address of a character pointer output parameter is not supported",
-                    ));
+                if let Some(output) = &storage.character_pointer_output {
+                    return Err(CustError::new(output.address_of_error_message()));
                 }
                 return match &storage.value {
                     Value::Scalar { .. } => Ok(PointerValue::Scalar {
@@ -43657,10 +44204,16 @@ impl Interpreter {
             }
             Expr::Number(0) => Ok(PointerValue::Null),
             Expr::Deref(output) if self.expr_is_character_pointer_output_value(output) => {
-                let output = self.eval_character_pointer_output_argument(
-                    "character pointer output dereference",
-                    "output",
-                    output,
+                let pointee = self
+                    .character_pointer_output_expr_pointee(output)
+                    .unwrap_or(CType::Char);
+                let operation = if pointee == CType::Char {
+                    "character pointer output dereference"
+                } else {
+                    "pointer output dereference"
+                };
+                let output = self.eval_character_pointer_output_argument_typed(
+                    operation, "output", pointee, output,
                 )?;
                 self.read_character_pointer_output(&output)
             }
@@ -44024,6 +44577,12 @@ impl Interpreter {
                     "assignment to undeclared variable '{name}'"
                 ))),
             },
+            Expr::Var(name)
+                if self.identifier_resolves_to_enum_constant(name)
+                    && self.find_enum_constant(name) == Some(0) =>
+            {
+                Ok(PointerValue::Null)
+            }
             Expr::Var(name) => match self.find_variable(name) {
                 Some(Value::Pointer { pointer, .. }) => Ok(pointer.clone()),
                 Some(Value::Array(array)) if array.borrow().dimensions.is_some() => {
@@ -44506,9 +45065,10 @@ impl Interpreter {
         if self.expr_is_character_pointer_output_value(left)
             || self.expr_is_character_pointer_output_value(right)
         {
-            return Err(CustError::new(
-                "character pointer output ordering comparisons are not supported",
-            ));
+            let kind = self.pointer_output_binary_kind_label(left, right);
+            return Err(CustError::new(format!(
+                "{kind} pointer output ordering comparisons are not supported"
+            )));
         }
         if self.expr_is_unsupported_double_pointer(left)
             || self.expr_is_unsupported_double_pointer(right)
@@ -46714,6 +47274,13 @@ impl Interpreter {
             }
             return self.validated_generic_selection_type(expr);
         }
+        if self.generic_selection_validation_depth.get() > 0
+            && self.expr_is_character_pointer_output_value(expr)
+        {
+            return Err(CustError::new(
+                "pointer output generic controlling expressions are not supported",
+            ));
+        }
         if self.expr_is_unsupported_double_pointer(expr) {
             return Err(CustError::new("double pointers are not supported"));
         }
@@ -46897,7 +47464,13 @@ impl Interpreter {
             if matches!(expr, Expr::GenericSelection { .. }) {
                 let (selected, selected_type) =
                     self.selected_generic_association_with_type(expr)?;
-                selected_type.map_or_else(|| self.validated_generic_selection_type(selected), Ok)
+                match selected_type {
+                    Some(GenericAssociationType::Decl(selected_type)) => Ok(selected_type),
+                    Some(GenericAssociationType::PointerOutput) => Err(CustError::new(
+                        "pointer output generic controlling expressions are not supported",
+                    )),
+                    None => self.validated_generic_selection_type(selected),
+                }
             } else {
                 self.sizeof_expr(expr)?;
                 self.generic_selection_type(expr)
@@ -47148,18 +47721,183 @@ impl Interpreter {
         }
     }
 
-    fn generic_expr_is_null_pointer_constant(&self, expr: &Expr) -> bool {
+    fn generic_integer_constant_expr_value(&self, expr: &Expr) -> Option<i64> {
+        if !self.generic_integer_constant_expr_is_valid(expr, 0) {
+            return None;
+        }
+        self.eval_generic_integer_constant_expr(expr, 0)
+    }
+
+    fn generic_integer_constant_expr_is_valid(&self, expr: &Expr, depth: usize) -> bool {
+        if depth > MAX_SIZEOF_EXPRESSION_DEPTH {
+            return false;
+        }
         match expr {
-            Expr::Number(0) => true,
-            Expr::Var(name) => self.find_enum_constant(name) == Some(0),
-            Expr::Cast { expr, .. } | Expr::UnaryPlus(expr) => {
-                self.generic_expr_is_null_pointer_constant(expr)
+            Expr::Number(_) => true,
+            Expr::Var(name) => self.identifier_resolves_to_enum_constant(name),
+            Expr::Cast { ty, expr }
+                if *ty != CType::Double && Parser::double_constant_expr_value(expr).is_some() =>
+            {
+                true
             }
+            Expr::Cast { ty, expr } => {
+                *ty != CType::Double && self.generic_integer_constant_expr_is_valid(expr, depth + 1)
+            }
+            Expr::UnaryPlus(expr)
+            | Expr::UnaryMinus(expr)
+            | Expr::BitwiseNot(expr)
+            | Expr::LogicalNot(expr) => {
+                self.generic_integer_constant_expr_is_valid(expr, depth + 1)
+            }
+            Expr::Binary(left, op, right) => {
+                *op != BinaryOp::Subscript
+                    && self.generic_integer_constant_expr_is_valid(left, depth + 1)
+                    && self.generic_integer_constant_expr_is_valid(right, depth + 1)
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                self.generic_integer_constant_expr_is_valid(cond, depth + 1)
+                    && self.generic_integer_constant_expr_is_valid(then_expr, depth + 1)
+                    && self.generic_integer_constant_expr_is_valid(else_expr, depth + 1)
+            }
+            Expr::Comma(left, right) => {
+                self.generic_integer_constant_expr_is_valid(left, depth + 1)
+                    && self.generic_integer_constant_expr_is_valid(right, depth + 1)
+            }
+            Expr::SizeOfType(_) | Expr::SizeOfValue(_) | Expr::AlignOfType(_) => true,
             Expr::GenericSelection { .. } => self
                 .selected_generic_association(expr)
-                .is_ok_and(|selected| self.generic_expr_is_null_pointer_constant(selected)),
+                .ok()
+                .is_some_and(|selected| {
+                    self.generic_integer_constant_expr_is_valid(selected, depth + 1)
+                }),
             _ => false,
         }
+    }
+
+    fn eval_generic_integer_constant_expr(&self, expr: &Expr, depth: usize) -> Option<i64> {
+        if depth > MAX_SIZEOF_EXPRESSION_DEPTH {
+            return None;
+        }
+        match expr {
+            Expr::Number(value) => Some(*value),
+            Expr::Var(name) if self.identifier_resolves_to_enum_constant(name) => {
+                self.find_enum_constant(name)
+            }
+            Expr::Cast { ty, expr }
+                if *ty != CType::Double && Parser::double_constant_expr_value(expr).is_some() =>
+            {
+                let value = Parser::double_constant_expr_value(expr)
+                    .expect("double-constant cast guard requires a double constant");
+                let value = if *ty == CType::Bool {
+                    i64::from(value != 0.0)
+                } else {
+                    value as i64
+                };
+                Some(ty.normalize(value))
+            }
+            Expr::Cast { ty, expr } if *ty != CType::Double => self
+                .eval_generic_integer_constant_expr(expr, depth + 1)
+                .map(|value| ty.normalize(value)),
+            Expr::UnaryPlus(expr) => self.eval_generic_integer_constant_expr(expr, depth + 1),
+            Expr::UnaryMinus(expr) => self
+                .eval_generic_integer_constant_expr(expr, depth + 1)
+                .and_then(i64::checked_neg),
+            Expr::BitwiseNot(expr) => self
+                .eval_generic_integer_constant_expr(expr, depth + 1)
+                .map(|value| !value),
+            Expr::LogicalNot(expr) => self
+                .eval_generic_integer_constant_expr(expr, depth + 1)
+                .map(|value| i64::from(value == 0)),
+            Expr::Binary(left, op, right) => {
+                let left = self.eval_generic_integer_constant_expr(left, depth + 1)?;
+                match op {
+                    BinaryOp::LogicalAnd if left == 0 => return Some(0),
+                    BinaryOp::LogicalOr if left != 0 => return Some(1),
+                    _ => {}
+                }
+                let right = self.eval_generic_integer_constant_expr(right, depth + 1)?;
+                match op {
+                    BinaryOp::Add => left.checked_add(right),
+                    BinaryOp::Sub => left.checked_sub(right),
+                    BinaryOp::Mul => left.checked_mul(right),
+                    BinaryOp::Div => left.checked_div(right),
+                    BinaryOp::Rem => left.checked_rem(right),
+                    BinaryOp::ShiftLeft => {
+                        let shift = u32::try_from(right).ok()?;
+                        if shift >= i64::BITS || left < 0 {
+                            return None;
+                        }
+                        if left == 0 || left <= (i64::MAX >> shift) {
+                            Some(left << shift)
+                        } else {
+                            None
+                        }
+                    }
+                    BinaryOp::ShiftRight => u32::try_from(right)
+                        .ok()
+                        .and_then(|shift| left.checked_shr(shift)),
+                    BinaryOp::Eq => Some(i64::from(left == right)),
+                    BinaryOp::Ne => Some(i64::from(left != right)),
+                    BinaryOp::Lt => Some(i64::from(left < right)),
+                    BinaryOp::Le => Some(i64::from(left <= right)),
+                    BinaryOp::Gt => Some(i64::from(left > right)),
+                    BinaryOp::Ge => Some(i64::from(left >= right)),
+                    BinaryOp::BitAnd => Some(left & right),
+                    BinaryOp::BitXor => Some(left ^ right),
+                    BinaryOp::BitOr => Some(left | right),
+                    BinaryOp::LogicalAnd => Some(i64::from(right != 0)),
+                    BinaryOp::LogicalOr => Some(i64::from(right != 0)),
+                    BinaryOp::Subscript => None,
+                }
+            }
+            Expr::Conditional {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                let condition = self.eval_generic_integer_constant_expr(cond, depth + 1)?;
+                self.eval_generic_integer_constant_expr(
+                    if condition != 0 { then_expr } else { else_expr },
+                    depth + 1,
+                )
+            }
+            Expr::SizeOfType(ty) => ty.size(&self.struct_types).ok(),
+            Expr::SizeOfValue(expr) => self.sizeof_expr(expr).ok(),
+            Expr::AlignOfType(ty) => ty.alignment(&self.struct_types).ok(),
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association(expr)
+                .ok()
+                .and_then(|selected| self.eval_generic_integer_constant_expr(selected, depth + 1)),
+            _ => None,
+        }
+    }
+
+    fn generic_expr_is_null_pointer_constant(&self, expr: &Expr) -> bool {
+        self.generic_integer_constant_expr_value(expr) == Some(0)
+    }
+
+    fn generic_expr_is_scalar_null_pointer_constant(&self, expr: &Expr) -> bool {
+        self.generic_expr_is_null_pointer_constant(expr)
+            && !self.generic_expr_is_null_void_pointer(expr)
+            && !self.expr_is_character_pointer_output_value(expr)
+            && self
+                .pointer_expr_pointee_type(expr)
+                .is_ok_and(|pointee| pointee.is_none())
+    }
+
+    fn generic_expr_is_null_void_pointer(&self, expr: &Expr) -> bool {
+        matches!(
+            expr,
+            Expr::PointerCast {
+                pointee: PointeeType::Void,
+                expr,
+                ..
+            } if self.generic_expr_is_null_pointer_constant(expr)
+        )
     }
 
     fn generic_aggregate_field_expr_type(&self, expr: &Expr) -> CustResult<Option<DeclType>> {
@@ -47314,7 +48052,7 @@ impl Interpreter {
     fn selected_generic_association_with_type<'a>(
         &self,
         expr: &'a Expr,
-    ) -> CustResult<(&'a Expr, Option<DeclType>)> {
+    ) -> CustResult<(&'a Expr, Option<GenericAssociationType>)> {
         let Expr::GenericSelection {
             controlling,
             associations,
@@ -47399,8 +48137,11 @@ impl Interpreter {
     fn validate_generic_association_constraints(
         &self,
         expr: &Expr,
-    ) -> CustResult<Option<DeclType>> {
+    ) -> CustResult<Option<GenericAssociationType>> {
         match expr {
+            Expr::GenericSelection { .. } => self
+                .selected_generic_association_with_type(expr)
+                .map(|(_, selected_type)| selected_type),
             Expr::VoidCast(inner) => {
                 self.sizeof_expr(inner)?;
                 Ok(None)
@@ -47425,7 +48166,23 @@ impl Interpreter {
                 self.validate_generic_association_constraints(left)?;
                 self.validate_generic_association_constraints(right)
             }
-            _ => self.validated_generic_selection_type(expr).map(Some),
+            _ if self.expr_is_character_pointer_output_value(expr) => {
+                let pointee = self
+                    .character_pointer_output_expr_pointee(expr)
+                    .unwrap_or(CType::Char);
+                self.validate_character_pointer_output_argument_typed_with_liveness(
+                    "generic association",
+                    "value",
+                    pointee,
+                    expr,
+                    false,
+                )?;
+                Ok(Some(GenericAssociationType::PointerOutput))
+            }
+            _ => self
+                .validated_generic_selection_type(expr)
+                .map(GenericAssociationType::Decl)
+                .map(Some),
         }
     }
 
@@ -47437,8 +48194,15 @@ impl Interpreter {
         let is_pointer = self.expr_is_pointer_value(expr);
         let is_double = self.expr_is_double_value(expr);
         if is_output {
-            let output =
-                self.eval_character_pointer_output_argument("scalar condition", "value", expr)?;
+            let pointee = self
+                .character_pointer_output_expr_pointee(expr)
+                .unwrap_or(CType::Char);
+            let output = self.eval_character_pointer_output_argument_typed(
+                "scalar condition",
+                "value",
+                pointee,
+                expr,
+            )?;
             return Ok(matches!(output, CharacterPointerOutput::Slot { .. }));
         }
         if is_pointer {
@@ -47654,9 +48418,13 @@ impl Interpreter {
             return Ok(());
         }
         if self.expr_is_character_pointer_output_value(expr) {
-            self.eval_character_pointer_output_argument(
-                "discarded character pointer output expression",
+            let pointee = self
+                .character_pointer_output_expr_pointee(expr)
+                .unwrap_or(CType::Char);
+            self.eval_character_pointer_output_argument_typed(
+                "discarded pointer output expression",
                 "value",
+                pointee,
                 expr,
             )?;
             return Ok(());
@@ -47690,9 +48458,10 @@ impl Interpreter {
 
     fn eval_assignment_expr(&mut self, name: &str, value: &Expr) -> CustResult<i64> {
         if self.find_character_pointer_output(name).is_some() {
-            return Err(CustError::new(
-                "character pointer output parameter reassignment is not supported",
-            ));
+            let kind = self.pointer_output_object_kind_label(name);
+            return Err(CustError::new(format!(
+                "{kind} pointer output parameter reassignment is not supported"
+            )));
         }
         match self.find_variable(name).cloned() {
             Some(Value::Scalar { ty, .. }) => {
@@ -47726,9 +48495,10 @@ impl Interpreter {
         value: &Expr,
     ) -> CustResult<i64> {
         if self.find_character_pointer_output(name).is_some() {
-            return Err(CustError::new(
-                "character pointer output parameter reassignment is not supported",
-            ));
+            let kind = self.pointer_output_object_kind_label(name);
+            return Err(CustError::new(format!(
+                "{kind} pointer output parameter reassignment is not supported"
+            )));
         }
         match self.find_variable(name).cloned() {
             Some(Value::Scalar {
@@ -48769,9 +49539,16 @@ impl Interpreter {
                     "sizeof expression nesting limit of {MAX_SIZEOF_EXPRESSION_DEPTH} exceeded"
                 )));
             }
-            if let Expr::Binary(left, _, right) = current {
-                pending.push((left, depth + 1));
-                pending.push((right, depth + 1));
+            match current {
+                Expr::Binary(left, _, right) => {
+                    pending.push((left, depth + 1));
+                    pending.push((right, depth + 1));
+                }
+                Expr::DerefSet { pointer, value } => {
+                    pending.push((pointer, depth));
+                    pending.push((value, depth));
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -49175,9 +49952,10 @@ impl Interpreter {
                     Ok(CHAR_SIZE)
                 }
                 Expr::AddressOf(name) if self.find_character_pointer_output(name).is_some() => {
-                    Err(CustError::new(
-                        "taking the address of a character pointer output parameter is not supported",
-                    ))
+                    let output = self
+                        .find_character_pointer_output(name)
+                        .expect("guard requires a pointer output object");
+                    Err(CustError::new(output.address_of_error_message()))
                 }
                 Expr::AddressOf(name) if self.identifier_resolves_to_enum_constant(name) => Err(
                     CustError::new(format!("cannot take the address of enum constant '{name}'")),
@@ -49389,13 +50167,18 @@ impl Interpreter {
                 Expr::DerefSet { pointer, value }
                     if self.expr_is_character_pointer_output_value(pointer) =>
                 {
-                    self.validate_character_pointer_output_argument_with_liveness(
-                        "character pointer output dereference",
-                        "output",
-                        pointer,
-                        false,
+                    let pointee = self
+                        .character_pointer_output_expr_pointee(pointer)
+                        .unwrap_or(CType::Char);
+                    let operation = if pointee == CType::Char {
+                        "character pointer output dereference"
+                    } else {
+                        "pointer output dereference"
+                    };
+                    self.validate_character_pointer_output_argument_typed_with_liveness(
+                        operation, "output", pointee, pointer, false,
                     )?;
-                    self.validate_character_pointer_output_assignment_expr(value)?;
+                    self.validate_character_pointer_output_assignment_expr(pointee, value)?;
                     Ok(POINTER_SIZE)
                 }
                 Expr::DerefSet { pointer, value } => {
@@ -49591,9 +50374,10 @@ impl Interpreter {
                     if let Expr::Var(name) = target.as_ref()
                         && self.find_character_pointer_output(name).is_some()
                     {
-                        return Err(CustError::new(
-                            "character pointer output parameter reassignment is not supported",
-                        ));
+                        let kind = self.pointer_output_object_kind_label(name);
+                        return Err(CustError::new(format!(
+                            "{kind} pointer output parameter reassignment is not supported"
+                        )));
                     }
                     if matches!(
                         self.pointer_expr_pointee_type(target)?,
@@ -49862,9 +50646,10 @@ impl Interpreter {
                 Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::BitwiseNot(inner)
                     if self.expr_is_character_pointer_output_value(inner) =>
                 {
-                    Err(CustError::new(
-                        "character pointer output arithmetic is not supported",
-                    ))
+                    let kind = self.pointer_output_kind_label(inner);
+                    Err(CustError::new(format!(
+                        "{kind} pointer output arithmetic is not supported"
+                    )))
                 }
                 Expr::UnaryPlus(inner) => {
                     if self.expr_is_unsupported_double_pointer(inner) {
@@ -49943,9 +50728,10 @@ impl Interpreter {
                 ) if self.expr_is_character_pointer_output_value(left)
                     || self.expr_is_character_pointer_output_value(right) =>
                 {
-                    Err(CustError::new(
-                        "character pointer output arithmetic is not supported",
-                    ))
+                    let kind = self.pointer_output_binary_kind_label(left, right);
+                    Err(CustError::new(format!(
+                        "{kind} pointer output arithmetic is not supported"
+                    )))
                 }
                 Expr::Binary(
                     left,
@@ -49954,9 +50740,10 @@ impl Interpreter {
                 ) if self.expr_is_character_pointer_output_value(left)
                     || self.expr_is_character_pointer_output_value(right) =>
                 {
-                    Err(CustError::new(
-                        "character pointer output ordering comparisons are not supported",
-                    ))
+                    let kind = self.pointer_output_binary_kind_label(left, right);
+                    Err(CustError::new(format!(
+                        "{kind} pointer output ordering comparisons are not supported"
+                    )))
                 }
                 Expr::Binary(left, BinaryOp::Add | BinaryOp::Subscript | BinaryOp::Sub, right) => {
                     let left_is_pointer = self.expr_is_pointer_value(left);
@@ -50205,21 +50992,28 @@ impl Interpreter {
         self.sizeof_expr(then_expr)?;
         self.sizeof_expr(else_expr)?;
         if self.expr_is_character_pointer_output_value(expr) {
+            let pointee = self
+                .character_pointer_output_expr_pointee(expr)
+                .unwrap_or(CType::Char);
+            let kind = if pointee == CType::Char {
+                "character"
+            } else {
+                "integer"
+            };
             return self
-                .validate_character_pointer_output_argument(
-                    "conditional character pointer output",
+                .validate_character_pointer_output_argument_typed_with_liveness(
+                    "conditional pointer output",
                     "branch",
+                    pointee,
                     expr,
+                    true,
                 )
                 .map(|_| POINTER_SIZE)
                 .map_err(|error| {
-                    if error
-                        .message
-                        .ends_with("requires a char pointer slot address")
-                    {
-                        CustError::new(
-                            "conditional character pointer output branches require compatible output values or null",
-                        )
+                    if error.message.contains("pointer slot address") {
+                        CustError::new(format!(
+                            "conditional {kind} pointer output branches require compatible output values or null"
+                        ))
                     } else {
                         error
                     }
@@ -50827,9 +51621,10 @@ impl Interpreter {
 
     fn sizeof_assignment_result(&self, name: &str) -> CustResult<i64> {
         if self.find_character_pointer_output(name).is_some() {
-            return Err(CustError::new(
-                "character pointer output parameter reassignment is not supported",
-            ));
+            let kind = self.pointer_output_object_kind_label(name);
+            return Err(CustError::new(format!(
+                "{kind} pointer output parameter reassignment is not supported"
+            )));
         }
         match self.find_variable(name) {
             Some(Value::Scalar { ty, .. }) => Ok(ty.size()),
@@ -50881,11 +51676,16 @@ impl Interpreter {
 
     fn sizeof_deref(&self, pointer: &Expr) -> CustResult<i64> {
         if self.expr_is_character_pointer_output_value(pointer) {
-            self.validate_character_pointer_output_argument_with_liveness(
-                "character pointer output dereference",
-                "output",
-                pointer,
-                false,
+            let pointee = self
+                .character_pointer_output_expr_pointee(pointer)
+                .unwrap_or(CType::Char);
+            let operation = if pointee == CType::Char {
+                "character pointer output dereference"
+            } else {
+                "pointer output dereference"
+            };
+            self.validate_character_pointer_output_argument_typed_with_liveness(
+                operation, "output", pointee, pointer, false,
             )?;
             return Ok(POINTER_SIZE);
         }
@@ -50969,9 +51769,10 @@ impl Interpreter {
         if let Expr::Var(name) = target
             && self.find_character_pointer_output(name).is_some()
         {
-            return Err(CustError::new(
-                "character pointer output parameter reassignment is not supported",
-            ));
+            let kind = self.pointer_output_object_kind_label(name);
+            return Err(CustError::new(format!(
+                "{kind} pointer output parameter reassignment is not supported"
+            )));
         }
         match target {
             Expr::Var(name) => match self.find_variable(name).cloned() {
@@ -51473,25 +52274,124 @@ impl Interpreter {
         {
             return Err(CustError::new("cannot compare pointer with double value"));
         }
+        if left_is_output != right_is_output {
+            let output = if left_is_output { left } else { right };
+            let output_pointee = self
+                .character_pointer_output_expr_pointee(output)
+                .unwrap_or(CType::Char);
+            self.validate_character_pointer_output_argument_typed_with_liveness(
+                "pointer output equality",
+                "operand",
+                output_pointee,
+                output,
+                false,
+            )?;
+            let other = if left_is_output { right } else { left };
+            if self.expr_is_pointer_value(other) {
+                if !matches!(
+                    self.pointer_expr_pointee_type(other)?,
+                    Some(PointeeType::Void)
+                ) {
+                    return Err(CustError::new(
+                        "pointer output equality requires compatible pointee types",
+                    ));
+                }
+                let equal = if left_is_output {
+                    let output_pointee = self
+                        .character_pointer_output_expr_pointee(left)
+                        .unwrap_or(CType::Char);
+                    let output = self.eval_character_pointer_output_argument_typed(
+                        "pointer output equality",
+                        "left operand",
+                        output_pointee,
+                        left,
+                    )?;
+                    let pointer = self.eval_pointer(right)?;
+                    self.ensure_pointer_value_live(&pointer)?;
+                    matches!(output, CharacterPointerOutput::Null { .. })
+                        && self.pointer_values_equal(&pointer, &PointerValue::Null)?
+                } else {
+                    let pointer = self.eval_pointer(left)?;
+                    self.ensure_pointer_value_live(&pointer)?;
+                    let output_pointee = self
+                        .character_pointer_output_expr_pointee(right)
+                        .unwrap_or(CType::Char);
+                    let output = self.eval_character_pointer_output_argument_typed(
+                        "pointer output equality",
+                        "right operand",
+                        output_pointee,
+                        right,
+                    )?;
+                    self.pointer_values_equal(&PointerValue::Null, &pointer)?
+                        && matches!(output, CharacterPointerOutput::Null { .. })
+                };
+                return match op {
+                    BinaryOp::Eq => Ok(equal as i64),
+                    BinaryOp::Ne => Ok((!equal) as i64),
+                    _ => unreachable!("only equality operators use eval_equality"),
+                };
+            }
+            if !self.generic_expr_is_null_pointer_constant(other) {
+                return Err(CustError::new(
+                    "cannot compare pointer with nonzero integer",
+                ));
+            }
+        }
+        if left_is_output && right_is_output {
+            let expected = self
+                .character_pointer_output_expr_pointee(left)
+                .or_else(|| self.character_pointer_output_expr_pointee(right))
+                .unwrap_or(CType::Char);
+            if !self.character_pointer_output_expr_matches_pointee(left, expected)
+                || !self.character_pointer_output_expr_matches_pointee(right, expected)
+            {
+                return Err(CustError::new(
+                    "pointer output equality requires compatible pointee types",
+                ));
+            }
+            self.validate_character_pointer_output_argument_typed_with_liveness(
+                "pointer output equality",
+                "left operand",
+                expected,
+                left,
+                false,
+            )?;
+            self.validate_character_pointer_output_argument_typed_with_liveness(
+                "pointer output equality",
+                "right operand",
+                expected,
+                right,
+                false,
+            )?;
+        }
         if left_is_output || right_is_output {
             let equal = match (left_is_output, right_is_output) {
                 (true, true) => {
-                    let left = self.eval_character_pointer_output_argument(
-                        "character pointer output equality",
+                    let pointee = self
+                        .character_pointer_output_expr_pointee(left)
+                        .unwrap_or(CType::Char);
+                    let left = self.eval_character_pointer_output_argument_typed(
+                        "pointer output equality",
                         "left operand",
+                        pointee,
                         left,
                     )?;
-                    let right = self.eval_character_pointer_output_argument(
-                        "character pointer output equality",
+                    let right = self.eval_character_pointer_output_argument_typed(
+                        "pointer output equality",
                         "right operand",
+                        pointee,
                         right,
                     )?;
                     left == right
                 }
                 (true, false) => {
-                    let output = self.eval_character_pointer_output_argument(
-                        "character pointer output equality",
+                    let pointee = self
+                        .character_pointer_output_expr_pointee(left)
+                        .unwrap_or(CType::Char);
+                    let output = self.eval_character_pointer_output_argument_typed(
+                        "pointer output equality",
                         "left operand",
+                        pointee,
                         left,
                     )?;
                     let value = self.eval(right)?;
@@ -51500,13 +52400,17 @@ impl Interpreter {
                             "cannot compare pointer with nonzero integer",
                         ));
                     }
-                    matches!(output, CharacterPointerOutput::Null)
+                    matches!(output, CharacterPointerOutput::Null { .. })
                 }
                 (false, true) => {
                     let value = self.eval(left)?;
-                    let output = self.eval_character_pointer_output_argument(
-                        "character pointer output equality",
+                    let pointee = self
+                        .character_pointer_output_expr_pointee(right)
+                        .unwrap_or(CType::Char);
+                    let output = self.eval_character_pointer_output_argument_typed(
+                        "pointer output equality",
                         "right operand",
+                        pointee,
                         right,
                     )?;
                     if value != 0 {
@@ -51514,7 +52418,7 @@ impl Interpreter {
                             "cannot compare pointer with nonzero integer",
                         ));
                     }
-                    matches!(output, CharacterPointerOutput::Null)
+                    matches!(output, CharacterPointerOutput::Null { .. })
                 }
                 (false, false) => unreachable!("guard requires a character pointer output"),
             };
@@ -52108,15 +53012,29 @@ impl Interpreter {
         }
         if !self.static_locals.contains_key(&id) {
             let character_pointer_output = match decl {
-                Stmt::CharacterPointerOutputDecl { name, expr } => {
+                Stmt::CharacterPointerOutputDecl {
+                    name,
+                    pointee,
+                    expr,
+                } => {
                     if !self.character_pointer_output_initializer_is_static_constant(expr) {
-                        return Err(Self::static_character_pointer_output_initializer_error());
-                    }
-                    let output = self.eval_character_pointer_output_initializer(name, expr)?;
-                    if !self.character_pointer_output_target_has_static_storage(&output) {
-                        return Err(CustError::new(
-                            "static character pointer object initializer requires a char pointer slot with static storage duration",
+                        return Err(Self::static_character_pointer_output_initializer_error(
+                            *pointee,
                         ));
+                    }
+                    let output =
+                        self.eval_character_pointer_output_initializer(name, *pointee, expr)?;
+                    if !self.character_pointer_output_target_has_static_storage(&output) {
+                        let (kind, type_name, article) = match pointee {
+                            CType::Char => ("character", "char", "a"),
+                            CType::Int => ("integer", "int", "an"),
+                            CType::Bool | CType::Double => {
+                                unreachable!("unsupported pointer output pointee type")
+                            }
+                        };
+                        return Err(CustError::new(format!(
+                            "static {kind} pointer object initializer requires {article} {type_name} pointer slot with static storage duration"
+                        )));
                     }
                     Some(output)
                 }
@@ -52261,18 +53179,27 @@ impl Interpreter {
                 }
                 Ok(ExecFlow::None)
             }
-            Stmt::CharacterPointerOutputDecl { name, expr } => {
+            Stmt::CharacterPointerOutputDecl {
+                name,
+                pointee,
+                expr,
+            } => {
                 let has_static_storage = self.scopes.len() == 1;
                 if has_static_storage
                     && !self.character_pointer_output_initializer_is_static_constant(expr)
                 {
-                    return Err(Self::static_character_pointer_output_initializer_error());
+                    return Err(Self::static_character_pointer_output_initializer_error(
+                        *pointee,
+                    ));
                 }
-                let output = self.eval_character_pointer_output_initializer(name, expr)?;
+                let output =
+                    self.eval_character_pointer_output_initializer(name, *pointee, expr)?;
                 if has_static_storage
                     && !self.character_pointer_output_target_has_static_storage(&output)
                 {
-                    return Err(Self::static_character_pointer_output_initializer_error());
+                    return Err(Self::static_character_pointer_output_initializer_error(
+                        *pointee,
+                    ));
                 }
                 if self.current_scope_has_identifier(name) {
                     return Err(CustError::new(format!(
@@ -53463,9 +54390,10 @@ impl Interpreter {
             Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::BitwiseNot(inner)
                 if self.expr_is_character_pointer_output_value(inner) =>
             {
-                Err(CustError::new(
-                    "character pointer output arithmetic is not supported",
-                ))
+                let kind = self.pointer_output_kind_label(inner);
+                Err(CustError::new(format!(
+                    "{kind} pointer output arithmetic is not supported"
+                )))
             }
             Expr::UnaryPlus(inner) => {
                 if matches!(
@@ -53556,9 +54484,10 @@ impl Interpreter {
                     if self.expr_is_character_pointer_output_value(left)
                         || self.expr_is_character_pointer_output_value(right) =>
                 {
-                    Err(CustError::new(
-                        "character pointer output arithmetic is not supported",
-                    ))
+                    let kind = self.pointer_output_binary_kind_label(left, right);
+                    Err(CustError::new(format!(
+                        "{kind} pointer output arithmetic is not supported"
+                    )))
                 }
                 BinaryOp::Add | BinaryOp::Subscript | BinaryOp::Sub => {
                     if self.expr_is_pointer_value(left) || self.expr_is_pointer_value(right) {

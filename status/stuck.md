@@ -4,9 +4,30 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-02 after bounded v0.50.0 received fresh independent `APPROVED` review and passed formatting, strict Clippy, all 2,137 local tests, a no-cache image rebuild, all 2,137 rebuilt-Docker tests, runtime output `10`, exact version probes, static safety scan, and diff hygiene. Release commit `6335a1fdc0b4f67df47f36cc186edca25cb0cc77` reached `origin/main` before annotated tag creation; remote `v0.50.0` object `e6ae36718e014b010fa17026c7f5a762fdd4baff` peels to the release commit. The later status-only evidence commit does not move or recreate the tag. The next tracked `int **` package has no user-input or external-dependency blocker.
+None. Last reviewed 2026-09-04 after review-driven RED/GREEN closed aggregate-condition ordering, null `void *`, qualification translation, `_Generic` association-value validation, formatting, and inventory gaps in the safe tracked unqualified `int **` slice. The 2,199-test canonical local/rebuilt-Docker gate and runtime smoke test pass. Bounded v0.51.0 release closure remains next.
 
 ## Resolved this run
+
+### 2026-09-03 — Integer pointer-output aggregate conditions and null `void *`
+
+- Failure: a conditional RHS with an aggregate condition reached a side-effecting assignment LHS before reporting the invalid scalar condition, while `(void *)0` was rejected for `int **` automatic/static initialization, reassignment, and arguments despite strict GCC/Clang acceptance.
+- Root cause: conditional pointer-write prevalidation used general `sizeof_expr()` instead of the scalar-condition validator, and tracked output validation recognized integer null-pointer constants but not the C null-pointer-constant form cast to `void *`.
+- RED/GREEN: the ordering regression first reported `division by zero`, and the automatic initializer first rejected `(void *)0`. Shared scalar-condition validation now rejects the aggregate before LHS evaluation; a narrow null-`void *` classifier maps direct `(void *)` casts of integer null constants to tracked null output state and static-constant admission. Const-qualified `void *` initializer and assignment regressions first received generic pointer-object diagnostics; exact qualification errors now survive both translation layers. Five regressions cover automatic, file-global, block-static, reassignment, call, and qualification routes; all 64 pointer-output tests and the compiler oracle pass.
+- Closure: final complete-diff re-review and canonical verification are pending.
+
+### 2026-09-03 — Integer null-pointer constant review closure
+
+- Failure: a selected zero arm could hide an incompatible pointer type or a non-constant variable in an unselected logical/conditional arm, while sufficiently deep folded-zero trees reached recursive classification before Cust's iterative nesting guard and overflowed the Rust test thread stack.
+- Root cause: one recursive helper combined integer-constant-expression admissibility with short-circuit value evaluation and had no depth budget; pointer-output null conversion consulted its selected value before proving the complete expression's scalar type and constant-expression validity.
+- RED/GREEN: focused regressions first returned `Ok(0)` for `0 && variable` / `1 ? 0 : variable`, accepted an incompatible `char *` arm, and reproduced a host stack overflow. Separate bounded validity and value passes now inspect every logical/conditional operand for constant-expression eligibility while evaluating only the selected arm, and scalar-null classification excludes pointer-typed conditionals. The 59-test pointer-output filter is GREEN. The native fixture now compares only same-type `sizeof` expressions, and status/reference text distinguishes supported unqualified scalar-pointee aliases from unsupported pointer typedef aliases.
+- Closure: final independent re-review and canonical verification are pending.
+
+### 2026-09-03 — Integer pointer-output parameter-scope escape
+
+- Failure: a nested conditional write through `int **` could store `&value` for a by-value callee parameter and return successfully when the caller did not dereference the dangling result.
+- Root cause: the post-call output check ran after the function body scope was gone but before the parameter scope was popped, so `ensure_pointer_value_live()` still considered the parameter target alive.
+- RED/GREEN: `integer_pointer_output_writes_reject_nested_escaping_parameter_owners_at_call_boundary` first panicked because interpretation returned `Ok(0)`. Output validation now runs after callee scope teardown and reports `pointer to out-of-scope variable 'value'`; the complete 59-test pointer-output filter remains GREEN.
+- Closure: prior complete-diff review and delta review passed before the later null-constant review findings; current final re-review and the 2,183-test canonical gate are pending.
 
 ### 2026-09-02 — Pointer classifier/evaluator parity review closure
 

@@ -2,6 +2,21 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-03 — Safe tracked integer pointer-output decisions
+
+- The existing tracked `char **` representation is safely generalizable when every output value carries an explicit scalar pointee. Reusing slot/null identity avoids host addresses and keeps lookup, static storage, assignment, parameter binding, equality, truthiness, and `sizeof` behavior in one model.
+- C conversion constraints must be checked structurally before evaluation. Assignment, call, conditional, comma, equality, discard, and non-evaluating routes therefore inspect expected pointee/null-pointer-constant metadata before running rejected side effects.
+- Output arguments must be collected in function parameter declaration order rather than map iteration order so validation and diagnostics are deterministic.
+- A function body scope is popped by `exec_block()` before call result handling, but the parameter scope remains until explicit call cleanup. Post-call lifetime validation before that cleanup catches ordinary locals but not pointers to by-value parameters. Read the caller-owned output slot only after popping the callee parameter scope, then apply the normal live-owner check.
+- Native C coverage is limited to defined pointer-slot identity, forwarding, null, and mutation relationships; GCC/Clang are test oracles only. Cust retains deterministic interpreter-owned sizes and identities. See `references/cust-integer-pointer-objects-and-output-parameters.md`.
+- C integer constant expressions may short-circuit value evaluation (`0 && (1 / 0)`, `1 ? 0 : (1 / 0)`), but every logical/conditional operand must still use constant-expression-permitted constructs. Cust therefore performs a bounded whole-tree admissibility pass before a separate bounded short-circuit value pass; unselected variables are rejected while unselected constant division by zero remains unevaluated.
+- Native pointer representations can differ by pointer type on a conforming implementation. Compiler-oracle fixtures compare `sizeof` only between expressions of the same pointer type (`int **` with `&int *`, `int *` with another `int *`) rather than assuming `sizeof(int **) == sizeof(int *)`.
+- Candidate evaluation considered inherited `int **` closure, immediate v0.51.0 release work, parser diagnostics, and more property/CLI coverage. Recovery priority selected the inherited coherent language slice. Bounded v0.51.0 release closure is next.
+- Fresh review confirmed strict GCC and Clang accept `(void *)0` as an `int **` initializer, assignment RHS, and argument under C11 constraints. Cust now recognizes only a `void *` cast whose operand independently folds to an integer null-pointer constant; arbitrary non-null `void *` values are not reclassified as tracked output objects.
+- Strict GCC diagnoses `(const void *)0` to `int **` as discarded qualifiers and Clang reports the equivalent incompatible-pointer-type qualification loss. Cust preserves `cannot discard const qualifier from pointer target` through both pointer-object initializer and reassignment error translation instead of replacing it with a generic accepted-shapes message.
+- Conditional pointer-write prevalidation must use the scalar-condition validator rather than merely sizing the condition. `sizeof(struct_value)` is valid, but `struct_value ? a : b` is not; using the narrower validator also guarantees the diagnostic precedes any side-effecting output-lvalue evaluation.
+- `_Generic` output values need a distinct validation-only association category: they remain forbidden as controlling-expression types, but are valid selected/unselected association values. Every association must still be structurally checked so an incompatible output assignment in an unselected arm reports its inner exact diagnostic without evaluation.
+
 ## 2026-09-02 — v0.50.0 release consistency
 
 - Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.49.0` and passed after Cargo/lock plus both Compose image tags moved to `0.50.0`.
