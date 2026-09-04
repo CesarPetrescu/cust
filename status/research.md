@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-04 — Tracked pointer-output parity decisions
+
+- Candidate evaluation compared deterministic cross-type pointer-output parity, parser-diagnostic expansion, CLI/product work, and immediate release preparation. Parity was selected because `char **`, `int **`, `_Bool **`, and `double **` were independently complete but lacked one generated classifier/evaluator contract; release preparation remains bounded and becomes next.
+- The complete primary matrix is four scalar pointee kinds × nine stable output-value routes × six consumers = 216 exact programs. Aggregate assertions (54 per kind, 24 per route, 36 per context) are paired with a cell array requiring every Cartesian tuple exactly once, preventing duplicate/missing cells from balancing counts.
+- Consumer assertions must expose false positives: equality checks compatible and distinct objects; truthiness checks non-null and null values; assignment-result routes check the assigned scratch slot; `_Generic` uses a marker-producing control expression and requires no marker; and `sizeof` checks every route without route side effects.
+- Lifetime non-observation and liveness-on-use require separate programs. A dangling output used only under `sizeof` followed by an unrelated valid call succeeds, while a later evaluated dereference reports the exact expired-owner diagnostic.
+- Diagnostic trap selection is part of test correctness. Division by zero can be translated by tracked-output initialization into the expected type diagnostic, so it cannot prove prevalidation. A dangling-pointer dereference retains a distinct error through translation and is executed independently as a trap witness before the 20-cell diagnostic matrix.
+- The package is deliberate coverage closure: focused tests passed immediately where existing behavior already satisfied the strengthened contract. No production change was invented. Fresh final independent review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,219 local tests, Docker test exit 0, runtime output `10`, and diff hygiene pass. Detailed maintenance guidance is in `references/cust-tracked-pointer-output-classifier-evaluator-parity.md`.
+
 ## 2026-09-04 — v0.53.0 release consistency
 
 - Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.52.0` and passed after Cargo/lock plus both Compose image tags moved to `0.53.0`.

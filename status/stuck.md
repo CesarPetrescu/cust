@@ -4,9 +4,15 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-04 after bounded v0.53.0 publication. Exact CLI/Compose version tests are GREEN at `0.53.0`, the 2,216-test executable inventory is reconciled, README/changelog/status expose the completed `double **` package and exact boundaries, the first review's qualified-double wording finding is resolved, fresh complete-diff review returned `APPROVED`, and the canonical local/no-cache-rebuilt-Docker/runtime/version/static-scan/diff gate passes. Repeated pre-publication tag checks were empty. Release commit `0114be428ae171d85c9af5b49c183c50f67fc240` reached exact `origin/main` before annotated tag creation; remote tag object `3996c355dee576040e245bb9e54caec0301599e7` peels to that exact commit.
+None. Last reviewed 2026-09-04 after deterministic tracked pointer-output parity closure. The complete 216-program route/consumer matrix, exact diagnostic/const/lifetime supplements, fresh `AI_REVIEW:CLEAR`, formatting, strict Clippy, all 2,219 local tests, Docker tests, runtime output `10`, and diff hygiene pass. Bounded v0.54.0 release closure is the concrete next task.
 
 ## Resolved this run
+
+### 2026-09-04 — Pointer-output parity false-positive resistance
+
+- Failure: the first independent review found six coverage gaps: no direct `&slot` output-value route, no equality false branch, no null truthiness case, no explicit assignment-result side-effect assertion, a constant `_Generic` control that could not prove non-evaluation, and a lifetime program whose eventual dereference obscured whether earlier `sizeof` or an unrelated call observed the dangling value. A second review found that division-by-zero traps could be translated into the same initializer diagnostic expected by the test.
+- Root cause: the initial matrix proved broad cross-type success but several consumers lacked a negative or side-effect witness, and one diagnostic trap shared an error-translation path with the expected result.
+- Closure: the final 216-cell matrix adds direct address classification, true/false equality, non-null/null truthiness, assignment-result scratch checks, marker-producing generic controls, and split positive/negative lifetime programs. Diagnostic programs now use an independently witnessed dangling dereference whose error survives pointer-output translation. Focused tests pass and fresh final review returned `AI_REVIEW:CLEAR`.
 
 ### 2026-09-04 — Double pointer-output unrelated-call observation
 
