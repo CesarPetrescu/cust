@@ -10368,10 +10368,10 @@ fn non_evaluating_return_storage_analysis_enforces_call_depth_limit() {
 
 #[test]
 fn direct_double_pointers_retain_deeper_pointer_boundaries() {
-    let deeper = "int main(void) { double **pointer; return 0; }";
+    let deeper = "int main(void) { double ***pointer; return 0; }";
     assert_eq!(
         interpret(deeper).expect_err(deeper).to_string(),
-        "pointer-to-pointer declarations are not supported at line 1, column 26"
+        "pointer-to-pointer declarations are not supported at line 1, column 27"
     );
 
     for program in [
@@ -10399,17 +10399,19 @@ fn direct_double_pointer_non_evaluating_boundaries_remain_exact() {
         8
     );
 
-    let err = interpret(
-        r#"
+    assert_eq!(
+        interpret(
+            r#"
         int main(void) {
             double value = 1.0;
             double *pointer = &value;
             return sizeof(&pointer);
         }
         "#,
-    )
-    .expect_err("taking the address of a double pointer must not expose double **");
-    assert_eq!(err.to_string(), "double pointers are not supported");
+        )
+        .unwrap(),
+        8
+    );
 }
 
 #[test]
@@ -26588,25 +26590,25 @@ fn rejects_array_return_types_with_context() {
 
 #[test]
 fn rejects_pointer_to_pointer_parameters_with_context() {
-    let program = "int load(double **value) { return **value; }\nint main() { return 0; }\n";
+    let program = "int load(double ***value) { return 0; }\nint main() { return 0; }\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "pointer-to-pointer parameters are not supported at line 1, column 18"
+        "pointer-to-pointer parameters are not supported at line 1, column 19"
     );
 }
 
 #[test]
 fn rejects_pointer_to_pointer_declarations_with_context() {
-    let program = "int main() {\ndouble x = 1.0;\ndouble **value = &x;\nreturn 0;\n}\n";
+    let program = "int main() {\ndouble ***value;\nreturn 0;\n}\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "pointer-to-pointer declarations are not supported at line 3, column 9"
+        "pointer-to-pointer declarations are not supported at line 2, column 10"
     );
 }
 
@@ -28143,6 +28145,191 @@ int main(void) {
     return slot == values + 1 && values[1] == 1 && alias == output ? 0 : 1;
 }
 "#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn double_pointer_objects_read_write_and_forward_local_slots() {
+    let program = r#"
+void set_output(double **output, double *value) {
+    *output = value;
+}
+
+void forward_output(double **output, double *value) {
+    set_output(output, value);
+}
+
+int main(void) {
+    double values[3] = {1.25, 2.5, 3.75};
+    double *slot = 0;
+    double **output = &slot;
+    double **alias = output;
+
+    forward_output(alias, values + 1);
+    **output = 9.5;
+    return slot == values + 1 && values[1] == 9.5 && alias == output ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn double_pointer_objects_support_global_static_null_and_sizeof_routes() {
+    let program = r#"
+double global_values[3] = {0.25, 0.5, 0.75};
+double *global_slot = 0;
+double **global_output = &global_slot;
+static double *file_slot = 0;
+static double **file_output = &file_slot;
+
+int update_static(void) {
+    static double *slot = 0;
+    static double **output = &slot;
+    *output = global_values + 2;
+    **output = 6.25;
+    return *slot == 6.25;
+}
+
+int main(void) {
+    double **empty;
+    *global_output = global_values;
+    **global_output = 2.25;
+    *file_output = global_values + 1;
+    **file_output = -3.5;
+    return global_values[0] == 2.25 && global_values[1] == -3.5 && update_static() &&
+                   empty == 0 && !empty && sizeof(empty) == sizeof(&global_slot) &&
+                   sizeof(*global_output) == sizeof(global_slot) &&
+                   sizeof(**global_output) == sizeof(*global_slot)
+               ? 0
+               : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn double_pointer_outputs_reject_arithmetic_ordering_and_compound_updates_without_panicking() {
+    for (operation, expected) in [
+        (
+            "return output + 1 != 0",
+            "double pointer output arithmetic is not supported",
+        ),
+        (
+            "return output < other",
+            "double pointer output ordering comparisons are not supported",
+        ),
+        (
+            "output += 1; return 0",
+            "double pointer output parameter reassignment is not supported",
+        ),
+    ] {
+        let program = format!(
+            "int inspect(double **output, double **other) {{ {operation}; }}\nint main(void) {{ double *slot = 0; return inspect(&slot, &slot); }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            expected,
+            "operation: {operation}"
+        );
+    }
+}
+
+#[test]
+fn double_pointer_output_objects_preserve_qualified_static_and_address_boundaries() {
+    for (program, expected) in [
+        (
+            "int main(void) { const double **output = 0; return 0; }\n",
+            "qualified double pointer objects are not supported at line 1, column 18",
+        ),
+        (
+            "int main(void) { double *slot = 0; static double **output = &slot; return 0; }\n",
+            "static double pointer object initializer requires a double pointer slot with static storage duration",
+        ),
+        (
+            "int main(void) { double *slot = 0; double **output = &slot; return &output != 0; }\n",
+            "taking the address of a double pointer output object is not supported",
+        ),
+        (
+            "int main(void) { int *slot = 0; double **output = &slot; return 0; }\n",
+            "double pointer object 'output' initializer requires null, another compatible pointer output object, or the address of a mutable double pointer variable",
+        ),
+        (
+            "int main(void) { double **outputs[2]; return 0; }\n",
+            "pointer array declarations are not supported at line 1, column 34",
+        ),
+        (
+            "struct Box { double **output; }; int main(void) { return 0; }\n",
+            "pointer-to-pointer struct fields are not supported at line 1, column 22",
+        ),
+        (
+            "double **select(void) { return 0; } int main(void) { return 0; }\n",
+            "pointer-to-pointer return types are not supported at line 1, column 9",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn double_pointer_outputs_reject_callee_local_and_parameter_escapes() {
+    for (program, name) in [
+        (
+            "void publish(double **output) { double local = 1.5; *output = &local; }\nint main(void) { double *saved = 0; publish(&saved); return 0; }\n",
+            "local",
+        ),
+        (
+            "void publish(double **output, double value) { *output = &value; }\nint main(void) { double *saved = 0; publish(&saved, 2.5); return 0; }\n",
+            "value",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            format!("pointer to out-of-scope variable '{name}'")
+        );
+    }
+}
+
+#[test]
+fn double_pointer_outputs_reject_callee_local_escapes_through_persistent_objects() {
+    for program in [
+        "double *saved = 0; double **output = &saved;\nvoid publish(void) { double local = 1.5; *output = &local; }\nint main(void) { publish(); return *saved == 1.5; }\n",
+        "double *saved = 0;\nvoid publish(void) { static double **output = &saved; double local = 1.5; *output = &local; }\nint main(void) { publish(); return *saved == 1.5; }\n",
+    ] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "pointer to out-of-scope variable 'local'"
+        );
+    }
+}
+
+#[test]
+fn double_pointer_outputs_do_not_observe_expired_values_at_unrelated_call_boundaries() {
+    let program = r#"
+int ping(void) {
+    return 7;
+}
+
+int main(void) {
+    double *slot = 0;
+    double **output = &slot;
+    {
+        double local = 1.0;
+        *output = &local;
+    }
+    return ping() == 7 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn double_pointer_objects_match_the_compiler_oracle_fixture() {
+    let program = include_str!("fixtures/compat/valid/double_pointer_objects.c");
 
     assert_eq!(interpret(program).unwrap(), 0);
 }

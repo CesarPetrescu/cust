@@ -2,6 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-04 — Safe tracked double pointer-output decisions
+
+- `double **` safely reuses the tracked interpreter-owned pointer-slot identity already used by `char **`, `int **`, and `_Bool **`; parser and mutable-slot filters extend to `CType::Double`, while binary64 scalar writes remain on the existing typed `double` storage path. No host address representation or native runtime path is introduced.
+- The direct-double unsupported classifier must exempt only expressions already recognized as tracked pointer-output values. Direct deeper pointers, aggregate fields, arrays, returns, arithmetic, ordering, and compound updates remain on their existing exact boundaries.
+- Lifetime checks follow the shared contract: validate ordered non-character output arguments after callee parameter-scope teardown and diagnose expired storage when a pointer is observed. Do not sweep every persistent output after every call: that observes valid-but-unused dangling values at unrelated boundaries, adds state-proportional call cost, and makes diagnostics nondeterministic when storage is held in `HashMap`s.
+- Candidate evaluation considered inherited `double **` completion, bounded v0.53.0 release closure, parser diagnostics, and a broader pointer-output property matrix. Recovery priority selected the inherited coherent vertical slice; bounded v0.53.0 release closure is next.
+- The executable inventory is 2,216 tests: `interpreter` 2,072 + `fuzz_safety` 101 + `cli` 33 + `pointer_classifier_parity` 6 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1. Focused RED/GREEN, strict GCC/Clang-compatible native fixture execution through the compiler oracle, fresh independent review, and the complete local/Docker gate establish the bounded extension. See `references/cust-double-pointer-objects-and-output-parameters.md`.
+
 ## 2026-09-04 — v0.52.0 release consistency
 
 - Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.51.0` and passed after Cargo/lock plus both Compose image tags moved to `0.52.0`.

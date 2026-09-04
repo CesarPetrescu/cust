@@ -1076,7 +1076,7 @@ impl CType {
             CType::Char => "character",
             CType::Int => "integer",
             CType::Bool => "boolean",
-            CType::Double => unreachable!("unsupported pointer output pointee type"),
+            CType::Double => "double",
         }
     }
 }
@@ -9551,7 +9551,7 @@ impl Parser {
             let pointer_output_pointee = if has_explicit_star
                 && matches!(
                     decl_type,
-                    DeclType::Scalar(CType::Char | CType::Int | CType::Bool)
+                    DeclType::Scalar(CType::Char | CType::Int | CType::Bool | CType::Double)
                 )
                 && self.check(&Token::Star)
             {
@@ -10537,7 +10537,7 @@ impl Parser {
         if has_explicit_star
             && matches!(
                 decl_type,
-                DeclType::Scalar(CType::Char | CType::Int | CType::Bool)
+                DeclType::Scalar(CType::Char | CType::Int | CType::Bool | CType::Double)
             )
             && self.check(&Token::Star)
         {
@@ -11240,7 +11240,7 @@ impl Parser {
         if has_explicit_star
             && matches!(
                 base_type,
-                DeclType::Scalar(CType::Char | CType::Int | CType::Bool)
+                DeclType::Scalar(CType::Char | CType::Int | CType::Bool | CType::Double)
             )
             && self.check(&Token::Star)
         {
@@ -18543,7 +18543,9 @@ impl CharacterPointerOutput {
             }
             CType::Int => "taking the address of an integer pointer output object is not supported",
             CType::Bool => "taking the address of a boolean pointer output object is not supported",
-            CType::Double => unreachable!("unsupported pointer output pointee type"),
+            CType::Double => {
+                "taking the address of a double pointer output object is not supported"
+            }
         }
     }
 }
@@ -19316,6 +19318,12 @@ impl Interpreter {
     }
 
     fn expr_is_unsupported_double_pointer(&self, expr: &Expr) -> bool {
+        // Tracked `double **` values are represented as interpreter-owned pointer-slot
+        // identities, not as ordinary deeper double pointers. Keep their deliberately
+        // supported object/output-parameter routes out of the direct-double boundary.
+        if self.expr_is_character_pointer_output_value(expr) {
+            return false;
+        }
         if matches!(
             expr,
             Expr::Binary(left, BinaryOp::Sub, right)
@@ -20001,7 +20009,7 @@ impl Interpreter {
                     .get(&param.name)
                     .filter(|output| {
                         matches!(output, CharacterPointerOutput::Slot { .. })
-                            && matches!(output.pointee(), CType::Int | CType::Bool)
+                            && matches!(output.pointee(), CType::Int | CType::Bool | CType::Double)
                     })
                     .cloned()
             })
@@ -33949,7 +33957,10 @@ impl Interpreter {
             if let Some(value) = scope.values.get(name) {
                 return match value {
                     Value::Pointer {
-                        ty: PointeeType::Scalar(pointee @ (CType::Char | CType::Int | CType::Bool)),
+                        ty:
+                            PointeeType::Scalar(
+                                pointee @ (CType::Char | CType::Int | CType::Bool | CType::Double),
+                            ),
                         points_to_const: false,
                         ..
                     } if !scope.const_variables.contains(name)
@@ -33972,7 +33983,10 @@ impl Interpreter {
             {
                 return match &storage.value {
                     Value::Pointer {
-                        ty: PointeeType::Scalar(pointee @ (CType::Char | CType::Int | CType::Bool)),
+                        ty:
+                            PointeeType::Scalar(
+                                pointee @ (CType::Char | CType::Int | CType::Bool | CType::Double),
+                            ),
                         points_to_const: false,
                         ..
                     } if !storage.is_const

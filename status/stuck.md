@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-04 after bounded v0.52.0 publication. Exact CLI/Compose version tests are GREEN at `0.52.0`, the 2,208-test executable inventory is reconciled, README/changelog/status expose the completed `_Bool **` package and exact boundaries, the first evidence-bearing review rejected premature approval wording, fresh corrected complete-diff re-review returned `APPROVED`, and the canonical local/no-cache-rebuilt-Docker/runtime/version/static-scan/diff gate passes. Repeated local/remote tag preflight was empty. Release commit `22ca74f271898e408200138dad054535ea4d2491` reached exact `origin/main` before annotated tag creation; remote tag object `55ea846f80a9850bd7f265ec5d387be757179329` peels to that exact release commit.
+None. Last reviewed 2026-09-04 after completing the safe tracked unqualified `double **` package. The double-only persistent-output sweep rejected dangling-but-unused storage at unrelated call boundaries and could choose diagnostics nondeterministically from unordered maps; focused RED/GREEN removed the sweep and retained the shared on-use/output-argument lifetime contract. Fresh corrected complete-diff re-review returned `APPROVED`; formatting, strict Clippy, all 2,216 local/Docker tests, runtime output `10`, static scan, and diff hygiene pass.
 
 ## Resolved this run
+
+### 2026-09-04 — Double pointer-output unrelated-call observation
+
+- Failure: independent review showed that a `double **` retaining an unobserved pointer to expired block storage failed at a later unrelated function call, and two persistent outputs could report either expired local depending on `HashMap` iteration order.
+- Root cause: a new double-only post-call sweep read every tracked output object in every live scope and static-local entry rather than validating only the ordered pointer-output arguments associated with the call.
+- RED/GREEN: `double_pointer_outputs_do_not_observe_expired_values_at_unrelated_call_boundaries` first failed with `pointer to out-of-scope variable 'local'`. Removing the broad sweep made it GREEN while explicit later dereference and output-argument escape regressions continue to reject expired targets.
+- Verification: all 87 double-pointer tests, the compiler oracle, fresh independent `APPROVED` re-review, formatting, strict Clippy, all 2,216 local/Docker tests, runtime output `10`, static scan, and diff hygiene pass.
 
 ### 2026-09-04 — Boolean pointer-output diagnostic parity
 

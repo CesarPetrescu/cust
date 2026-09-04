@@ -149,6 +149,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/character_pointer_objects.c",
     "tests/fixtures/compat/valid/integer_pointer_objects.c",
     "tests/fixtures/compat/valid/boolean_pointer_objects.c",
+    "tests/fixtures/compat/valid/double_pointer_objects.c",
     "tests/fixtures/compat/valid/void_pointer_objects.c",
     "tests/fixtures/compat/valid/void_pointer_return_functions.c",
     "tests/fixtures/compat/valid/bounded_memory_copy_function.c",
