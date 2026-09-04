@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-04 during bounded v0.53.0 release preparation. Exact CLI/Compose version tests are GREEN at `0.53.0`, the 2,216-test executable inventory is reconciled, README/changelog/status expose the completed `double **` package and exact boundaries, the first review's qualified-double wording finding is resolved, fresh complete-diff review returned `APPROVED`, and the canonical local/no-cache-rebuilt-Docker/runtime/version/static-scan/diff gate passes. Repeated local/remote tag preflight is empty. Release-commit-first publication and exact annotated-tag checks are normal remaining acceptance steps, not blockers.
+None. Last reviewed 2026-09-04 after bounded v0.53.0 publication. Exact CLI/Compose version tests are GREEN at `0.53.0`, the 2,216-test executable inventory is reconciled, README/changelog/status expose the completed `double **` package and exact boundaries, the first review's qualified-double wording finding is resolved, fresh complete-diff review returned `APPROVED`, and the canonical local/no-cache-rebuilt-Docker/runtime/version/static-scan/diff gate passes. Repeated pre-publication tag checks were empty. Release commit `0114be428ae171d85c9af5b49c183c50f67fc240` reached exact `origin/main` before annotated tag creation; remote tag object `3996c355dee576040e245bb9e54caec0301599e7` peels to that exact commit.
 
 ## Resolved this run
 
