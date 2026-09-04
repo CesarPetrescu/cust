@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-04 after completing the safe tracked unqualified `double **` package. The double-only persistent-output sweep rejected dangling-but-unused storage at unrelated call boundaries and could choose diagnostics nondeterministically from unordered maps; focused RED/GREEN removed the sweep and retained the shared on-use/output-argument lifetime contract. Fresh corrected complete-diff re-review returned `APPROVED`; formatting, strict Clippy, all 2,216 local/Docker tests, runtime output `10`, static scan, and diff hygiene pass.
+None. Last reviewed 2026-09-04 during bounded v0.53.0 release preparation. Exact CLI/Compose version tests are GREEN at `0.53.0`, the 2,216-test executable inventory is reconciled, README/changelog/status expose the completed `double **` package and exact boundaries, the first review's qualified-double wording finding is resolved, fresh complete-diff review returned `APPROVED`, and the canonical local/no-cache-rebuilt-Docker/runtime/version/static-scan/diff gate passes. Repeated local/remote tag preflight is empty. Release-commit-first publication and exact annotated-tag checks are normal remaining acceptance steps, not blockers.
 
 ## Resolved this run
 
