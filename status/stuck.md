@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-04 during bounded v0.52.0 release preparation. Exact CLI/Compose version tests are GREEN at `0.52.0`, the 2,208-test executable inventory is reconciled, README/changelog/status expose the completed `_Bool **` package and exact boundaries, a fresh independent re-review remains pending after correcting premature approval wording, and the canonical local/no-cache-rebuilt-Docker/runtime/version/static-scan/diff gate passes. Repeated local/remote tag preflight is empty. Release-commit-first publication and exact annotated-tag checks are normal remaining acceptance steps, not blockers.
+None. Last reviewed 2026-09-04 after bounded v0.52.0 publication. Exact CLI/Compose version tests are GREEN at `0.52.0`, the 2,208-test executable inventory is reconciled, README/changelog/status expose the completed `_Bool **` package and exact boundaries, the first evidence-bearing review rejected premature approval wording, fresh corrected complete-diff re-review returned `APPROVED`, and the canonical local/no-cache-rebuilt-Docker/runtime/version/static-scan/diff gate passes. Repeated local/remote tag preflight was empty. Release commit `22ca74f271898e408200138dad054535ea4d2491` reached exact `origin/main` before annotated tag creation; remote tag object `55ea846f80a9850bd7f265ec5d387be757179329` peels to that exact release commit.
 
 ## Resolved this run
 
