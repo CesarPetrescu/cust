@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-05 after bounded v0.54.0 release review and canonical verification. Fresh complete-diff review returned `APPROVED`; formatting, strict Clippy, all 2,219 local and rebuilt-Docker tests, a no-cache image rebuild, runtime output `10`, exact versions, static scan, and diff hygiene pass. Local and remote tag preflight remain empty. Branch-first release publication and exact remote annotated-tag verification remain in progress, not blocked.
+None. Last reviewed 2026-09-05 after bounded v0.54.0 publication. Release commit `46447ed7be84d1abaa21a7abb91a584c4fc1e435` reached exact `origin/main` before annotated tag creation; remote tag object `439ba3c85247b159a37bda726cf164bbb26774f9` peels to that exact release commit. Fresh release review and the 2,219-test local/rebuilt-Docker canonical gate pass. Pointer typedef aliases as inner tracked-output types are the concrete next task.
 
 ## Resolved this run
 
