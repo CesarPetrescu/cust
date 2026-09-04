@@ -2,7 +2,7 @@
 
 Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
 
-> Status: **v0.53.0** — tested, Dockerized deterministic C-subset interpreter.
+> Status: **v0.54.0** — tested, Dockerized deterministic C-subset interpreter.
 
 ## License
 
@@ -38,7 +38,7 @@ Expected output:
 cargo test
 ```
 
-The v0.53.0 executable inventory is 2,216 tests: 2,072 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+The v0.54.0 executable inventory is 2,219 tests: 2,072 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 3 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 
 ### Run inside Docker
 
@@ -71,7 +71,7 @@ The `test` service keeps a writable container overlay so Cargo can update `targe
 
 ## Current language subset
 
-Bounded v0.53.0 packages the first safe tracked unqualified `double **` object/output-parameter slice without exposing host addresses. Local, file-global, and block-static objects preserve mutable `double *` slot identity through null/default initialization, compatible forwarding, indirect pointer/scalar reads and writes, equality, truthiness, and non-evaluating `sizeof`; indirect scalar access remains on Cust's deterministic binary64 storage path. Caller-owned pointee owner, lifetime, constness, array identity, and static-storage rules remain enforced. Eight focused interpreter regressions and one registered warning-free native fixture cover the package, including expired-owner and unrelated-call observation boundaries. Release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`.
+Bounded v0.54.0 packages deterministic classifier/evaluator parity across all four supported tracked unqualified scalar pointer-output families: `char **`, `int **`, `_Bool **`, and `double **`. A generated four-kind × nine-route × six-consumer matrix executes 216 programs over direct mutable-slot addresses, local/file-global/block-static objects, conditional/comma/`_Generic` wrappers, and assignment-result expressions through initialization, assignment, arguments, equality, truthiness, and non-evaluating `sizeof`. Twenty type-diagnostic cells plus const and split evaluated/non-evaluating lifetime matrices preserve pointee typing, owner identity, qualification, liveness-on-use, null behavior, and one-time evaluation without host addresses. This release strengthens executable conformance coverage without changing the production runtime path. Release procedure publishes annotated tags only after independent review, the canonical gate, and release-commit acceptance on `origin/main`.
 
 Persistent object bytes remain available for every mutable scalar-only non-`double` union. Layouts with a non-const full-width `int` or `char` retain their deterministic visible carrier; carrierless layouts use hidden maximum-layout bytes while canonical typed routing still selects an actual mutable source member. Selected-member and whole-object `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` operations share one aggregate root at offset zero; raw bytes remain observable while `int`, `char`, and `_Bool` views synchronize under Cust's deterministic scalar model. Whole-object operations use the union's maximum layout size, selected-member operations retain that member's capacity, and overlap, recursive const/lifetime, deep-copy and aggregate-array-element isolation, zero-count identity, typed results, and non-evaluation remain enforced. All-const scalar unions and layouts containing arrays, pointers, `double`, or nested aggregates retain targeted rejection. Cust currently supports this C subset:
 
@@ -218,7 +218,7 @@ See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](do
 
 ## Roadmap
 
-- Post-publication next milestone: add a deterministic tracked pointer-output classifier/evaluator parity matrix across `char **`, `int **`, `_Bool **`, and `double **`. Cross stable storage/value routes with initializer, assignment, argument, equality/truthiness, and non-evaluating consumers; assert exact type, owner/lifetime/const, one-time-evaluation, diagnostic, and route-total behavior without host addresses.
+- Post-publication next milestone: support pointer typedef aliases as the inner type of tracked scalar output objects and parameters (for example `typedef int *IntPtr; IntPtr *output`) across `char`, `int`, `_Bool`, and `double`, while preserving pointer-slot versus pointee qualification, owner/lifetime identity, static-storage rules, non-evaluating classification, and exact deeper/array/aggregate boundaries.
 - Parser quality: continue recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
 - Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
 - Longer term: extend standard-library calls cautiously, then reconsider multiple pointer levels and broader C conformance fixtures.

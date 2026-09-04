@@ -6,6 +6,24 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.54.0 — 2026-09-05
+
+### Conformance coverage
+
+- Added a deterministic classifier/evaluator parity suite across the supported tracked unqualified `char **`, `int **`, `_Bool **`, and `double **` families. The primary matrix executes 216 programs from four pointee kinds × nine stable storage/value routes × six consumers, with identity-keyed assertions requiring every Cartesian cell exactly once.
+- Covered direct mutable-slot addresses, local/file-global/block-static objects, conditional/comma/`_Generic` wrappers, and assignment-result expressions through initialization, assignment, arguments, equality true/false cases, non-null/null truthiness, and non-evaluating `sizeof`. Side-effect markers prove one-time evaluation and controlling-expression suppression.
+- Added 20 exact incompatible-type diagnostic cells, four const-discard rejections, four non-observing expired-lifetime cases, four evaluated lifetime failures, and an independent dangling-dereference trap witness. This is coverage closure over existing interpreter behavior; no production runtime path changed.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.54.0`.
+- Reconciled an executable inventory of 2,219 tests: 2,072 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 3 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Tracked scalar pointer-output support remains deliberately limited to the existing unqualified object/parameter families. Qualified or incompatible slots, deeper pointers, pointer arrays, aggregate fields, pointer-return types, address-taking of tracked two-level objects, arithmetic, relational ordering, and compound updates retain their existing targeted boundaries; pointer typedef aliases as the inner output type are not yet supported uniformly.
+
 ## v0.53.0 — 2026-09-04
 
 ### Language subset

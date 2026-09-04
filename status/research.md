@@ -2,6 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-05 — v0.54.0 release consistency
+
+- Candidate evaluation compared the queue-leading bounded v0.54.0 release, pointer typedef aliases as inner tracked-output types, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages an already reviewed deterministic cross-type contract with bounded metadata risk; the typedef package is the concrete post-release language task.
+- Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.53.0` and passed after Cargo/lock plus both Compose image tags moved to `0.54.0`.
+- Executable target listing yields 2,219 tests: `interpreter` 2,072 + `fuzz_safety` 101 + `cli` 33 + `pointer_classifier_parity` 6 + `pointer_output_parity` 3 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1. The non-interpreter/fuzz subtotal is 46, independently reconciling the total.
+- Central release claims describe the four-kind × nine-route × six-consumer 216-program matrix, exact cell cardinality, one-time and non-evaluation witnesses, 20 incompatible-type cells, four const checks, split four-case lifetime success/failure matrices, and unchanged production behavior. Existing qualified/incompatible/deeper/array/aggregate/return/address/arithmetic/order/compound-update boundaries remain disclosed.
+- Local and remote `v0.54.0` tag preflight were empty. The annotated tag remains reserved until independent review, the canonical gate, and exact `origin/main` acceptance of the release commit.
+- Fresh independent complete-diff review returned `APPROVED` with no findings and confirmed version consistency, release-note coverage, inventory arithmetic, limitation wording, pre-publication chronology, secret absence, and one unambiguous post-release task.
+- The canonical gate passed: `cargo fmt --check`; `cargo clippy -- -D warnings`; all 2,219 local tests; `docker compose build --no-cache`; all 2,219 rebuilt-Docker tests through `docker compose run --rm test`; runtime smoke output `10` through `docker compose run --rm cust`; and `git diff --check`. Supplemental probes report local CLI `cust 0.54.0`, Cargo metadata `0.54.0`, runtime image `cust 0.54.0`, and test-image package `0.54.0`; the added-line static scan is clear and repeated local/remote tag preflight is empty.
+
 ## 2026-09-04 — Tracked pointer-output parity decisions
 
 - Candidate evaluation compared deterministic cross-type pointer-output parity, parser-diagnostic expansion, CLI/product work, and immediate release preparation. Parity was selected because `char **`, `int **`, `_Bool **`, and `double **` were independently complete but lacked one generated classifier/evaluator contract; release preparation remains bounded and becomes next.
