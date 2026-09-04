@@ -6,6 +6,27 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.52.0 — 2026-09-04
+
+### Language subset
+
+- Added the first safe tracked unqualified `_Bool **` object/output-parameter slice without exposing host addresses. Local, file-global, and block-static objects preserve mutable `_Bool *` slot identity through null/default initialization, compatible forwarding, indirect pointer/scalar reads and writes, equality, truthiness, aliases, and non-evaluating `sizeof`.
+- Preserved caller-owned pointee owner, lifetime, constness, array identity, and static-storage rules. Indirect scalar writes use typed `_Bool` storage, so every nonzero value normalizes to `1`.
+
+### Diagnostics and verification
+
+- Added nine focused interpreter regressions plus one registered warning-free native fixture. Pointee-driven diagnostics distinguish boolean pointer outputs in conditional and equality validation, including nested non-evaluating `sizeof` and `_Generic` routes.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.52.0`.
+- Reconciled an executable inventory of 2,208 tests: 2,064 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Tracked `_Bool **` support is deliberately limited to unqualified local/file-global/block-static objects and function parameters over mutable `_Bool *` slots. Qualified pointees or slots, `double **`, deeper pointers, pointer arrays, aggregate fields, pointer-return types, address-taking of tracked two-level objects, arithmetic, relational ordering, and compound updates remain unsupported. Shared union object-byte and other existing subset boundaries remain unchanged.
+
 ## v0.51.0 — 2026-09-04
 
 ### Language subset

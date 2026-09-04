@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-04 after completing the first safe tracked unqualified `_Bool **` slice. Nine focused regressions, the registered native fixture, fresh independent approval, all 2,208 local/rebuilt-Docker tests, formatting, strict Clippy, runtime output `10`, and diff hygiene pass. Bounded v0.52.0 release closure is next; no user input or external dependency is required.
+None. Last reviewed 2026-09-04 during bounded v0.52.0 release preparation. Exact CLI/Compose version tests are GREEN at `0.52.0`, the 2,208-test executable inventory is reconciled, README/changelog/status expose the completed `_Bool **` package and exact boundaries, a fresh independent re-review remains pending after correcting premature approval wording, and the canonical local/no-cache-rebuilt-Docker/runtime/version/static-scan/diff gate passes. Repeated local/remote tag preflight is empty. Release-commit-first publication and exact annotated-tag checks are normal remaining acceptance steps, not blockers.
 
 ## Resolved this run
 
