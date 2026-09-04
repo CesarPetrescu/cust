@@ -2,6 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-04 — Safe tracked boolean pointer-output decisions
+
+- The tracked output representation already carries a scalar `CType`, so admitting `_Bool **` safely requires extending parser/runtime filters from `char`/`int` to `_Bool`, not adding host-address storage. Existing slot identity, owner/lifetime/const/static checks, call forwarding, equality/truthiness, and non-evaluating validation remain shared.
+- Indirect scalar writes must continue through typed `_Bool` storage so every nonzero value normalizes to `1`; the valid fixture and focused tests exercise positive and negative nonzero writes across local/global/static roots.
+- Diagnostic labels must be fully pointee-driven. Binary `if char { character } else { integer }` assumptions become wrong as soon as `_Bool` is admitted; both conditional `sizeof` and aggregate equality beneath `sizeof`/`_Generic` exposed this. Route labels through `CType::pointer_output_kind()` and the existing binary output-kind classifier.
+- Candidate evaluation considered inherited `_Bool **` completion, bounded v0.52.0 release closure, parser diagnostics, and broader property/CLI work. Recovery priority selected the inherited coherent vertical slice; bounded v0.52.0 release closure is next.
+- No external semantic source was required. The existing tracked `char **`/`int **` model, strict GCC/Clang compilation of the warning-free fixture, focused RED/GREEN, and independent review establish this bounded extension. See `references/cust-boolean-pointer-objects-and-output-parameters.md`.
+
 ## 2026-09-04 — v0.51.0 release consistency
 
 - Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.50.0` and passed after Cargo/lock plus both Compose image tags moved to `0.51.0`.

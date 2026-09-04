@@ -1070,6 +1070,15 @@ impl CType {
             CType::Char | CType::Bool | CType::Double => "a",
         }
     }
+
+    fn pointer_output_kind(self) -> &'static str {
+        match self {
+            CType::Char => "character",
+            CType::Int => "integer",
+            CType::Bool => "boolean",
+            CType::Double => unreachable!("unsupported pointer output pointee type"),
+        }
+    }
 }
 
 impl PointeeType {
@@ -9540,17 +9549,16 @@ impl Parser {
                 ));
             }
             let pointer_output_pointee = if has_explicit_star
-                && matches!(decl_type, DeclType::Scalar(CType::Char | CType::Int))
+                && matches!(
+                    decl_type,
+                    DeclType::Scalar(CType::Char | CType::Int | CType::Bool)
+                )
                 && self.check(&Token::Star)
             {
                 let DeclType::Scalar(pointee) = decl_type else {
                     unreachable!("guard requires a scalar pointer output type")
                 };
-                let pointer_output_label = if pointee == CType::Char {
-                    "character"
-                } else {
-                    "integer"
-                };
+                let pointer_output_label = pointee.pointer_output_kind();
                 if parameter_alias_is_qualified {
                     return Err(Self::error_at(
                         format!(
@@ -10527,17 +10535,16 @@ impl Parser {
         };
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
         if has_explicit_star
-            && matches!(decl_type, DeclType::Scalar(CType::Char | CType::Int))
+            && matches!(
+                decl_type,
+                DeclType::Scalar(CType::Char | CType::Int | CType::Bool)
+            )
             && self.check(&Token::Star)
         {
             let DeclType::Scalar(pointee) = decl_type else {
                 unreachable!("guard requires a scalar pointer output type")
             };
-            let pointer_output_label = if pointee == CType::Char {
-                "character"
-            } else {
-                "integer"
-            };
+            let pointer_output_label = pointee.pointer_output_kind();
             if let Some(qualifier) = declaration_base_qualifier.clone().or(post_star_qualifier) {
                 return Err(Self::error_at(
                     format!("qualified {pointer_output_label} pointer objects are not supported"),
@@ -10567,12 +10574,10 @@ impl Parser {
                 );
             }
             if require_semi {
-                let declaration_kind = if pointee == CType::Char {
-                    "character pointer object declaration"
-                } else {
-                    "integer pointer object declaration"
-                };
-                self.expect_semicolon_after(declaration_kind)?;
+                self.expect_semicolon_after(&format!(
+                    "{} pointer object declaration",
+                    pointee.pointer_output_kind()
+                ))?;
             }
             return Ok(stmt);
         }
@@ -11176,11 +11181,7 @@ impl Parser {
         &mut self,
         pointee: CType,
     ) -> CustResult<Stmt> {
-        let pointer_output_label = if pointee == CType::Char {
-            "character"
-        } else {
-            "integer"
-        };
+        let pointer_output_label = pointee.pointer_output_kind();
         let name = self.parse_declarator_name(&format!(
             "{pointer_output_label} pointer object name after '**'"
         ))?;
@@ -11237,17 +11238,16 @@ impl Parser {
         };
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
         if has_explicit_star
-            && matches!(base_type, DeclType::Scalar(CType::Char | CType::Int))
+            && matches!(
+                base_type,
+                DeclType::Scalar(CType::Char | CType::Int | CType::Bool)
+            )
             && self.check(&Token::Star)
         {
             let DeclType::Scalar(pointee) = base_type else {
                 unreachable!("guard requires a scalar pointer output type")
             };
-            let pointer_output_label = if pointee == CType::Char {
-                "character"
-            } else {
-                "integer"
-            };
+            let pointer_output_label = pointee.pointer_output_kind();
             if base_qualifier.is_some() || leading_const || post_star_qualifier.is_some() {
                 return Err(Self::error_at(
                     format!("qualified {pointer_output_label} pointer objects are not supported"),
@@ -18542,9 +18542,8 @@ impl CharacterPointerOutput {
                 "taking the address of a character pointer output parameter is not supported"
             }
             CType::Int => "taking the address of an integer pointer output object is not supported",
-            CType::Bool | CType::Double => {
-                unreachable!("unsupported pointer output pointee type")
-            }
+            CType::Bool => "taking the address of a boolean pointer output object is not supported",
+            CType::Double => unreachable!("unsupported pointer output pointee type"),
         }
     }
 }
@@ -20002,7 +20001,7 @@ impl Interpreter {
                     .get(&param.name)
                     .filter(|output| {
                         matches!(output, CharacterPointerOutput::Slot { .. })
-                            && output.pointee() == CType::Int
+                            && matches!(output.pointee(), CType::Int | CType::Bool)
                     })
                     .cloned()
             })
@@ -26085,9 +26084,10 @@ impl Interpreter {
                                     ));
                                 }
                                 _ => {
-                                    return Err(CustError::new(
-                                        "character pointer output equality requires another output or an integer null pointer constant",
-                                    ));
+                                    let kind = self.pointer_output_binary_kind_label(left, right);
+                                    return Err(CustError::new(format!(
+                                        "{kind} pointer output equality requires another output or an integer null pointer constant"
+                                    )));
                                 }
                             }
                         }
@@ -33921,30 +33921,16 @@ impl Interpreter {
     }
 
     fn pointer_output_object_kind_label(&self, name: &str) -> &'static str {
-        match self
-            .find_character_pointer_output(name)
+        self.find_character_pointer_output(name)
             .map(CharacterPointerOutput::pointee)
             .unwrap_or(CType::Char)
-        {
-            CType::Char => "character",
-            CType::Int => "integer",
-            CType::Bool | CType::Double => {
-                unreachable!("unsupported pointer output pointee type")
-            }
-        }
+            .pointer_output_kind()
     }
 
     fn pointer_output_kind_label(&self, expr: &Expr) -> &'static str {
-        match self
-            .character_pointer_output_expr_pointee(expr)
+        self.character_pointer_output_expr_pointee(expr)
             .unwrap_or(CType::Char)
-        {
-            CType::Char => "character",
-            CType::Int => "integer",
-            CType::Bool | CType::Double => {
-                unreachable!("unsupported pointer output pointee type")
-            }
-        }
+            .pointer_output_kind()
     }
 
     fn pointer_output_binary_kind_label(&self, left: &Expr, right: &Expr) -> &'static str {
@@ -33963,7 +33949,7 @@ impl Interpreter {
             if let Some(value) = scope.values.get(name) {
                 return match value {
                     Value::Pointer {
-                        ty: PointeeType::Scalar(pointee @ (CType::Char | CType::Int)),
+                        ty: PointeeType::Scalar(pointee @ (CType::Char | CType::Int | CType::Bool)),
                         points_to_const: false,
                         ..
                     } if !scope.const_variables.contains(name)
@@ -33986,7 +33972,7 @@ impl Interpreter {
             {
                 return match &storage.value {
                     Value::Pointer {
-                        ty: PointeeType::Scalar(pointee @ (CType::Char | CType::Int)),
+                        ty: PointeeType::Scalar(pointee @ (CType::Char | CType::Int | CType::Bool)),
                         points_to_const: false,
                         ..
                     } if !storage.is_const
@@ -34541,13 +34527,8 @@ impl Interpreter {
     }
 
     fn static_character_pointer_output_initializer_error(pointee: CType) -> CustError {
-        let (kind, type_name) = match pointee {
-            CType::Char => ("character", "char"),
-            CType::Int => ("integer", "int"),
-            CType::Bool | CType::Double => {
-                unreachable!("unsupported pointer output pointee type")
-            }
-        };
+        let kind = pointee.pointer_output_kind();
+        let type_name = pointee.name();
         CustError::new(format!(
             "static {kind} pointer object initializer must be null or the address of a mutable {type_name} pointer variable with static storage duration"
         ))
@@ -50995,11 +50976,7 @@ impl Interpreter {
             let pointee = self
                 .character_pointer_output_expr_pointee(expr)
                 .unwrap_or(CType::Char);
-            let kind = if pointee == CType::Char {
-                "character"
-            } else {
-                "integer"
-            };
+            let kind = pointee.pointer_output_kind();
             return self
                 .validate_character_pointer_output_argument_typed_with_liveness(
                     "conditional pointer output",
@@ -53025,13 +53002,9 @@ impl Interpreter {
                     let output =
                         self.eval_character_pointer_output_initializer(name, *pointee, expr)?;
                     if !self.character_pointer_output_target_has_static_storage(&output) {
-                        let (kind, type_name, article) = match pointee {
-                            CType::Char => ("character", "char", "a"),
-                            CType::Int => ("integer", "int", "an"),
-                            CType::Bool | CType::Double => {
-                                unreachable!("unsupported pointer output pointee type")
-                            }
-                        };
+                        let kind = pointee.pointer_output_kind();
+                        let type_name = pointee.name();
+                        let article = pointee.indefinite_article();
                         return Err(CustError::new(format!(
                             "static {kind} pointer object initializer requires {article} {type_name} pointer slot with static storage duration"
                         )));

@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-04 after bounded v0.51.0 publication. Release commit `c4d75d723c84b39a2832a166485b6d06e1618ca1` reached `origin/main` before annotated tag creation; remote tag object `f6de73c38c53f3173031c046dae620b7865d6322` peels to that exact commit. The reviewed 2,199-test local/no-cache-rebuilt-Docker gate and exact version/runtime probes pass. A first safe tracked unqualified `_Bool **` slice is next; no user input or external dependency is required.
+None. Last reviewed 2026-09-04 after completing the first safe tracked unqualified `_Bool **` slice. Nine focused regressions, the registered native fixture, fresh independent approval, all 2,208 local/rebuilt-Docker tests, formatting, strict Clippy, runtime output `10`, and diff hygiene pass. Bounded v0.52.0 release closure is next; no user input or external dependency is required.
 
 ## Resolved this run
+
+### 2026-09-04 — Boolean pointer-output diagnostic parity
+
+- Failure: inherited `_Bool **` conditional coverage reported `integer pointer output` instead of `boolean`; after that fix, independent review reproduced `character pointer output equality` for aggregate operands beneath `sizeof` and `_Generic`.
+- Root cause: two non-evaluating diagnostic branches retained binary `char`/non-`char` assumptions from before tracked pointer outputs carried explicit scalar pointee types.
+- RED/GREEN: the inherited conditional test failed before `CType::pointer_output_kind()` replaced the binary label. A dedicated equality regression then failed on `sizeof(output == box)` and passed after the binary output-kind classifier supplied the actual pointee label; the same test covers `_Generic`.
+- Verification: nine boolean-output tests, all 82 pointer-output tests, the compiler oracle, fresh independent `APPROVED` re-review, formatting, strict Clippy, all 2,208 local/rebuilt-Docker tests, runtime output `10`, static scan, and diff hygiene pass.
 
 ### 2026-09-03 — Integer pointer-output aggregate conditions and null `void *`
 

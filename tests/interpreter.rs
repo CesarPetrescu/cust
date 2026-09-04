@@ -26588,25 +26588,25 @@ fn rejects_array_return_types_with_context() {
 
 #[test]
 fn rejects_pointer_to_pointer_parameters_with_context() {
-    let program = "int load(_Bool **value) { return **value; }\nint main() { return 0; }\n";
+    let program = "int load(double **value) { return **value; }\nint main() { return 0; }\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "pointer-to-pointer parameters are not supported at line 1, column 17"
+        "pointer-to-pointer parameters are not supported at line 1, column 18"
     );
 }
 
 #[test]
 fn rejects_pointer_to_pointer_declarations_with_context() {
-    let program = "int main() {\n_Bool x = 1;\n_Bool **value = &x;\nreturn 0;\n}\n";
+    let program = "int main() {\ndouble x = 1.0;\ndouble **value = &x;\nreturn 0;\n}\n";
 
     let err = interpret(program).unwrap_err();
 
     assert_eq!(
         err.to_string(),
-        "pointer-to-pointer declarations are not supported at line 3, column 8"
+        "pointer-to-pointer declarations are not supported at line 3, column 9"
     );
 }
 
@@ -28119,6 +28119,174 @@ int main(void) {
 "#;
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn boolean_pointer_objects_read_write_and_forward_local_slots() {
+    let program = r#"
+void set_output(_Bool **output, _Bool *value) {
+    *output = value;
+}
+
+void forward_output(_Bool **output, _Bool *value) {
+    set_output(output, value);
+}
+
+int main(void) {
+    _Bool values[3] = {0, 0, 0};
+    _Bool *slot = 0;
+    _Bool **output = &slot;
+    _Bool **alias = output;
+
+    forward_output(alias, values + 1);
+    **output = 9;
+    return slot == values + 1 && values[1] == 1 && alias == output ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn boolean_pointer_objects_support_global_static_null_and_sizeof_routes() {
+    let program = r#"
+_Bool global_values[3] = {0, 0, 0};
+_Bool *global_slot = 0;
+_Bool **global_output = &global_slot;
+static _Bool *file_slot = 0;
+static _Bool **file_output = &file_slot;
+
+int update_static(void) {
+    static _Bool *slot = 0;
+    static _Bool **output = &slot;
+    *output = global_values + 2;
+    **output = 42;
+    return *slot;
+}
+
+int main(void) {
+    _Bool **empty;
+    *global_output = global_values;
+    **global_output = 7;
+    *file_output = global_values + 1;
+    **file_output = -3;
+    return global_values[0] == 1 && global_values[1] == 1 && update_static() == 1 &&
+                   empty == 0 && !empty && sizeof(empty) == sizeof(&global_slot)
+               ? 0
+               : 1;
+}
+"#;
+
+    assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn qualified_boolean_pointer_output_objects_have_boolean_diagnostics() {
+    let program = "int main(void) { const _Bool **output = 0; return 0; }\n";
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "qualified boolean pointer objects are not supported at line 1, column 18"
+    );
+}
+
+#[test]
+fn static_boolean_pointer_outputs_reject_automatic_slots_without_panicking() {
+    let program = "int main(void) { _Bool *slot = 0; static _Bool **output = &slot; return 0; }\n";
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "static boolean pointer object initializer requires a _Bool pointer slot with static storage duration"
+    );
+}
+
+#[test]
+fn taking_boolean_pointer_output_addresses_is_rejected_without_panicking() {
+    let program =
+        "int main(void) { _Bool *slot = 0; _Bool **output = &slot; return &output != 0; }\n";
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "taking the address of a boolean pointer output object is not supported"
+    );
+}
+
+#[test]
+fn boolean_pointer_outputs_reject_arithmetic_ordering_and_compound_updates_without_panicking() {
+    for (operation, expected) in [
+        (
+            "return output + 1 != 0",
+            "boolean pointer output arithmetic is not supported",
+        ),
+        (
+            "return output < other",
+            "boolean pointer output ordering comparisons are not supported",
+        ),
+        (
+            "output += 1; return 0",
+            "boolean pointer output parameter reassignment is not supported",
+        ),
+    ] {
+        let program = format!(
+            "int inspect(_Bool **output, _Bool **other) {{ {operation}; }}\nint main(void) {{ _Bool *slot = 0; return inspect(&slot, &slot); }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            expected,
+            "operation: {operation}"
+        );
+    }
+}
+
+#[test]
+fn boolean_pointer_outputs_reject_callee_local_and_parameter_escapes() {
+    for (program, name) in [
+        (
+            "void publish(_Bool **output) { _Bool local = 1; *output = &local; }\nint main(void) { _Bool *saved = 0; publish(&saved); return 0; }\n",
+            "local",
+        ),
+        (
+            "void publish(_Bool **output, _Bool value) { *output = &value; }\nint main(void) { _Bool *saved = 0; publish(&saved, 1); return 0; }\n",
+            "value",
+        ),
+    ] {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            format!("pointer to out-of-scope variable '{name}'")
+        );
+    }
+}
+
+#[test]
+fn boolean_pointer_output_equality_uses_boolean_diagnostics_in_non_evaluating_routes() {
+    for expression in ["sizeof(output == box)", "_Generic(output == box, int: 1)"] {
+        let program = format!(
+            "struct Box {{ int value; }};\nint main(void) {{ _Bool *slot = 0; _Bool **output = &slot; struct Box box = {{1}}; return {expression}; }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "boolean pointer output equality requires another output or an integer null pointer constant",
+            "expression: {expression}"
+        );
+    }
+}
+
+#[test]
+fn boolean_pointer_output_conditionals_have_boolean_diagnostics() {
+    let program = r#"
+int main(void) {
+    _Bool *slot = 0;
+    _Bool **output = &slot;
+    return sizeof(1 ? output : 1);
+}
+"#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "conditional boolean pointer output branches require compatible output values or null"
+    );
 }
 
 #[test]
