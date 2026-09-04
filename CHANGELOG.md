@@ -6,6 +6,27 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.51.0 — 2026-09-04
+
+### Language subset
+
+- Added the first safe tracked unqualified `int **` object/output-parameter slice without exposing host addresses. Local, file-global, and block-static objects preserve mutable `int *` slot identity through null/default and `(void *)0` initialization, compatible reassignment, indirect pointer/scalar reads and writes, equality, truthiness, parameter forwarding, and non-evaluating `sizeof`.
+- Preserved caller-owned pointee owner, lifetime, constness, array identity, and static-storage rules across calls and assignments. Unqualified scalar-pointee typedef aliases resolve to the same tracked representation.
+
+### Diagnostics and verification
+
+- Added 62 focused interpreter regressions plus one registered warning-free native fixture. Structural checks reject incompatible or qualified conversions before side effects, validate every constant-expression and `_Generic` association route, bound nested null-constant analysis, and diagnose output pointers that escape callee parameter scope after teardown.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.51.0`.
+- Reconciled an executable inventory of 2,199 tests: 2,055 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Tracked `int **` support is deliberately limited to unqualified local/file-global/block-static objects and function parameters over mutable `int *` slots. Qualified pointees or slots, `_Bool **`, `double **`, deeper pointers, pointer arrays, aggregate fields, pointer typedef aliases, pointer-return types, address-taking of tracked two-level objects, arithmetic, relational ordering, and compound updates remain unsupported. Shared union object-byte and other existing subset boundaries remain unchanged.
+
 ## v0.50.0 — 2026-09-02
 
 ### Language subset

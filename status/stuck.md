@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-04 after review-driven RED/GREEN closed aggregate-condition ordering, null `void *`, qualification translation, `_Generic` association-value validation, formatting, and inventory gaps in the safe tracked unqualified `int **` slice. The 2,199-test canonical local/rebuilt-Docker gate and runtime smoke test pass. Bounded v0.51.0 release closure remains next.
+None. Last reviewed 2026-09-04 during bounded v0.51.0 release preparation. Exact CLI/Compose version tests are GREEN at `0.51.0`, the 2,199-test executable inventory is reconciled, stale 52-test wording was corrected to the verified 62-test interpreter delta, fresh independent re-review returned `APPROVED`, and the complete local/no-cache-rebuilt-Docker gate, runtime/version probes, static safety scan, diff hygiene, and repeated local/remote tag preflight pass. Release-commit-first publication and exact annotated-tag verification are normal remaining acceptance steps, not blockers.
 
 ## Resolved this run
 

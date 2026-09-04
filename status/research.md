@@ -2,6 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-04 — v0.51.0 release consistency
+
+- Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.50.0` and passed after Cargo/lock plus both Compose image tags moved to `0.51.0`.
+- Executable target listing yields 2,199 tests: `interpreter` 2,055 + `fuzz_safety` 101 + `cli` 33 + `pointer_classifier_parity` 6 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1. The non-interpreter/fuzz subtotal is 43, independently reconciling the total.
+- Central release claims describe tracked unqualified `int **` local/file-global/block-static objects and output parameters, mutable `int *` slot identity, null/default and `(void *)0` state, compatible reassignment, indirect pointer/scalar access, forwarding, unqualified scalar-pointee aliases, owner/lifetime/const/static guarantees, and conversion-before-side-effect diagnostics. Qualified/deeper/array/field/alias/return/address/arithmetic/order/compound-update forms remain disclosed boundaries.
+- Candidate evaluation considered queue-leading v0.51.0 release closure, a first safe tracked `_Bool **` package, parser-diagnostic expansion, and broader property/CLI work. Release closure was selected because it atomically packages an already reviewed correctness package and exact executable coverage with bounded metadata risk. The `_Bool **` object/output-parameter slice is the concrete post-release task because it reuses tracked slot identity while adding normalization-sensitive scalar behavior before the larger `double **` boundary.
+- Local and remote `v0.51.0` tag preflight are empty. The tag remains reserved for the independently reviewed, canonically verified release commit after `origin/main` accepts that exact commit.
+- Initial independent review found that release/status prose claimed 52 interpreter regressions while executable inventory increased from 1,993 to 2,055. Both arithmetic and a `v0.50.0..HEAD` count independently prove 62 added `#[test]` functions; all current claims now say 62. Fresh complete-diff re-review returned `APPROVED` with version, inventory, boundaries, publication ordering, secret scan, and the single `_Bool **` next package consistent.
+- The canonical gate passed: `cargo fmt --check`; `cargo clippy -- -D warnings`; all 2,199 local tests; `docker compose build --no-cache`; all 2,199 rebuilt-Docker tests through `docker compose run --rm test`; runtime smoke output `10` through `docker compose run --rm cust`; and `git diff --check`. Supplemental probes report local CLI `cust 0.51.0`, Cargo metadata `0.51.0`, runtime image `cust 0.51.0`, and test-image package `0.51.0`; the added-line secret scan is clear and repeated local/remote tag preflight remains empty.
+
 ## 2026-09-03 — Safe tracked integer pointer-output decisions
 
 - The existing tracked `char **` representation is safely generalizable when every output value carries an explicit scalar pointee. Reusing slot/null identity avoids host addresses and keeps lookup, static storage, assignment, parameter binding, equality, truthiness, and `sizeof` behavior in one model.
