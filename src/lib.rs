@@ -756,6 +756,7 @@ enum TypeAlias {
         pointee: PointeeType,
         points_to_const: bool,
     },
+    PointerOutput(CType),
     Array(PointeeType, usize),
     Array2D(CType, usize, usize),
     Array2DPointer {
@@ -774,6 +775,7 @@ enum DeclType {
         pointee: PointeeType,
         points_to_const: bool,
     },
+    PointerOutput(CType),
     Array(PointeeType, usize),
     Array2D(CType, usize, usize),
     Array2DPointer {
@@ -7857,7 +7859,9 @@ impl Parser {
                         DeclType::Void => PointeeType::Void,
                         DeclType::Scalar(ty) => PointeeType::Scalar(ty),
                         DeclType::Struct(type_name) => PointeeType::Struct(type_name),
-                        DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
+                        DeclType::Pointer { .. }
+                        | DeclType::PointerOutput(_)
+                        | DeclType::Array2DPointer { .. } => {
                             return Err(Self::error_at(
                                 "pointer-to-pointer _Atomic types are not supported".to_string(),
                                 self.previous(),
@@ -7895,6 +7899,12 @@ impl Parser {
                         points_to_const: nested_const,
                     };
                 } else {
+                    if matches!(decl_type, DeclType::PointerOutput(_)) {
+                        return Err(Self::error_at(
+                            "pointer-to-pointer _Atomic types are not supported".to_string(),
+                            &atomic_type_token,
+                        ));
+                    }
                     if matches!(
                         decl_type,
                         DeclType::Pointer {
@@ -8011,6 +8021,10 @@ impl Parser {
                             points_to_const,
                         },
                     ))
+                }
+                Some(TypeAlias::PointerOutput(pointee)) => {
+                    saw_const |= self.consume_type_qualifiers();
+                    Ok((saw_const, DeclType::PointerOutput(pointee)))
                 }
                 Some(TypeAlias::Array(pointee, len)) => {
                     saw_const |= self.consume_type_qualifiers();
@@ -8316,6 +8330,9 @@ impl Parser {
                 ty: pointee,
                 points_to_const,
             },
+            DeclType::PointerOutput(_) => {
+                unreachable!("tracked pointer outputs are not valid return types")
+            }
             DeclType::Array2DPointer {
                 elem_type,
                 columns,
@@ -8341,6 +8358,7 @@ impl Parser {
                 PointeeType::Scalar(ty) => ParamType::Scalar(*ty),
                 PointeeType::Struct(type_name) => ParamType::Struct(type_name.clone()),
             },
+            DeclType::PointerOutput(pointee) => ParamType::Scalar(*pointee),
             DeclType::Array(pointee, _) => match pointee {
                 PointeeType::Void => unreachable!("void arrays are rejected while parsing"),
                 PointeeType::Scalar(ty) => ParamType::Scalar(*ty),
@@ -8359,6 +8377,9 @@ impl Parser {
             DeclType::Scalar(ty) => PointeeType::Scalar(*ty),
             DeclType::Struct(type_name) => PointeeType::Struct(type_name.clone()),
             DeclType::Pointer { pointee, .. } => pointee.clone(),
+            DeclType::PointerOutput(_) => {
+                unreachable!("tracked pointer outputs do not decay to one-level pointers")
+            }
             DeclType::Array(pointee, _) => pointee.clone(),
             DeclType::Array2D(_, _, _) | DeclType::Array2DPointer { .. } => {
                 unreachable!("two-dimensional arrays do not decay to scalar pointers")
@@ -8543,7 +8564,11 @@ impl Parser {
         let has_explicit_star = explicit_star_token.is_some();
         if matches!(
             base_type,
-            DeclType::Pointer { .. } | DeclType::Array2DPointer { .. }
+            DeclType::Pointer {
+                pointee: PointeeType::Void | PointeeType::Struct(_),
+                ..
+            } | DeclType::Array2DPointer { .. }
+                | DeclType::PointerOutput(_)
         ) && has_explicit_star
         {
             return Err(Self::error_at(
@@ -8572,8 +8597,15 @@ impl Parser {
                     pointee: PointeeType::Struct(type_name),
                     points_to_const: leading_const,
                 },
+                DeclType::Pointer {
+                    pointee: PointeeType::Scalar(pointee),
+                    ..
+                } => TypeAlias::PointerOutput(pointee),
                 DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
-                    unreachable!("pointer aliases with stars return above")
+                    unreachable!("unsupported pointer aliases with stars return above")
+                }
+                DeclType::PointerOutput(_) => {
+                    unreachable!("tracked pointer-output aliases with stars return above")
                 }
                 DeclType::Array(_, _) | DeclType::Array2D(_, _, _) => {
                     return Err(Self::error_at(
@@ -8596,6 +8628,7 @@ impl Parser {
                     pointee,
                     points_to_const,
                 },
+                DeclType::PointerOutput(pointee) => TypeAlias::PointerOutput(pointee),
                 DeclType::Array(pointee, len) => TypeAlias::Array(pointee, len),
                 DeclType::Array2D(ty, rows, columns) => TypeAlias::Array2D(ty, rows, columns),
                 DeclType::Array2DPointer {
@@ -8642,7 +8675,9 @@ impl Parser {
                     }
                     TypeAlias::Array(PointeeType::Struct(type_name), len)
                 }
-                TypeAlias::Pointer { .. } | TypeAlias::Array2DPointer { .. } => {
+                TypeAlias::Pointer { .. }
+                | TypeAlias::PointerOutput(_)
+                | TypeAlias::Array2DPointer { .. } => {
                     return Err(Self::error_at(
                         "pointer array typedef aliases are not supported".to_string(),
                         self.previous(),
@@ -8674,7 +8709,9 @@ impl Parser {
         } else {
             base_is_qualified
         };
-        let alias_pointer_pointee_is_qualified = if has_explicit_star {
+        let alias_pointer_pointee_is_qualified = if matches!(alias, TypeAlias::PointerOutput(_)) {
+            base_is_qualified || base_pointer_pointee_is_qualified
+        } else if has_explicit_star {
             base_is_qualified
         } else {
             base_pointer_pointee_is_qualified
@@ -9270,6 +9307,7 @@ impl Parser {
             }
             return Ok((ReturnType::Void, false));
         }
+        let return_type_token = self.peek_located().clone();
         let (leading_const, decl_type) =
             self.parse_const_qualified_decl_type("function return type")?;
         if self.matches(&Token::Star) {
@@ -9282,7 +9320,11 @@ impl Parser {
                     self.previous(),
                 ));
             }
-            if matches!(decl_type, DeclType::Pointer { .. }) || self.check(&Token::Star) {
+            if matches!(
+                decl_type,
+                DeclType::Pointer { .. } | DeclType::PointerOutput(_)
+            ) || self.check(&Token::Star)
+            {
                 return Err(Self::error_at(
                     "pointer-to-pointer return types are not supported".to_string(),
                     self.peek_located(),
@@ -9308,6 +9350,12 @@ impl Parser {
                     points_to_const,
                 },
                 false,
+            ));
+        }
+        if matches!(decl_type, DeclType::PointerOutput(_)) {
+            return Err(Self::error_at(
+                "pointer-to-pointer return types are not supported".to_string(),
+                &return_type_token,
             ));
         }
         if matches!(
@@ -9550,6 +9598,7 @@ impl Parser {
                     pointee: PointeeType::Scalar(pointee),
                     ..
                 } if has_explicit_star => Some((*pointee, false)),
+                DeclType::PointerOutput(pointee) if !has_explicit_star => Some((*pointee, false)),
                 _ => None,
             };
             let pointer_output_pointee = if let Some((pointee, consume_second_star)) =
@@ -9588,7 +9637,10 @@ impl Parser {
                 None
             };
             if pointer_output_pointee.is_none()
-                && matches!(decl_type, DeclType::Pointer { .. })
+                && matches!(
+                    decl_type,
+                    DeclType::Pointer { .. } | DeclType::PointerOutput(_)
+                )
                 && has_explicit_star
             {
                 return Err(Self::error_at(
@@ -9648,6 +9700,9 @@ impl Parser {
                             unreachable!("pointer aliases with explicit stars return above")
                         }
                     }
+                    DeclType::PointerOutput(_) => {
+                        unreachable!("pointer-output aliases with explicit stars return above")
+                    }
                     DeclType::Array(_, _) => {
                         unreachable!("array aliases with explicit stars return above")
                     }
@@ -9669,6 +9724,9 @@ impl Parser {
                     }
                     DeclType::Pointer { .. } => {
                         self.parse_declarator_name("pointer parameter name after type")?
+                    }
+                    DeclType::PointerOutput(_) => {
+                        self.parse_declarator_name("pointer output parameter name after type")?
                     }
                     DeclType::Array(_, _) => {
                         self.parse_declarator_name("array parameter name after type")?
@@ -10554,6 +10612,7 @@ impl Parser {
                 pointee: PointeeType::Scalar(pointee),
                 ..
             } if has_explicit_star => Some((*pointee, false)),
+            DeclType::PointerOutput(pointee) if !has_explicit_star => Some((*pointee, false)),
             _ => None,
         };
         if let Some((pointee, consume_second_star)) = pointer_output_pointee {
@@ -10600,7 +10659,7 @@ impl Parser {
         }
         if matches!(
             decl_type,
-            DeclType::Pointer { .. } | DeclType::Array2DPointer { .. }
+            DeclType::Pointer { .. } | DeclType::PointerOutput(_) | DeclType::Array2DPointer { .. }
         ) && has_explicit_star
         {
             return Err(Self::error_at(
@@ -10656,6 +10715,9 @@ impl Parser {
                 DeclType::Pointer { .. } => {
                     unreachable!("pointer aliases with explicit stars return above")
                 }
+                DeclType::PointerOutput(_) => {
+                    unreachable!("pointer-output aliases with explicit stars return above")
+                }
                 DeclType::Array2DPointer { .. } => {
                     unreachable!("row pointer aliases with explicit stars return above")
                 }
@@ -10667,6 +10729,9 @@ impl Parser {
                 DeclType::Struct(_) => self.parse_declarator_name("struct variable name")?,
                 DeclType::Pointer { .. } => {
                     self.parse_declarator_name("pointer name after type")?
+                }
+                DeclType::PointerOutput(_) => {
+                    self.parse_declarator_name("pointer output name after type")?
                 }
                 DeclType::Array2DPointer { .. } => {
                     self.parse_declarator_name("row pointer name after type")?
@@ -10833,7 +10898,8 @@ impl Parser {
                     | DeclType::Pointer {
                         pointee: PointeeType::Scalar(_),
                         ..
-                    } => "pointer declaration",
+                    }
+                    | DeclType::PointerOutput(_) => "pointer declaration",
                     DeclType::Struct(_)
                     | DeclType::Pointer {
                         pointee: PointeeType::Struct(_),
@@ -10878,7 +10944,8 @@ impl Parser {
                     | DeclType::Pointer {
                         pointee: PointeeType::Scalar(_),
                         ..
-                    } => "pointer declaration",
+                    }
+                    | DeclType::PointerOutput(_) => "pointer declaration",
                     DeclType::Struct(_)
                     | DeclType::Pointer {
                         pointee: PointeeType::Struct(_),
@@ -11262,6 +11329,7 @@ impl Parser {
                 pointee: PointeeType::Scalar(pointee),
                 ..
             } if has_explicit_star => Some((*pointee, false)),
+            DeclType::PointerOutput(pointee) if !has_explicit_star => Some((*pointee, false)),
             _ => None,
         };
         if let Some((pointee, consume_second_star)) = pointer_output_pointee {
@@ -11295,7 +11363,7 @@ impl Parser {
         }
         if matches!(
             base_type,
-            DeclType::Pointer { .. } | DeclType::Array2DPointer { .. }
+            DeclType::Pointer { .. } | DeclType::PointerOutput(_) | DeclType::Array2DPointer { .. }
         ) && has_explicit_star
         {
             return Err(Self::error_at(
@@ -11340,6 +11408,9 @@ impl Parser {
                     ));
                 }
                 DeclType::Pointer { .. } => unreachable!("pointer aliases with stars return above"),
+                DeclType::PointerOutput(_) => {
+                    unreachable!("pointer-output aliases with stars return above")
+                }
                 DeclType::Array2DPointer { .. } => {
                     unreachable!("row pointer aliases with stars return above")
                 }
@@ -11352,6 +11423,9 @@ impl Parser {
                     self.parse_declarator_name("struct variable name after ','")?
                 }
                 DeclType::Pointer { .. } => self.parse_declarator_name("pointer name after ','")?,
+                DeclType::PointerOutput(_) => {
+                    self.parse_declarator_name("pointer output name after ','")?
+                }
                 DeclType::Array2DPointer { .. } => {
                     self.parse_declarator_name("row pointer name after ','")?
                 }
@@ -11475,7 +11549,8 @@ impl Parser {
                     | DeclType::Pointer {
                         pointee: PointeeType::Scalar(_),
                         ..
-                    } => "pointer declaration",
+                    }
+                    | DeclType::PointerOutput(_) => "pointer declaration",
                     DeclType::Struct(_)
                     | DeclType::Pointer {
                         pointee: PointeeType::Struct(_),
@@ -11629,6 +11704,7 @@ impl Parser {
                 }
             }
             DeclType::Pointer { .. }
+            | DeclType::PointerOutput(_)
             | DeclType::Array(_, _)
             | DeclType::Array2D(_, _, _)
             | DeclType::Array2DPointer { .. } => {
@@ -12779,6 +12855,12 @@ impl Parser {
                         ));
                     }
                     DeclType::Pointer { pointee, .. } => StructFieldType::Pointer(pointee),
+                    DeclType::PointerOutput(_) => {
+                        return Err(Self::error_at(
+                            format!("pointer-to-pointer {keyword} fields are not supported"),
+                            self.previous(),
+                        ));
+                    }
                     DeclType::Array(PointeeType::Void, _) => {
                         return Err(CustError::new("void arrays are not supported"));
                     }
@@ -13611,6 +13693,7 @@ impl Parser {
             }
             DeclType::Void
             | DeclType::Pointer { .. }
+            | DeclType::PointerOutput(_)
             | DeclType::Array(_, _)
             | DeclType::Array2D(_, _, _)
             | DeclType::Array2DPointer { .. } => {
@@ -16419,7 +16502,9 @@ impl Parser {
                 DeclType::Void => PointeeType::Void,
                 DeclType::Scalar(ty) => PointeeType::Scalar(ty),
                 DeclType::Struct(type_name) => PointeeType::Struct(type_name),
-                DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
+                DeclType::Pointer { .. }
+                | DeclType::PointerOutput(_)
+                | DeclType::Array2DPointer { .. } => {
                     return Err(Self::error_at(
                         "pointer-to-pointer casts are not supported".to_string(),
                         self.previous(),
@@ -16510,6 +16595,12 @@ impl Parser {
                     points_to_const,
                     expr: Box::new(self.parse_unary()?),
                 });
+            }
+            DeclType::PointerOutput(_) => {
+                return Err(Self::error_at(
+                    "pointer-to-pointer casts are not supported".to_string(),
+                    &type_token,
+                ));
             }
             DeclType::Array(pointee, len) => {
                 self.reject_multidimensional_array_cast_suffix()?;
@@ -17166,7 +17257,9 @@ impl Parser {
                     Ok(SizeOfType::Struct(type_name))
                 }
             }
-            DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
+            DeclType::Pointer { .. }
+            | DeclType::PointerOutput(_)
+            | DeclType::Array2DPointer { .. } => {
                 if self.matches(&Token::Star) {
                     return Err(Self::error_at(
                         format!("pointer-to-pointer {operator} types are not supported"),
@@ -17705,7 +17798,9 @@ impl Parser {
                 DeclType::Void => PointeeType::Void,
                 DeclType::Scalar(ty) => PointeeType::Scalar(ty),
                 DeclType::Struct(type_name) => PointeeType::Struct(type_name),
-                DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
+                DeclType::Pointer { .. }
+                | DeclType::PointerOutput(_)
+                | DeclType::Array2DPointer { .. } => {
                     return Err(Self::error_at(
                         "pointer-to-pointer generic associations are not supported".to_string(),
                         self.previous(),
@@ -17745,6 +17840,10 @@ impl Parser {
                 // pointer itself. Top-level qualifiers do not affect C type compatibility.
                 points_to_const: alias_points_to_const,
             }),
+            DeclType::PointerOutput(_) => Err(Self::error_at(
+                "pointer-to-pointer generic associations are not supported".to_string(),
+                &type_token,
+            )),
             DeclType::Array(_, _)
             | DeclType::Array2D(_, _, _)
             | DeclType::Array2DPointer { .. } => Err(Self::error_at(
@@ -26108,7 +26207,9 @@ impl Interpreter {
                                     pointee: PointeeType::Void,
                                     ..
                                 } => {}
-                                DeclType::Pointer { .. } | DeclType::Array2DPointer { .. } => {
+                                DeclType::Pointer { .. }
+                                | DeclType::PointerOutput(_)
+                                | DeclType::Array2DPointer { .. } => {
                                     return Err(CustError::new(
                                         "pointer output equality requires compatible pointee types",
                                     ));
@@ -28396,6 +28497,7 @@ impl Interpreter {
                     DeclType::Void
                     | DeclType::Scalar(_)
                     | DeclType::Pointer { .. }
+                    | DeclType::PointerOutput(_)
                     | DeclType::Array(_, _)
                     | DeclType::Array2D(_, _, _)
                     | DeclType::Array2DPointer { .. },

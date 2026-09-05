@@ -2,6 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-05 — Complete tracked scalar output typedef aliases
+
+- Candidate evaluation compared the queue-leading complete-output-alias gap, bounded v0.56.0 release closure, parser-diagnostic expansion, and CLI/product work. The language gap was selected because complete aliases remained the only unsupported spelling of an already bounded tracked scalar output shape.
+- Preserve the complete shape as `TypeAlias::PointerOutput(CType)` / `DeclType::PointerOutput(CType)` rather than flattening it into an ordinary one-level pointer. This retains the scalar pointee through chained aliases and lets object/parameter declarators reuse existing interpreter-owned tracked output storage without inventing host addresses.
+- Complete aliases consume no declarator star at use sites. Parameter, first-object, and later-comma routes therefore recognize `DeclType::PointerOutput` only when no explicit star is present; an additional explicit star remains the exact third-level pointer boundary.
+- Qualification is carried by the existing const-alias scope alongside the semantic output variant. Alias pointee const, output-slot const, and chained aliases retain the established qualified-output diagnostics; owner/lifetime and static-storage enforcement remain runtime-shared.
+- `_Atomic(complete-output-alias)` must be rejected explicitly before generic type-query lowering because it denotes a pointer-to-pointer atomic type outside Cust's supported atomic pointer subset. The focused `sizeof`/`_Alignof` regression preserves the source location and prevents an internal unreachable path.
+- The warning-free C11 oracle uses portable pointer equality, alias-copy identity, direct-versus-typedef prototype compatibility, and same-type `sizeof` relationships only. Native compilers remain external test oracles; Cust's runtime remains interpreter-owned.
+- Eight new interpreter tests raise the exact executable inventory to 2,231: 2,084 interpreter + 101 fuzz-safety + 33 CLI + 6 pointer-classifier parity + 3 tracked pointer-output parity + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test. Fresh final independent review returned `APPROVED`; the local and rebuilt-Docker gates plus runtime output `10` pass. Detailed maintenance guidance is in `references/cust-pointer-typedef-output-objects-and-parameters.md`.
+
 ## 2026-09-05 — v0.55.0 release consistency
 
 - Candidate evaluation compared the queue-leading bounded v0.55.0 release, typedef aliases of the complete tracked scalar output type, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages an already reviewed pointer-typedef language slice with bounded metadata risk; the full-output-alias package is the concrete post-release task.

@@ -5874,7 +5874,7 @@ fn direct_double_typedef_aliases_preserve_safety_boundaries() {
             "double pointers are not supported",
         ),
         (
-            "typedef double *RealPtr; typedef RealPtr *RealPtrPtr; int main(void) { return 0; }",
+            "typedef double *RealPtr; typedef RealPtr *RealOutput; typedef RealOutput *RealTriple; int main(void) { return 0; }",
             "pointer-to-pointer typedef aliases are not supported",
         ),
         (
@@ -25164,7 +25164,7 @@ fn rejects_pointer_typedef_aliases_to_pointer_aliases() {
 
     assert_eq!(
         err.to_string(),
-        "pointer-to-pointer typedef aliases are not supported at line 2, column 16"
+        "pointer-to-pointer typedef aliases are not supported at line 3, column 19"
     );
 }
 
@@ -28279,6 +28279,199 @@ fn pointer_typedef_output_parameters_preserve_inner_pointer_lifetime_checks() {
 #[test]
 fn pointer_typedef_output_objects_match_fixture() {
     let program = include_str!("fixtures/compat/valid/pointer_typedef_output_objects.c");
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn pointer_output_typedef_aliases_preserve_inner_qualification_for_objects() {
+    let program = "typedef const int *ConstIntPtr;\ntypedef ConstIntPtr *ConstIntOutput;\nint main(void) { ConstIntPtr slot = 0; ConstIntOutput output = &slot; return 0; }\n";
+
+    assert!(
+        interpret(program)
+            .unwrap_err()
+            .to_string()
+            .starts_with("qualified integer pointer objects are not supported at line 3, column ")
+    );
+}
+
+#[test]
+fn complete_pointer_output_typedef_aliases_preserve_qualification_across_scalar_types() {
+    for (scalar_type, label) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        let qualified_pointee = format!(
+            "typedef const {scalar_type} *ValuePtr;\ntypedef ValuePtr *Output;\ntypedef Output ChainedOutput;\nvoid inspect(ChainedOutput output) {{}}\nint main(void) {{ return 0; }}\n"
+        );
+        assert!(
+            interpret(&qualified_pointee)
+                .unwrap_err()
+                .to_string()
+                .starts_with(&format!(
+                    "qualified {label} pointer output parameters are not supported at line 4, column "
+                )),
+            "scalar type: {scalar_type}"
+        );
+
+        let qualified_output_slot = format!(
+            "typedef {scalar_type} *ValuePtr;\ntypedef ValuePtr * const Output;\ntypedef Output ChainedOutput;\nint main(void) {{ ChainedOutput output = 0; return 0; }}\n"
+        );
+        assert!(
+            interpret(&qualified_output_slot)
+                .unwrap_err()
+                .to_string()
+                .starts_with(&format!(
+                    "qualified {label} pointer objects are not supported at line 4, column "
+                )),
+            "scalar type: {scalar_type}"
+        );
+    }
+}
+
+#[test]
+fn complete_pointer_output_typedef_aliases_preserve_lifetime_and_static_storage_checks() {
+    let escaped_local = r#"
+        typedef int *IntPtr;
+        typedef IntPtr *IntOutput;
+        void expose(IntOutput output) {
+            int local = 7;
+            *output = &local;
+        }
+        int main(void) {
+            IntPtr slot = 0;
+            expose(&slot);
+            return 0;
+        }
+    "#;
+    assert_eq!(
+        interpret(escaped_local).unwrap_err().to_string(),
+        "pointer to out-of-scope variable 'local'"
+    );
+
+    let automatic_static_initializer = r#"
+        typedef int *IntPtr;
+        typedef IntPtr *IntOutput;
+        int inspect(void) {
+            IntPtr slot = 0;
+            static IntOutput output = &slot;
+            return output != 0;
+        }
+        int main(void) { return inspect(); }
+    "#;
+    assert_eq!(
+        interpret(automatic_static_initializer)
+            .unwrap_err()
+            .to_string(),
+        "static integer pointer object initializer requires an int pointer slot with static storage duration"
+    );
+}
+
+#[test]
+fn pointer_output_typedef_aliases_reject_return_types() {
+    let program = "typedef int *IntPtr;\ntypedef IntPtr *IntOutput;\nIntOutput choose(void) { return 0; }\nint main(void) { return 0; }\n";
+
+    assert!(
+        interpret(program)
+            .unwrap_err()
+            .to_string()
+            .starts_with("pointer-to-pointer return types are not supported at line 3, column ")
+    );
+}
+
+#[test]
+fn pointer_output_typedef_aliases_reject_non_scalar_pointer_bases_without_panicking() {
+    let program = "typedef _Atomic(void *) VoidPtr;\ntypedef VoidPtr *VoidOutput;\nint main(void) { return 0; }\n";
+
+    let result = std::panic::catch_unwind(|| interpret(program));
+    assert!(result.is_ok(), "non-scalar pointer aliases must not panic");
+    assert_eq!(
+        result.unwrap().unwrap_err().to_string(),
+        "pointer-to-pointer typedef aliases are not supported at line 2, column 17"
+    );
+}
+
+#[test]
+fn complete_pointer_output_typedef_aliases_remain_rejected_in_atomic_type_queries() {
+    for (query, column) in [("sizeof", 40), ("_Alignof", 42)] {
+        let program = format!(
+            "typedef int *P;\ntypedef P *O;\nint main(void) {{ return {query}(_Atomic(O)); }}\n"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            format!(
+                "pointer-to-pointer _Atomic types are not supported at line 3, column {column}"
+            ),
+            "query: {query}"
+        );
+    }
+}
+
+#[test]
+fn pointer_output_typedef_aliases_preserve_unsupported_type_boundaries() {
+    let cases = [
+        (
+            "typedef int *P; typedef P *O; int main(void) { O values[2]; return 0; }",
+            "pointer array declarations are not supported",
+        ),
+        (
+            "typedef int *P; typedef P *O; struct H { O value; }; int main(void) { return 0; }",
+            "pointer-to-pointer struct fields are not supported",
+        ),
+        (
+            "typedef int *P; typedef P *O; int main(void) { O *value = 0; return 0; }",
+            "pointer-to-pointer declarations are not supported",
+        ),
+        (
+            "typedef int *P; typedef P *O; int main(void) { return (O)0 != 0; }",
+            "pointer-to-pointer casts are not supported",
+        ),
+    ];
+    for (program, expected) in cases {
+        assert!(
+            interpret(program)
+                .unwrap_err()
+                .to_string()
+                .starts_with(expected)
+        );
+    }
+}
+
+#[test]
+fn complete_pointer_output_typedef_aliases_support_objects_and_parameters() {
+    let program = r#"
+        typedef int *IntPtr;
+        typedef IntPtr *IntOutput;
+
+        IntPtr global_slot = 0;
+        IntOutput global_output = &global_slot;
+
+        void set_output(IntOutput output, IntPtr value) {
+            *output = value;
+        }
+
+        int main(void) {
+            int values[2] = {4, 5};
+            IntPtr local_slot = 0;
+            IntOutput local_output = &local_slot;
+            static IntPtr static_slot = 0;
+            static IntOutput static_output = &static_slot;
+
+            set_output(local_output, values + 1);
+            **local_output = 9;
+            set_output(global_output, values);
+            set_output(static_output, values + 1);
+            return local_slot == values + 1 && values[1] == 9 &&
+                           global_slot == values && static_slot == values + 1 &&
+                           sizeof(local_output) == sizeof(&local_slot) &&
+                           sizeof(*local_output) == sizeof(local_slot) &&
+                           sizeof(**local_output) == sizeof(*local_slot)
+                       ? 0
+                       : 1;
+        }
+    "#;
+
     assert_eq!(interpret(program), Ok(0));
 }
 

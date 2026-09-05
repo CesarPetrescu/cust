@@ -1,5 +1,6 @@
 typedef int *IntPtr;
-typedef IntPtr *IntPtrPtr;
+typedef IntPtr *IntOutput;
+typedef IntOutput *IntTriple;
 
 int main() {
     int value = 1;

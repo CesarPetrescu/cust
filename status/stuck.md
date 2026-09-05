@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-05 after bounded v0.55.0 publication. Fresh complete-diff review returned `APPROVED`; formatting, strict Clippy, all 2,223 local and rebuilt-Docker tests, a no-cache image rebuild, runtime output `10`, exact versions, static scan, and diff hygiene pass. Release commit `c95487a5e52696963a708e9f858a1eaa2b8c2239` reached exact `origin/main` before annotated tag creation; remote tag object `7083573fc65a7bce68b389aae66921de8b031412` peels to that exact release commit. Complete tracked-output typedef aliases are the one concrete next task.
+None. Last reviewed 2026-09-05 after complete tracked scalar output typedef aliases passed focused TDD, independent review, formatting, strict Clippy, all 2,231 local and rebuilt-Docker tests, runtime output `10`, and diff hygiene. Bounded v0.56.0 release closure is the one concrete next task.
 
 ## Resolved this run
+
+### 2026-09-05 — Complete tracked-output alias parser closure
+
+- Failure: complete aliases such as `typedef IntPtr *IntOutput; IntOutput output` stopped at the pointer-to-pointer typedef boundary even though direct `int **` and inner-alias `IntPtr *` tracked outputs were supported. Independent review also found `_Atomic(IntOutput)` needed an explicit targeted rejection and that an older safety test no longer reached the intended third pointer level.
+- Root cause: ordinary pointer-alias metadata represented only one-level pointers, so flattening a complete output alias either lost one level or triggered generic rejection; `_Atomic` and retained-boundary dispatch had no semantic variant for the complete tracked shape.
+- RED/GREEN: the complete-alias object/parameter regression first failed at typedef parsing. Dedicated tracked-output alias metadata made it GREEN across all four scalar kinds. The review-driven `_Atomic` type-query regression then failed before explicit `PointerOutput` rejection and passed afterward; the older double boundary now constructs a genuine third-level alias.
+- Verification: eight new interpreter regressions, the expanded registered compiler-oracle fixture, fresh final `APPROVED` review, formatting, strict Clippy, all 2,231 local/rebuilt-Docker tests, runtime output `10`, and diff hygiene pass.
 
 ### 2026-09-04 — Pointer-output parity false-positive resistance
 
