@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-05 during bounded v0.57.0 release preparation. Version-first CLI and Compose expectations went RED at `0.56.0` and GREEN at `0.57.0`; exact executable listing reconciles all 2,235 tests. Initial local/remote tag preflight was empty. Branch-first publication and exact remote tag verification remain in progress rather than blocked. The first safe tracked scalar-output function-return slice is the concrete post-release task.
+None. Last reviewed 2026-09-05 after bounded v0.57.0 publication. Version-first CLI and Compose expectations went RED at `0.56.0` and GREEN at `0.57.0`; exact executable listing reconciles all 2,235 tests, fresh review returned `APPROVED`, and the local/no-cache-rebuilt-Docker gate plus runtime output `10` pass. Release commit `08e86214b0e47d378c87077315f2bfd09a8577d7` reached exact `origin/main` before annotated tag object `a58f9f6ca347e77304c68af69bf972b4c7034087` was created and pushed; remote peeled verification matches that release commit. The first safe tracked scalar-output function-return slice is the single next task.
 
 ## Resolved this run
 
