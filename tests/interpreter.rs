@@ -28124,6 +28124,165 @@ int main(void) {
 }
 
 #[test]
+fn pointer_typedef_outputs_support_scalar_objects_parameters_and_storage() {
+    for (scalar_type, values, replacement) in [
+        ("char", "{1, 2}", "7"),
+        ("int", "{4, 5}", "9"),
+        ("_Bool", "{0, 0}", "7"),
+        ("double", "{1.25, 2.5}", "9.5"),
+    ] {
+        let program = format!(
+            r#"
+typedef {scalar_type} *ValuePtr;
+typedef ValuePtr ChainedValuePtr;
+ValuePtr global_slot = 0;
+ValuePtr *global_output = &global_slot;
+
+void set_output(ChainedValuePtr *output, ValuePtr value) {{
+    *output = value;
+}}
+
+int main(void) {{
+    {scalar_type} values[2] = {values};
+    ValuePtr local_slot = 0, *local_output = &local_slot;
+    static ValuePtr static_slot = 0;
+    static ValuePtr *static_output = &static_slot;
+
+    set_output(local_output, values + 1);
+    **local_output = {replacement};
+    set_output(global_output, values);
+    set_output(static_output, values + 1);
+    return local_slot == values + 1 && global_slot == values && static_slot == values + 1 &&
+                   sizeof(local_output) == sizeof(&local_slot) &&
+                   sizeof(*local_output) == sizeof(local_slot) &&
+                   sizeof(**local_output) == sizeof(*local_slot)
+               ? 0
+               : 1;
+}}
+"#
+        );
+
+        assert_eq!(interpret(&program), Ok(0), "scalar type: {scalar_type}");
+    }
+}
+
+#[test]
+fn pointer_typedef_outputs_keep_qualification_and_unsupported_shape_boundaries() {
+    for (scalar_type, label) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        for alias in [
+            format!("typedef const {scalar_type} *ValuePtr;"),
+            format!("typedef {scalar_type} * const ValuePtr;"),
+        ] {
+            let program =
+                format!("{alias}\nint main(void) {{ ValuePtr *output = 0; return 0; }}\n");
+            assert_eq!(
+                interpret(&program).unwrap_err().to_string(),
+                format!("qualified {label} pointer objects are not supported at line 2, column 18")
+            );
+        }
+
+        let program = format!(
+            "typedef {scalar_type} *ValuePtr;\nint main(void) {{ ValuePtr * const output = 0; return 0; }}\n"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            format!("qualified {label} pointer objects are not supported at line 2, column 29")
+        );
+
+        for alias in [
+            format!("typedef const {scalar_type} *ValuePtr;"),
+            format!("typedef volatile {scalar_type} *ValuePtr;"),
+            format!("typedef {scalar_type} * const ValuePtr;"),
+        ] {
+            let program = format!(
+                "{alias}\nvoid set_output(ValuePtr *output) {{}}\nint main(void) {{ return 0; }}\n"
+            );
+            assert!(interpret(&program)
+                .unwrap_err()
+                .to_string()
+                .starts_with(&format!(
+                    "qualified {label} pointer output parameters are not supported at line 2, column "
+                )));
+        }
+    }
+
+    let chained_qualified = "typedef const int *InnerPtr;\ntypedef InnerPtr ValuePtr;\nvoid set_output(ValuePtr *output) {}\nint main(void) { return 0; }\n";
+    assert!(
+        interpret(chained_qualified)
+            .unwrap_err()
+            .to_string()
+            .starts_with(
+                "qualified integer pointer output parameters are not supported at line 3, column "
+            )
+    );
+
+    let qualified_later_declarator = "typedef int *ValuePtr;\nint main(void) { ValuePtr slot = 0, * const output = 0; return 0; }\n";
+    assert!(
+        interpret(qualified_later_declarator)
+            .unwrap_err()
+            .to_string()
+            .starts_with("qualified integer pointer objects are not supported at line 2, column ")
+    );
+
+    for (program, expected) in [
+        (
+            "typedef int *ValuePtr;\nint main(void) { ValuePtr **output = 0; return 0; }\n",
+            "pointer-to-pointer declarations are not supported at line 2, column 28",
+        ),
+        (
+            "typedef int *ValuePtr;\nint main(void) { ValuePtr *outputs[2]; return 0; }\n",
+            "pointer array declarations are not supported at line 2, column 35",
+        ),
+        (
+            "typedef int *ValuePtr;\nstruct Box { ValuePtr *output; };\nint main(void) { return 0; }\n",
+            "pointer-to-pointer struct fields are not supported at line 2, column 23",
+        ),
+        (
+            "typedef int *ValuePtr;\nValuePtr *choose(void) { return 0; }\nint main(void) { return 0; }\n",
+            "pointer-to-pointer return types are not supported at line 2, column 11",
+        ),
+        (
+            "struct Item { int value; };\ntypedef struct Item *ItemPtr;\nint main(void) { ItemPtr *output = 0; return 0; }\n",
+            "pointer-to-pointer declarations are not supported at line 3, column 26",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn pointer_typedef_output_parameters_preserve_inner_pointer_lifetime_checks() {
+    let program = r#"
+        typedef int *IntPtr;
+
+        void expose(IntPtr *output) {
+            int local = 7;
+            *output = &local;
+        }
+
+        int main(void) {
+            IntPtr slot = 0;
+            expose(&slot);
+            return *slot;
+        }
+    "#;
+
+    let error = interpret(program).unwrap_err().to_string();
+    assert_eq!(error, "pointer to out-of-scope variable 'local'");
+}
+
+#[test]
+fn pointer_typedef_output_objects_match_fixture() {
+    let program = include_str!("fixtures/compat/valid/pointer_typedef_output_objects.c");
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
 fn boolean_pointer_objects_read_write_and_forward_local_slots() {
     let program = r#"
 void set_output(_Bool **output, _Bool *value) {

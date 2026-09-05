@@ -9532,12 +9532,6 @@ impl Parser {
                     &parameter_type_token,
                 ));
             }
-            if matches!(decl_type, DeclType::Pointer { .. }) && has_explicit_star {
-                return Err(Self::error_at(
-                    "pointer-to-pointer parameters are not supported".to_string(),
-                    self.previous(),
-                ));
-            }
             if matches!(
                 decl_type,
                 DeclType::Array(_, _) | DeclType::Array2D(_, _, _)
@@ -9548,18 +9542,21 @@ impl Parser {
                     self.previous(),
                 ));
             }
-            let pointer_output_pointee = if has_explicit_star
-                && matches!(
-                    decl_type,
-                    DeclType::Scalar(CType::Char | CType::Int | CType::Bool | CType::Double)
-                )
-                && self.check(&Token::Star)
+            let pointer_output_pointee = match &decl_type {
+                DeclType::Scalar(pointee) if has_explicit_star && self.check(&Token::Star) => {
+                    Some((*pointee, true))
+                }
+                DeclType::Pointer {
+                    pointee: PointeeType::Scalar(pointee),
+                    ..
+                } if has_explicit_star => Some((*pointee, false)),
+                _ => None,
+            };
+            let pointer_output_pointee = if let Some((pointee, consume_second_star)) =
+                pointer_output_pointee
             {
-                let DeclType::Scalar(pointee) = decl_type else {
-                    unreachable!("guard requires a scalar pointer output type")
-                };
                 let pointer_output_label = pointee.pointer_output_kind();
-                if parameter_alias_is_qualified {
+                if parameter_alias_is_qualified || parameter_alias_pointee_is_qualified {
                     return Err(Self::error_at(
                         format!(
                             "qualified {pointer_output_label} pointer output parameters are not supported"
@@ -9575,19 +9572,30 @@ impl Parser {
                         &qualifier,
                     ));
                 }
-                self.expect(Token::Star)?;
-                if let Some(qualifier) = self.leading_type_qualifier_token() {
-                    return Err(Self::error_at(
-                        format!(
-                            "qualified {pointer_output_label} pointer output parameters are not supported"
-                        ),
-                        &qualifier,
-                    ));
+                if consume_second_star {
+                    self.expect(Token::Star)?;
+                    if let Some(qualifier) = self.leading_type_qualifier_token() {
+                        return Err(Self::error_at(
+                            format!(
+                                "qualified {pointer_output_label} pointer output parameters are not supported"
+                            ),
+                            &qualifier,
+                        ));
+                    }
                 }
                 Some(pointee)
             } else {
                 None
             };
+            if pointer_output_pointee.is_none()
+                && matches!(decl_type, DeclType::Pointer { .. })
+                && has_explicit_star
+            {
+                return Err(Self::error_at(
+                    "pointer-to-pointer parameters are not supported".to_string(),
+                    self.previous(),
+                ));
+            }
             if has_explicit_star && self.check(&Token::Star) {
                 return Err(Self::error_at(
                     "pointer-to-pointer parameters are not supported".to_string(),
@@ -9634,7 +9642,11 @@ impl Parser {
                         self.parse_declarator_name("struct pointer parameter name after '*'")?
                     }
                     DeclType::Pointer { .. } => {
-                        unreachable!("pointer aliases with explicit stars return above")
+                        if pointer_output_pointee.is_some() {
+                            self.parse_declarator_name("pointer output parameter name after '*'")?
+                        } else {
+                            unreachable!("pointer aliases with explicit stars return above")
+                        }
                     }
                     DeclType::Array(_, _) => {
                         unreachable!("array aliases with explicit stars return above")
@@ -10534,16 +10546,17 @@ impl Parser {
             None
         };
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
-        if has_explicit_star
-            && matches!(
-                decl_type,
-                DeclType::Scalar(CType::Char | CType::Int | CType::Bool | CType::Double)
-            )
-            && self.check(&Token::Star)
-        {
-            let DeclType::Scalar(pointee) = decl_type else {
-                unreachable!("guard requires a scalar pointer output type")
-            };
+        let pointer_output_pointee = match &decl_type {
+            DeclType::Scalar(pointee) if has_explicit_star && self.check(&Token::Star) => {
+                Some((*pointee, true))
+            }
+            DeclType::Pointer {
+                pointee: PointeeType::Scalar(pointee),
+                ..
+            } if has_explicit_star => Some((*pointee, false)),
+            _ => None,
+        };
+        if let Some((pointee, consume_second_star)) = pointer_output_pointee {
             let pointer_output_label = pointee.pointer_output_kind();
             if let Some(qualifier) = declaration_base_qualifier.clone().or(post_star_qualifier) {
                 return Err(Self::error_at(
@@ -10551,12 +10564,16 @@ impl Parser {
                     &qualifier,
                 ));
             }
-            self.expect(Token::Star)?;
-            if let Some(qualifier) = self.leading_type_qualifier_token() {
-                return Err(Self::error_at(
-                    format!("qualified {pointer_output_label} pointer objects are not supported"),
-                    &qualifier,
-                ));
+            if consume_second_star {
+                self.expect(Token::Star)?;
+                if let Some(qualifier) = self.leading_type_qualifier_token() {
+                    return Err(Self::error_at(
+                        format!(
+                            "qualified {pointer_output_label} pointer objects are not supported"
+                        ),
+                        &qualifier,
+                    ));
+                }
             }
             if self.check(&Token::Star) {
                 return Err(Self::error_at(
@@ -11237,16 +11254,17 @@ impl Parser {
             None
         };
         let post_star_const = has_explicit_star && self.consume_type_qualifiers();
-        if has_explicit_star
-            && matches!(
-                base_type,
-                DeclType::Scalar(CType::Char | CType::Int | CType::Bool | CType::Double)
-            )
-            && self.check(&Token::Star)
-        {
-            let DeclType::Scalar(pointee) = base_type else {
-                unreachable!("guard requires a scalar pointer output type")
-            };
+        let pointer_output_pointee = match &base_type {
+            DeclType::Scalar(pointee) if has_explicit_star && self.check(&Token::Star) => {
+                Some((*pointee, true))
+            }
+            DeclType::Pointer {
+                pointee: PointeeType::Scalar(pointee),
+                ..
+            } if has_explicit_star => Some((*pointee, false)),
+            _ => None,
+        };
+        if let Some((pointee, consume_second_star)) = pointer_output_pointee {
             let pointer_output_label = pointee.pointer_output_kind();
             if base_qualifier.is_some() || leading_const || post_star_qualifier.is_some() {
                 return Err(Self::error_at(
@@ -11256,12 +11274,16 @@ impl Parser {
                         .unwrap_or_else(|| self.peek_located()),
                 ));
             }
-            self.expect(Token::Star)?;
-            if let Some(qualifier) = self.leading_type_qualifier_token() {
-                return Err(Self::error_at(
-                    format!("qualified {pointer_output_label} pointer objects are not supported"),
-                    &qualifier,
-                ));
+            if consume_second_star {
+                self.expect(Token::Star)?;
+                if let Some(qualifier) = self.leading_type_qualifier_token() {
+                    return Err(Self::error_at(
+                        format!(
+                            "qualified {pointer_output_label} pointer objects are not supported"
+                        ),
+                        &qualifier,
+                    ));
+                }
             }
             if self.check(&Token::Star) {
                 return Err(Self::error_at(

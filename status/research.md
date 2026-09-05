@@ -2,6 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-05 — Pointer typedef aliases as tracked scalar output inner types
+
+- Candidate evaluation compared the queue-leading pointer-typedef output gap, bounded v0.55.0 release closure, parser-diagnostic expansion, and CLI/product work. The language gap was selected because equivalent direct `T **` and alias-backed `typedef T *ValuePtr; ValuePtr *output` declarations did not share parser routing.
+- Root cause: parameter and object parsers rejected `DeclType::Pointer` followed by an explicit star before the scalar tracked-output classifier. Direct `T **` requires consuming two explicit stars, whereas alias-backed `ValuePtr *` has only one; parameter name parsing also treated the alias route as unreachable.
+- Implementation decision: derive the tracked scalar pointee from either `DeclType::Scalar` plus a second star or `DeclType::Pointer<PointeeType::Scalar>` plus one outer star, and apply the same distinction in parameter, first-object, and later-comma declarators. Runtime storage remains unchanged and interpreter-owned.
+- Qualification remains metadata-first: alias pointee qualification, alias pointer-slot qualification, and outer-star qualification all reject before tracked-object evaluation. Chained aliases preserve this metadata. Non-scalar pointer aliases, extra stars, pointer arrays, aggregate fields, and pointer returns remain outside the bounded exception.
+- The warning-free C11 oracle fixture compares portable identities and same-type sizes only, and mixes an explicit `int **` prototype with a typedef-backed definition to verify compatible signatures. Native compilers remain test oracles, not a Cust runtime path. Detailed guidance is in `references/cust-pointer-typedef-output-objects-and-parameters.md`.
+- Four focused interpreter regressions and the actual compiler-oracle test pass. Two fresh independent complete-diff reviews reported no security or logic findings. Formatting, warning-denied Clippy, all 2,223 local tests, all 2,223 Docker tests, runtime smoke output `10`, and diff hygiene pass.
+
 ## 2026-09-05 — v0.54.0 release consistency
 
 - Candidate evaluation compared the queue-leading bounded v0.54.0 release, pointer typedef aliases as inner tracked-output types, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages an already reviewed deterministic cross-type contract with bounded metadata risk; the typedef package is the concrete post-release language task.
