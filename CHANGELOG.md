@@ -6,6 +6,27 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.55.0 — 2026-09-05
+
+### Language subset
+
+- Added pointer typedef aliases as the inner type of tracked scalar output objects and parameters across `char`, `int`, `_Bool`, and `double`. Direct `T **` and `typedef T *ValuePtr; ValuePtr *output` spellings share the same interpreter-owned representation in function parameters, first object declarators, and later comma declarators.
+- Preserved local, file-global, and block-static storage; chained aliases; forwarding; indirect typed reads and writes; non-evaluating `sizeof`; owner/lifetime identity; and static-storage rules without host addresses or a native runtime path.
+
+### Diagnostics and verification
+
+- Added four focused interpreter regressions plus one registered warning-free C11 fixture. Coverage includes direct and later declarators, all four scalar pointees, explicit-versus-typedef prototype compatibility, pointer-slot versus pointee qualification, qualified outer slots, owner expiry, and targeted deeper-pointer, pointer-array, aggregate-field, non-scalar-alias, and pointer-return boundaries.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.55.0`.
+- Reconciled an executable inventory of 2,223 tests: 2,076 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 3 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Tracked scalar output support remains limited to unqualified object and parameter families. Typedef aliases of the complete two-level output type, qualified inner aliases or outer slots, non-scalar pointer aliases followed by another star, deeper pointers, pointer arrays, aggregate fields, pointer returns, address-taking of tracked two-level objects, arithmetic, relational ordering, and compound updates remain unsupported or retain targeted diagnostics.
+
 ## v0.54.0 — 2026-09-05
 
 ### Conformance coverage

@@ -2,6 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-05 — v0.55.0 release consistency
+
+- Candidate evaluation compared the queue-leading bounded v0.55.0 release, typedef aliases of the complete tracked scalar output type, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages an already reviewed pointer-typedef language slice with bounded metadata risk; the full-output-alias package is the concrete post-release task.
+- Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.54.0` and passed after Cargo/lock plus both Compose image tags moved to `0.55.0`.
+- Executable target listing yields 2,223 tests: `interpreter` 2,076 + `fuzz_safety` 101 + `cli` 33 + `pointer_classifier_parity` 6 + `pointer_output_parity` 3 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1. The non-interpreter/fuzz subtotal is 46, independently reconciling the total.
+- Central release claims distinguish direct `T **` from alias-backed `typedef T *ValuePtr; ValuePtr *output` spellings while documenting shared local/file-global/block-static storage, parameter and comma-declarator routing, chained aliases, typed indirect access, non-evaluating `sizeof`, qualification, owner/lifetime, and static-storage behavior. Typedef aliases of the complete two-level output shape, qualified/non-scalar aliases, deeper pointers, arrays, aggregate fields, returns, address-taking, arithmetic, ordering, and compound updates remain disclosed boundaries.
+- Local and remote `v0.55.0` tag preflight were empty before release work. The tag remains reserved for the reviewed and canonically verified release commit and must not be created until exact `origin/main` acceptance is proved.
+- Fresh independent complete-diff review returned `APPROVED` with no findings and confirmed version consistency, release-note coverage, inventory arithmetic, central support/limitation wording, truthful pre-publication chronology, secret absence, and one unambiguous post-release task.
+- The canonical gate passed: `cargo fmt --check`; `cargo clippy -- -D warnings`; all 2,223 local tests; `docker compose build --no-cache`; all 2,223 rebuilt-Docker tests through `docker compose run --rm test`; runtime output `10` through `docker compose run --rm cust`; and `git diff --check`. Supplemental probes report local CLI `cust 0.55.0`, Cargo metadata `0.55.0`, runtime image `cust 0.55.0`, and test-image package `0.55.0`; the added-line static scan is clear.
+
 ## 2026-09-05 — Pointer typedef aliases as tracked scalar output inner types
 
 - Candidate evaluation compared the queue-leading pointer-typedef output gap, bounded v0.55.0 release closure, parser-diagnostic expansion, and CLI/product work. The language gap was selected because equivalent direct `T **` and alias-backed `typedef T *ValuePtr; ValuePtr *output` declarations did not share parser routing.
