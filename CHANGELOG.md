@@ -6,6 +6,24 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.57.0 — 2026-09-05
+
+### Conformance coverage
+
+- Added deterministic classifier/evaluator parity for complete tracked scalar output aliases across `char`, `int`, `_Bool`, and `double`. The identity-keyed primary matrix executes 384 programs from four pointee kinds × four direct/inner-alias/complete-alias/chained-alias spellings × four local/file-global/block-static/parameter routes × six initializer/assignment/argument/equality/truthiness/non-evaluating `sizeof` consumers.
+- Added 72 supplemental programs: 16 qualification cells, 32 split non-observing/evaluated lifetime programs, and 24 retained non-scalar, deeper-pointer, array, aggregate-field, cast, and return boundary cells. Direct file-global operands, route-specific backing-slot checks, null branches, and observable `sizeof` side-effect witnesses resist false-positive coverage.
+- Confirmed shared interpreter-owned identity, one-time evaluation, typed backing-slot mutation, qualification, owner/lifetime, and null behavior across every supported spelling. This release adds conformance coverage without changing the production runtime path or exposing host addresses.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.57.0`.
+- Reconciled an executable inventory of 2,235 tests: 2,084 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 7 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Tracked scalar outputs remain limited to unqualified object and parameter families. Qualified pointees or output slots, non-scalar complete aliases, deeper pointers, pointer arrays, aggregate fields, tracked-output casts and function returns, address-taking of tracked two-level objects, arithmetic, relational ordering, and compound updates remain unsupported or retain targeted diagnostics.
+
 ## v0.56.0 — 2026-09-05
 
 ### Language subset

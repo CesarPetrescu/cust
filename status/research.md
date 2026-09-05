@@ -2,9 +2,19 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-05 — v0.57.0 release consistency
+
+- Candidate evaluation compared the queue-leading bounded v0.57.0 release, a first safe tracked scalar-output function-return slice, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages the independently reviewed complete-output-alias parity suite with bounded metadata risk; function returns are the concrete post-release implementation task, while tracked aggregate fields remain a larger overflow candidate.
+- Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.56.0` and passed after Cargo/lock plus both Compose image tags moved to `0.57.0`.
+- Executable target listing yields 2,235 tests: `interpreter` 2,084 + `fuzz_safety` 101 + `cli` 33 + `pointer_classifier_parity` 6 + `pointer_output_parity` 7 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1. The non-interpreter/fuzz subtotal is 50, independently reconciling the total.
+- Central release claims expose the 384-program kind/spelling/route/consumer matrix and 72 qualification/lifetime/boundary supplements, including direct global operands, observable non-evaluation, named backing-slot mutation, and explicit chained non-scalar prerequisite coverage. The release is conformance coverage over existing behavior and does not alter Cust's production runtime path.
+- Initial local and remote `v0.57.0` tag preflight was empty. The tag remains reserved for the independently reviewed and canonically verified release commit and must not be created until exact `origin/main` acceptance is proved.
+- The next implementation package is bounded to tracked scalar-output function returns across direct and alias spellings. It must preserve caller-owned identity, qualification, lifetime/static-storage checks, forwarding, and non-evaluating call typing while rejecting callee-local escapes and retaining adjacent unsupported shapes.
+- No external semantic source was required; release consistency follows executable tests, the completed parity reference note, and the repository's established release process.
+
 ## 2026-09-05 — Complete tracked-output alias classifier/evaluator parity
 
-- Candidate evaluation compared the sole queue-leading complete-output-alias parity matrix, parser-diagnostic expansion, CLI/product work, and immediate release metadata. Parity was selected because four equivalent supported spellings lacked one mechanical classifier/evaluator contract; bounded v0.57.0 release closure is next.
+- Candidate evaluation compared the sole queue-leading complete-output-alias parity matrix, parser-diagnostic expansion, CLI/product work, and immediate release metadata. Parity was selected because four equivalent supported spellings lacked one mechanical classifier/evaluator contract; bounded v0.57.0 release closure became next at feature completion.
 - The primary matrix is four scalar kinds × four declaration spellings × four storage/forwarding routes × six consumers = 384 exact programs. Stable enum identities index kind/spelling/route/consumer counts and every Cartesian cell so duplicate and omitted cases cannot balance totals.
 - The 72 supplemental programs comprise 16 qualification cells, 32 split lifetime programs (non-observing `sizeof` success plus evaluated dangling-use rejection), and 24 unsupported-shape cells across non-scalar, deeper-pointer, array, aggregate-field, cast, and return boundaries.
 - All focused additions passed immediately because this is deliberate coverage closure over existing behavior; no production change was invented. Native compilers were unnecessary because the existing registered fixture already covers portable direct/alias prototype, identity, and same-type `sizeof` relationships.
@@ -107,7 +117,7 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 - The tracked output representation already carries a scalar `CType`, so admitting `_Bool **` safely requires extending parser/runtime filters from `char`/`int` to `_Bool`, not adding host-address storage. Existing slot identity, owner/lifetime/const/static checks, call forwarding, equality/truthiness, and non-evaluating validation remain shared.
 - Indirect scalar writes must continue through typed `_Bool` storage so every nonzero value normalizes to `1`; the valid fixture and focused tests exercise positive and negative nonzero writes across local/global/static roots.
 - Diagnostic labels must be fully pointee-driven. Binary `if char { character } else { integer }` assumptions become wrong as soon as `_Bool` is admitted; both conditional `sizeof` and aggregate equality beneath `sizeof`/`_Generic` exposed this. Route labels through `CType::pointer_output_kind()` and the existing binary output-kind classifier.
-- Candidate evaluation considered inherited `_Bool **` completion, bounded v0.52.0 release closure, parser diagnostics, and broader property/CLI work. Recovery priority selected the inherited coherent vertical slice; bounded v0.52.0 release closure is next.
+- Candidate evaluation considered inherited `_Bool **` completion, bounded v0.52.0 release closure, parser diagnostics, and broader property/CLI work. Recovery priority selected the inherited coherent vertical slice; bounded v0.52.0 release closure became next at that point and is published in later evidence.
 - No external semantic source was required. The existing tracked `char **`/`int **` model, strict GCC/Clang compilation of the warning-free fixture, focused RED/GREEN, and independent review establish this bounded extension. See `references/cust-boolean-pointer-objects-and-output-parameters.md`.
 
 ## 2026-09-04 — v0.51.0 release consistency
@@ -148,7 +158,7 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 ## 2026-09-02 — Pointer classifier/evaluator parity decisions
 
-- Recovery candidates were finishing the inherited pointer parity package, immediate v0.50.0 release closure, parser-diagnostic expansion, and broader pointer work. Recovery priority selected the existing substantial queue-leading package; bounded v0.50.0 release closure is next.
+- Recovery candidates were finishing the inherited pointer parity package, immediate v0.50.0 release closure, parser-diagnostic expansion, and broader pointer work. Recovery priority selected the existing substantial queue-leading package; bounded v0.50.0 release closure became next at that point and is published in later evidence.
 - The exact generated surface is 69 stable pointer route identities × eight consumers = 552 programs, plus seven explicit const-preservation routes. Route/context/cell counters are identity keyed rather than iteration-position-only.
 - C pointer conversion constraints are semantic and must be checked before runtime operand evaluation. Cust therefore applies metadata-only pointee/qualification checks before evaluating incompatible initializer, argument, return, assignment-expression, aggregate-field assignment, and static-local initializer operands.
 - C block-scope compound literals have enclosing-block storage duration. Hidden scalar-array compound-literal roots now receive lexical owners for every element type, allowing same-block library use while preserving exact escaped-pointer lifetime diagnostics.

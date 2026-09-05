@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-05 after deterministic complete-output-alias classifier/evaluator parity. The 384 primary and 72 supplemental programs pass across all required kinds/spellings/routes/consumers and qualification/lifetime/unsupported-shape boundaries. Review-driven false-positive closures received fresh final `APPROVED`; formatting, strict Clippy, all 2,235 local/Docker tests, runtime output `10`, and diff hygiene pass. Bounded v0.57.0 release closure is the one concrete next task.
+None. Last reviewed 2026-09-05 during bounded v0.57.0 release preparation. Version-first CLI and Compose expectations went RED at `0.56.0` and GREEN at `0.57.0`; exact executable listing reconciles all 2,235 tests. Initial local/remote tag preflight was empty. Branch-first publication and exact remote tag verification remain in progress rather than blocked. The first safe tracked scalar-output function-return slice is the concrete post-release task.
 
 ## Resolved this run
 
