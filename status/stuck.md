@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-05 after bounded v0.55.0 release review and canonical verification. Fresh complete-diff review returned `APPROVED`; formatting, strict Clippy, all 2,223 local and rebuilt-Docker tests, a no-cache image rebuild, runtime output `10`, exact versions, static scan, and diff hygiene pass. Local and remote tag preflight were empty before release work. Branch-first publication and exact remote annotated-tag verification remain in progress, not blocked; complete tracked-output typedef aliases are the concrete post-publication task.
+None. Last reviewed 2026-09-05 after bounded v0.55.0 publication. Fresh complete-diff review returned `APPROVED`; formatting, strict Clippy, all 2,223 local and rebuilt-Docker tests, a no-cache image rebuild, runtime output `10`, exact versions, static scan, and diff hygiene pass. Release commit `c95487a5e52696963a708e9f858a1eaa2b8c2239` reached exact `origin/main` before annotated tag creation; remote tag object `7083573fc65a7bce68b389aae66921de8b031412` peels to that exact release commit. Complete tracked-output typedef aliases are the one concrete next task.
 
 ## Resolved this run
 
