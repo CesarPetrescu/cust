@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-05 after bounded v0.56.0 release review and canonical verification. Exact CLI and Compose expectations went RED at `0.55.0` and GREEN at `0.56.0`; review-driven exact image assertions and historical queue wording received fresh complete-diff `APPROVED`; formatting, strict Clippy, all 2,231 local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, static scan, and diff hygiene pass. Branch-first publication and exact remote tag verification remain in progress rather than blocked. The deterministic complete-output-alias parity matrix is the concrete post-release task.
+None. Last reviewed 2026-09-05 after bounded v0.56.0 publication. Release commit `ae70c61bc2bfd89771e96a6f9b31791ce5b8e703` reached exact `origin/main` before annotated tag creation; remote tag object `f38f70426036984e7dede128c3819f4ed732e5da` peels to that commit. Version-first RED/GREEN, fresh independent approval, formatting, strict Clippy, all 2,231 local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, static scan, and diff hygiene pass. The deterministic complete-output-alias parity matrix is the one concrete next task.
 
 ## Resolved this run
 
