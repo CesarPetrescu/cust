@@ -2,6 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-05 — Complete tracked-output alias classifier/evaluator parity
+
+- Candidate evaluation compared the sole queue-leading complete-output-alias parity matrix, parser-diagnostic expansion, CLI/product work, and immediate release metadata. Parity was selected because four equivalent supported spellings lacked one mechanical classifier/evaluator contract; bounded v0.57.0 release closure is next.
+- The primary matrix is four scalar kinds × four declaration spellings × four storage/forwarding routes × six consumers = 384 exact programs. Stable enum identities index kind/spelling/route/consumer counts and every Cartesian cell so duplicate and omitted cases cannot balance totals.
+- The 72 supplemental programs comprise 16 qualification cells, 32 split lifetime programs (non-observing `sizeof` success plus evaluated dangling-use rejection), and 24 unsupported-shape cells across non-scalar, deeper-pointer, array, aggregate-field, cast, and return boundaries.
+- All focused additions passed immediately because this is deliberate coverage closure over existing behavior; no production change was invented. Native compilers were unnecessary because the existing registered fixture already covers portable direct/alias prototype, identity, and same-type `sizeof` relationships.
+- The first two independent reviews found four false-positive risks: file-global routes copied through local objects, `sizeof` lacked an observable non-evaluation witness, mutations were read back through the copied output rather than the named backing slot, and the chained non-scalar source duplicated the complete source. Direct global operands, a `touch()` sequence witness, route-specific backing-slot checks, and an explicit chained prerequisite source closed them. Fresh final review returned `APPROVED`.
+- The complete gate passes: focused 7-test target, formatting, warning-denied Clippy, all 2,235 local tests, all 2,235 Docker tests, runtime output `10`, and diff hygiene. An initial combined foreground gate exceeded its wait window during Docker work; explicit local and background Docker reruns exited 0, so this was not a test failure.
+- Detailed maintenance guidance is in `references/cust-complete-output-alias-classifier-evaluator-parity.md`.
+
 ## 2026-09-05 — v0.56.0 release consistency
 
 - Candidate evaluation compared the sole queue-leading bounded v0.56.0 release, a generated complete-output-alias parity matrix, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages the already reviewed complete-alias language slice with bounded consistency risk; the generated parity matrix is the concrete post-release task.

@@ -496,3 +496,454 @@ fn generated_tracked_pointer_outputs_preserve_const_and_lifetime_without_evaluat
 
     assert_eq!(kind_counts, [1; 4]);
 }
+
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum PointerOutputSpelling {
+    Direct,
+    InnerAlias,
+    CompleteAlias,
+    ChainedCompleteAlias,
+}
+
+impl PointerOutputSpelling {
+    const COUNT: usize = 4;
+    const ALL: [Self; Self::COUNT] = [
+        Self::Direct,
+        Self::InnerAlias,
+        Self::CompleteAlias,
+        Self::ChainedCompleteAlias,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn type_name(self, scalar_type: &str) -> String {
+        match self {
+            Self::Direct => format!("{scalar_type} **"),
+            Self::InnerAlias => "ValuePtr *".to_owned(),
+            Self::CompleteAlias => "CompleteOutput".to_owned(),
+            Self::ChainedCompleteAlias => "ChainedOutput".to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum PointerOutputStorageRoute {
+    Local,
+    FileGlobal,
+    BlockStatic,
+    Parameter,
+}
+
+impl PointerOutputStorageRoute {
+    const COUNT: usize = 4;
+    const ALL: [Self; Self::COUNT] = [
+        Self::Local,
+        Self::FileGlobal,
+        Self::BlockStatic,
+        Self::Parameter,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum PointerOutputAliasConsumer {
+    Initializer,
+    Assignment,
+    Argument,
+    Equality,
+    Truthiness,
+    Sizeof,
+}
+
+impl PointerOutputAliasConsumer {
+    const COUNT: usize = 6;
+    const ALL: [Self; Self::COUNT] = [
+        Self::Initializer,
+        Self::Assignment,
+        Self::Argument,
+        Self::Equality,
+        Self::Truthiness,
+        Self::Sizeof,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn body(self, output_type: &str, source: &str, backing_slot: &str) -> String {
+        let evaluated = format!("(touch(), {source})");
+        match self {
+            Self::Initializer => format!(
+                "{output_type} result = {evaluated}; *result = values + 7; return {backing_slot} == values + 7 && sequence == 1 ? 0 : 1;"
+            ),
+            Self::Assignment => format!(
+                "{output_type} result = 0; result = {evaluated}; *result = values + 7; return {backing_slot} == values + 7 && sequence == 1 ? 0 : 1;"
+            ),
+            Self::Argument => format!(
+                "retarget({evaluated}, values + 7); return {backing_slot} == values + 7 && sequence == 1 ? 0 : 1;"
+            ),
+            Self::Equality => format!(
+                "return {evaluated} == {evaluated} && {evaluated} != other_output && sequence == 3 ? 0 : 1;"
+            ),
+            Self::Truthiness => format!(
+                "{output_type} nil = 0; return {evaluated} && !nil && sequence == 1 ? 0 : 1;"
+            ),
+            Self::Sizeof => format!(
+                "return sizeof({evaluated}) == sizeof(other_output) && sequence == 0 ? 0 : 1;"
+            ),
+        }
+    }
+
+    fn program(
+        self,
+        kind: PointerOutputKind,
+        spelling: PointerOutputSpelling,
+        route: PointerOutputStorageRoute,
+    ) -> String {
+        let scalar_type = kind.scalar_type();
+        let values = kind.values();
+        let output_type = spelling.type_name(scalar_type);
+        let aliases = format!(
+            "typedef {scalar_type} *ValuePtr;\n\
+             typedef ValuePtr *CompleteOutput;\n\
+             typedef CompleteOutput ChainedOutput;"
+        );
+        let common = format!(
+            "{scalar_type} values[8] = {values};\n\
+             {aliases}\n\
+             {scalar_type} *global_slot = values;\n\
+             {output_type} global_output = &global_slot;\n\
+             {scalar_type} *other_slot = values + 1;\n\
+             {output_type} other_output = &other_slot;\n\
+             int sequence;\n\
+             int touch(void) {{ sequence = sequence + 1; return 0; }}\n\
+             void retarget({output_type} output, {scalar_type} *value) {{ *output = value; }}"
+        );
+
+        match route {
+            PointerOutputStorageRoute::Local => {
+                let body = self.body(&output_type, "source", "local_slot");
+                format!(
+                    "{common}\n\
+                     int main(void) {{\n\
+                         {scalar_type} *local_slot = values + 2;\n\
+                         {output_type} source = &local_slot;\n\
+                         {body}\n\
+                     }}\n"
+                )
+            }
+            PointerOutputStorageRoute::FileGlobal => {
+                let body = self.body(&output_type, "global_output", "global_slot");
+                format!("{common}\nint main(void) {{ {body} }}\n")
+            }
+            PointerOutputStorageRoute::BlockStatic => {
+                let body = self.body(&output_type, "source", "block_slot");
+                format!(
+                    "{common}\n\
+                     int main(void) {{\n\
+                         static {scalar_type} *block_slot = values + 2;\n\
+                         static {output_type} source = &block_slot;\n\
+                         {body}\n\
+                     }}\n"
+                )
+            }
+            PointerOutputStorageRoute::Parameter => {
+                let body = self.body(&output_type, "source", "global_slot");
+                format!(
+                    "{common}\n\
+                     int exercise({output_type} source) {{ {body} }}\n\
+                     int main(void) {{ return exercise(global_output); }}\n"
+                )
+            }
+        }
+    }
+}
+
+#[test]
+fn generated_complete_output_alias_spellings_stay_in_classifier_evaluator_parity() {
+    let mut kind_counts = [0; PointerOutputKind::COUNT];
+    let mut spelling_counts = [0; PointerOutputSpelling::COUNT];
+    let mut route_counts = [0; PointerOutputStorageRoute::COUNT];
+    let mut consumer_counts = [0; PointerOutputAliasConsumer::COUNT];
+    let mut cell_counts = [0; PointerOutputKind::COUNT
+        * PointerOutputSpelling::COUNT
+        * PointerOutputStorageRoute::COUNT
+        * PointerOutputAliasConsumer::COUNT];
+
+    for kind in PointerOutputKind::ALL {
+        for spelling in PointerOutputSpelling::ALL {
+            for route in PointerOutputStorageRoute::ALL {
+                for consumer in PointerOutputAliasConsumer::ALL {
+                    kind_counts[kind.index()] += 1;
+                    spelling_counts[spelling.index()] += 1;
+                    route_counts[route.index()] += 1;
+                    consumer_counts[consumer.index()] += 1;
+                    let cell_index = (((kind.index() * PointerOutputSpelling::COUNT
+                        + spelling.index())
+                        * PointerOutputStorageRoute::COUNT
+                        + route.index())
+                        * PointerOutputAliasConsumer::COUNT)
+                        + consumer.index();
+                    cell_counts[cell_index] += 1;
+
+                    let source = consumer.program(kind, spelling, route);
+                    let result = panic::catch_unwind(|| interpret(&source)).unwrap_or_else(|payload| {
+                        panic!(
+                            "complete-output alias route panicked for {kind:?}, {spelling:?}, {route:?}, {consumer:?}: {payload:?}"
+                        )
+                    });
+                    assert_eq!(
+                        result.unwrap_or_else(|error| panic!(
+                            "complete-output alias route failed for {kind:?}, {spelling:?}, {route:?}, {consumer:?}: {error}\nsource:\n{source}"
+                        )),
+                        0,
+                        "complete-output alias route returned the wrong value for {kind:?}, {spelling:?}, {route:?}, {consumer:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    assert_eq!(kind_counts, [96; 4]);
+    assert_eq!(spelling_counts, [96; 4]);
+    assert_eq!(route_counts, [96; 4]);
+    assert_eq!(consumer_counts, [64; 6]);
+    assert!(cell_counts.into_iter().all(|count| count == 1));
+}
+
+#[test]
+fn generated_complete_output_alias_spellings_preserve_lifetime_without_observation() {
+    let mut kind_counts = [0; PointerOutputKind::COUNT];
+    let mut spelling_counts = [0; PointerOutputSpelling::COUNT];
+    let mut cell_counts = [0; PointerOutputKind::COUNT * PointerOutputSpelling::COUNT];
+
+    for kind in PointerOutputKind::ALL {
+        for spelling in PointerOutputSpelling::ALL {
+            kind_counts[kind.index()] += 1;
+            spelling_counts[spelling.index()] += 1;
+            cell_counts[kind.index() * PointerOutputSpelling::COUNT + spelling.index()] += 1;
+
+            let scalar_type = kind.scalar_type();
+            let output_type = spelling.type_name(scalar_type);
+            let aliases = format!(
+                "typedef {scalar_type} *ValuePtr;\n\
+                 typedef ValuePtr *CompleteOutput;\n\
+                 typedef CompleteOutput ChainedOutput;"
+            );
+            let non_evaluating = format!(
+                "{aliases}\n\
+                 int ping(void) {{ return 7; }}\n\
+                 int main(void) {{\n\
+                     {scalar_type} value = 0;\n\
+                     {scalar_type} *slot = &value;\n\
+                     {output_type} output = &slot;\n\
+                     {{ {scalar_type} local = 0; *output = &local; }}\n\
+                     if (sizeof(**output) != sizeof({scalar_type})) return 1;\n\
+                     return ping() == 7 ? 0 : 2;\n\
+                 }}\n"
+            );
+            assert_eq!(
+                interpret(&non_evaluating),
+                Ok(0),
+                "non-evaluating lifetime for {kind:?}, {spelling:?}"
+            );
+
+            let evaluated = format!(
+                "{aliases}\n\
+                 int main(void) {{\n\
+                     {scalar_type} value = 0;\n\
+                     {scalar_type} *slot = &value;\n\
+                     {output_type} output = &slot;\n\
+                     {{ {scalar_type} local = 0; *output = &local; }}\n\
+                     return **output != 0;\n\
+                 }}\n"
+            );
+            assert_eq!(
+                interpret(&evaluated).unwrap_err().to_string(),
+                "pointer to out-of-scope variable 'local'",
+                "evaluated lifetime for {kind:?}, {spelling:?}"
+            );
+        }
+    }
+
+    assert_eq!(kind_counts, [4; 4]);
+    assert_eq!(spelling_counts, [4; 4]);
+    assert!(cell_counts.into_iter().all(|count| count == 1));
+}
+
+#[test]
+fn generated_complete_output_alias_spellings_preserve_qualification_boundaries() {
+    let mut kind_counts = [0; PointerOutputKind::COUNT];
+    let mut spelling_counts = [0; PointerOutputSpelling::COUNT];
+    let mut cell_counts = [0; PointerOutputKind::COUNT * PointerOutputSpelling::COUNT];
+
+    for kind in PointerOutputKind::ALL {
+        for spelling in PointerOutputSpelling::ALL {
+            kind_counts[kind.index()] += 1;
+            spelling_counts[spelling.index()] += 1;
+            cell_counts[kind.index() * PointerOutputSpelling::COUNT + spelling.index()] += 1;
+
+            let scalar_type = kind.scalar_type();
+            let declaration = match spelling {
+                PointerOutputSpelling::Direct => {
+                    format!("const {scalar_type} **output = 0;")
+                }
+                PointerOutputSpelling::InnerAlias => format!(
+                    "typedef const {scalar_type} *QualifiedValuePtr; QualifiedValuePtr *output = 0;"
+                ),
+                PointerOutputSpelling::CompleteAlias => format!(
+                    "typedef const {scalar_type} *QualifiedValuePtr; typedef QualifiedValuePtr *QualifiedOutput; QualifiedOutput output = 0;"
+                ),
+                PointerOutputSpelling::ChainedCompleteAlias => format!(
+                    "typedef const {scalar_type} *QualifiedValuePtr; typedef QualifiedValuePtr *QualifiedOutput; typedef QualifiedOutput ChainedQualifiedOutput; ChainedQualifiedOutput output = 0;"
+                ),
+            };
+            let source = format!("int main(void) {{ {declaration} return 0; }}\n");
+            let error = panic::catch_unwind(|| interpret(&source))
+                .unwrap_or_else(|payload| {
+                    panic!(
+                        "qualified output spelling panicked for {kind:?}, {spelling:?}: {payload:?}"
+                    )
+                })
+                .expect_err(&format!(
+                    "qualified output spelling unexpectedly passed for {kind:?}, {spelling:?}"
+                ))
+                .to_string();
+            assert!(
+                error.starts_with(&format!(
+                    "qualified {} pointer objects are not supported at line 1, column ",
+                    kind.kind_label()
+                )),
+                "qualification diagnostic for {kind:?}, {spelling:?}: {error}"
+            );
+        }
+    }
+
+    assert_eq!(kind_counts, [4; 4]);
+    assert_eq!(spelling_counts, [4; 4]);
+    assert!(cell_counts.into_iter().all(|count| count == 1));
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum PointerOutputAliasBoundary {
+    NonScalar,
+    DeeperPointer,
+    Array,
+    AggregateField,
+    Cast,
+    Return,
+}
+
+impl PointerOutputAliasBoundary {
+    const COUNT: usize = 6;
+    const ALL: [Self; Self::COUNT] = [
+        Self::NonScalar,
+        Self::DeeperPointer,
+        Self::Array,
+        Self::AggregateField,
+        Self::Cast,
+        Self::Return,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn program(self, spelling: PointerOutputSpelling) -> (String, &'static str) {
+        if matches!(self, Self::NonScalar) {
+            return match spelling {
+                PointerOutputSpelling::Direct => (
+                    "struct Item { int value; }; int main(void) { struct Item **output = 0; return 0; }".to_owned(),
+                    "pointer-to-pointer declarations are not supported",
+                ),
+                PointerOutputSpelling::InnerAlias => (
+                    "struct Item { int value; }; typedef struct Item *ItemPtr; int main(void) { ItemPtr *output = 0; return 0; }".to_owned(),
+                    "pointer-to-pointer declarations are not supported",
+                ),
+                PointerOutputSpelling::CompleteAlias => (
+                    "struct Item { int value; }; typedef struct Item *ItemPtr; typedef ItemPtr *ItemOutput; int main(void) { return 0; }".to_owned(),
+                    "pointer-to-pointer typedef aliases are not supported",
+                ),
+                PointerOutputSpelling::ChainedCompleteAlias => (
+                    "struct Item { int value; }; typedef struct Item *ItemPtr; typedef ItemPtr *ItemOutput; typedef ItemOutput ChainedItemOutput; int main(void) { return 0; }".to_owned(),
+                    "pointer-to-pointer typedef aliases are not supported",
+                ),
+            };
+        }
+
+        let output_type = spelling.type_name("int");
+        let aliases = "typedef int *ValuePtr; typedef ValuePtr *CompleteOutput; typedef CompleteOutput ChainedOutput;";
+        match self {
+            Self::NonScalar => unreachable!(),
+            Self::DeeperPointer => (
+                format!("{aliases} int main(void) {{ {output_type} *extra = 0; return 0; }}"),
+                "pointer-to-pointer declarations are not supported",
+            ),
+            Self::Array => (
+                format!("{aliases} int main(void) {{ {output_type} outputs[2]; return 0; }}"),
+                "pointer array declarations are not supported",
+            ),
+            Self::AggregateField => (
+                format!(
+                    "{aliases} struct Box {{ {output_type} output; }}; int main(void) {{ return 0; }}"
+                ),
+                "pointer-to-pointer struct fields are not supported",
+            ),
+            Self::Cast => (
+                format!("{aliases} int main(void) {{ return ({output_type})0 != 0; }}"),
+                "pointer-to-pointer casts are not supported",
+            ),
+            Self::Return => (
+                format!(
+                    "{aliases} {output_type} choose(void) {{ return 0; }} int main(void) {{ return 0; }}"
+                ),
+                "pointer-to-pointer return types are not supported",
+            ),
+        }
+    }
+}
+
+#[test]
+fn generated_complete_output_alias_spellings_retain_unsupported_shape_boundaries() {
+    let mut spelling_counts = [0; PointerOutputSpelling::COUNT];
+    let mut boundary_counts = [0; PointerOutputAliasBoundary::COUNT];
+    let mut cell_counts = [0; PointerOutputSpelling::COUNT * PointerOutputAliasBoundary::COUNT];
+
+    for spelling in PointerOutputSpelling::ALL {
+        for boundary in PointerOutputAliasBoundary::ALL {
+            spelling_counts[spelling.index()] += 1;
+            boundary_counts[boundary.index()] += 1;
+            cell_counts[spelling.index() * PointerOutputAliasBoundary::COUNT + boundary.index()] +=
+                1;
+
+            let (source, expected) = boundary.program(spelling);
+            let error = panic::catch_unwind(|| interpret(&source))
+                .unwrap_or_else(|payload| {
+                    panic!(
+                        "output-alias boundary panicked for {spelling:?}, {boundary:?}: {payload:?}"
+                    )
+                })
+                .expect_err(&format!(
+                    "output-alias boundary unexpectedly passed for {spelling:?}, {boundary:?}"
+                ))
+                .to_string();
+            assert!(
+                error.starts_with(expected),
+                "output-alias boundary diagnostic for {spelling:?}, {boundary:?}: {error}"
+            );
+        }
+    }
+
+    assert_eq!(spelling_counts, [6; 4]);
+    assert_eq!(boundary_counts, [4; 6]);
+    assert!(cell_counts.into_iter().all(|count| count == 1));
+}
