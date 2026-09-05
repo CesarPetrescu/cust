@@ -13,6 +13,7 @@ fn compose_services_rebuild_images_before_running() {
 fn compose_images_use_the_release_version() {
     let compose = std::fs::read_to_string("docker-compose.yml").unwrap();
 
-    assert!(compose.contains("image: cust:v0.55.0"));
-    assert!(compose.contains("image: cust-test:v0.55.0"));
+    let image_lines = compose.lines().map(str::trim).collect::<Vec<_>>();
+    assert!(image_lines.contains(&"image: cust:v0.56.0"));
+    assert!(image_lines.contains(&"image: cust-test:v0.56.0"));
 }

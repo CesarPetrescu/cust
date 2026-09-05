@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-05 after complete tracked scalar output typedef aliases passed focused TDD, independent review, formatting, strict Clippy, all 2,231 local and rebuilt-Docker tests, runtime output `10`, and diff hygiene. Bounded v0.56.0 release closure is the one concrete next task.
+None. Last reviewed 2026-09-05 after bounded v0.56.0 release review and canonical verification. Exact CLI and Compose expectations went RED at `0.55.0` and GREEN at `0.56.0`; review-driven exact image assertions and historical queue wording received fresh complete-diff `APPROVED`; formatting, strict Clippy, all 2,231 local/no-cache-rebuilt-Docker tests, runtime output `10`, exact versions, static scan, and diff hygiene pass. Branch-first publication and exact remote tag verification remain in progress rather than blocked. The deterministic complete-output-alias parity matrix is the concrete post-release task.
 
 ## Resolved this run
 

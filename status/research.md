@@ -2,6 +2,17 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-05 — v0.56.0 release consistency
+
+- Candidate evaluation compared the sole queue-leading bounded v0.56.0 release, a generated complete-output-alias parity matrix, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages the already reviewed complete-alias language slice with bounded consistency risk; the generated parity matrix is the concrete post-release task.
+- Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.55.0` and passed after Cargo/lock plus both Compose image tags moved to `0.56.0`.
+- Executable target listing yields 2,231 tests: `interpreter` 2,084 + `fuzz_safety` 101 + `cli` 33 + `pointer_classifier_parity` 6 + `pointer_output_parity` 3 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1. The non-interpreter/fuzz subtotal is 46, independently reconciling the total.
+- Central release claims distinguish direct `T **`, inner-alias `typedef T *ValuePtr; ValuePtr *output`, complete-alias `typedef ValuePtr *Output; Output output`, and chained-complete-alias spellings while documenting shared local/file-global/block-static and parameter behavior, qualification/lifetime/static guarantees, and unchanged interpreter-owned storage. Non-scalar/qualified/deeper/array/aggregate/cast/return/address/arithmetic/order/compound-update boundaries remain disclosed.
+- Initial local and remote `v0.56.0` tag preflight was empty. The tag remains reserved for the reviewed and canonically verified release commit and must not be created until exact `origin/main` acceptance is proved.
+- The first two independent review rounds found non-exact `contains(...)` Compose image assertions and stale same-date v0.55.0 queue conclusions. Exact trimmed-line comparisons and explicitly historical progression wording closed both findings; fresh complete-diff re-review returned `APPROVED` with no findings.
+- The canonical gate passed: `cargo fmt --check`; `cargo clippy -- -D warnings`; all 2,231 local tests; `docker compose build --no-cache`; all 2,231 rebuilt-Docker tests through `docker compose run --rm test`; runtime output `10` through `docker compose run --rm cust`; and `git diff --check`. Supplemental probes report local CLI `cust 0.56.0`, Cargo metadata `0.56.0`, runtime image `cust 0.56.0`, and test-image package `0.56.0`; the added-line static scan is clear.
+- No external semantic source was required; release consistency follows executable tests, current feature/reference notes, and the repository's established release process.
+
 ## 2026-09-05 — Complete tracked scalar output typedef aliases
 
 - Candidate evaluation compared the queue-leading complete-output-alias gap, bounded v0.56.0 release closure, parser-diagnostic expansion, and CLI/product work. The language gap was selected because complete aliases remained the only unsupported spelling of an already bounded tracked scalar output shape.
