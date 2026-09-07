@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-07 after bounded v0.58.0 preparation passed fresh independent `APPROVED` review, formatting, warning-denied Clippy, all 2,309 local and rebuilt-Docker tests, runtime output `10`, exact Cargo/CLI/Compose version checks, repeated empty local/remote tag preflight, and diff hygiene. Version-first CLI and Compose expectations went RED at `0.57.0` and GREEN at `0.58.0`. The annotated tag remains reserved until the verified release commit reaches exact `origin/main`; no active blocker prevents publication. A first safe tracked scalar-output aggregate-field slice is the concrete post-publication task.
+None. Last reviewed 2026-09-07 after bounded v0.58.0 publication. Fresh independent `APPROVED` review, formatting, warning-denied Clippy, all 2,309 local and rebuilt-Docker tests, runtime output `10`, exact Cargo/CLI/Compose version checks, repeated empty pre-publication tag checks, and diff hygiene passed. Release commit `6d910f7498b437ee38b2d63481db8616cabb9fa1` reached exact `origin/main` before annotated tag object `d4c9cdcf0a07d1fd04df40e47d63c21bbbcae4af` was created and pushed; local and remote refs peel to that release commit. This status-only evidence update does not move or recreate the tag. A first safe tracked scalar-output aggregate-field slice is the single current task.
 
 ## Resolved this run
 
