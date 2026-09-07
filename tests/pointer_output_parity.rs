@@ -832,6 +832,46 @@ fn generated_complete_output_alias_spellings_preserve_qualification_boundaries()
     assert!(cell_counts.into_iter().all(|count| count == 1));
 }
 
+#[test]
+fn generated_complete_output_alias_spellings_support_function_returns() {
+    let mut kind_counts = [0; PointerOutputKind::COUNT];
+    let mut spelling_counts = [0; PointerOutputSpelling::COUNT];
+    let mut cell_counts = [0; PointerOutputKind::COUNT * PointerOutputSpelling::COUNT];
+
+    for kind in PointerOutputKind::ALL {
+        for spelling in PointerOutputSpelling::ALL {
+            kind_counts[kind.index()] += 1;
+            spelling_counts[spelling.index()] += 1;
+            cell_counts[kind.index() * PointerOutputSpelling::COUNT + spelling.index()] += 1;
+
+            let scalar_type = kind.scalar_type();
+            let output_type = spelling.type_name(scalar_type);
+            let source = format!(
+                "typedef {scalar_type} *ValuePtr;\n\
+                 typedef ValuePtr *CompleteOutput;\n\
+                 typedef CompleteOutput ChainedOutput;\n\
+                 int calls;\n\
+                 {output_type} identity({output_type} output) {{ calls = calls + 1; return output; }}\n\
+                 int main(void) {{\n\
+                     {scalar_type} value = 0;\n\
+                     {scalar_type} *slot = &value;\n\
+                     {output_type} output = identity(&slot);\n\
+                     return output == &slot && sizeof(identity(output)) == sizeof(output) && calls == 1 ? 0 : 1;\n\
+                 }}\n"
+            );
+            assert_eq!(
+                interpret(&source),
+                Ok(0),
+                "pointer-output return for {kind:?}, {spelling:?}"
+            );
+        }
+    }
+
+    assert_eq!(kind_counts, [4; 4]);
+    assert_eq!(spelling_counts, [4; 4]);
+    assert!(cell_counts.into_iter().all(|count| count == 1));
+}
+
 #[derive(Clone, Copy, Debug)]
 #[repr(usize)]
 enum PointerOutputAliasBoundary {
@@ -840,18 +880,16 @@ enum PointerOutputAliasBoundary {
     Array,
     AggregateField,
     Cast,
-    Return,
 }
 
 impl PointerOutputAliasBoundary {
-    const COUNT: usize = 6;
+    const COUNT: usize = 5;
     const ALL: [Self; Self::COUNT] = [
         Self::NonScalar,
         Self::DeeperPointer,
         Self::Array,
         Self::AggregateField,
         Self::Cast,
-        Self::Return,
     ];
 
     fn index(self) -> usize {
@@ -902,12 +940,6 @@ impl PointerOutputAliasBoundary {
                 format!("{aliases} int main(void) {{ return ({output_type})0 != 0; }}"),
                 "pointer-to-pointer casts are not supported",
             ),
-            Self::Return => (
-                format!(
-                    "{aliases} {output_type} choose(void) {{ return 0; }} int main(void) {{ return 0; }}"
-                ),
-                "pointer-to-pointer return types are not supported",
-            ),
         }
     }
 }
@@ -943,7 +975,7 @@ fn generated_complete_output_alias_spellings_retain_unsupported_shape_boundaries
         }
     }
 
-    assert_eq!(spelling_counts, [6; 4]);
-    assert_eq!(boundary_counts, [4; 6]);
+    assert_eq!(spelling_counts, [5; 4]);
+    assert_eq!(boundary_counts, [4; 5]);
     assert!(cell_counts.into_iter().all(|count| count == 1));
 }

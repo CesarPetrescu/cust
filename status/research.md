@@ -2,6 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-07 — Tracked scalar-output function-return decisions
+
+- Candidate evaluation compared recovery of the inherited tracked-output return implementation, parser-diagnostic expansion, CLI/product work, and aggregate-field tracked outputs. Recovery was mandatory and highest impact because it closes the sole unchecked roadmap item as one parser/runtime/type/lifetime vertical slice.
+- Represent tracked output calls explicitly as `ReturnType::PointerOutput(CType)` and `ReturnValue::PointerOutput(CharacterPointerOutput)`. This preserves the existing interpreter-owned slot identity and scalar pointee metadata through calls instead of flattening two levels into an ordinary one-level pointer or manufacturing host addresses.
+- Function-return parsing admits direct `T **`, `typedef T *Ptr; Ptr *`, complete `typedef Ptr *Output; Output`, and chained aliases only for unqualified scalar pointees. Qualified, non-scalar, third-level, array, aggregate-field, cast, arithmetic, ordering, and compound-update shapes retain targeted boundaries.
+- Callee-local output objects are rejected after scope teardown by validating returned tracked slot liveness. Caller-owned and static objects retain their original identities through multi-hop return chains and compatible calls.
+- Non-evaluating call typing must validate arguments and constraints without executing the callee. A dedicated return-call limit of 16 temporarily narrows the existing 128-level non-evaluating expression budget and restores it afterward, preventing host-stack overflow without regressing established deep ordinary `sizeof(memcmp(...))` coverage.
+- The inherited feature RED is unavailable and is not re-claimed. Recovery-focused execution passes 73 interpreter regressions, generated alias-return parity, and the registered warning-free native fixture. Fresh independent complete-diff review returned `APPROVED`; the canonical 2,309-test local/Docker gate and runtime output `10` pass.
+- No external semantic source was required; the implementation follows Cust's established tracked-output safety model and native compilers remain fixture-only oracles. Detailed maintenance guidance is in `references/cust-tracked-scalar-output-function-returns.md`.
+
 ## 2026-09-05 — v0.57.0 release consistency
 
 - Candidate evaluation compared the queue-leading bounded v0.57.0 release, a first safe tracked scalar-output function-return slice, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages the independently reviewed complete-output-alias parity suite with bounded metadata risk; function returns are the concrete post-release implementation task, while tracked aggregate fields remain a larger overflow candidate.

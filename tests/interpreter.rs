@@ -26339,12 +26339,18 @@ fn reports_missing_parameter_types_before_parameter_names() {
 }
 
 #[test]
-fn rejects_pointer_return_types_with_context() {
+fn tracked_pointer_output_returns_reject_parameter_slot_escapes() {
+    let program = "int **identity(int *x) { return &x; }\nint main(void) { int *slot = 0; return identity(slot) == 0; }\n";
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to out-of-scope variable 'x'"
+    );
+}
+
+#[test]
+fn rejects_unsupported_pointer_return_types_with_context() {
     let cases = [
-        (
-            "int **identity(int *x) { return &x; }\nint main() { return 0; }\n",
-            "pointer-to-pointer return types are not supported at line 1, column 6",
-        ),
         (
             include_str!("fixtures/invalid/void_pointer_return.c"),
             "pointer-to-pointer return types are not supported at line 1, column 7",
@@ -28229,6 +28235,9 @@ fn pointer_typedef_outputs_keep_qualification_and_unsupported_shape_boundaries()
             .starts_with("qualified integer pointer objects are not supported at line 2, column ")
     );
 
+    let supported_return = "typedef int *ValuePtr;\nValuePtr *choose(ValuePtr *output) { return output; }\nint main(void) { ValuePtr slot = 0; return choose(&slot) == &slot ? 0 : 1; }\n";
+    assert_eq!(interpret(supported_return), Ok(0));
+
     for (program, expected) in [
         (
             "typedef int *ValuePtr;\nint main(void) { ValuePtr **output = 0; return 0; }\n",
@@ -28241,10 +28250,6 @@ fn pointer_typedef_outputs_keep_qualification_and_unsupported_shape_boundaries()
         (
             "typedef int *ValuePtr;\nstruct Box { ValuePtr *output; };\nint main(void) { return 0; }\n",
             "pointer-to-pointer struct fields are not supported at line 2, column 23",
-        ),
-        (
-            "typedef int *ValuePtr;\nValuePtr *choose(void) { return 0; }\nint main(void) { return 0; }\n",
-            "pointer-to-pointer return types are not supported at line 2, column 11",
         ),
         (
             "struct Item { int value; };\ntypedef struct Item *ItemPtr;\nint main(void) { ItemPtr *output = 0; return 0; }\n",
@@ -28369,15 +28374,1614 @@ fn complete_pointer_output_typedef_aliases_preserve_lifetime_and_static_storage_
 }
 
 #[test]
-fn pointer_output_typedef_aliases_reject_return_types() {
-    let program = "typedef int *IntPtr;\ntypedef IntPtr *IntOutput;\nIntOutput choose(void) { return 0; }\nint main(void) { return 0; }\n";
+fn tracked_scalar_output_function_returns_preserve_caller_owned_identity() {
+    let program = r#"
+        int **identity(int **output) {
+            return output;
+        }
 
-    assert!(
-        interpret(program)
-            .unwrap_err()
-            .to_string()
-            .starts_with("pointer-to-pointer return types are not supported at line 3, column ")
+        int main(void) {
+            int values[2] = {4, 9};
+            int *slot = values;
+            int **output = identity(&slot);
+            *identity(output) = values + 1;
+            return output == identity(&slot) && **output == 9 ? 0 : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_preserve_static_identity_through_multi_hop_forwarding() {
+    let program = r#"
+        int calls;
+
+        int **static_output(int *value) {
+            static int *slot;
+            calls = calls + 1;
+            slot = value;
+            return &slot;
+        }
+
+        int **forward_once(int **output) {
+            return output;
+        }
+
+        int **forward_twice(int **output) {
+            return forward_once(output);
+        }
+
+        int main(void) {
+            int values[2] = {4, 9};
+            int **first = forward_twice(static_output(values));
+            int **second = static_output(values + 1);
+            return first == second && **first == 9 &&
+                           sizeof(forward_twice(static_output(values))) == sizeof(first) &&
+                           calls == 2
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_support_complete_typedef_aliases() {
+    let program = r#"
+        typedef int *IntPtr;
+        typedef IntPtr *IntOutput;
+        typedef IntOutput ChainedOutput;
+
+        IntOutput identity(IntOutput output);
+
+        ChainedOutput identity(IntOutput output) {
+            return output;
+        }
+
+        int main(void) {
+            int value = 7;
+            IntPtr slot = &value;
+            ChainedOutput output = identity(&slot);
+            return output == &slot && sizeof(identity(output)) == sizeof(output) ? 0 : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_qualified_output_types() {
+    for (scalar_type, label) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        for program in [
+            format!(
+                "volatile {scalar_type} **select(void) {{ return 0; }} int main(void) {{ return 0; }}"
+            ),
+            format!(
+                "{scalar_type} volatile **select(void) {{ return 0; }} int main(void) {{ return 0; }}"
+            ),
+            format!(
+                "typedef {scalar_type} * volatile ValuePtr; ValuePtr *select(void) {{ return 0; }} int main(void) {{ return 0; }}"
+            ),
+            format!(
+                "typedef volatile {scalar_type} *ValuePtr; ValuePtr *select(void) {{ return 0; }} int main(void) {{ return 0; }}"
+            ),
+            format!(
+                "typedef volatile {scalar_type} *ValuePtr; typedef ValuePtr *Output; Output select(void) {{ return 0; }} int main(void) {{ return 0; }}"
+            ),
+            format!(
+                "typedef {scalar_type} *ValuePtr; typedef ValuePtr *Output; volatile Output select(void) {{ return 0; }} int main(void) {{ return 0; }}"
+            ),
+        ] {
+            let Err(error) = interpret(&program) else {
+                panic!("qualified output return was accepted: {program}");
+            };
+            assert!(
+                error.to_string().starts_with(&format!(
+                    "qualified {label} pointer output return types are not supported at line "
+                )),
+                "program: {program}; error: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_ignore_nested_type_definition_qualifiers() {
+    let program = r#"
+        enum E { N = sizeof(const int) } **select(void) { return 0; }
+        int main(void) { return select() != 0; }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_match_the_compiler_oracle_fixture() {
+    let program = include_str!("fixtures/compat/valid/tracked_scalar_output_function_returns.c",);
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_callee_local_slots() {
+    let program = r#"
+        int **escape(void) {
+            int *slot = 0;
+            return &slot;
+        }
+
+        int main(void) {
+            return escape() == 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer to out-of-scope variable 'slot'"
     );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_mismatched_values_and_fallthrough() {
+    for (program, expected) in [
+        (
+            "int **select(char **output) { return output; } int main(void) { char *slot = 0; return select(&slot) == 0; }",
+            "function 'pointer output return' parameter 'value' requires an int pointer slot address",
+        ),
+        (
+            "_Bool **select(void) { } int main(void) { return select() == 0; }",
+            "function 'select' finished without return",
+        ),
+    ] {
+        assert_eq!(interpret(program).unwrap_err().to_string(), expected);
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_validate_unselected_array2d_arguments() {
+    let cases = [
+        (
+            r#"
+                int **select(int values[][2]) { return 0; }
+                int main(void) {
+                    int **output = 1 ? 0 : select(3);
+                    return output != 0;
+                }
+            "#,
+            "function 'select' parameter 'values' requires a two-dimensional array argument",
+        ),
+        (
+            r#"
+                int **select(int values[][2]) { return 0; }
+                int main(void) {
+                    int values[1][3] = {{1, 2, 3}};
+                    int **output = 1 ? 0 : select(values);
+                    return output != 0;
+                }
+            "#,
+            "function 'select' parameter 'values' expected a two-dimensional int array with 2 columns",
+        ),
+        (
+            r#"
+                int **select(int values[][2]) { return 0; }
+                int main(void) {
+                    const int values[1][2] = {{1, 2}};
+                    int **output = 1 ? 0 : select(values);
+                    return output != 0;
+                }
+            "#,
+            "cannot discard const qualifier from two-dimensional array argument 'values'",
+        ),
+        (
+            r#"
+                int **select(int values[][2]) { return 0; }
+                int main(void) {
+                    int **output = 1 ? 0 : select(unknown);
+                    return output != 0;
+                }
+            "#,
+            "undefined variable 'unknown'",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            expected,
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_validate_array2d_arguments_under_sizeof() {
+    let cases = [
+        (
+            "int **select(int values[][2]) { return 0; } int main(void) { return sizeof(select(3)); }",
+            "function 'select' parameter 'values' requires a two-dimensional array argument",
+        ),
+        (
+            "int **select(int values[][2]) { return 0; } int main(void) { int values[1][3]; return sizeof(select(values)); }",
+            "function 'select' parameter 'values' expected a two-dimensional int array with 2 columns",
+        ),
+        (
+            "int **select(int values[][2]) { return 0; } int main(void) { const int values[1][2]; return sizeof(select(values)); }",
+            "cannot discard const qualifier from two-dimensional array argument 'values'",
+        ),
+        (
+            "int **select(int values[][2]) { return 0; } int main(void) { int bad[1][3]; int good[1][2]; return sizeof(select(1 ? (void *)bad : (void *)good)); }",
+            "function 'select' parameter 'values' expected a two-dimensional int array with 2 columns",
+        ),
+        (
+            "int **select(int values[][2]) { return 0; } int main(void) { int bad[1][3]; int good[1][2]; return sizeof(select((void *)(1 ? (void *)bad : (void *)good))); }",
+            "function 'select' parameter 'values' expected a two-dimensional int array with 2 columns",
+        ),
+        (
+            "int **select(int values[][2]) { return 0; } int main(void) { int bad[1][3]; return sizeof(select((void *)(void *)bad)); }",
+            "function 'select' parameter 'values' expected a two-dimensional int array with 2 columns",
+        ),
+        (
+            "int **output(void) { return 0; } int **select(int values[][2]) { return 0; } int main(void) { return sizeof(select(1 ? output() : (void *)0)); }",
+            "function 'select' parameter 'values' requires a two-dimensional array argument",
+        ),
+        (
+            "int **select(int values[][2]) { return 0; } int main(void) { int bad[1][3]; return sizeof(select(_Generic(0, int: (void *)bad))); }",
+            "function 'select' parameter 'values' expected a two-dimensional int array with 2 columns",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            expected,
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_const_array2d_field_decay_under_sizeof() {
+    let arguments = [
+        ("const struct Box box = {{{1, 2}}};", "box.values"),
+        (
+            "const struct Box box = {{{1, 2}}}; const struct Box *pointer = &box;",
+            "pointer->values",
+        ),
+        (
+            "const struct Box boxes[1] = {{{{1, 2}}}};",
+            "boxes[0].values",
+        ),
+        (
+            "const struct Box box = {{{1, 2}}}; const struct Box *pointer = &box;",
+            "pointer[0].values",
+        ),
+    ];
+
+    for (declarations, argument) in arguments {
+        let program = format!(
+            "struct Box {{ int values[1][2]; }};\n\
+             int **select(int values[][2]) {{ return 0; }}\n\
+             int main(void) {{ {declarations} return sizeof(select({argument})); }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot discard const qualifier from two-dimensional array argument 'expression'",
+            "argument: {argument}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_const_nested_array2d_field_decay_under_sizeof() {
+    let program = r#"
+        struct Inner { int values[1][2]; };
+        struct Outer { const struct Inner inner; };
+        int **select(int values[][2]) { return 0; }
+        int main(void) {
+            struct Outer outer = {{{{1, 2}}}};
+            return sizeof(select(outer.inner.values));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from two-dimensional array argument 'expression'"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_reversed_const_array2d_field_decay_under_sizeof() {
+    let program = r#"
+        struct Box { int values[1][2]; };
+        int **select(int values[][2]) { return 0; }
+        int main(void) {
+            const struct Box boxes[1] = {{{{1, 2}}}};
+            int index = 0;
+            return sizeof(select(index[boxes].values));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from two-dimensional array argument 'expression'"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_preserve_array2d_field_row_addresses_under_sizeof() {
+    for argument in [
+        "&box.values[0]",
+        "&pointer->values[0]",
+        "&boxes[0].values[0]",
+        "&pointer[0].values[0]",
+    ] {
+        let program = format!(
+            "struct Box {{ int values[1][2]; }};\n\
+             int scalar(int values[][2]) {{ return 0; }}\n\
+             int **output(int values[][2]) {{ return 0; }}\n\
+             int main(void) {{\n\
+                 struct Box box = {{{{{{1, 2}}}}}};\n\
+                 struct Box boxes[1] = {{{{{{{{1, 2}}}}}}}};\n\
+                 struct Box *pointer = &box;\n\
+                 int **slot = 0;\n\
+                 return sizeof(scalar({argument})) == sizeof(int) &&\n\
+                            sizeof(output({argument})) == sizeof(slot)\n\
+                        ? 0\n\
+                        : 1;\n\
+             }}\n"
+        );
+
+        assert_eq!(interpret(&program), Ok(0), "argument: {argument}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_accept_null_array2d_arguments_under_sizeof() {
+    for argument in ["0", "NIL", "(void *)0"] {
+        let program = format!(
+            "enum Null {{ NIL = 0 }};\n\
+             int scalar(int values[][2]) {{ return 0; }}\n\
+             int **output(int values[][2]) {{ return 0; }}\n\
+             int main(void) {{\n\
+                 int **slot = 0;\n\
+                 return sizeof(scalar({argument})) == sizeof(int) &&\n\
+                            sizeof(output({argument})) == sizeof(slot)\n\
+                        ? 0\n\
+                        : 1;\n\
+             }}\n"
+        );
+
+        assert_eq!(interpret(&program), Ok(0), "argument: {argument}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_array2d_values_for_scalar_parameters() {
+    let program = r#"
+        int **select(int value) { return 0; }
+        int main(void) {
+            int values[1][2] = {{0, 0}};
+            int **output = 1 ? 0 : select(values);
+            return output != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer value used as scalar"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_void_scalar_arguments() {
+    let program = r#"
+        void no_value(void) {}
+        int **select(int value) { return 0; }
+        int main(void) {
+            int **output = 1 ? 0 : select(no_value());
+            return output != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "void expression used as scalar"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_void_prototype_conditions_without_panicking() {
+    let program = r#"
+        void no_value(void);
+        int **select(int value) { return 0; }
+        int main(void) {
+            int **output = 1 ? 0 : select(no_value() ? 1 : 0);
+            return output != 0;
+        }
+    "#;
+
+    let result = std::panic::catch_unwind(|| interpret(program));
+    assert!(result.is_ok(), "Cust panicked on a void prototype call");
+    assert_eq!(
+        result.unwrap().unwrap_err().to_string(),
+        "void function 'no_value' used as scalar expression"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_validate_nested_dereferenced_calls() {
+    let cases = [
+        "int **source(int **output) { return output; } int **sink(int *value) { return 0; } int main(void) { int **result = 1 ? 0 : sink(*source()); return result != 0; }",
+        "int **source(int **output) { return output; } int **sink(int *value) { return 0; } int main(void) { int **result = 1 ? 0 : sink(*(0, source())); return result != 0; }",
+        "int **source(int **output) { return output; } int **sink(int *value) { return 0; } int main(void) { int **result = 1 ? 0 : sink(*(1 ? source() : source())); return result != 0; }",
+        "int **source(int **output) { return output; } int **sink(int *value) { return 0; } int main(void) { int **result = 1 ? 0 : sink(*source() = 0); return result != 0; }",
+    ];
+
+    for program in cases {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "function 'source' expected 1 arguments, got 0",
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_preserve_row_address_arguments_under_sizeof() {
+    let program = r#"
+        typedef int (*Rows)[2];
+
+        int **select(int values[][2]) { return 0; }
+
+        int **forward(int values[][2]) {
+            int **output = 0;
+            return sizeof(select(&values[0])) == sizeof(output) ? output : 0;
+        }
+
+        int main(void) {
+            int values[1][2] = {{1, 2}};
+            Rows rows = values;
+            int **output = 0;
+            return sizeof(select(&values[0])) == sizeof(output) &&
+                           sizeof(select(&rows[0])) == sizeof(output) &&
+                           sizeof(forward(values)) == sizeof(output)
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_preserve_row_pointer_assignment_arguments_under_sizeof() {
+    let program = r#"
+        int marker;
+        int touch(void) { marker = marker + 1; return 0; }
+        int **select(int values[][2]) { return 0; }
+
+        int main(void) {
+            int values[1][2] = {{1, 2}};
+            int (*rows)[2] = values;
+            int **output = 0;
+            return sizeof(select(rows = values)) == sizeof(output) &&
+                           sizeof(select(rows = (void *)values)) == sizeof(output) &&
+                           sizeof(select(rows += touch())) == sizeof(output) &&
+                           sizeof(select(rows = 0)) == sizeof(output) &&
+                           marker == 0
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_preserve_void_cast_array2d_arguments() {
+    let program = r#"
+        int marker;
+        int touch(void) { marker = marker + 1; return 0; }
+        int **select(int values[][2]) { return 0; }
+        int main(void) {
+            int values[1][2] = {{1, 2}};
+            int **output = 0;
+            return sizeof(select((void *)values)) == sizeof(output) &&
+                           sizeof(select((touch(), (void *)values))) == sizeof(output) &&
+                           sizeof(select(marker ? (void *)values : (void *)values)) == sizeof(output) &&
+                           marker == 0
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_nested_const_void_cast_array2d_arguments_under_sizeof()
+ {
+    for argument in [
+        "(const void *)(void *)values",
+        "(const void *)(1 ? (void *)values : (void *)values)",
+        "1 ? (void *)values : (const void *)0",
+    ] {
+        let program = format!(
+            "int **select(int values[][2]) {{ return 0; }}\n\
+             int main(void) {{\n\
+                 int values[1][2];\n\
+                 return sizeof(select({argument}));\n\
+             }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot discard const qualifier from two-dimensional array argument 'expression'",
+            "argument: {argument}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_unselected_scalar_output_arguments() {
+    let program = r#"
+        int **output(void) {
+            return 0;
+        }
+
+        int **select(int value) {
+            return 0;
+        }
+
+        int main(void) {
+            int **result = 1 ? 0 : select(output());
+            return result != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer value used as scalar"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_stored_outputs_as_scalar_arguments() {
+    let program = r#"
+        int **select(int value) { return 0; }
+        int main(void) {
+            int **stored = 0;
+            int **result = 1 ? 0 : select(stored);
+            return result != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer value used as scalar"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_nested_const_array_addresses_in_unselected_calls()
+{
+    for (scalar_type, initial_value) in [("int", "1"), ("_Bool", "1"), ("double", "1.0")] {
+        for address in [
+            "&outer.inner.values[0]",
+            "&pointer->inner.values[0]",
+            "&outers[0].inner.values[0]",
+            "&array_pointer[0].inner.values[0]",
+        ] {
+            let program = r#"
+                struct Inner { SCALAR values[1]; };
+                struct Outer { const struct Inner inner; };
+
+                SCALAR **select(SCALAR *value) { return 0; }
+
+                int main(void) {
+                    struct Outer outer = {{{INITIAL}}};
+                    struct Outer outers[1] = {{{{INITIAL}}}};
+                    struct Outer *pointer = &outer;
+                    struct Outer *array_pointer = outers;
+                    SCALAR **result = 1 ? 0 : select(ADDRESS);
+                    return result != 0;
+                }
+            "#
+            .replace("SCALAR", scalar_type)
+            .replace("INITIAL", initial_value)
+            .replace("ADDRESS", address);
+
+            assert_eq!(
+                interpret(&program).unwrap_err().to_string(),
+                "cannot discard const qualifier from pointer target",
+                "scalar type: {scalar_type}, address: {address}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_allow_nested_const_pointer_fields_to_mutable_storage() {
+    for (scalar_type, initial_value) in [("int", "1"), ("_Bool", "1"), ("double", "1.0")] {
+        for address in [
+            "&outer.inner.values[0]",
+            "&pointer->inner.values[0]",
+            "&outers[0].inner.values[0]",
+            "&array_pointer[0].inner.values[0]",
+        ] {
+            let program = r#"
+                struct Inner { SCALAR *values; };
+                struct Outer { const struct Inner inner; };
+
+                SCALAR **select(SCALAR *value) { return 0; }
+
+                int main(void) {
+                    SCALAR value = INITIAL;
+                    struct Outer outer = {{&value}};
+                    struct Outer outers[1] = {{{&value}}};
+                    struct Outer *pointer = &outer;
+                    struct Outer *array_pointer = outers;
+                    SCALAR **result = 1 ? 0 : select(ADDRESS);
+                    return result != 0;
+                }
+            "#
+            .replace("SCALAR", scalar_type)
+            .replace("INITIAL", initial_value)
+            .replace("ADDRESS", address);
+
+            assert_eq!(
+                interpret(&program),
+                Ok(0),
+                "scalar type: {scalar_type}, address: {address}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_allow_const_aggregate_pointer_fields_to_mutable_storage()
+{
+    for (scalar_type, initial_value) in [
+        ("char", "1"),
+        ("int", "1"),
+        ("_Bool", "1"),
+        ("double", "1.0"),
+    ] {
+        let program = r#"
+            struct Box { SCALAR *value; };
+
+            SCALAR **select(SCALAR *value) { return 0; }
+
+            int main(void) {
+                SCALAR value = INITIAL;
+                const struct Box box = {&value};
+                SCALAR **result = 1 ? 0 : select(&box.value[0]);
+                return result != 0;
+            }
+        "#
+        .replace("SCALAR", scalar_type)
+        .replace("INITIAL", initial_value);
+
+        assert_eq!(interpret(&program), Ok(0), "scalar type: {scalar_type}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_validate_unselected_output_assignment_arguments() {
+    for (argument, expected) in [
+        ("stored = 0", "pointer value used as scalar"),
+        (
+            "stored = 1",
+            "int pointer object 'stored' assignment requires null, another compatible pointer output object, or the address of a mutable int pointer variable",
+        ),
+        (
+            "stored += 1",
+            "integer pointer output parameter reassignment is not supported",
+        ),
+    ] {
+        let program = format!(
+            "int **select(int value) {{ return 0; }}\n\
+             int main(void) {{\n\
+                 int **stored = 0;\n\
+                 int **result = 1 ? 0 : select({argument});\n\
+                 return result != 0;\n\
+             }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            expected,
+            "argument: {argument}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_allow_output_assignments_as_bool_arguments() {
+    let program = r#"
+        int **select(_Bool condition) { return 0; }
+        int main(void) {
+            int value = 7;
+            int *slot = &value;
+            int **stored = &slot;
+            int **result = select(stored = 0);
+            return result == 0 && stored == 0 ? 0 : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_are_scalar_conditions_in_nested_calls() {
+    for condition in ["identity(&slot) ? 1 : 0", "identity(&slot) && 1"] {
+        let program = format!(
+            "int **identity(int **output) {{ return output; }}\n\
+             int **select(int value) {{ return 0; }}\n\
+             int main(void) {{ int *slot = 0; return select({condition}) != 0; }}\n"
+        );
+
+        assert_eq!(interpret(&program), Ok(0), "condition: {condition}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_support_void_pointer_null_conditionals_as_arguments() {
+    for scalar_type in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "{scalar_type} **identity({scalar_type} **output) {{ return output; }}\n\
+             int main(void) {{\n\
+                 {scalar_type} *slot = 0;\n\
+                 return identity(1 ? &slot : (void *)0) == &slot ? 0 : 1;\n\
+             }}\n"
+        );
+
+        assert_eq!(interpret(&program), Ok(0), "scalar type: {scalar_type}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_support_null_conditionals_in_nested_calls() {
+    for scalar_type in ["char", "int", "_Bool", "double"] {
+        for null_pointer in ["0", "(void *)0"] {
+            let program = format!(
+                "{scalar_type} **identity({scalar_type} **output) {{ return output; }}\n\
+                 {scalar_type} **select(_Bool condition) {{ return 0; }}\n\
+                 int main(void) {{\n\
+                     {scalar_type} *slot = 0;\n\
+                     return select(1 ? identity(&slot) : {null_pointer}) != 0;\n\
+                 }}\n"
+            );
+
+            assert_eq!(
+                interpret(&program),
+                Ok(0),
+                "scalar type: {scalar_type}, null pointer: {null_pointer}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_validation_preserves_void_call_row_metadata_under_sizeof()
+{
+    let program = r#"
+        void *identity(void *pointer) { return pointer; }
+        int select(int values[][2]) { return 0; }
+
+        int main(void) {
+            int values[1][2];
+            return sizeof(select(identity(values)));
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_preserves_shadowed_scalar_assignments() {
+    for update in ["output = 1", "output += 1"] {
+        let program = format!(
+            "void *memcpy(void *destination, const void *source, unsigned long count);\n\
+             int data = 7;\n\
+             int *slot = 0;\n\
+             int **output = &slot;\n\
+             int *source(void) {{\n\
+                 int output = 0;\n\
+                 return _Generic({update}, int: &data);\n\
+             }}\n\
+             int main(void) {{\n\
+                 int destination = 0;\n\
+                 return sizeof(memcpy(&destination, source(), sizeof(int))) == sizeof(void *)\n\
+                            ? 0\n\
+                            : 1;\n\
+             }}\n"
+        );
+
+        assert_eq!(interpret(&program), Ok(0), "update: {update}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_decays_scoped_array2d_arguments() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long count);
+        int data = 7;
+        const int values[1][2] = {{8, 9}};
+
+        int first(int values[][2]) {
+            return values[0][0];
+        }
+
+        int *source(void) {
+            int values[2][2] = {{1, 2}, {3, 4}};
+            return _Generic(first(values), int: &data);
+        }
+
+        int main(void) {
+            int destination = 0;
+            return sizeof(memcpy(&destination, source(), sizeof(int))) == sizeof(void *)
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_validates_calls_with_scoped_arguments() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long count);
+        int data = 7;
+
+        int **select(int value) {
+            return 0;
+        }
+
+        int *source(void) {
+            int value = 0;
+            return _Generic(*select(value), int *: &data);
+        }
+
+        int main(void) {
+            int destination = 0;
+            return sizeof(memcpy(&destination, source(), sizeof(int))) == sizeof(void *)
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_rejects_const_scoped_array2d_arguments() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long count);
+        int data = 7;
+
+        int first(int values[][2]) {
+            return values[0][0];
+        }
+
+        int *source(void) {
+            const int values[2][2] = {{1, 2}, {3, 4}};
+            return _Generic(first(values), int: &data);
+        }
+
+        int main(void) {
+            int destination = 0;
+            return sizeof(memcpy(&destination, source(), sizeof(int)));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot discard const qualifier from two-dimensional array argument 'values'"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_preserves_shadowed_runtime_constness() {
+    for update in ["output = 1", "output += 1"] {
+        let program = format!(
+            "void *memcpy(void *destination, const void *source, unsigned long count);\n\
+             int data = 7;\n\
+             const int output = 0;\n\
+             int *source(void) {{\n\
+                 int output = 0;\n\
+                 return _Generic({update}, int: &data);\n\
+             }}\n\
+             int main(void) {{\n\
+                 int destination = 0;\n\
+                 return sizeof(memcpy(&destination, source(), sizeof(int))) == sizeof(void *)\n\
+                             ? 0\n\
+                             : 1;\n\
+             }}\n"
+        );
+
+        assert_eq!(interpret(&program), Ok(0), "update: {update}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_preserves_scoped_row_pointer_void_casts() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long count);
+        int data = 7;
+
+        int first(int values[][2]) {
+            return values == 0;
+        }
+
+        int *source(void) {
+            int (*values)[2] = 0;
+            return _Generic(first((void *)values), int: &data);
+        }
+
+        int main(void) {
+            int destination = 0;
+            return sizeof(memcpy(&destination, source(), sizeof(int))) == sizeof(void *)
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_scalar_compound_literal_arguments_in_unselected_calls()
+ {
+    let program = r#"
+        int **source(void) { return 0; }
+        int **select(int value) { return 0; }
+        int main(void) {
+            int **output = 1 ? 0 : select((int){source()});
+            return output != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "scalar assignment requires a scalar value"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_scalar_compound_literal_conversions_under_sizeof()
+{
+    let program = r#"
+        int **source(void) { return 0; }
+        int **select(int value) { return 0; }
+        int main(void) { return sizeof(select((int){source()})); }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "scalar assignment requires a scalar value"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_increment_arguments_in_unselected_calls() {
+    for argument in ["output++", "++output"] {
+        let program = format!(
+            "int **identity(int **output) {{ return output; }}\n\
+             int main(void) {{ int **output = 0; int **result = 1 ? 0 : identity({argument}); return result != 0; }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "integer pointer output parameter reassignment is not supported",
+            "argument: {argument}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_casts_preserve_scalar_constraints_under_sizeof() {
+    for cast_type in ["int", "double"] {
+        for expression in [
+            format!("({cast_type})source()"),
+            format!("sink(({cast_type})source())"),
+        ] {
+            let program = format!(
+                "int **source(void) {{ return 0; }}\n\
+                 int sink(int value) {{ return value; }}\n\
+                 int main(void) {{ return sizeof({expression}); }}\n"
+            );
+
+            assert_eq!(
+                interpret(&program).unwrap_err().to_string(),
+                "pointer output function 'source' used as scalar expression",
+                "expression: {expression}"
+            );
+        }
+    }
+
+    let boolean_cast = r#"
+        int calls;
+        int **source(void) { calls = calls + 1; return 0; }
+        int main(void) {
+            return sizeof((_Bool)source()) == sizeof(_Bool) && calls == 0 ? 0 : 1;
+        }
+    "#;
+    assert_eq!(interpret(boolean_cast), Ok(0));
+
+    for (cast_type, expected) in [
+        ("int", "pointer value used as scalar"),
+        ("double", "cannot cast pointer expression to double"),
+    ] {
+        let wrapped_pointer = format!(
+            "int **source(void) {{ return 0; }}\n\
+             int **sink({cast_type} value) {{ return 0; }}\n\
+             int main(void) {{\n\
+                 void *pointer = 0;\n\
+                 int **output = 1 ? 0 : sink(({cast_type})(1 ? source() : pointer));\n\
+                 return output != 0;\n\
+             }}\n"
+        );
+        assert_eq!(
+            interpret(&wrapped_pointer).unwrap_err().to_string(),
+            expected,
+            "cast type: {cast_type}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_deref_compound_updates_remain_rejected_under_sizeof() {
+    let program = r#"
+        int **source(void) { return 0; }
+        int main(void) { return sizeof(*source() *= 1); }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "expected pointer expression"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_return_deref_increment_updates_remain_rejected_under_sizeof() {
+    for expression in [
+        "(*source())++",
+        "(*source())--",
+        "++(*source())",
+        "--(*source())",
+    ] {
+        let program = format!(
+            "int **source(void) {{ return 0; }}\n\
+             int main(void) {{ return sizeof({expression}); }}\n"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "invalid increment/decrement target",
+            "expression: {expression}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_pointer_casts_remain_rejected_under_sizeof() {
+    for cast_type in ["int", "char", "const char"] {
+        let program = format!(
+            "int **source(void) {{ return 0; }}\n\
+             int main(void) {{ return sizeof(({cast_type} *)source()); }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "expected pointer expression",
+            "cast type: {cast_type}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_are_rejected_as_bounded_memory_integer_arguments_under_sizeof()
+ {
+    let cases = [
+        (
+            "void *memchr(const void *memory, int value, unsigned long count);",
+            "memchr(&value, source(), 1)",
+            "function 'memchr' requires an integer search value",
+        ),
+        (
+            "void *memchr(const void *memory, int value, unsigned long count);",
+            "memchr(&value, 0, source())",
+            "function 'memchr' requires an integer count",
+        ),
+        (
+            "int memcmp(const void *left, const void *right, unsigned long count);",
+            "memcmp(&value, &value, source())",
+            "function 'memcmp' requires an integer count",
+        ),
+        (
+            "void *memcpy(void *destination, const void *source, unsigned long count);",
+            "memcpy(&value, &value, source())",
+            "function 'memcpy' requires an integer count",
+        ),
+        (
+            "void *memmove(void *destination, const void *source, unsigned long count);",
+            "memmove(&value, &value, source())",
+            "function 'memmove' requires an integer count",
+        ),
+        (
+            "void *memset(void *destination, int value, unsigned long count);",
+            "memset(&value, source(), 1)",
+            "function 'memset' requires an integer fill value",
+        ),
+        (
+            "void *memset(void *destination, int value, unsigned long count);",
+            "memset(&value, 0, source())",
+            "function 'memset' requires an integer count",
+        ),
+    ];
+
+    for (prototype, call, expected) in cases {
+        let program = format!(
+            "{prototype}\n\
+             int **source(void) {{ return 0; }}\n\
+             int main(void) {{ int value = 0; return sizeof({call}); }}\n"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            expected,
+            "call: {call}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_accept_null_void_pointer_arguments() {
+    for scalar_type in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "{scalar_type} **identity({scalar_type} **output) {{ return output; }}\n\
+             int main(void) {{ {scalar_type} **output = identity((void *)0); return output != 0; }}\n"
+        );
+
+        assert_eq!(interpret(&program), Ok(0), "scalar type: {scalar_type}");
+    }
+
+    for argument in ["(0, (void *)0)", "_Generic(0, int: (void *)0)"] {
+        let program = format!(
+            "int **identity(int **output) {{ return output; }}\n\
+             int main(void) {{ int **output = identity({argument}); return output != 0; }}\n"
+        );
+        assert_eq!(interpret(&program), Ok(0), "argument: {argument}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_reject_qualified_null_branches_in_nested_calls() {
+    let programs = [
+        r#"
+            int **identity(int **output) { return output; }
+            int main(void) {
+                int *slot = 0;
+                int **output = 1 ? 0 : identity(1 ? &slot : (const void *)0);
+                return output != 0;
+            }
+        "#,
+        r#"
+            int **identity(int **output) { return output; }
+            int main(void) {
+                int *slot = 0;
+                return sizeof(identity(identity(1 ? &slot : (const void *)0)));
+            }
+        "#,
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "cannot discard const qualifier from pointer target",
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_uses_shadowed_row_pointer_constness() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long count);
+        int data;
+        const int values[1][2];
+
+        int first(int rows[][2]) { return 0; }
+
+        int *source(void) {
+            int (*values)[2] = 0;
+            return _Generic(first((void *)values), int: &data);
+        }
+
+        int main(void) {
+            int destination;
+            return sizeof(memcpy(&destination, source(), sizeof(int)));
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(8));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_initializers_preserve_callee_failures() {
+    let missing_return = r#"
+        int **source(void) {}
+        int main(void) { int **output = source(); return output != 0; }
+    "#;
+    assert_eq!(
+        interpret(missing_return).unwrap_err().to_string(),
+        "function 'source' finished without return"
+    );
+
+    let runtime_failure = r#"
+        int trap(void) { return 1 / 0; }
+        int **source(int **output) { return output; }
+        int main(void) {
+            int *slot = 0;
+            int **output = source(trap() ? &slot : &slot);
+            return output != 0;
+        }
+    "#;
+    assert_eq!(
+        interpret(runtime_failure).unwrap_err().to_string(),
+        "division by zero"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_return_initializers_preserve_nested_argument_diagnostics() {
+    let programs = [
+        r#"
+            int **source(int *value) { return 0; }
+            int main(void) {
+                char *value = 0;
+                int **output = source(value);
+                return output != 0;
+            }
+        "#,
+        r#"
+            int **source(int *value) { return 0; }
+            int main(void) {
+                char *value = 0;
+                int **output = (0, source(value));
+                return output != 0;
+            }
+        "#,
+        r#"
+            int **source(int *value) { return 0; }
+            int main(void) {
+                char *value = 0;
+                int **output = 1 ? 0 : source(value);
+                return output != 0;
+            }
+        "#,
+    ];
+
+    for program in programs {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            "cannot convert pointer to char to pointer to int",
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_initializers_preserve_nested_scalar_cast_diagnostics() {
+    let program = r#"
+        int **source(int value) { return 0; }
+        int **nested(void) { return 0; }
+        int main(void) {
+            int **output = source((int)nested());
+            return output != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "pointer output function 'nested' used as scalar expression"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_return_assignments_preserve_nested_call_diagnostics() {
+    let cases = [
+        (
+            r#"
+                int **source(int value) { return 0; }
+                int main(void) {
+                    int **output = 0;
+                    output = source();
+                    return output != 0;
+                }
+            "#,
+            "function 'source' expected 1 arguments, got 0",
+        ),
+        (
+            r#"
+                int **source(int *value) { return 0; }
+                int main(void) {
+                    char *value = 0;
+                    int **output = 0;
+                    output = source(value);
+                    return output != 0;
+                }
+            "#,
+            "cannot convert pointer to char to pointer to int",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(
+            interpret(program).unwrap_err().to_string(),
+            expected,
+            "program: {program}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_rejects_qualified_scoped_slot_addresses() {
+    for qualifier in ["volatile", "restrict", "_Atomic"] {
+        let program = format!(
+            "void *memcpy(void *destination, const void *source, unsigned long count);\n\
+             int data;\n\
+             int **identity(int **output) {{ return output; }}\n\
+             int *source(void) {{\n\
+                 int * {qualifier} slot = 0;\n\
+                 return _Generic(*identity(&slot), int *: &data);\n\
+             }}\n\
+             int main(void) {{\n\
+                 int destination;\n\
+                 return sizeof(memcpy(&destination, source(), sizeof(int)));\n\
+             }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "function 'identity' parameter 'output' requires an int pointer slot address",
+            "qualifier: {qualifier}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_validates_updated_scalar_literal_initializers() {
+    for expression in ["(int){source()} = 0", "(int){source()} += 0"] {
+        let program = format!(
+            "int **source(void) {{ return 0; }}\n\
+             int **sink(int value) {{ return 0; }}\n\
+             int main(void) {{ return sizeof(sink({expression})); }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "scalar assignment requires a scalar value",
+            "expression: {expression}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_void_pointer_conditionals_match_runtime_truthiness() {
+    let program = r#"
+        int **output(void) { return 0; }
+        int truth(_Bool value) { return value; }
+        int main(void) {
+            int value = 1;
+            void *pointer = &value;
+            return truth(1 ? output() : pointer) == 0 &&
+                           truth(0 ? output() : pointer) == 1
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_void_pointer_conditionals_match_runtime_equality() {
+    let program = r#"
+        int **output(void) { return 0; }
+        int main(void) {
+            int value = 1;
+            void *pointer = &value;
+            return (1 ? output() : pointer) == 0 &&
+                           (0 ? output() : pointer) != 0
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_void_pointer_conditionals_compare_cross_pointee_nulls() {
+    let program = r#"
+        int **integer_output(void) { return 0; }
+        char **character_output(void) { return 0; }
+        int main(void) {
+            void *pointer = 0;
+            return (1 ? integer_output() : pointer) ==
+                   (1 ? character_output() : pointer)
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_conditionals_preserve_void_pointer_qualification() {
+    let program = r#"
+        int **output(void) { return 0; }
+        int main(void) {
+            void *pointer = 0;
+            _Bool truth = 1 ? output() : (const void *)0;
+            return truth != 0 ||
+                   (1 ? output() : (const void *)0) != 0 ||
+                   sizeof((1 ? output() : (const void *)0) == 0) != sizeof(int) ||
+                   _Generic(1 ? output() : (const void *)0,
+                            const void *: 0,
+                            default: 1) ||
+                   _Generic(1 ? (1 ? output() : (const void *)0) : pointer,
+                            const void *: 0,
+                            default: 1);
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_wrapped_void_pointer_conditionals_match_runtime_truthiness()
+ {
+    for condition in [
+        "(0, 1 ? output() : pointer)",
+        "_Generic(0, int: 1 ? output() : pointer)",
+    ] {
+        let program = format!(
+            "int **output(void) {{ return 0; }}\n\
+             int truth(_Bool value) {{ return value; }}\n\
+             int main(void) {{\n\
+                 int value = 1;\n\
+                 void *pointer = &value;\n\
+                 return truth({condition});\n\
+             }}\n"
+        );
+
+        assert_eq!(interpret(&program), Ok(0), "condition: {condition}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_changes_preserve_row_pointer_conditional_truthiness() {
+    let program = r#"
+        int main(void) {
+            int values[1][2];
+            int (*rows)[2] = values;
+            return (1 ? rows : rows) ? 0 : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_rejects_wrapped_qualified_slot_addresses() {
+    for qualifier in ["volatile", "restrict", "_Atomic"] {
+        for argument in ["(0, &slot)", "1 ? &slot : 0"] {
+            let program = format!(
+                "void *memcpy(void *destination, const void *source, unsigned long count);\n\
+                 int data;\n\
+                 int **identity(int **output) {{ return output; }}\n\
+                 int *source(void) {{\n\
+                     int * {qualifier} slot = 0;\n\
+                     return _Generic(*identity({argument}), int *: &data);\n\
+                 }}\n\
+                 int main(void) {{\n\
+                     int destination;\n\
+                     return sizeof(memcpy(&destination, source(), sizeof(int)));\n\
+                 }}\n"
+            );
+
+            assert_eq!(
+                interpret(&program).unwrap_err().to_string(),
+                "function 'identity' parameter 'output' requires an int pointer slot address",
+                "qualifier: {qualifier}, argument: {argument}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_rejects_generic_selected_ineligible_slot_addresses()
+ {
+    for declaration in [
+        "int * volatile slot = 0;",
+        "int * restrict slot = 0;",
+        "int * _Atomic slot = 0;",
+        "int slot[2];",
+    ] {
+        let program = format!(
+            "void *memcpy(void *destination, const void *source, unsigned long count);\n\
+             int data;\n\
+             int **identity(int **output) {{ return output; }}\n\
+             int *source(void) {{\n\
+                 {declaration}\n\
+                 return _Generic(*identity(_Generic(0, int: &slot)), int *: &data);\n\
+             }}\n\
+             int main(void) {{\n\
+                 int destination;\n\
+                 return sizeof(memcpy(&destination, source(), sizeof(int)));\n\
+             }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "function 'identity' parameter 'output' requires an int pointer slot address",
+            "declaration: {declaration}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_rejects_array_addresses_as_output_slots() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long count);
+        int data;
+        int **identity(int **output) { return output; }
+        int *source(void) {
+            int values[2];
+            return _Generic(*identity(&values), int *: &data);
+        }
+        int main(void) {
+            int destination;
+            return sizeof(memcpy(&destination, source(), sizeof(int)));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'identity' parameter 'output' requires an int pointer slot address"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_preserves_scoped_output_object_types() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long count);
+        int data;
+        int **identity(int **output) { return output; }
+        int *source(void) {
+            int **output = 0;
+            return _Generic(*identity(output), int *: &data);
+        }
+        int main(void) {
+            int destination;
+            return sizeof(memcpy(&destination, source(), sizeof(int))) == sizeof(void *)
+                       ? 0
+                       : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
 }
 
 #[test]
@@ -28592,6 +30196,9 @@ fn double_pointer_outputs_reject_arithmetic_ordering_and_compound_updates_withou
 
 #[test]
 fn double_pointer_output_objects_preserve_qualified_static_and_address_boundaries() {
+    let supported_return = "double **select(double **output) { return output; } int main(void) { double *slot = 0; return select(&slot) == &slot ? 0 : 1; }\n";
+    assert_eq!(interpret(supported_return), Ok(0));
+
     for (program, expected) in [
         (
             "int main(void) { const double **output = 0; return 0; }\n",
@@ -28616,10 +30223,6 @@ fn double_pointer_output_objects_preserve_qualified_static_and_address_boundarie
         (
             "struct Box { double **output; }; int main(void) { return 0; }\n",
             "pointer-to-pointer struct fields are not supported at line 1, column 22",
-        ),
-        (
-            "double **select(void) { return 0; } int main(void) { return 0; }\n",
-            "pointer-to-pointer return types are not supported at line 1, column 9",
         ),
     ] {
         assert_eq!(interpret(program).unwrap_err().to_string(), expected);
@@ -41618,6 +43221,142 @@ int main(void) {{
             interpret(&program).unwrap_err().to_string(),
             "pointer to double objects cannot be used with bounded byte-memory intrinsics",
             "{assignment}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn tracked_scalar_output_function_return_validation_has_a_deterministic_expression_depth_limit() {
+    const CHILD_ENV: &str = "CUST_POINTER_OUTPUT_RETURN_DEPTH_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let sum = std::iter::repeat_n("1", 48).collect::<Vec<_>>().join(" + ");
+        let program = format!(
+            "int **identity(int value) {{ return 0; }}\n\
+             int main(void) {{ int **output = 1 ? 0 : identity({sum}); return output != 0; }}\n"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "non-evaluating callee-expression nesting limit of 16 exceeded"
+        );
+        return;
+    }
+
+    let output = std::process::Command::new(
+        std::env::current_exe().expect("current integration-test executable should exist"),
+    )
+    .args([
+        "--exact",
+        "tracked_scalar_output_function_return_validation_has_a_deterministic_expression_depth_limit",
+        "--nocapture",
+    ])
+    .env(CHILD_ENV, "1")
+    .env_remove("RUST_MIN_STACK")
+    .output()
+    .expect("child integration test should run");
+
+    assert!(
+        output.status.success(),
+        "deep pointer-output return validation must not abort the host: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_validate_const_assignments_in_unselected_calls() {
+    let program = r#"
+        int **select(int value) { return 0; }
+        int main(void) {
+            const int value = 0;
+            int **output = 1 ? 0 : select(value = 1);
+            return output != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "cannot assign to const variable 'value'"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_returns_validate_pointer_slot_updates_in_unselected_calls() {
+    let program = r#"
+        int **source(void) { return 0; }
+        int sink(int *value) { return value != 0; }
+        int **select(int value) { return 0; }
+        int main(void) {
+            int **output = 1 ? 0 : select(sink((*source())++));
+            return output != 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "invalid increment/decrement target"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_function_return_conditionals_accept_null_void_pointer_branches() {
+    let program = r#"
+        int **identity(int **output) { return output; }
+        int main(void) {
+            int value = 4;
+            int *slot = &value;
+            return **(1 ? identity(&slot) : (void *)0) == 4 ? 0 : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_accepts_scoped_output_null_assignments() {
+    let program = r#"
+        void *memcpy(void *destination, const void *source, unsigned long count);
+        int data;
+        int **identity(int **output) { return output; }
+        int *source(void) {
+            int **output = 0;
+            return _Generic(*identity(output = 0), int *: &data);
+        }
+        int main(void) {
+            int destination;
+            return sizeof(memcpy(&destination, source(), sizeof(int))) == sizeof(void *) ? 0 : 1;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_function_return_analysis_rejects_ineligible_slot_assignments() {
+    for declaration in [
+        "int * volatile slot = 0;",
+        "int * restrict slot = 0;",
+        "int * _Atomic slot = 0;",
+        "int slot[2];",
+    ] {
+        let program = format!(
+            "void *memcpy(void *destination, const void *source, unsigned long count);\n\
+             int data;\n\
+             int **identity(int **output) {{ return output; }}\n\
+             int *source(void) {{\n\
+                 {declaration}\n\
+                 int **output = 0;\n\
+                 return _Generic(*identity(output = &slot), int *: &data);\n\
+             }}\n\
+             int main(void) {{\n\
+                 int destination;\n\
+                 return sizeof(memcpy(&destination, source(), sizeof(int)));\n\
+             }}\n"
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "function 'identity' parameter 'output' requires an int pointer slot address",
+            "declaration: {declaration}"
         );
     }
 }
