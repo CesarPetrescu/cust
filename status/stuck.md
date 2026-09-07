@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-07 after tracked scalar-output function returns completed across all four scalar pointees and direct/alias spellings. Seventy-three focused interpreter regressions, generated alias parity, the compiler oracle, fresh independent `APPROVED` review, formatting, strict Clippy, all 2,309 local/Docker tests, runtime output `10`, and diff hygiene pass. The inherited diff's original RED is unavailable and is not re-claimed. Bounded v0.58.0 release closure is the single next task.
+None. Last reviewed 2026-09-07 after bounded v0.58.0 preparation passed fresh independent `APPROVED` review, formatting, warning-denied Clippy, all 2,309 local and rebuilt-Docker tests, runtime output `10`, exact Cargo/CLI/Compose version checks, repeated empty local/remote tag preflight, and diff hygiene. Version-first CLI and Compose expectations went RED at `0.57.0` and GREEN at `0.58.0`. The annotated tag remains reserved until the verified release commit reaches exact `origin/main`; no active blocker prevents publication. A first safe tracked scalar-output aggregate-field slice is the concrete post-publication task.
 
 ## Resolved this run
 

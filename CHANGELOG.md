@@ -6,6 +6,27 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.58.0 — 2026-09-07
+
+### Language subset
+
+- Added safe tracked scalar-output function return declarations and call results across unqualified `char **`, `int **`, `_Bool **`, and `double **`. Direct `T **`, inner-pointer-alias, complete-output-alias, and chained-alias return spellings preserve caller-owned output-slot identity through return chains, compatible assignment and arguments, typed indirect reads and writes, equality, and truthiness.
+- Preserved scalar pointee type, qualification, lexical owner/lifetime, static-storage validation, and non-evaluating `sizeof(call)` without executing the callee or exposing host addresses. Callee-local output objects and tracked pointees that escape their owner are rejected after scope teardown.
+
+### Diagnostics and verification
+
+- Added 73 focused interpreter regressions, one generated alias-return parity test, and one registered warning-free C11 compiler-oracle fixture. Coverage retains targeted qualified/non-scalar/deeper-pointer, array, aggregate-field, cast, arithmetic, relational-ordering, and compound-update boundaries plus a dedicated depth limit for recursive tracked-output return-call validation.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.58.0`.
+- Reconciled an executable inventory of 2,309 tests: 2,157 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 8 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Tracked scalar outputs remain limited to unqualified scalar-pointee objects, parameters, and function returns. Qualified or non-scalar aliases, deeper pointers, pointer arrays, aggregate fields, casts to or from tracked two-level output types, address-taking of tracked two-level objects, arithmetic, relational ordering, and compound updates remain unsupported or retain targeted diagnostics; scalar truth conversion such as `(_Bool)output_call()` remains supported. Recursive non-evaluating tracked-output return-call validation has a dedicated deterministic 16-level callee-expression limit.
+
 ## v0.57.0 — 2026-09-05
 
 ### Conformance coverage
