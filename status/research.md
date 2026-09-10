@@ -2,9 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: only the newest v0.59.0 release-preparation note and the final unchecked status items define current order. Every older “next” statement is historical as of its dated research entry.
+Queue authority: bounded v0.59.0 is published; the final unchecked status item, fixed one-dimensional tracked scalar-output arrays, defines current order. Every older “next” statement is historical as of its dated research entry.
 
-## 2026-09-10 — v0.59.0 release consistency
+## 2026-09-10 — v0.59.0 publication recovery
+
+- The `origin/main` reflog records `update by push` to release commit `19e451c2a38644e78bca096bd6c3a158ff3e0d1f` at 2026-09-10T15:18:28+03:00. The annotated tag's tagger timestamp is 2026-09-10T15:18:31+03:00, establishing branch acceptance before tag creation from retained local Git evidence.
+- The local `v0.59.0` ref is an annotated `tag` object. Fresh remote verification reports unpeeled tag object `dc40e8523f06a9fb578f965e89ac29b617388d4c`, peeled target `19e451c2a38644e78bca096bd6c3a158ff3e0d1f`, and remote `main` at the same release commit.
+- This later status evidence does not move or recreate `v0.59.0`. Fixed one-dimensional tracked scalar-output arrays are the single current implementation package.
+
+## 2026-09-10 — v0.59.0 release consistency (historical preparation record)
 
 - Candidate evaluation compared the queue-leading bounded v0.59.0 release, fixed one-dimensional tracked-output arrays, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages the independently reviewed 135-test aggregate-field feature with bounded consistency risk; fixed tracked-output arrays are the concrete post-publication task.
 - Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.58.0` and passed after Cargo/lock plus both Compose image tags moved to `0.59.0`.
@@ -19,7 +25,7 @@ Queue authority: only the newest v0.59.0 release-preparation note and the final 
 - Aggregate metadata must retain the real direct/reverse subscript base, addressed/composed aggregate route, recursive const ancestry, output-slot qualification, and ordinary-pointer pointee qualification. Returning `None` from a metadata helper is not safe when it silently disables a constraint.
 - Brace-elision validation applies destination-aware scalar or pointer conversion after selecting the nested subobject. It rejects nonzero integers and const discard for ordinary pointer destinations while accepting null pointer constants including `(void *)0`.
 - Work counters cover folded association/field traversal, including repeated composed, reverse-subscript, and output-comparison routes, so untrusted source receives deterministic diagnostics rather than host resource exhaustion.
-- Strict GCC and Clang were used only as external rejection/acceptance oracles. All 135 focused tests, the generated parity suite, compiler oracle, and canonical local/rebuilt-Docker gates pass; bounded v0.59.0 release closure is next.
+- Strict GCC and Clang were used only as external rejection/acceptance oracles. All 135 focused tests, the generated parity suite, compiler oracle, and canonical local/rebuilt-Docker gates pass; bounded v0.59.0 release closure became next at feature completion and is published above.
 
 ## 2026-09-10 — Aggregate metadata architecture reconciliation
 

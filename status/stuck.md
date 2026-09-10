@@ -8,6 +8,12 @@ None.
 
 ## Resolved this run
 
+### 2026-09-10 — v0.59.0 publication evidence recovery
+
+- Recovery state: the release commit and annotated tag had already reached the remote, while authoritative status queues still described publication as pending.
+- Ordering evidence: the `origin/main` reflog records the release commit push at 2026-09-10T15:18:28+03:00, before the tagger timestamp 2026-09-10T15:18:31+03:00.
+- Closure: fresh remote checks report `origin/main` and peeled `v0.59.0` at release commit `19e451c2a38644e78bca096bd6c3a158ff3e0d1f`, with annotated tag object `dc40e8523f06a9fb578f965e89ac29b617388d4c`. The evidence update does not move or recreate the tag; no blocker remains.
+
 ### 2026-09-10 — v0.59.0 release gate timing retry
 
 - Failure: the first local `cargo test` gate failed only `right_associated_double_call_arithmetic_evaluation_is_bounded` at a 5.90× measured ratio, before Docker execution.
