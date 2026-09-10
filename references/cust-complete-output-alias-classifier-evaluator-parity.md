@@ -19,9 +19,9 @@ Supplement the primary matrix with:
 
 - 16 qualification cells (all kinds × spellings);
 - 32 lifetime programs (all kinds × spellings, split into non-observing `sizeof` success and evaluated dangling-use failure);
-- 24 unsupported-shape cells (all spellings × non-scalar, deeper-pointer, array, aggregate-field, cast, and return boundaries).
+- 20 unsupported-shape cells (all spellings × non-scalar, deeper-pointer, pointer-array, aggregate-field-array, and cast boundaries).
 
-These 72 supplemental programs preserve exact safety boundaries around the 384 valid programs. A non-scalar complete output alias is rejected while its prerequisite `typedef ItemPtr *ItemOutput` is parsed, so the chained non-scalar case includes the intended later chained typedef but expects the same prerequisite diagnostic; it cannot construct the chain after the unsupported complete alias fails.
+These 68 supplemental programs preserve exact safety boundaries around the 384 primary valid programs. A separate 16-cell all-pointee/all-spelling matrix now proves supported tracked scalar-output function returns. A non-scalar complete output alias is rejected while its prerequisite `typedef ItemPtr *ItemOutput` is parsed, so the chained non-scalar case includes the intended later chained typedef but expects the same prerequisite diagnostic; it cannot construct the chain after the unsupported complete alias fails.
 
 ## Interpretation rules
 

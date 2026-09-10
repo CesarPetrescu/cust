@@ -8,6 +8,13 @@ None.
 
 ## Resolved this run
 
+### 2026-09-10 — v0.59.0 release gate timing retry
+
+- Failure: the first local `cargo test` gate failed only `right_associated_double_call_arithmetic_evaluation_is_bounded` at a 5.90× measured ratio, before Docker execution.
+- Investigation: release changes contain no interpreter production code. The exact test then passed five consecutive focused runs with stable total duration, while the next unchanged complete canonical run passed all 2,449 local tests and all 2,449 tests in the no-cache-rebuilt Docker image.
+- Classification: the one-off ratio excursion is consistent with transient scheduler contention during a parallel timing sample, but its external cause was not proven. Five focused reruns and both complete canonical reruns reproduced neither the excursion nor any deterministic semantic or scaling regression.
+- Closure: no test threshold or production code changed. Successive documentation/reference corrections received fresh independent `APPROVED` review over the complete 17-file release diff. The final canonical rerun passed formatting, strict Clippy, all 2,449 local tests, a no-cache image rebuild, all 2,449 rebuilt-Docker tests, runtime output `10`, local CLI `cust 0.59.0`, image tag `cust:v0.59.0`, and diff hygiene. No active blocker remains.
+
 ### 2026-09-10 — TODO 417 tracked scalar-output aggregate fields
 
 - Failure: runtime and parser-folded metadata disagreed across addressed/composed/reverse aggregate bases, field operations, brace-elided pointer subobjects, qualification, output-only operators, and nested initialization; several unselected `_Generic` routes could hide constraints.

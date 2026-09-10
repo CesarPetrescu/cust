@@ -24,7 +24,7 @@ Do not infer mutability from the flattened scalar pointee alone. Reject output f
 - a direct explicit inner/outer star is qualified; or
 - a complete output alias carries top-level qualification (`typedef ValuePtr * const Output`).
 
-Keep non-scalar pointer aliases outside this exception. Aggregate/void pointer aliases followed by `*`, extra stars, pointer arrays, aggregate fields, casts, `_Atomic` wrappers, and pointer-return forms retain their existing exact unsupported diagnostics. An explicit star after `DeclType::PointerOutput` is a genuine third pointer level. Chained pointer and output aliases must preserve both the scalar pointee and qualification metadata.
+At completion of this slice, non-scalar pointer aliases remained outside the exception, and aggregate/void pointer aliases followed by `*`, extra stars, pointer arrays, aggregate fields, casts, `_Atomic` wrappers, and pointer-return forms retained their existing exact unsupported diagnostics. Later bounded slices added tracked scalar-output function returns and restricted unqualified scalar-output aggregate fields. The current adjacent boundaries still reject non-scalar output aliases, extra/deeper stars, pointer arrays (including aggregate-field arrays), casts, qualified output forms, and unsupported `_Atomic` wrappers. An explicit star after `DeclType::PointerOutput` is a genuine third pointer level. Chained pointer and output aliases must preserve both the scalar pointee and qualification metadata.
 
 ## Verification shape
 

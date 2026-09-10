@@ -2,7 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: only the newest v0.58.0 release note and the final unchecked status items define current order. Every older “next” statement is historical as of its dated research entry.
+Queue authority: only the newest v0.59.0 release-preparation note and the final unchecked status items define current order. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-10 — v0.59.0 release consistency
+
+- Candidate evaluation compared the queue-leading bounded v0.59.0 release, fixed one-dimensional tracked-output arrays, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages the independently reviewed 135-test aggregate-field feature with bounded consistency risk; fixed tracked-output arrays are the concrete post-publication task.
+- Version-first release TDD changed only exact CLI and Compose expectations. Both focused tests failed against package/images `0.58.0` and passed after Cargo/lock plus both Compose image tags moved to `0.59.0`.
+- Executable target listing yields 2,449 tests: `interpreter` 2,297 + `fuzz_safety` 101 + `cli` 33 + `pointer_classifier_parity` 6 + `pointer_output_parity` 8 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1. The non-interpreter/fuzz subtotal is 51, independently reconciling the total.
+- Central release claims expose direct/indexed/nested/arrow/embedded/reverse tracked-output fields, containing-object owner/lifetime and recursive const, same-pointee direct unions, forwarding/return/copy/static behavior, runtime/non-evaluating parity, and qualification/array/deeper-pointer/union/cast/address/arithmetic/ordering/update boundaries.
+- Initial local and remote `v0.59.0` tag preflight is empty. Successive review rounds found stale aggregate-field limitations, an overbroad cast boundary, omission of the retained 16-level return-call limit, stale deep-ledger support/queue statements, an obsolete 32-call runtime claim, and historical reference boundary/count wording that no longer matched later function-return and aggregate-field slices. Corrections received fresh `APPROVED` over the complete 17-file diff. The final canonical rerun passed formatting, strict Clippy, all 2,449 local tests, a no-cache image rebuild, all 2,449 rebuilt-Docker tests, runtime output `10`, local CLI `cust 0.59.0`, image tag `cust:v0.59.0`, and diff hygiene. An initial local timing-only regression passed five focused reruns and both complete canonical reruns without threshold or production changes. This establishes non-reproducibility and no observed release defect; transient parallel scheduling remains a plausible but unproven external cause. Repeated tag preflight and release-commit-first publication remain required; no tag publication is claimed.
+- No external semantic source was required; release consistency follows executable tests, `references/cust-tracked-scalar-output-aggregate-fields.md`, and the repository's established release process.
 
 ## 2026-09-10 — Final TODO 417 review closure
 

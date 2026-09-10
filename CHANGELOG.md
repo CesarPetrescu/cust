@@ -6,6 +6,27 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.59.0 — 2026-09-10
+
+### Language subset
+
+- Added safe tracked scalar-output aggregate fields across unqualified `char **`, `int **`, `_Bool **`, and `double **`. Direct, indexed, nested, arrow, embedded-aggregate-array, reverse-subscript, aggregate-expression, conditional, comma, `_Generic`, assignment-result, forwarding, return, copy, and static-initializer routes preserve containing-object owner/lifetime, recursive const ancestry, scalar pointee type, qualification, and tracked slot identity without exposing host addresses.
+- Added direct same-pointee union fields with synchronized tracked identity. Mixed-pointee unions, output/non-output overlap, and unions containing nested aggregate output storage retain targeted rejection.
+
+### Diagnostics and verification
+
+- Added 135 focused interpreter regressions, expanded generated tracked-output parity coverage, and registered a warning-free C11 compiler-oracle fixture. Runtime and non-evaluating callee analysis now share conversion, operation, static-storage, recursive-const, and bounded-work validation across the complete aggregate-field surface.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.59.0`.
+- Reconciled an executable inventory of 2,449 tests: 2,297 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 8 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Tracked scalar-output fields remain limited to unqualified scalar pointees in supported structs and direct same-pointee unions. Qualified output fields, output-field arrays, deeper pointers, mixed-pointee/output-versus-ordinary/nested-output union overlap, tracked-output casts, address-taking of tracked two-level values, arithmetic, relational ordering, increment/decrement, and compound updates remain unsupported or retain targeted diagnostics; ordinary scalar truth conversion such as `(_Bool)aggregate.output` remains supported. Recursive aggregate metadata and non-evaluating callee analysis use deterministic work limits, and recursive tracked-output return-call validation retains its exact 16-level callee-expression limit.
+
 ## v0.58.0 — 2026-09-07
 
 ### Language subset

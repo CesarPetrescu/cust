@@ -10,7 +10,7 @@ Returned values retain the caller-owned pointer-output identity. They can be for
 
 - Reject callee-local output objects and output objects whose tracked pointee escapes its owner.
 - Preserve const-slot and const-pointee conversion checks at return and assignment boundaries.
-- Keep unsupported non-scalar, deeper-pointer, array, aggregate-field, cast, arithmetic, relational-ordering, and compound-update forms targeted.
+- Keep unsupported non-scalar, deeper-pointer, pointer-array, aggregate-field-array, cast, arithmetic, relational-ordering, and compound-update forms targeted. A later slice added restricted unqualified scalar-output aggregate fields themselves; it did not enable arrays of those fields.
 - Do not manufacture host addresses; returned values reuse interpreter-owned tracked identities.
 
 ## Validation-depth pitfall

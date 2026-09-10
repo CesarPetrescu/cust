@@ -32,9 +32,9 @@ Focused CLI coverage should include:
 6. missing/system/macro-expanded/path-traversal/symlink-loop diagnostics;
 7. primary and included FIFO rejection under a process deadline;
 8. parser and runtime errors originating in headers;
-9. AST debug-output compatibility and the existing 32-call recursion boundary.
+9. AST debug-output compatibility and the then-existing 32-call recursion boundary.
 
-The added `io_error` flag initially enlarged `CustError` enough to trigger host stack overflow at the prior recursion boundary. Store the message as `Box<str>` and box `Stmt::Break`/`Stmt::Continue` token payloads so the deterministic `MAX_CALL_DEPTH = 32` contract remains intact.
+The added `io_error` flag initially enlarged `CustError` enough to trigger host stack overflow at the recursion boundary used by this feature slice. Storing the message as `Box<str>` and boxing `Stmt::Break`/`Stmt::Continue` token payloads preserved the then-current `MAX_CALL_DEPTH = 32` contract. Later double-pointer runtime work deliberately established the current separate `MAX_CALL_DEPTH = 24` contract; this historical include-hardening result does not override that active limit.
 
 ## Verification
 
