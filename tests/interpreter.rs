@@ -1,5 +1,1342 @@
 use cust::{format_tokens, interpret};
 
+#[test]
+fn tracked_scalar_output_aggregate_fields_blocker_folded_complement() {
+    let mut failures = Vec::new();
+    for (ty, kind) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        for operand in ["b.p", "(calls++,b.p)"] {
+            for body in [
+                format!("return ~{operand};"),
+                format!("return sizeof(~{operand});"),
+                format!("enum{{N=_Generic(0,int:1,default:~{operand})}}; return N+calls;"),
+                format!("enum{{N=_Generic(~{operand},int:1,default:2)}}; return N+calls;"),
+                format!("enum{{N=_Generic(0,int:1,default:sizeof(~{operand}))}}; return N+calls;"),
+            ] {
+                let program = format!(
+                    "struct B{{{ty} **p;}}; int main(void){{int calls=0; struct B b={{0}}; {body}}}"
+                );
+                let actual = interpret(&program).map_err(|e| e.to_string());
+                let expected = format!("{kind} pointer output arithmetic is not supported");
+                if !actual
+                    .as_ref()
+                    .is_err_and(|e| e.split(" at line ").next() == Some(expected.as_str()))
+                {
+                    failures.push(format!(
+                        "{ty}: {body}: expected {expected:?}, got {actual:?}"
+                    ));
+                }
+            }
+        }
+    }
+    for ty in ["char", "int", "_Bool"] {
+        let program = format!(
+            "int main(void){{int calls=0; {ty} scalar=1; \
+             enum{{N=_Generic(0,int:1,default:~(calls++,scalar))}}; \
+             enum{{M=_Generic(~scalar,int:1,default:2)}}; \
+             return N+M+calls+(~scalar!=-2);}}"
+        );
+        let actual = interpret(&program);
+        if actual != Ok(2) {
+            failures.push(format!("{ty}: scalar complement control: {actual:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_blocker_folded_reverse_operations() {
+    let mut failures = Vec::new();
+    for (ty, kind, address_kind) in [
+        ("char", "character", "parameter"),
+        ("int", "integer", "object"),
+        ("_Bool", "boolean", "object"),
+        ("double", "double", "object"),
+    ] {
+        for qualifier in ["", "const "] {
+            for base in ["a[i]", "i[a]", "a[(calls++,i)]", "i[(calls++,a)]"] {
+                for (operation, expected) in [
+                    (format!("{base}.p"), None),
+                    (format!("{base}.p==0"), None),
+                    (format!("&{base}"), None),
+                    (format!("{base}.p=0"), None),
+                    (format!("{base}.p=(calls++,&slot)"), None),
+                    (
+                        format!("{base}.p=1"),
+                        Some("incompatible assignment type".to_string()),
+                    ),
+                    (
+                        format!("{base}.p+1"),
+                        Some(format!("{kind} pointer output arithmetic is not supported")),
+                    ),
+                    (
+                        format!("&{base}.p"),
+                        Some(format!(
+                            "taking the address of {} {kind} pointer output {address_kind} is not supported",
+                            if ty == "int" { "an" } else { "a" }
+                        )),
+                    ),
+                    (
+                        format!("{base}.p++"),
+                        Some(format!(
+                            "{kind} pointer output parameter reassignment is not supported"
+                        )),
+                    ),
+                    (
+                        format!("--{base}.p"),
+                        Some(format!(
+                            "{kind} pointer output parameter reassignment is not supported"
+                        )),
+                    ),
+                    (
+                        format!("{base}.p+=1"),
+                        Some(format!(
+                            "{kind} pointer output parameter reassignment is not supported"
+                        )),
+                    ),
+                ] {
+                    let expected = if !qualifier.is_empty()
+                        && operation.contains(".p=")
+                        && !operation.contains("==")
+                    {
+                        Some("cannot assign to const aggregate field".to_string())
+                    } else {
+                        expected
+                    };
+                    let program = format!(
+                        "struct B{{{ty} **p;}}; int main(void){{int i=0,calls=0; {ty} *slot=0; \
+                         {qualifier}struct B a[1]={{{{0}}}}; \
+                         enum{{N=_Generic(0,int:1,default:({operation}))}}; \
+                         return N+i+calls+(a[0].p!=0);}}"
+                    );
+                    let actual = interpret(&program).map_err(|e| e.to_string());
+                    let correct = match &expected {
+                        Some(expected) => actual
+                            .as_ref()
+                            .is_err_and(|e| e.split(" at line ").next() == Some(expected.as_str())),
+                        None => actual == Ok(1),
+                    };
+                    if !correct {
+                        failures.push(format!(
+                            "{ty}: {qualifier}{operation}: expected {expected:?}, got {actual:?}"
+                        ));
+                    }
+                }
+            }
+        }
+        for base in ["a[i]", "i[a]", "a[i++]", "(i++)[a]"] {
+            let program = format!(
+                "struct B{{{ty} **p; {ty} value;}}; int main(void){{int i=0,calls=0; \
+                 struct B a[1]={{{{0,0}}}}; \
+                 enum{{N=_Generic(0,int:1,default:({base}.p=0,&{base}.value, \
+                 {base}.value++,--{base}.value,{base}.value+=1))}}; \
+                 return N+i+calls+(a[0].p!=0)+(a[0].value!=0);}}"
+            );
+            let actual = interpret(&program);
+            if actual != Ok(1) {
+                failures.push(format!("{ty}: {base}: valid controls: {actual:?}"));
+            }
+        }
+        for count in [8, 300, 8] {
+            let operands = vec!["i[(calls++,a)].p=0"; count].join(",");
+            let program = format!(
+                "struct B{{{ty} **p;}}; int main(void){{int i=0,calls=0; struct B a[1]={{{{0}}}}; \
+                 enum{{N=_Generic(0,int:1,default:(int[]){{{operands}}})}}; return N+i+calls;}}"
+            );
+            let actual = interpret(&program).map_err(|e| e.to_string());
+            let correct = if count == 300 {
+                actual
+                    .as_ref()
+                    .is_err_and(|e| e.contains("validation work limit"))
+            } else {
+                actual == Ok(1)
+            };
+            if !correct {
+                failures.push(format!("{ty}: {count} reverse operations: {actual:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_blocker_addressed_nested_metadata() {
+    let mut failures = Vec::new();
+    for (ty, kind, address_kind) in [
+        ("char", "character", "parameter"),
+        ("int", "integer", "object"),
+        ("_Bool", "boolean", "object"),
+        ("double", "double", "object"),
+    ] {
+        for qualifier in ["", "const "] {
+            for (field, is_const) in [
+                ("(&h.b)->p", !qualifier.is_empty()),
+                ("(&q->b)->p", !qualifier.is_empty()),
+                ("(&a[0].b)->p", !qualifier.is_empty()),
+                ("(&_Generic(0,default:h).b)->p", !qualifier.is_empty()),
+                ("(calls++,&h.b)->p", !qualifier.is_empty()),
+                ("h.link->p", !qualifier.is_empty()),
+                ("q->link->p", !qualifier.is_empty()),
+                ("a[0].link->p", !qualifier.is_empty()),
+                ("h.mutable_link->p", false),
+                ("q->mutable_link->p", false),
+            ] {
+                for (operation, expected) in [
+                    (field.to_string(), None),
+                    (format!("{field}=0"), None),
+                    (format!("{field}=(calls++,&slot)"), None),
+                    (
+                        format!("{field}=1"),
+                        Some("incompatible assignment type".to_string()),
+                    ),
+                    (
+                        format!("{field}++"),
+                        Some(format!(
+                            "{kind} pointer output parameter reassignment is not supported"
+                        )),
+                    ),
+                    (
+                        format!("--{field}"),
+                        Some(format!(
+                            "{kind} pointer output parameter reassignment is not supported"
+                        )),
+                    ),
+                    (
+                        format!("{field}+=1"),
+                        Some(format!(
+                            "{kind} pointer output parameter reassignment is not supported"
+                        )),
+                    ),
+                    (
+                        format!("&{field}"),
+                        Some(format!(
+                            "taking the address of {} {kind} pointer output {address_kind} is not supported",
+                            if ty == "int" { "an" } else { "a" }
+                        )),
+                    ),
+                ] {
+                    let expected =
+                        if is_const && operation.contains('=') && !operation.contains("+=") {
+                            Some("cannot assign to const aggregate field".to_string())
+                        } else {
+                            expected
+                        };
+                    let program = format!(
+                        "struct B{{{ty} **p;}}; struct H{{struct B b; {qualifier}struct B *link; struct B *mutable_link;}}; \
+                         int main(void){{int calls=0; {ty} *slot=0; struct B b={{0}}; \
+                         {qualifier}struct H h={{{{0}},&b,&b}}; {qualifier}struct H *q=&h; \
+                         {qualifier}struct H a[1]={{{{{{0}},&b,&b}}}}; \
+                         enum{{N=_Generic(0,int:1,default:({operation}))}}; return N+calls+(b.p!=0)+(h.b.p!=0);}}"
+                    );
+                    let actual = interpret(&program).map_err(|e| e.to_string());
+                    let correct = match expected {
+                        Some(expected) => actual
+                            .as_ref()
+                            .is_err_and(|e| e.split(" at line ").next() == Some(expected.as_str())),
+                        None => actual == Ok(1),
+                    };
+                    if !correct {
+                        failures.push(format!("{ty}: {qualifier}: {operation}: {actual:?}"));
+                    }
+                }
+            }
+        }
+        for count in [8, 300, 8] {
+            let operands = vec!["(calls++,&h.b)->p=0"; count].join(",");
+            let program = format!(
+                "struct B{{{ty} **p;}}; struct H{{struct B b;}}; \
+                 int main(void){{int calls=0; struct H h={{{{0}}}}; \
+                 enum{{N=_Generic(0,int:1,default:(int[]){{{operands}}})}}; return N+calls;}}"
+            );
+            let actual = interpret(&program).map_err(|e| e.to_string());
+            let correct = if count == 300 {
+                actual
+                    .as_ref()
+                    .is_err_and(|e| e.contains("validation work limit"))
+            } else {
+                actual == Ok(1)
+            };
+            if !correct {
+                failures.push(format!("{ty}: {count} addressed operations: {actual:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_blocker_folded_output_operators() {
+    let mut failures = Vec::new();
+    for (ty, wrong, kind) in [
+        ("char", "int", "character"),
+        ("int", "_Bool", "integer"),
+        ("_Bool", "double", "boolean"),
+        ("double", "char", "double"),
+    ] {
+        for field in ["b.p", "a[0].p", "ptr->p", "(&h.b)->p", "h.link->p"] {
+            for (op, other, diagnostic) in [
+                ("*", "1", "arithmetic"),
+                ("/", "1", "arithmetic"),
+                ("%", "1", "arithmetic"),
+                ("+", "1", "arithmetic"),
+                ("-", "1", "arithmetic"),
+                ("-", "b.p", "arithmetic"),
+                ("<", "0", "ordering comparisons"),
+                ("<=", "b.p", "ordering comparisons"),
+                (">", "0", "ordering comparisons"),
+                (">=", "b.p", "ordering comparisons"),
+                ("==", "1", "cannot compare pointer with nonzero integer"),
+                ("!=", "zero", "cannot compare pointer with nonzero integer"),
+                ("==", "0.0", "cannot compare pointer with double value"),
+                (
+                    "!=",
+                    "slot",
+                    "pointer output equality requires compatible pointee types",
+                ),
+                (
+                    "==",
+                    "bad.p",
+                    "pointer output equality requires compatible pointee types",
+                ),
+                (
+                    "!=",
+                    "&wrong_slot",
+                    "pointer output equality requires compatible pointee types",
+                ),
+                ("==", "0", ""),
+                ("!=", "ZERO", ""),
+                ("==", "(1-1)", ""),
+                ("!=", "(void *)0", ""),
+                ("==", "vp", ""),
+                ("!=", "b.p", ""),
+                ("==", "&slot", ""),
+            ] {
+                let expected = if matches!(diagnostic, "arithmetic" | "ordering comparisons") {
+                    format!("{kind} pointer output {diagnostic} are not supported")
+                        .replace("arithmetic are", "arithmetic is")
+                } else {
+                    diagnostic.to_string()
+                };
+                for reverse in [false, true] {
+                    let expression = if reverse {
+                        format!("{other} {op} {field}")
+                    } else {
+                        format!("{field} {op} {other}")
+                    };
+                    for body in [
+                        format!("{expression}; return 1;"),
+                        format!("enum{{N=_Generic(0,int:1,default:({expression}))}}; return N;"),
+                        format!("enum{{N=_Generic(({expression}),int:1,default:2)}}; return N;"),
+                        format!(
+                            "enum{{N=_Generic(0,int:1,default:sizeof({expression}))}}; return N;"
+                        ),
+                    ] {
+                        let program = format!(
+                            "struct B{{{ty} **p;}}; struct W{{{wrong} **p;}}; struct H{{struct B b; struct B *link;}}; \
+                             int main(void){{enum{{ZERO=0}}; int zero=0; {ty} *slot=0; {wrong} *wrong_slot=0; void *vp=0; \
+                             struct B b={{0}}, a[1]={{{{0}}}}; struct B *ptr=&b; struct W bad={{0}}; struct H h={{{{0}},&b}}; {body}}}"
+                        );
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        let correct = if expected.is_empty() {
+                            actual == Ok(1)
+                        } else {
+                            actual.as_ref().is_err_and(|e| {
+                                e.split(" at line ").next() == Some(expected.as_str())
+                            })
+                        };
+                        if !correct {
+                            failures.push(format!(
+                                "{ty}: {body}: expected {expected:?}, got {actual:?}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        for count in [8, 300, 8] {
+            let operands = vec!["(calls++,b.p)==0"; count].join(",");
+            let program = format!(
+                "struct B{{{ty} **p;}}; int main(void){{int calls=0; struct B b={{0}}; \
+                 enum{{N=_Generic(0,int:1,default:(int[]){{{operands}}})}}; return N+calls;}}"
+            );
+            let actual = interpret(&program).map_err(|e| e.to_string());
+            let correct = if count == 300 {
+                actual
+                    .as_ref()
+                    .is_err_and(|e| e.contains("validation work limit"))
+            } else {
+                actual == Ok(1)
+            };
+            if !correct {
+                failures.push(format!("{ty}: {count} output comparisons: {actual:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_final_blocker_array_operand_traversal() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for value in ["1", "0"] {
+            let index = format!("sizeof((struct B){{{value}}})-sizeof(struct B)");
+            for operand in [
+                format!("q->a[{index}].p"),
+                format!("({index},q)->a[0].p"),
+                format!("h[0].a[{index}].p"),
+                format!("h[{index}].a[0].p"),
+            ] {
+                let program = format!(
+                    "struct B{{{ty} **p;}}; struct H{{struct B a[1];}}; \
+                     int main(void){{struct H h[1]={{{{{{{{0}}}}}}}}; struct H *q=h; \
+                     enum{{N=_Generic(0,int:1,default:({operand}))}}; return N;}}"
+                );
+                let actual = interpret(&program).map_err(|e| e.to_string());
+                let correct = if value == "1" {
+                    actual
+                        .as_ref()
+                        .is_err_and(|e| e.contains("incompatible assignment type"))
+                } else {
+                    actual == Ok(1)
+                };
+                if !correct {
+                    failures.push(format!("{program}: {actual:?}"));
+                }
+            }
+        }
+        for count in [8, 300, 8] {
+            let operands = vec!["q->a[0].p,h[0].a[0].p"; count].join(",");
+            let program = format!(
+                "struct B{{{ty} **p;}}; struct H{{struct B a[1];}}; \
+                 int main(void){{struct H h[1]={{{{{{{{0}}}}}}}}; struct H *q=h; \
+                 enum{{N=_Generic(0,int:1,default:(int[]){{{operands}}})}}; return N;}}"
+            );
+            let actual = interpret(&program).map_err(|e| e.to_string());
+            let correct = if count == 300 {
+                actual
+                    .as_ref()
+                    .is_err_and(|e| e.contains("validation work limit"))
+            } else {
+                actual == Ok(1)
+            };
+            if !correct {
+                failures.push(format!("{ty}: {count} array accesses: {actual:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_final_blocker_composed_base_operations() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for qualifier in ["", "const "] {
+            for base in [
+                "(&(QUALstruct B){0})",
+                "(calls++,&(QUALstruct B){0})",
+                "_Generic(0,int:&(QUALstruct B){0},default:&b)",
+                "(&((QUALstruct B[]){ {0} })[0])",
+                "(1 ? &(QUALstruct B){0} : &b)",
+                "(0 ? &b : &(QUALstruct B){0})",
+                "(0 + &(QUALstruct B){0})",
+                "(&(QUALstruct B){0} - 0)",
+                "q->a[0]",
+                "h[0].a[0]",
+            ] {
+                let base = base.replace("QUAL", qualifier);
+                let field = if base.ends_with("a[0]") {
+                    format!("({base}).p")
+                } else {
+                    format!("({base})->p")
+                };
+                for (operation, expected) in [
+                    (format!("{field}=0"), None),
+                    (format!("{field}=&slot"), None),
+                    (format!("{field}=1"), Some("incompatible assignment type")),
+                    (format!("{field}++"), Some("reassignment is not supported")),
+                    (format!("++{field}"), Some("reassignment is not supported")),
+                    (format!("{field}+=1"), Some("reassignment is not supported")),
+                    (format!("&{field}"), Some("taking the address")),
+                    (field.clone(), None),
+                ] {
+                    let expected = if qualifier == "const "
+                        && operation.contains('=')
+                        && !operation.contains("+=")
+                    {
+                        Some("cannot assign to const aggregate field")
+                    } else {
+                        expected
+                    };
+                    let program = format!(
+                        "struct B{{{ty} **p;}}; struct H{{struct B a[1];}}; \
+                         int main(void){{int calls=0; struct B b={{0}}; {ty} *slot=0; \
+                         {qualifier}struct H h[1]={{{{{{{{0}}}}}}}}; {qualifier}struct H *q=h; \
+                         enum{{N=_Generic(0,int:1,default:({operation}))}}; return N+calls;}}"
+                    );
+                    let actual = interpret(&program).map_err(|e| e.to_string());
+                    let correct = match expected {
+                        Some(expected) => actual.as_ref().is_err_and(|e| e.contains(expected)),
+                        None => actual == Ok(1),
+                    };
+                    if !correct {
+                        failures.push(format!("{ty}: {qualifier}: {operation}: {actual:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_final_review_embedded_array_validation() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (operand, expected) in [
+            ("h.a[0].p=1", Some("incompatible assignment type")),
+            ("h.a[0].p+=1", Some("reassignment is not supported")),
+            ("h.a[0].p++", Some("reassignment is not supported")),
+            ("++h.a[0].p", Some("reassignment is not supported")),
+            (
+                "h.a[sizeof((struct B){1})-sizeof(struct B)].p",
+                Some("incompatible assignment type"),
+            ),
+            (
+                "h.a[sizeof((struct B){1})-sizeof(struct B)].p=0",
+                Some("incompatible assignment type"),
+            ),
+            (
+                "h.a[sizeof((struct B){1})-sizeof(struct B)].p+=0",
+                Some("incompatible assignment type"),
+            ),
+            (
+                "h.a[0].p=sizeof((struct B){1})-sizeof(struct B)",
+                Some("incompatible assignment type"),
+            ),
+            (
+                "h.a[0].p+=sizeof((struct B){1})-sizeof(struct B)",
+                Some("incompatible assignment type"),
+            ),
+            ("h.a[0].p", None),
+            ("h.a[0].p=0", None),
+            ("h.a[0].p=&slot", None),
+            ("h.a[0].p=h.a[1].p", None),
+            ("h.a[sizeof((struct B){0})-sizeof(struct B)].p", None),
+        ] {
+            let program = format!(
+                "struct B{{{ty} **p;}}; struct H{{struct B a[2];}}; \
+                 int main(void){{struct H h={{{{{{0}}}}}}; {ty} *slot=0; \
+                 enum{{N=_Generic(0,int:1,default:({operand}))}}; return N;}}"
+            );
+            let actual = interpret(&program).map_err(|e| e.to_string());
+            let correct = match expected {
+                Some(expected) => actual.as_ref().is_err_and(|e| e.contains(expected)),
+                None => actual == Ok(1),
+            };
+            if !correct {
+                failures.push(format!("{ty}: {operand}: {actual:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_final_review_folded_slot_qualification() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for qualifier in ["volatile", "const", "const volatile", ""] {
+            for storage in ["", "static "] {
+                for folded in [false, true] {
+                    let assignment = if folded {
+                        "enum{N=_Generic(0,int:1,default:(b.p=&slot))};"
+                    } else {
+                        "b.p=&slot;"
+                    };
+                    let program = format!(
+                        "struct B{{{ty} **p;}}; int main(void){{struct B b={{0}}; \
+                         {storage}{ty} *{qualifier} slot=0; {assignment} return 1;}}"
+                    );
+                    let actual = interpret(&program).map_err(|e| e.to_string());
+                    let correct = if qualifier.is_empty() {
+                        actual == Ok(1)
+                    } else {
+                        actual.as_ref().is_err_and(|e| {
+                            e.contains(&format!("address of a mutable {ty} pointer variable"))
+                        })
+                    };
+                    if !correct {
+                        failures.push(format!("{program}: {actual:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_final_review_folded_field_pointee_const() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for source_const in ["", "const "] {
+            for destination_const in ["", "const "] {
+                for nested in ["struct B b", "struct B b[2]"] {
+                    for source in ["s.p", "a[0].p", "ptr->p", "((struct S){0}).p", "h.a[0].p"] {
+                        for folded in [false, true] {
+                            let size = format!("sizeof((struct O){{{source}}})");
+                            let body = if folded {
+                                format!("enum{{N=_Generic(0,int:1,default:{size})}}; return N;")
+                            } else {
+                                format!("return {size}==sizeof(struct O);")
+                            };
+                            let program = format!(
+                                "struct S{{{source_const}{ty} *p;}}; \
+                                 struct B{{{destination_const}{ty} *ordinary; {ty} **output;}}; \
+                                 struct O{{{nested};}}; struct H{{struct S a[1];}}; \
+                                 int main(void){{const struct S s={{0}}; struct S a[1]={{{{0}}}}; \
+                                 struct S *ptr=a; struct H h={{{{{{0}}}}}}; {body}}}"
+                            );
+                            let actual = interpret(&program).map_err(|e| e.to_string());
+                            let correct = if !source_const.is_empty()
+                                && destination_const.is_empty()
+                            {
+                                actual.as_ref().is_err_and(|e| {
+                                    e.contains("cannot discard const qualifier from pointer target")
+                                })
+                            } else {
+                                actual == Ok(1)
+                            };
+                            if !correct {
+                                failures.push(format!("{program}: {actual:?}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_review_runtime_brace_elision() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for nested in ["struct B b", "struct B b[2]"] {
+            for (value, expected) in [
+                ("0", None),
+                ("(void *)0", None),
+                ("_Generic(0,int:0,default:1)", None),
+                ("(struct B){0}", None),
+                ("1", Some("incompatible assignment type")),
+                (
+                    "(const void *)0",
+                    Some("cannot discard const qualifier from pointer target"),
+                ),
+                (
+                    "(struct Wrong){0}",
+                    Some("incompatible struct assignment type"),
+                ),
+            ] {
+                for folded in [true, false] {
+                    let size = format!("sizeof((struct O){{{value}}})");
+                    let body = if folded {
+                        format!("enum{{N={size}}}; return N==sizeof(struct O);")
+                    } else {
+                        format!("return {size}==sizeof(struct O);")
+                    };
+                    let program = format!(
+                        "struct B{{{ty} **p;}}; struct O{{{nested};}}; \
+                         struct Wrong{{int x;}}; int main(void){{{body}}}"
+                    );
+                    let actual = interpret(&program).map_err(|e| e.to_string());
+                    let correct = match expected {
+                        Some(expected) => actual.as_ref().is_err_and(|e| e.contains(expected)),
+                        None => actual == Ok(1),
+                    };
+                    if !correct {
+                        failures.push(format!("{program}: {actual:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_review_brace_elision_null_void() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for nested in ["struct B b", "struct B b[2]"] {
+            for (value, expected) in [
+                ("(void *)0", None),
+                ("(void *)(1-1)", None),
+                ("_Generic(0,int:(void *)0,default:1)", None),
+                ("(void *)1", Some("incompatible assignment type")),
+                (
+                    "(const void *)0",
+                    Some("cannot discard const qualifier from pointer target"),
+                ),
+            ] {
+                let program = format!(
+                    "struct B{{{ty} *ordinary; {ty} **output;}}; struct O{{{nested};}}; \
+                     enum{{N=sizeof((struct O){{{value}}})}}; int main(void){{return 1;}}"
+                );
+                let actual = interpret(&program).map_err(|e| e.to_string());
+                let correct = match expected {
+                    Some(expected) => actual.as_ref().is_err_and(|e| e.contains(expected)),
+                    None => actual == Ok(1),
+                };
+                if !correct {
+                    failures.push(format!("{program}: {actual:?}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_review_brace_elision_pointer_const() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for nested in ["struct B b", "struct B b[2]"] {
+            for qualifier in ["", "const "] {
+                let program = format!(
+                    "struct B{{{qualifier}{ty} *ordinary; {ty} **output;}}; \
+                     struct O{{{nested};}}; enum{{N=sizeof((struct O){{(const {ty}[]){{0}}}})}}; \
+                     int main(void){{return 1;}}"
+                );
+                let actual = interpret(&program).map_err(|e| e.to_string());
+                let correct = if qualifier.is_empty() {
+                    actual.as_ref().is_err_and(|e| {
+                        e.contains("cannot discard const qualifier from pointer target")
+                    })
+                } else {
+                    actual == Ok(1)
+                };
+                if !correct {
+                    failures.push(format!("{program}: {actual:?}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_review_folded_field_scopes() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (setup, expected) in [
+            (
+                "struct B b={0}; int main(void){enum{N=_Generic(0,int:1,default:b.p=1)}; return 1;}",
+                Some("incompatible assignment type"),
+            ),
+            (
+                "int f(struct B b){enum{N=_Generic(0,int:1,default:b.p=1)}; return 1;} int main(void){return f((struct B){0});}",
+                Some("incompatible assignment type"),
+            ),
+            (
+                "int main(void){struct B b={0}; {const struct B b={0};} enum{N=_Generic(0,int:1,default:b.p=0)}; return 1;}",
+                None,
+            ),
+            (
+                "int main(void){struct B b={0}; enum{N=_Generic(0,int:1,default:b.p=b.p)}; return 1;}",
+                None,
+            ),
+            (
+                "int f(struct B b, TYPE *slot){enum{N=_Generic(0,int:1,default:b.p=&slot)}; return 1;} int main(void){return f((struct B){0},0);}",
+                None,
+            ),
+            (
+                "int main(void){for(struct B b={0};1;){enum{N=_Generic(0,int:1,default:b.p=1)}; return 1;} return 0;}",
+                Some("incompatible assignment type"),
+            ),
+            (
+                "int main(void){struct B b={0}; for(const struct B b={0};0;){} enum{N=_Generic(0,int:1,default:b.p=0)}; return 1;}",
+                None,
+            ),
+        ] {
+            let setup = setup.replace("TYPE", ty);
+            let program = format!("struct B{{{ty} **p;}}; {setup}");
+            let actual = interpret(&program).map_err(|e| e.to_string());
+            let correct = match expected {
+                Some(expected) => actual.as_ref().is_err_and(|e| e.contains(expected)),
+                None => actual == Ok(1),
+            };
+            if !correct {
+                failures.push(format!("{program}: {actual:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_review_folded_field_operations() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for field in [
+            "b.p",
+            "a[0].p",
+            "ptr->p",
+            "((struct B[]){{0}})->p",
+            "(&b)->p",
+            "((struct B[]){{0}})[0].p",
+        ] {
+            for (operand, expected) in [
+                (format!("{field}=1"), Some("incompatible assignment type")),
+                (format!("{field}=0"), None),
+                (format!("{field}=out"), None),
+                (format!("{field}=&slot"), None),
+                (format!("{field}++"), Some("reassignment is not supported")),
+                (format!("++{field}"), Some("reassignment is not supported")),
+                (format!("{field}+=1"), Some("reassignment is not supported")),
+                (format!("&{field}"), Some("taking the address")),
+            ] {
+                for is_const in [false, true] {
+                    let qualifier = if is_const { "const " } else { "" };
+                    let operand = if is_const {
+                        operand.replace("(struct B[])", "(const struct B[])")
+                    } else {
+                        operand.clone()
+                    };
+                    let expected = if is_const && operand.contains('=') && !operand.contains("+=") {
+                        Some("const")
+                    } else {
+                        expected
+                    };
+                    let program = format!(
+                        "struct B{{{ty} **p;}}; int main(void){{{qualifier}struct B b={{0}}; \
+                         {qualifier}struct B a[1]={{{{0}}}}; {qualifier}struct B *ptr=a; \
+                         {ty} **out=0; {ty} *slot=0; \
+                         enum{{N=_Generic(0,int:1,default:({operand}))}}; return 1;}}"
+                    );
+                    let actual = interpret(&program).map_err(|e| e.to_string());
+                    let correct = match expected {
+                        Some(expected) => actual.as_ref().is_err_and(|e| e.contains(expected)),
+                        None => actual == Ok(1),
+                    };
+                    if !correct {
+                        failures.push(format!("{program}: {actual:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_review_folded_operand_walk() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for operand in [
+            "a[sizeof((struct B){1})-sizeof(struct B)].p",
+            "a[sizeof((struct B){1})-sizeof(struct B)].p=0",
+            "a[0].p=sizeof((struct B){1})-sizeof(struct B)",
+            "&a[sizeof((struct B){1})-sizeof(struct B)].p",
+            "b.p+=sizeof((struct B){1})-sizeof(struct B)",
+        ] {
+            let program = format!(
+                "struct B{{{ty} **p;}}; int main(void){{struct B a[1]={{{{0}}}}; \
+                 struct B b={{0}}; enum{{N=_Generic(0,int:1,default:({operand}))}}; return 1;}}"
+            );
+            let actual = interpret(&program).map_err(|e| e.to_string());
+            if !actual
+                .as_ref()
+                .is_err_and(|e| e.split(" at line ").next() == Some("incompatible assignment type"))
+            {
+                failures.push(format!("{ty}: {operand}: {actual:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_folded_named_field_assignment_walks_rhs() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct B {{ {ty} **p; int tag; }}; int main(void) {{ struct B b={{0}}; \
+             enum {{ N=_Generic(0,int:1,default:(b.tag=sizeof((struct B){{1,0}}))) }}; \
+             return 0; }}"
+        );
+        let error = interpret(&program)
+            .expect_err("unselected named-field assignment RHS constraints must be validated")
+            .to_string();
+        assert_eq!(
+            error.split(" at line ").next(),
+            Some("incompatible assignment type"),
+            "{ty}: {error}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_folded_named_field_indexes_are_walked() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for operand in [
+            "h.tags[sizeof((struct B){1,0})-sizeof(struct B)]",
+            "&h.tags[sizeof((struct B){1,0})-sizeof(struct B)]",
+        ] {
+            let program = format!(
+                "struct B {{ {ty} **p; int tag; }}; struct H {{ int tags[1]; }}; \
+                 int main(void) {{ struct H h={{{{0}}}}; \
+                 enum {{ N=_Generic(0,int:1,default:({operand})) }}; return 0; }}"
+            );
+            let error = interpret(&program)
+                .expect_err("unselected named-field index constraints must be validated")
+                .to_string();
+            assert_eq!(
+                error.split(" at line ").next(),
+                Some("incompatible assignment type"),
+                "{ty}: {operand}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_folded_literal_field_assignments_validate_operation() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct B {{ {ty} **p; }}; int main(void) {{ \
+             enum {{ N=_Generic(0,int:1,default:(((struct B){{0}}).p=1)) }}; return 0; }}"
+        );
+        let error = interpret(&program)
+            .expect_err("unselected aggregate-field assignment itself must be validated")
+            .to_string();
+        assert_eq!(
+            error.split(" at line ").next(),
+            Some("incompatible assignment type"),
+            "{ty}: {error}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_folded_literal_field_updates_validate_operation() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (operand, expected) in [
+            ("((struct B){0}).p+=1", "reassignment is not supported"),
+            ("((struct B){0}).p++", "reassignment is not supported"),
+            ("&((struct B){0}).p", "taking the address"),
+            ("((const struct B){0}).p=0", "const"),
+        ] {
+            let program = format!(
+                "struct B {{ {ty} **p; }}; int main(void) {{ \
+                 enum {{ N=_Generic(0,int:1,default:({operand})) }}; return 0; }}"
+            );
+            let error = interpret(&program)
+                .expect_err("unselected aggregate-field operation itself must be validated")
+                .to_string();
+            assert!(
+                error.contains(expected)
+                    && (expected == "const" || error.contains("pointer output")),
+                "{ty}: {operand}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_final_folded_field_operands() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (value, expected) in [
+            ("1", Some("incompatible assignment type")),
+            (
+                "(const void *)0",
+                Some("cannot discard const qualifier from pointer target"),
+            ),
+            ("0", None),
+            ("(void *)0", None),
+        ] {
+            for operand in [
+                format!("((struct B){{{value},0}}).p"),
+                format!("((struct B){{{value},0}}).tag=calls++"),
+                format!("((struct B){{{value},0}}).tag+=calls++"),
+                format!("((struct B){{{value},0}}).tag++"),
+                format!("&((struct B){{{value},0}}).tag"),
+                format!("((struct B[]){{{{{value},0}}}})->p"),
+                format!("((struct B[]){{{{{value},0}}}})[calls++].p"),
+                format!("((struct B[]){{{{{value},0}}}})[0].tag=calls++"),
+                format!("((struct B[]){{{{{value},0}}}})[0].tag+=calls++"),
+                format!("&((struct B[]){{{{{value},0}}}})[0].tag"),
+                format!("((struct B[]){{{{{value},0}}}})->tag=calls++"),
+                format!("((struct B[]){{{{{value},0}}}})->tag+=calls++"),
+                format!("((struct B[]){{{{{value},0}}}})->tag++"),
+                format!("&((struct B[]){{{{{value},0}}}})->tag"),
+                format!("((struct B){{0,0}}).p=((struct B){{{value},0}}).p"),
+            ] {
+                for size in [
+                    format!("_Generic((calls++,0),int:1,default:({operand}))"),
+                    format!("sizeof(_Generic((calls++,0),int:1,default:({operand})))"),
+                ] {
+                    for declaration in [format!("enum {{ N={size} }};"), format!("int a[{size}];")]
+                    {
+                        let program = format!(
+                            "struct B {{ {ty} **p; int tag; }}; int main(void) {{ int calls=0; {declaration} return calls; }}"
+                        );
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        let correct = match expected {
+                            Some(expected) => actual
+                                .as_ref()
+                                .is_err_and(|e| e.split(" at line ").next() == Some(expected)),
+                            None => actual == Ok(0),
+                        };
+                        if !correct {
+                            failures.push(format!("{program}: {actual:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_final_folded_brace_elision_destination() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for field in [
+            "int tag",
+            "char tag",
+            "double tag",
+            "int tag[2]",
+            "int tag[2][2]",
+            "_Bool tag",
+        ] {
+            for nested in ["struct B b", "struct B b[2]"] {
+                for value in [
+                    "(struct B[]){{0}}",
+                    "_Generic(0,default:(struct B[]){{0}})",
+                    "0",
+                    "(struct B){0}",
+                ] {
+                    let literal = format!("(struct O){{.b={value}}}");
+                    for size in [
+                        format!("sizeof({literal})"),
+                        format!("_Generic(0,int:1,default:{literal})"),
+                    ] {
+                        for declaration in
+                            [format!("enum {{ N={size} }};"), format!("int a[{size}];")]
+                        {
+                            let program = format!(
+                                "struct B {{ {field}; {ty} **p; }}; struct O {{ {nested}; }}; {declaration} int main(void) {{ return 0; }}"
+                            );
+                            let actual = interpret(&program).map_err(|e| e.to_string());
+                            let invalid = value.contains("B[]") && field != "_Bool tag";
+                            let correct = if invalid {
+                                let expected = if field == "double tag" {
+                                    "cannot assign pointer expression to double value"
+                                } else {
+                                    "scalar assignment requires a scalar value"
+                                };
+                                actual
+                                    .as_ref()
+                                    .is_err_and(|e| e.split(" at line ").next() == Some(expected))
+                            } else {
+                                actual == Ok(0)
+                            };
+                            if !correct {
+                                failures.push(format!("{program}: {actual:?}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_brace_elision_validates_ordinary_pointer_destination() {
+    for nested in ["struct B b", "struct B b[2]"] {
+        for size in [
+            "sizeof((struct O){(char[]){0}})".to_string(),
+            "_Generic(0,int:1,default:(struct O){(char[]){0}})".to_string(),
+        ] {
+            for declaration in [format!("enum {{ N={size} }};"), format!("int a[{size}];")] {
+                let program = format!(
+                    "struct B {{ int *ordinary; int **output; }}; struct O {{ {nested}; }}; {declaration} int main(void) {{ return 0; }}"
+                );
+                let error = interpret(&program).unwrap_err().to_string();
+                assert_eq!(
+                    error.split(" at line ").next(),
+                    Some("cannot convert pointer to char to pointer to int"),
+                    "{nested}: {size}: {error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_final_folded_selected_generic_null() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (value, expected) in [
+            ("(void *)0", None),
+            ("(void *)(1-1)", None),
+            (
+                "(const void *)0",
+                Some("cannot discard const qualifier from pointer target"),
+            ),
+            ("(void *)1", Some("incompatible assignment type")),
+        ] {
+            for depth in [1, 3] {
+                let mut value = value.to_string();
+                for _ in 0..depth {
+                    value = format!("_Generic((calls++,0),int:{value},default:calls++)");
+                }
+                for literal in [
+                    format!("(struct B){{{value}}}"),
+                    format!("(struct B[]){{{{{value}}}}}"),
+                    format!("(struct O){{.b={value}}}"),
+                ] {
+                    for size in [
+                        format!("sizeof({literal})"),
+                        format!("_Generic(0,int:1,default:{literal})"),
+                    ] {
+                        for declaration in
+                            [format!("enum {{ N={size} }};"), format!("int a[{size}];")]
+                        {
+                            let program = format!(
+                                "struct B {{ {ty} **p; }}; struct O {{ struct B b; }}; int main(void) {{ int calls=0; {declaration} return calls; }}"
+                            );
+                            let actual = interpret(&program).map_err(|e| e.to_string());
+                            let correct = match expected {
+                                Some(expected) => actual
+                                    .as_ref()
+                                    .is_err_and(|e| e.split(" at line ").next() == Some(expected)),
+                                None => actual == Ok(0),
+                            };
+                            if !correct {
+                                failures.push(format!("{program}: {actual:?}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_final_folded_work_bound() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for count in [8, 300, 8] {
+            let fields = vec!["((struct B){0,0}).tag"; count].join(",");
+            let size = format!("_Generic(0,int:1,default:(int[]){{{fields}}})");
+            for declaration in [format!("enum {{ N={size} }};"), format!("int a[{size}];")] {
+                let program = format!(
+                    "struct B {{ {ty} **p; int tag; }}; {declaration} int main(void) {{ return 0; }}"
+                );
+                let actual = interpret(&program).map_err(|e| e.to_string());
+                let expected = if count == 300 {
+                    Err("generic selection validation work limit of 1024 exceeded".to_string())
+                } else {
+                    Ok(0)
+                };
+                assert_eq!(actual, expected, "{ty}: {count} field selections");
+                assert_eq!(interpret(&program).map_err(|e| e.to_string()), actual);
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_blocking_review_folded_const_void() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for literal in [
+            "(struct B){(const void *)0}",
+            "(struct B[]){{(const void *)0}}",
+        ] {
+            for declaration in [
+                format!("enum {{ N=sizeof({literal}) }};"),
+                format!("int a[sizeof({literal})];"),
+            ] {
+                let program = format!(
+                    "struct B {{ {ty} **p; }}; {declaration} int main(void) {{ return 0; }}"
+                );
+                let actual = interpret(&program).map_err(|error| error.to_string());
+                if !actual.as_ref().is_err_and(|error| {
+                    error.split(" at line ").next()
+                        == Some("cannot discard const qualifier from pointer target")
+                }) {
+                    failures.push(format!("{program}: {actual:?}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_blocking_review_folded_aggregate_mismatch() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for value in ["(struct W){1}", "_Generic(0,default:(struct W){1})"] {
+            for declaration in [
+                format!("enum {{ N=sizeof((struct O){{.b={value}}}) }};"),
+                format!("int a[sizeof((struct O){{.b={value}}})];"),
+                format!("int n=sizeof((struct O){{.b={value}}});"),
+            ] {
+                let program = format!(
+                    "struct B {{ int tag; {ty} **p; }}; struct W {{ int tag; }}; \
+                     struct O {{ struct B b; }}; int main(void) {{ {declaration} return 0; }}"
+                );
+                let actual = interpret(&program).map_err(|error| error.to_string());
+                if !actual.as_ref().is_err_and(|error| {
+                    error.split(" at line ").next() == Some("incompatible struct assignment type")
+                }) {
+                    failures.push(format!("{program}: {actual:?}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_blocking_review_generic_callee_const_void() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for qualified in [true, false] {
+            let value = if qualified {
+                "(const void *)0"
+            } else {
+                "(void *)0"
+            };
+            for argument in [
+                value.to_string(),
+                format!("_Generic(0,default:{value})"),
+                format!("_Generic(0,default:_Generic(0,default:{value}))"),
+            ] {
+                for probe in ["f()==0 && calls==2", "sizeof(f())==sizeof(int) && calls==0"] {
+                    let program = format!(
+                        "int calls; int g({ty} **p) {{ calls++; return p!=0; }} \
+                         int f(void) {{ calls++; return g({argument}); }} \
+                         int main(void) {{ return {probe}; }}"
+                    );
+                    let actual = interpret(&program).map_err(|error| error.to_string());
+                    let expected = if qualified {
+                        Err("cannot discard const qualifier from pointer target".to_string())
+                    } else {
+                        Ok(1)
+                    };
+                    if actual != expected {
+                        failures.push(format!("{program}: {actual:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_blocking_review_generic_controlling_initializer() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (value, expected) in [
+            ("1", Some("incompatible assignment type")),
+            (
+                "(const void *)0",
+                Some("cannot discard const qualifier from pointer target"),
+            ),
+            ("0", None),
+            ("(void *)0", None),
+        ] {
+            for controlling in [
+                format!("(struct B){{{value}}}"),
+                format!("(struct B[]){{{{{value}}}}}"),
+            ] {
+                for size in [
+                    format!("sizeof(_Generic({controlling},default:(struct B){{0}}))"),
+                    format!("_Generic({controlling},default:sizeof(struct B))"),
+                ] {
+                    for declaration in [format!("enum {{ N={size} }};"), format!("int a[{size}];")]
+                    {
+                        let program = format!(
+                            "struct B {{ {ty} **p; }}; {declaration} int main(void) {{ return 0; }}"
+                        );
+                        let actual = interpret(&program).map_err(|error| error.to_string());
+                        let correct = match expected {
+                            Some(expected) => actual.as_ref().is_err_and(|error| {
+                                error.split(" at line ").next() == Some(expected)
+                            }),
+                            None => actual == Ok(0),
+                        };
+                        if !correct {
+                            failures.push(format!("{program}: {actual:?}"));
+                        }
+                    }
+                }
+            }
+        }
+        let program = format!(
+            "struct B {{ {ty} **p; }}; int main(void) {{ int calls=0; \
+             enum {{ N=sizeof(_Generic(((calls++), (struct B){{0}}),default:(struct B){{0}})) }}; \
+             return calls==0 && N==sizeof(struct B); }}"
+        );
+        if interpret(&program) != Ok(1) {
+            failures.push(format!("non-evaluation: {program}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_blocking_review_folded_generic_work_bound() {
+    for depth in [4, 12, 4] {
+        let mut value = "sizeof((struct B){0})".to_string();
+        for _ in 0..depth {
+            value = format!("_Generic(0,default:{value})");
+        }
+        let program = format!(
+            "struct B {{ int **p; }}; enum {{ N={value} }}; int main(void) {{ return 0; }}"
+        );
+        let actual = interpret(&program).map_err(|error| error.to_string());
+        let expected = if depth == 12 {
+            Err("generic selection validation work limit of 1024 exceeded".to_string())
+        } else {
+            Ok(0)
+        };
+        assert_eq!(actual, expected, "depth {depth}");
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn interpreter_errors_ignore_undocumented_trace_environment_variables() {
@@ -5123,6 +6460,7 @@ struct Item { double values[1]; };
 union Choice { struct Item item; };
 struct Holder { struct Item *pointer; };
 struct Item *get(struct Holder *holder) { return holder->pointer; }
+struct Item safe = {{3.0}};
 struct Item *pick(int flag, struct Item *item) {
     struct Holder safe_holder = {&safe};
     struct Holder unsafe_holder = {item};
@@ -5314,6 +6652,7 @@ int main(void) {{
 #[test]
 fn reverse_subscript_aggregate_double_fields_preserve_const_pointer_qualification() {
     for expression in [
+        "sizeof(pointer = &index.zero[items].values[0]);",
         "double *pointer = &index.zero[items].scalar;",
         "double *pointer = index.zero[items].values;",
         "double *pointer = &index.zero[items].values[0];",
@@ -6002,7 +7341,11 @@ fn wrapped_direct_double_struct_pointer_bases_preserve_const_ancestry_before_ind
         "(0, slot->inner.values)[bad()] += 1.0",
         "(1 ? slot->inner.values : slot->inner.values)[bad()]++",
     ] {
-        for wrapped in [expression.to_string(), format!("sizeof({expression})")] {
+        for wrapped in [
+            expression.to_string(),
+            format!("sizeof({expression})"),
+            format!("_Generic(({expression}), default: 0)"),
+        ] {
             let program = format!(
                 r#"
 struct Inner {{ double values[2]; }};
@@ -11846,18 +13189,23 @@ int main(void) {
 }
 "#;
 
-    for program in [
-        global_pointer,
-        direct_field,
-        indexed_field,
-        arrow_field,
-        local_direct_field,
-        local_indexed_field,
-        local_arrow_field,
+    // Standalone slots have tracked output identities; addresses of ordinary
+    // pointer fields remain unsupported before byte-memory provenance is checked.
+    for (program, expected) in [
+        (
+            global_pointer,
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+        ),
+        (direct_field, "double pointers are not supported"),
+        (indexed_field, "double pointers are not supported"),
+        (arrow_field, "double pointers are not supported"),
+        (local_direct_field, "double pointers are not supported"),
+        (local_indexed_field, "double pointers are not supported"),
+        (local_arrow_field, "double pointers are not supported"),
     ] {
         assert_eq!(
             interpret(program).expect_err(program).to_string(),
-            "pointer to double objects cannot be used with bounded byte-memory intrinsics",
+            expected,
             "unexpected result for {program}"
         );
     }
@@ -11941,10 +13289,10 @@ double dangerous;
 struct Box { char *pointer; };
 struct Holder { struct Box *selected; };
 void *hidden_storage(void) {
-    struct Box box = {&safe};
+    struct Box box = {(char *)&safe};
     struct Holder holders[1] = {{0}};
     holders[0] = (struct Holder){&box};
-    holders[0].selected->pointer = &dangerous;
+    holders[0].selected->pointer = (char *)&dangerous;
     return box.pointer;
 }
 int main(void) {
@@ -11969,7 +13317,7 @@ struct Box { char *pointer; };
 struct Holder { struct Box *selected; };
 struct Outer { struct Holder holder; };
 void *hidden_storage(void) {
-    struct Box box = {&safe};
+    struct Box box = {(char *)&safe};
     ROUTE
     return box.pointer;
 }
@@ -11989,10 +13337,10 @@ void select(struct Holder *holder, struct Box *box) {
     *holder = (struct Holder){box};
 }
 void *hidden_storage(void) {
-    struct Box box = {&safe};
+    struct Box box = {(char *)&safe};
     struct Holder holder = {0};
     select(&holder, &box);
-    holder.selected->pointer = &dangerous;
+    holder.selected->pointer = (char *)&dangerous;
     return box.pointer;
 }
 int main(void) {
@@ -12002,16 +13350,16 @@ int main(void) {
 
     let programs = [
         expression_write(
-            "struct Holder holders[1] = {{0}}; (holders[0] = (struct Holder){&box}); holders[0].selected->pointer = &dangerous;",
+            "struct Holder holders[1] = {{0}}; (holders[0] = (struct Holder){&box}); holders[0].selected->pointer = (char *)&dangerous;",
         ),
         expression_write(
-            "struct Outer outers[1] = {{{0}}}; (outers[0].holder = (struct Holder){&box}); outers[0].holder.selected->pointer = &dangerous;",
+            "struct Outer outers[1] = {{{0}}}; (outers[0].holder = (struct Holder){&box}); outers[0].holder.selected->pointer = (char *)&dangerous;",
         ),
         expression_write(
-            "struct Outer outer = {{0}}; struct Outer *pointer = &outer; (pointer->holder = (struct Holder){&box}); pointer->holder.selected->pointer = &dangerous;",
+            "struct Outer outer = {{0}}; struct Outer *pointer = &outer; (pointer->holder = (struct Holder){&box}); pointer->holder.selected->pointer = (char *)&dangerous;",
         ),
         expression_write(
-            "struct Holder holder = {0}; struct Holder *pointer = &holder; (*pointer = (struct Holder){&box}); pointer->selected->pointer = &dangerous;",
+            "struct Holder holder = {0}; struct Holder *pointer = &holder; (*pointer = (struct Holder){&box}); pointer->selected->pointer = (char *)&dangerous;",
         ),
         call_effect.to_string(),
     ];
@@ -24564,13 +25912,13 @@ fn supports_struct_pointer_fields_with_const_pointee_views() {
 }
 
 #[test]
-fn rejects_pointer_to_pointer_struct_fields() {
+fn rejects_deeper_pointer_struct_fields() {
     let program = include_str!("fixtures/invalid/struct_pointer_to_pointer_field.c");
 
     let err = interpret(program).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "pointer-to-pointer struct fields are not supported at line 2, column 10"
+        "pointer-to-pointer struct fields are not supported at line 2, column 11"
     );
 }
 
@@ -28248,8 +29596,8 @@ fn pointer_typedef_outputs_keep_qualification_and_unsupported_shape_boundaries()
             "pointer array declarations are not supported at line 2, column 35",
         ),
         (
-            "typedef int *ValuePtr;\nstruct Box { ValuePtr *output; };\nint main(void) { return 0; }\n",
-            "pointer-to-pointer struct fields are not supported at line 2, column 23",
+            "typedef int *ValuePtr;\nstruct Box { ValuePtr **output; };\nint main(void) { return 0; }\n",
+            "pointer-to-pointer struct fields are not supported at line 2, column 24",
         ),
         (
             "struct Item { int value; };\ntypedef struct Item *ItemPtr;\nint main(void) { ItemPtr *output = 0; return 0; }\n",
@@ -30020,7 +31368,7 @@ fn pointer_output_typedef_aliases_preserve_unsupported_type_boundaries() {
             "pointer array declarations are not supported",
         ),
         (
-            "typedef int *P; typedef P *O; struct H { O value; }; int main(void) { return 0; }",
+            "typedef int *P; typedef P *O; struct H { O *value; }; int main(void) { return 0; }",
             "pointer-to-pointer struct fields are not supported",
         ),
         (
@@ -30221,8 +31569,8 @@ fn double_pointer_output_objects_preserve_qualified_static_and_address_boundarie
             "pointer array declarations are not supported at line 1, column 34",
         ),
         (
-            "struct Box { double **output; }; int main(void) { return 0; }\n",
-            "pointer-to-pointer struct fields are not supported at line 1, column 22",
+            "struct Box { double ***output; }; int main(void) { return 0; }\n",
+            "pointer-to-pointer struct fields are not supported at line 1, column 23",
         ),
     ] {
         assert_eq!(interpret(program).unwrap_err().to_string(), expected);
@@ -43359,4 +44707,3801 @@ fn tracked_scalar_output_function_return_analysis_rejects_ineligible_slot_assign
             "declaration: {declaration}"
         );
     }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_direct() {
+    let program = r#"
+        struct Box { int **output; };
+        int main(void) {
+            int value = 7;
+            int *slot = 0;
+            struct Box box = { &slot };
+            *box.output = &value;
+            return slot == &value && **box.output == 7;
+        }
+    "#;
+    assert_eq!(interpret(program).unwrap(), 1);
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_indexed_identity() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            r#"
+            struct Box {{ {ty} **output; }};
+            int main(void) {{
+                {ty} first = 0, second = 1;
+                {ty} *left = &first, *right = &second;
+                struct Box boxes[2] = {{ {{ &left }}, {{ &right }} }};
+                int i = 0;
+                *boxes[i++].output = &second;
+                return i == 1 && left == &second && right == &second
+                    && boxes[0].output != boxes[1].output;
+            }}
+        "#
+        );
+        assert_eq!(interpret(&program).unwrap(), 1, "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_nested_arrow_forwarding() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            r#"
+            struct Inner {{ {ty} **output; }};
+            struct Outer {{ struct Inner inner; }};
+            void set({ty} **output, {ty} *value) {{ *output = value; }}
+            void forward(struct Outer *box, {ty} *value) {{ set(box->inner.output, value); }}
+            int main(void) {{
+                {ty} value = 1;
+                {ty} *slot = 0;
+                struct Outer box = {{ {{ &slot }} }};
+                struct Outer *alias = &box;
+                forward(alias, &value);
+                return box.inner.output == alias->inner.output && slot == &value
+                    && **alias->inner.output == 1;
+            }}
+        "#
+        );
+        assert_eq!(interpret(&program).unwrap(), 1, "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_assignment_and_typed_access() {
+    for (ty, value, changed) in [
+        ("char", "65", "66"),
+        ("int", "17", "23"),
+        ("_Bool", "0", "1"),
+        ("double", "1.25", "2.75"),
+    ] {
+        let program = format!(
+            r#"
+            struct Inner {{ {ty} **output; }};
+            struct Outer {{ struct Inner inner; }};
+            {ty} **forward({ty} **output) {{ return output; }}
+            int main(void) {{
+                {ty} value = {value};
+                {ty} *slot = &value;
+                struct Outer boxes[2] = {{ {{ {{ 0 }} }}, {{ {{ 0 }} }} }};
+                struct Outer *alias = boxes;
+                int i = 0;
+                boxes[i++].inner.output = &slot;
+                alias[1].inner.output = forward(boxes[0].inner.output);
+                **alias->inner.output = {changed};
+                return i == 1 && value == {changed}
+                    && (alias->inner.output = boxes[1].inner.output) == &slot;
+            }}
+        "#
+        );
+        assert_eq!(interpret(&program).unwrap(), 1, "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_copy_and_containing_lifetime() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            r#"
+            struct Box {{ {ty} **output; }};
+            int main(void) {{
+                {ty} value = 1;
+                {ty} *slot = &value;
+                struct Box copy = {{ 0 }};
+                {{ struct Box box = {{ &slot }}; copy = box; }}
+                return copy.output == &slot && **copy.output == 1;
+            }}
+        "#
+        );
+        assert_eq!(interpret(&program).unwrap(), 1, "{ty}");
+        for (declarations, body, expired) in [
+            (
+                "struct Box *alias = 0;",
+                "{ struct Box box = { &slot }; alias = &box; } return alias->output != 0;",
+                "box",
+            ),
+            (
+                "struct Box box = { 0 };",
+                "{ TYPE *inner = &value; box.output = &inner; } return box.output != 0;",
+                "inner",
+            ),
+            (
+                "struct Box box = { &slot };",
+                "{ TYPE local[1] = { 1 }; *box.output = local; } return **box.output == 1;",
+                "local",
+            ),
+        ] {
+            let program = format!("struct Box {{ {ty} **output; }}; int main(void) {{ {ty} value = 1; {ty} *slot = &value; {declarations} {body} }}").replace("TYPE", ty);
+            assert_eq!(
+                interpret(&program).unwrap_err().to_string(),
+                format!("pointer to out-of-scope variable '{expired}'"),
+                "{ty}: {body}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_recursive_const() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let allowed = format!(
+            r#"
+            struct Inner {{ {ty} **output; }};
+            struct Outer {{ const struct Inner inner; }};
+            void set({ty} **output, {ty} *value) {{ *output = value; }}
+            int main(void) {{
+                {ty} value = 1; {ty} *slot = 0;
+                const struct Outer box = {{ {{ &slot }} }};
+                set(box.inner.output, &value);
+                return slot == &value;
+            }}
+        "#
+        );
+        assert_eq!(interpret(&allowed).unwrap(), 1, "{ty}");
+        for (declaration, target, expected) in [
+            (
+                "const struct Inner box = { &slot };",
+                "box.output",
+                "cannot assign to const variable 'box'",
+            ),
+            (
+                "struct Outer box = { { &slot } };",
+                "box.inner.output",
+                "cannot assign to const struct field 'inner'",
+            ),
+            (
+                "const struct Inner boxes[1] = { { &slot } };",
+                "boxes[0].output",
+                "cannot assign to const variable 'boxes'",
+            ),
+            (
+                "struct Inner box = { &slot }; const struct Inner *alias = &box;",
+                "alias->output",
+                "cannot assign through pointer to const",
+            ),
+        ] {
+            for operation in [format!("{target} = 0;"), format!("sizeof({target} = 0);")] {
+                let program = format!(
+                    "struct Inner {{ {ty} **output; }}; struct Outer {{ const struct Inner inner; }}; int main(void) {{ {ty} *slot = 0; {declaration} {operation} return 0; }}"
+                );
+                assert_eq!(
+                    interpret(&program).unwrap_err().to_string(),
+                    expected,
+                    "{ty}: {operation}"
+                );
+            }
+        }
+        for field in [
+            format!("{ty} volatile **output"),
+            format!("_Atomic({ty}) **output"),
+            format!("{ty} *volatile *output"),
+            format!("{ty} **const output"),
+            format!("const {ty} **output"),
+        ] {
+            let program = format!("struct Box {{ {field}; }}; int main(void) {{ return 0; }}");
+            let error = interpret(&program).unwrap_err().to_string();
+            assert!(
+                error.starts_with(
+                    "qualified pointer output aggregate fields are not supported at line 1, column "
+                ),
+                "{field}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_does_not_evaluate() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            r#"
+            struct Box {{ {ty} **output; }};
+            int calls = 0;
+            {ty} **touch({ty} **output) {{ calls++; return output; }}
+            int main(void) {{
+                {ty} value = 1; {ty} *slot = &value;
+                struct Box boxes[1] = {{ {{ &slot }} }};
+                struct Box *alias = 0;
+                int i = 0;
+                int ok = sizeof(boxes[i++].output = touch(0)) == sizeof(&slot)
+                    && sizeof(*boxes[i++].output) == sizeof(slot)
+                    && sizeof(**boxes[i++].output) == sizeof(value)
+                    && sizeof(touch(alias->output)) == sizeof(&slot);
+                {{ struct Box gone = {{ &slot }}; alias = &gone; }}
+                ok = ok && sizeof(alias->output) == sizeof(&slot)
+                    && sizeof(**alias->output) == sizeof(value);
+                return ok && i == 0 && calls == 0 && boxes[0].output == &slot;
+            }}
+        "#
+        );
+        assert_eq!(interpret(&program).unwrap(), 1, "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_checks_assignment_types() {
+    for (ty, wrong) in [
+        ("char", "int"),
+        ("int", "_Bool"),
+        ("_Bool", "double"),
+        ("double", "char"),
+    ] {
+        for target in ["box.output", "boxes[0].output", "alias->output"] {
+            let program = format!(
+                "struct Box {{ {ty} **output; }}; int main(void) {{ {wrong} *wrong = 0; struct Box box = {{ 0 }}, boxes[1] = {{ {{ 0 }} }}; struct Box *alias = &box; return sizeof({target} = &wrong); }}"
+            );
+            let result = interpret(&program);
+            assert!(result.is_err(), "{ty}: {target}: {result:?}");
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                format!(
+                    "function 'pointer output field assignment' parameter 'output' requires the address of a mutable {ty} pointer variable"
+                )
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_aliases_and_static_storage() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            r#"
+            typedef {ty} *Pointer;
+            typedef Pointer *Output;
+            typedef Output Chained;
+            struct Box {{ {ty} **direct; Pointer *inner; Output complete; Chained chained; }};
+            {ty} value = 1;
+            {ty} *slot = &value;
+            struct Box global = {{ &slot, &slot, &slot, &slot }};
+            int check(void) {{
+                static struct Box local = {{ &slot, &slot, &slot, &slot }};
+                return global.direct == local.inner && global.complete == local.chained;
+            }}
+            int main(void) {{ return check() && check() && **global.chained == 1; }}
+        "#
+        );
+        assert_eq!(interpret(&program).unwrap(), 1, "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_retain_operation_boundaries() {
+    for (ty, kind) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        for target in ["box.output", "boxes[0].output", "alias->output"] {
+            for (operation, expected) in [
+                (
+                    format!("{target} + 1"),
+                    format!("{kind} pointer output arithmetic is not supported"),
+                ),
+                (
+                    format!("{target} < &slot"),
+                    format!("{kind} pointer output ordering comparisons are not supported"),
+                ),
+                (
+                    format!("{target} += 1"),
+                    format!("{kind} pointer output parameter reassignment is not supported"),
+                ),
+                (
+                    format!("++{target}"),
+                    format!("{kind} pointer output parameter reassignment is not supported"),
+                ),
+                (
+                    format!("{target}++"),
+                    format!("{kind} pointer output parameter reassignment is not supported"),
+                ),
+            ] {
+                for expression in [operation.clone(), format!("sizeof({operation})")] {
+                    let program = format!(
+                        "struct Box {{ {ty} **output; }}; int main(void) {{ {ty} *slot = 0; struct Box box = {{ &slot }}, boxes[1] = {{ {{ &slot }} }}; struct Box *alias = &box; {expression}; return 0; }}"
+                    );
+                    let result = interpret(&program);
+                    assert!(result.is_err(), "{ty}: {expression}: {result:?}");
+                    assert_eq!(
+                        result.unwrap_err().to_string(),
+                        expected,
+                        "{ty}: {expression}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_retain_address_cast_and_array_boundaries() {
+    for (ty, address_error) in [
+        (
+            "char",
+            "taking the address of a character pointer output parameter is not supported",
+        ),
+        (
+            "int",
+            "taking the address of an integer pointer output object is not supported",
+        ),
+        (
+            "_Bool",
+            "taking the address of a boolean pointer output object is not supported",
+        ),
+        (
+            "double",
+            "taking the address of a double pointer output object is not supported",
+        ),
+    ] {
+        for target in ["box.output", "boxes[0].output", "alias->output"] {
+            for expression in [format!("&{target} != 0"), format!("sizeof(&{target})")] {
+                let program = format!(
+                    "struct Box {{ {ty} **output; }}; int main(void) {{ struct Box box = {{ 0 }}, boxes[1] = {{ {{ 0 }} }}; struct Box *alias = &box; return {expression}; }}"
+                );
+                assert_eq!(
+                    interpret(&program).unwrap_err().to_string(),
+                    address_error,
+                    "{ty}: {expression}"
+                );
+            }
+        }
+        for (declaration, expected) in [
+            (
+                format!("struct Box {{ {ty} ***output; }};"),
+                "pointer-to-pointer struct fields are not supported",
+            ),
+            (
+                format!("struct Box {{ {ty} **outputs[2]; }};"),
+                "pointer array struct fields are not supported",
+            ),
+            (
+                format!("{ty} **outputs[2];"),
+                "pointer array declarations are not supported",
+            ),
+        ] {
+            let program = format!("{declaration} int main(void) {{ return 0; }}");
+            assert!(
+                interpret(&program)
+                    .unwrap_err()
+                    .to_string()
+                    .starts_with(expected),
+                "{program}"
+            );
+        }
+        for expression in [format!("({ty} **)0"), format!("sizeof(({ty} **)0)")] {
+            let program = format!("int main(void) {{ return {expression} != 0; }}");
+            assert!(
+                interpret(&program)
+                    .unwrap_err()
+                    .to_string()
+                    .starts_with("pointer-to-pointer casts are not supported")
+            );
+        }
+    }
+    for field in ["struct Item **output", "ItemPtr *output"] {
+        let program = format!(
+            "struct Item {{ int value; }}; typedef struct Item *ItemPtr; struct Box {{ {field}; }}; int main(void) {{ return 0; }}"
+        );
+        assert!(
+            interpret(&program)
+                .unwrap_err()
+                .to_string()
+                .starts_with("pointer-to-pointer struct fields are not supported")
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_validates_initializers_and_calls() {
+    for (ty, wrong) in [
+        ("char", "int"),
+        ("int", "_Bool"),
+        ("_Bool", "double"),
+        ("double", "char"),
+    ] {
+        let program = format!(
+            "struct Box {{ {ty} **output; }}; int main(void) {{ {wrong} *wrong = 0; return sizeof((struct Box){{ &wrong }}); }}"
+        );
+        let result = interpret(&program);
+        assert!(
+            result.is_err(),
+            "{ty}: incompatible initializer accepted: {result:?}"
+        );
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "incompatible assignment type"
+        );
+        let program = format!(
+            r#"
+            struct Box {{ {ty} **output; }};
+            struct Box *select(int value) {{ return 0; }}
+            int main(void) {{ return sizeof(select()->output); }}
+        "#
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "function 'select' expected 1 arguments, got 0"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_match_compiler_oracle_fixture() {
+    let program = include_str!("fixtures/compat/valid/tracked_scalar_output_aggregate_fields.c");
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_and_null_safety() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct Inner {{ {ty} **output; }}; struct Outer {{ struct Inner inner; }}; int main(void) {{ {ty} *slot = 0; static struct Outer outer = {{ {{ &slot }} }}; return 0; }}"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "static pointer initializer requires static storage duration"
+        );
+        let program = format!(
+            "struct Box {{ {ty} **output; }}; int main(void) {{ struct Box box = {{ 0 }}; return **box.output; }}"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "null pointer dereference"
+        );
+        let program = format!(
+            r#"
+            struct Box {{ {ty} **output; }};
+            {ty} value = 1; {ty} *slot = &value;
+            int calls = 0;
+            {ty} **produce(void) {{
+                struct Box local = {{ &slot }};
+                calls++;
+                return local.output;
+            }}
+            int main(void) {{
+                int ok = sizeof(produce()) == sizeof(&slot) && calls == 0;
+                {ty} **output = produce();
+                return ok && calls == 1 && output == &slot && **output == 1;
+            }}
+        "#
+        );
+        assert_eq!(interpret(&program).unwrap(), 1, "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_union_overlap() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            r#"
+            union U {{ {ty} **a; {ty} **b; }};
+            struct Outer {{ union U u; }};
+            int main(void) {{
+                {ty} x = 1, y = 0;
+                {ty} *p = &x, *q = &y;
+                union U u = {{ &p }};
+                if (u.b != &p) return 1;
+                u.b = &q;
+                if (u.a != &q) return 2;
+                union U copy = u;
+                u.a = &p;
+                if (copy.a != &q || copy.b != &q || u.b != &p) return 3;
+                copy = u;
+                if (copy.a != &p || copy.b != &p) return 4;
+                struct Outer outer = {{ {{ .b = &q }} }};
+                if (outer.u.a != &q) return 5;
+                outer.u.a = &p;
+                return outer.u.b != &p;
+            }}
+            "#
+        );
+        assert_eq!(interpret(&program), Ok(0), "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_constants() {
+    for (ty, kind) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        for expr in ["f()", "source.p"] {
+            for declaration in [
+                format!("struct Box target = {{ {expr} }};"),
+                format!("struct Outer target = {{ {{ {{ {expr} }} }} }};"),
+                format!("struct Box target[1] = {{ {{ {expr} }} }};"),
+            ] {
+                for local in [false, true] {
+                    let declarations = format!(
+                        "struct Box {{ {ty} **p; }}; struct Outer {{ struct Box a[1]; }}; {ty} *slot = 0; struct Box source = {{ &slot }}; {ty} **f(void) {{ return &slot; }}"
+                    );
+                    let program = if local {
+                        format!(
+                            "{declarations} int main(void) {{ static {declaration} return 0; }}"
+                        )
+                    } else {
+                        format!("{declarations} {declaration} int main(void) {{ return 0; }}")
+                    };
+                    assert_eq!(
+                        interpret(&program).map_err(|e| e.to_string()),
+                        Err(format!(
+                            "static {kind} pointer object initializer must be null or the address of a mutable {ty} pointer variable with static storage duration"
+                        )),
+                        "{program}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_expression_routes() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for field in [
+            "o.a[0].p",
+            "((struct Box){ &slot }).p",
+            "make(&slot).p",
+            "(1 ? box : box).p",
+            "(box = box).p",
+        ] {
+            let program = format!(
+                r#"
+                struct Box {{ {ty} **p; }};
+                struct Outer {{ struct Box a[1]; }};
+                int calls = 0;
+                struct Box make({ty} **p) {{ struct Box box = {{ p }}; calls++; return box; }}
+                int main(void) {{
+                    {ty} value = 1; {ty} *slot = &value;
+                    struct Box box = {{ &slot }};
+                    struct Outer o = {{ {{ {{ &slot }} }} }};
+                    if (sizeof(**({field})) != sizeof(value)) return 1;
+                    if (sizeof(*({field})) != sizeof(slot)) return 2;
+                    if (sizeof({field}) != sizeof(&slot) || calls != 0) return 3;
+                    {ty} **out = {field};
+                    if (out != &slot || !({field}) || **({field}) != 1) return 4;
+                    *({field}) = &value;
+                    **({field}) = 0;
+                    return value != 0;
+                }}
+                "#
+            );
+            assert_eq!(interpret(&program), Ok(0), "{ty}: {field}");
+        }
+        for field in [
+            "o.a[index++].p",
+            "((struct Box){ &slot }).p",
+            "(*(index++, &o.a[0])).p",
+        ] {
+            let program = format!(
+                "struct Box {{ {ty} **p; }}; struct Outer {{ struct Box a[1]; }}; int main(void) {{ {ty} *slot = 0, *other = 0; struct Outer o = {{ {{ {{ &slot }} }} }}; int index = 0; if (sizeof(o.a[0].p) != sizeof(&slot) || index != 0) return 1; return ({field} = &other) != &other; }}"
+            );
+            assert_eq!(interpret(&program), Ok(0), "{ty}: {field} assignment");
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_update_routes() {
+    for (ty, kind) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        for field in [
+            "o.a[0].p",
+            "((struct Box){ &slot }).p",
+            "(0, o.a[0]).p",
+            "(1 ? box : box).p",
+            "make(&slot).p",
+            "view->a[0].p",
+            "boxes[0].p",
+            "box.p",
+        ] {
+            for update in [
+                format!("{field} += 1"),
+                format!("{field} -= 1"),
+                format!("++{field}"),
+                format!("{field}++"),
+                format!("--{field}"),
+                format!("{field}--"),
+            ] {
+                for expr in [
+                    update.clone(),
+                    format!("sizeof({update})"),
+                    format!("sizeof(0, ({update}))"),
+                    format!("sizeof((_Bool)({update}))"),
+                    format!("sizeof(take({update}))"),
+                ] {
+                    let program = format!(
+                        "struct Box {{ {ty} **p; }}; struct Outer {{ struct Box a[1]; }}; int take({ty} **p) {{ return p != 0; }} struct Box make({ty} **p) {{ struct Box box = {{ p }}; return box; }} int main(void) {{ {ty} *slot = 0; struct Box box = {{ &slot }}, boxes[1] = {{ {{ &slot }} }}; struct Outer o = {{ {{ {{ &slot }} }} }}; struct Outer *view = &o; {expr}; return 0; }}"
+                    );
+                    assert_eq!(
+                        interpret(&program).map_err(|e| e.to_string()),
+                        Err(format!(
+                            "{kind} pointer output parameter reassignment is not supported"
+                        )),
+                        "{ty}: {expr}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_arrow_base_validation() {
+    for (ty, kind, address) in [
+        (
+            "char",
+            "character",
+            "taking the address of a character pointer output parameter is not supported",
+        ),
+        (
+            "int",
+            "integer",
+            "taking the address of an integer pointer output object is not supported",
+        ),
+        (
+            "_Bool",
+            "boolean",
+            "taking the address of a boolean pointer output object is not supported",
+        ),
+        (
+            "double",
+            "double",
+            "taking the address of a double pointer output object is not supported",
+        ),
+    ] {
+        let prefix = format!(
+            "struct Box {{ {ty} **p; }}; int main(void) {{ struct Box b = {{ 0 }}; struct Box *view = 0; int calls = 0;"
+        );
+        let cases = [
+            (
+                "(b.p++, view)->p",
+                format!("{kind} pointer output parameter reassignment is not supported"),
+            ),
+            (
+                "(b.p ^= 1, view)->p",
+                format!("{kind} pointer output parameter reassignment is not supported"),
+            ),
+            ("(&b.p, view)->p", address.to_string()),
+            (
+                "(view + 1.5)->p",
+                "pointer arithmetic requires an integer offset".to_string(),
+            ),
+        ];
+        let actual: Vec<_> = cases
+            .iter()
+            .map(|(expr, _)| {
+                interpret(&format!("{prefix} return sizeof({expr}); }}")).map_err(|e| e.to_string())
+            })
+            .collect();
+        let expected: Vec<_> = cases.iter().map(|(_, error)| Err(error.clone())).collect();
+        assert_eq!(actual, expected, "{ty}");
+        assert_eq!(
+            interpret(&format!(
+                "{prefix} return sizeof((calls++, view)->p) == sizeof(b.p) && sizeof((view++)->p) == sizeof(b.p) && calls == 0 && view == 0; }}"
+            )),
+            Ok(1),
+            "{ty}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_literal_constants() {
+    for (ty, kind) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        for declaration in [
+            "struct Box *target = &(struct Box){ f() };",
+            "struct Box *target = (struct Box[1]){ { f() } };",
+            "struct Outer *target = &(struct Outer){ { { f() } } };",
+            "struct Holder target = { &(struct Box){ f() } };",
+            "struct Holder target = { (struct Box[1]){ { f() } } };",
+            "struct Holder *target = &(struct Holder){ &(struct Box){ f() } };",
+        ] {
+            for local in [false, true] {
+                let prefix = format!(
+                    "struct Box {{ {ty} **p; }}; struct Outer {{ struct Box a[1]; }}; struct Holder {{ struct Box *p; }}; {ty} *slot = 0; {ty} **f(void) {{ int zero = 0; zero = 1 / zero; return &slot; }}"
+                );
+                let program = if local {
+                    format!("{prefix} int main(void) {{ static {declaration} return 0; }}")
+                } else {
+                    format!("{prefix} {declaration} int main(void) {{ return 0; }}")
+                };
+                let expected = if local
+                    && declaration == "struct Box *target = (struct Box[1]){ { f() } };"
+                {
+                    "static pointer initializer requires static storage duration".to_string()
+                } else {
+                    format!(
+                        "static {kind} pointer object initializer must be null or the address of a mutable {ty} pointer variable with static storage duration"
+                    )
+                };
+                assert_eq!(
+                    interpret(&program).map_err(|e| e.to_string()),
+                    Err(expected),
+                    "{program}"
+                );
+            }
+        }
+        let program = format!(
+            "struct Box {{ {ty} **p; }}; {ty} *slot = 0; struct Box *global = &(struct Box){{ &slot }}; int calls = 0; {ty} **f(void) {{ calls++; return &slot; }} int main(void) {{ struct Box *local = &(struct Box){{ f() }}; return calls == 1 && local->p == global->p; }}"
+        );
+        assert_eq!(interpret(&program), Ok(1), "{ty}: automatic literal");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_reject_nested_union_storage() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for member in [
+            "struct Box a",
+            "struct Box a[1]",
+            "struct Layer a",
+            "union Direct a",
+            "struct { struct Box b; } a",
+        ] {
+            let program = format!(
+                "struct Box {{ {ty} **p; }}; typedef struct Box Box;\nstruct Layer {{ Box b[1]; }}; union Direct {{ {ty} **p; {ty} **q; }};\nunion U {{\n    {member};\n}};\nint main(void) {{ return 0; }}"
+            );
+            assert_eq!(interpret(&program).map_err(|e| e.to_string()), Err("union fields containing nested pointer output storage are not supported at line 4, column 5".to_string()), "{ty}: {member}");
+        }
+        let program = format!(
+            "union Direct {{ {ty} **p; {ty} **q; }}; struct Box {{ union Direct u; }}; int main(void) {{ {ty} *slot = 0; struct Box b = {{ {{ &slot }} }}; b.u.q = 0; return b.u.p == 0; }}"
+        );
+        assert_eq!(
+            interpret(&program),
+            Ok(1),
+            "{ty}: supported nested struct and direct union"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_reverse_variable_index() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (field, increments, calls) in [
+            ("i[boxes].p", 0, 0),
+            ("i[(calls++, boxes)].p", 0, 1),
+            ("(i++)[boxes].p", 1, 0),
+        ] {
+            let program = format!(
+                r#"
+                struct Box {{ {ty} **p; }};
+                int main(void) {{
+                    {ty} value = 1; {ty} *slot = &value, *other = 0;
+                    struct Box boxes[1] = {{ {{ &slot }} }};
+                    int i = 0, calls = 0;
+                    if (sizeof({field}) != sizeof(&slot) || sizeof(*({field})) != sizeof(slot)
+                        || sizeof(**({field})) != sizeof(value)
+                        || sizeof({field} = &other) != sizeof(&other)) return 1;
+                    if (i != 0 || calls != 0 || boxes[0].p != &slot) return 2;
+                    {ty} **out = {field};
+                    if (out != &slot || i != {increments} || calls != {calls}) return 3;
+                    i = 0; calls = 0;
+                    if (({field} = &other) != &other || i != {increments} || calls != {calls}) return 4;
+                    if (boxes[0].p != &other) return 5;
+                    i = 0; calls = 0;
+                    *({field}) = &value;
+                    return other != &value || i != {increments} || calls != {calls};
+                }}
+            "#
+            );
+            assert_eq!(interpret(&program), Ok(0), "{ty}: {field}");
+        }
+        let program = format!(
+            "struct Box {{ {ty} **p; }}; int main(void) {{ struct Box boxes[1] = {{ {{ 0 }} }}; double i = 0.5; return sizeof(i[boxes].p); }}"
+        );
+        assert_eq!(
+            interpret(&program).map_err(|e| e.to_string()),
+            Err("array subscript requires an integer value".to_string()),
+            "{ty}: invalid reverse index"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_reject_recursive_storage_without_host_overflow() {
+    let program = r#"
+        struct Node { int **output; };
+        int main(void) {
+            struct Node { struct Node next; };
+            union Holder { struct Node node; int value; };
+            return 0;
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "recursive aggregate storage is not supported at line 5, column 28"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_indexed_pointers_preserve_recursive_const() {
+    for expression in [
+        "holder.boxes[0].inner.output = 0",
+        "sizeof(holder.boxes[0].inner.output = 0)",
+    ] {
+        let program = format!(
+            r#"
+            struct Inner {{ int **output; }};
+            struct Outer {{ const struct Inner inner; }};
+            struct Holder {{ struct Outer *boxes; }};
+            int main(void) {{
+                int *slot = 0;
+                struct Outer boxes[1] = {{ {{ {{ &slot }} }} }};
+                struct Holder holder = {{ boxes }};
+                {expression};
+                return 0;
+            }}
+        "#
+        );
+
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "cannot assign to const struct field 'inner'",
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_bound_deep_metadata_scans() {
+    let mut program = String::from("struct S0 { int value; };\n");
+    for depth in 1..256 {
+        program.push_str(&format!(
+            "struct S{depth} {{ struct S{} nested; }};\n",
+            depth - 1
+        ));
+    }
+    program.push_str("union U { struct S255 nested; };\nint main(void) { return 0; }\n");
+
+    assert_eq!(
+        interpret(&program).unwrap_err().to_string(),
+        "aggregate storage nesting limit exceeded at line 257, column 11"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn tracked_scalar_output_aggregate_fields_bound_static_expression_walks() {
+    const CHILD_ENV: &str = "CUST_STATIC_AGGREGATE_OUTPUT_DEPTH_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let sum = std::iter::repeat_n("0", 1_000)
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let program = format!(
+            "struct B {{ int **p; }}; static struct B b={{{sum}}}; \
+             int main(void) {{ return b.p != 0; }}"
+        );
+        assert_eq!(
+            interpret(&program).unwrap_err().to_string(),
+            "static initializer expression nesting limit of 128 exceeded"
+        );
+        return;
+    }
+
+    let output = std::process::Command::new(
+        std::env::current_exe().expect("current integration-test executable should exist"),
+    )
+    .args([
+        "--exact",
+        "tracked_scalar_output_aggregate_fields_bound_static_expression_walks",
+        "--nocapture",
+    ])
+    .env(CHILD_ENV, "1")
+    .env_remove("RUST_MIN_STACK")
+    .output()
+    .expect("child integration test should run");
+
+    assert!(
+        output.status.success(),
+        "deep static initializer validation must not abort the host: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_reject_mixed_pointee_unions() {
+    let program = r#"
+        union Mixed { int **integer; char **character; };
+        int main(void) { return 0; }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "union pointer output fields must use the same scalar pointee type at line 2, column 38"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_validate_nested_assignments_under_sizeof_calls() {
+    let program = r#"
+        struct Box { int **output; };
+        int data;
+        int **identity(int **output) { return output; }
+        int *source(void) {
+            int * volatile slot = 0;
+            struct Box box = {0};
+            return _Generic(*identity(box.output = &slot), int *: &data);
+        }
+        void *memcpy(void *destination, const void *source, unsigned long count);
+        int main(void) {
+            int destination;
+            return sizeof(memcpy(&destination, source(), 4));
+        }
+    "#;
+
+    assert_eq!(
+        interpret(program).unwrap_err().to_string(),
+        "function 'identity' parameter 'output' requires an int pointer slot address"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_support_scalar_field_reverse_indexes() {
+    let program = r#"
+        struct Box { int **output; };
+        struct Offset { int index; };
+        int main(void) {
+            struct Box boxes[1] = {{0}};
+            struct Offset offset = {0};
+            return offset.index[boxes].output == 0;
+        }
+    "#;
+
+    assert_eq!(interpret(program), Ok(1));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_bound_shared_metadata_graph_walks() {
+    let mut program = String::from("struct S0 { int value; };\n");
+    for depth in 1..=22 {
+        program.push_str(&format!(
+            "struct S{depth} {{ struct S{} left; struct S{} right; }};\n",
+            depth - 1,
+            depth - 1
+        ));
+    }
+    program.push_str("union U { struct S22 nested; int value; };\nint main(void) { return 0; }\n");
+
+    let started = std::time::Instant::now();
+    assert_eq!(interpret(&program), Ok(0));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "shared aggregate metadata graph traversal exceeded the linear-time budget"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_reject_union_overlap_with_non_output_storage() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for fields in [
+            format!("{ty} **output;\n    int scalar;"),
+            format!("int scalar;\n    {ty} **output;"),
+        ] {
+            let program =
+                format!("union U {{\n    {fields}\n}};\nint main(void) {{ return 0; }}\n");
+            assert_eq!(
+                interpret(&program).unwrap_err().to_string(),
+                "union pointer output fields cannot overlap non-output storage at line 3, column 5",
+                "{ty}: {fields}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_support_recursive_sizeof_call_dereference_analysis() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            r#"
+            struct Box {{ {ty} **output; }};
+            {ty} *source(void) {{
+                {ty} *slot = 0;
+                struct Box box = {{ &slot }};
+                int zero = 0;
+                zero = 1 / zero;
+                return *box.output;
+            }}
+            void *memcpy(void *destination, const void *source, unsigned long count);
+            int main(void) {{
+                char destination = 0;
+                return sizeof(memcpy(&destination, source(), 0)) == sizeof(source());
+            }}
+        "#
+        );
+        assert_eq!(interpret(&program), Ok(1), "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_preserve_function_return_validation_under_sizeof() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for function in [
+            format!(
+                "struct Box {{ {ty} **output; }}; {ty} **source(void) {{ {ty} *slot = 0; const struct Box box = {{ &slot }}; box.output = 0; return box.output; }}"
+            ),
+            format!(
+                "struct Box {{ {ty} **output; }}; {ty} **source(void) {{ const {ty} *slot = 0; struct Box box = {{ &slot }}; return box.output; }}"
+            ),
+        ] {
+            let evaluated = format!("{function} int main(void) {{ return source() != 0; }}");
+            let expected = interpret(&evaluated)
+                .expect_err("evaluated function must expose the invalid aggregate-field operation")
+                .to_string();
+            let unevaluated = format!("{function} int main(void) {{ return sizeof(source()); }}");
+            assert_eq!(
+                interpret(&unevaluated).map_err(|error| error.to_string()),
+                Err(expected),
+                "{ty}: {function}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_preserve_assignment_slot_validation_under_sizeof() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let function = format!(
+            "struct Box {{ {ty} **output; }}; {ty} **source(void) {{ {ty} * volatile slot = 0; struct Box box = {{ 0 }}; box.output = &slot; return box.output; }}"
+        );
+        let evaluated = format!("{function} int main(void) {{ return source() != 0; }}");
+        let expected = interpret(&evaluated)
+            .expect_err("evaluated assignment must reject the qualified pointer slot")
+            .to_string();
+        let unevaluated = format!("{function} int main(void) {{ return sizeof(source()); }}");
+        assert_eq!(
+            interpret(&unevaluated).map_err(|error| error.to_string()),
+            Err(expected),
+            "{ty}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_field_assignment_results_preserve_slot_validation_under_sizeof()
+{
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (setup, target) in [
+            ("struct Box box = { 0 };", "box.output"),
+            ("struct Box boxes[1] = { { 0 } };", "boxes[0].output"),
+            (
+                "struct Box box = { 0 }; struct Box *pointer = &box;",
+                "pointer->output",
+            ),
+            (
+                "struct Holder holder = { { { 0 } } };",
+                "holder.boxes[0].output",
+            ),
+            ("", "((struct Box){ 0 }).output"),
+        ] {
+            let function = format!(
+                "struct Box {{ {ty} **output; }}; struct Holder {{ struct Box boxes[1]; }}; {ty} **source(void) {{ {ty} * volatile slot = 0; {setup} return {target} = &slot; }}"
+            );
+            let evaluated = format!("{function} int main(void) {{ return source() != 0; }}");
+            let expected = interpret(&evaluated)
+                .expect_err("evaluated assignment result must reject the qualified pointer slot")
+                .to_string();
+            let unevaluated = format!("{function} int main(void) {{ return sizeof(source()); }}");
+            assert_eq!(
+                interpret(&unevaluated).map_err(|error| error.to_string()),
+                Err(expected),
+                "{ty}: {target}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_accept_local_enum_zero_under_sizeof() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            r#"
+            struct Box {{ {ty} **output; }};
+            {ty} *slot = 0;
+            {ty} **source(void) {{
+                enum {{ ZERO = 0 }};
+                struct Box box = {{ ZERO }};
+                return box.output;
+            }}
+            int main(void) {{
+                return sizeof(source()) == sizeof(&slot);
+            }}
+        "#
+        );
+        assert_eq!(interpret(&program), Ok(1), "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_field_assignments_accept_local_enum_zero_under_sizeof() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for zero in [
+            "ZERO",
+            "ZERO + 0",
+            "1 ? ZERO : 1",
+            "_Generic(ZERO, int: ZERO)",
+        ] {
+            let program = format!(
+                r#"
+                struct Box {{ {ty} **output; }};
+                {ty} *slot = 0;
+                {ty} **source(void) {{
+                    enum {{ ZERO = 0 }};
+                    struct Box box = {{ &slot }};
+                    return box.output = {zero};
+                }}
+                int main(void) {{
+                    return sizeof(source()) == sizeof(&slot);
+                }}
+            "#
+            );
+            assert_eq!(interpret(&program), Ok(1), "{ty}: {zero}");
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_preserve_indexed_returns_under_sizeof() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            r#"
+            struct Box {{ {ty} **output; }};
+            struct Holder {{ struct Box *boxes; }};
+            struct Offset {{ int index; }};
+            {ty} *slot = 0;
+            {ty} **forward(void) {{
+                struct Box boxes[1] = {{ {{ &slot }} }};
+                struct Holder holder = {{ boxes }};
+                return holder.boxes[0].output;
+            }}
+            {ty} **reverse(void) {{
+                struct Box boxes[1] = {{ {{ &slot }} }};
+                int index = 0;
+                return index[boxes].output;
+            }}
+            {ty} **field_reverse(void) {{
+                struct Box boxes[1] = {{ {{ &slot }} }};
+                struct Offset offset = {{ 0 }};
+                return offset.index[boxes].output;
+            }}
+            int main(void) {{
+                if (sizeof(forward()) != sizeof(&slot)) return 1;
+                if (sizeof(reverse()) != sizeof(&slot)) return 2;
+                if (sizeof(field_reverse()) != sizeof(&slot)) return 3;
+                return forward() != &slot || reverse() != &slot || field_reverse() != &slot;
+            }}
+        "#
+        );
+        assert_eq!(interpret(&program), Ok(0), "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_preserve_static_2d_declaration_lists_across_calls() {
+    let program = r#"
+        typedef int Matrix[2][2];
+        int touch(void) {
+            static int first[1][2] = {{1, 2}}, second[1][2] = {{3, 4}};
+            static Matrix left = {{1, 2}, {3, 4}}, right = {{5, 6}, {7, 8}};
+            first[0][0] += 1;
+            second[0][1] += 2;
+            left[1][0] += 3;
+            right[1][1] += 4;
+            return first[0][0] + second[0][1] + left[1][0] + right[1][1];
+        }
+        int main(void) { return touch() != 26 || touch() != 36; }
+    "#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_discarded_assignments_reject_volatile_slots() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (setup, target) in [
+            ("struct B b = {0};", "b.p"),
+            ("struct B b[1] = {{0}};", "b[0].p"),
+            ("struct B b = {0}; struct B *ptr = &b;", "ptr->p"),
+            ("struct H h = {{{0}}};", "h.a[0].p"),
+        ] {
+            for assignment in [
+                format!("({target} = &slot)"),
+                format!("({target} = &slot, 0)"),
+            ] {
+                let function = format!(
+                    "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; \
+                     {ty} **f(void) {{ {ty} *volatile slot = 0; {setup} {assignment}; return {target}; }}"
+                );
+                let expected =
+                    interpret(&format!("{function} int main(void) {{ return f() != 0; }}"))
+                        .expect_err("evaluated assignment must reject volatile slots")
+                        .to_string();
+                let actual = interpret(&format!(
+                    "{function} int main(void) {{ return sizeof(f()); }}"
+                ))
+                .map_err(|error| error.to_string());
+                if actual != Err(expected.clone()) {
+                    failures.push(format!(
+                        "{ty}: {assignment}: {actual:?}, expected {expected}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_indexed_assignments_accept_callee_enum_zero() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; \
+             int calls; {ty} **f(void) {{ enum {{ Z=0 }}; struct H h={{{{{{0}}}}}}; \
+             calls++; return h.a[0].p=Z; }} \
+             int main(void) {{ return sizeof(f()) == sizeof(void *) && calls == 0; }}"
+        );
+        let actual = interpret(&program);
+        if actual != Ok(1) {
+            failures.push(format!("{ty}: {actual:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_equality_uses_callee_lexical_types_and_enum_zero() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for operand in ["out", "1 ? out : pointer", "1 ? out : (const void *)0"] {
+            for comparison in [
+                format!("({operand}) == Z"),
+                format!("Z == ({operand})"),
+                format!("({operand}) != Z"),
+                format!("Z != ({operand})"),
+            ] {
+                let program = format!(
+                    "{ty} **output(void) {{ return 0; }} \
+                     int check(void) {{ enum {{ Z=0 }}; {ty} **out = output(); void *pointer=0; \
+                     return ({comparison}); }} \
+                     int main(void) {{ return sizeof(check()) == sizeof(int); }}"
+                );
+                assert_eq!(interpret(&program), Ok(1), "{ty}: {comparison}");
+            }
+        }
+    }
+}
+
+#[test]
+fn non_evaluating_callee_row_parameters_preserve_indexed_aggregate_pointer_returns() {
+    for parameter in ["int rows[][2]", "Row rows"] {
+        let program = format!(
+            "typedef int (*Row)[2]; struct B {{ int value; }}; struct B items[1] = {{{{7}}}}; \
+             struct B *select({parameter}) {{ Row local = rows; return &items[local[0][0]]; }} \
+             int main(void) {{ int rows[1][2] = {{{{0, 0}}}}; \
+             return sizeof(select(rows)->value) == sizeof(int) && select(rows)->value == 7; }}"
+        );
+        assert_eq!(interpret(&program), Ok(1), "{parameter}");
+    }
+}
+
+#[test]
+fn non_evaluating_callee_row_metadata_preserves_pointee_and_pointer_constness() {
+    for update in ["rows[0][0] = 1", "rows[0][0] += 1"] {
+        for (declaration, expected) in [
+            (
+                "const int (*rows)[2] = values;",
+                "cannot modify read-only array 'rows'",
+            ),
+            ("int (*const rows)[2] = values;", ""),
+        ] {
+            let function = format!(
+                "int values[1][2] = {{{{0}}}}; int f(void) {{ {declaration} return {update}; }}"
+            );
+            let program =
+                format!("{function} int main(void) {{ return sizeof(f()) == sizeof(int); }}");
+            let actual = interpret(&program).map_err(|error| error.to_string());
+            if expected.is_empty() {
+                assert_eq!(actual, Ok(1), "{declaration}: {update}");
+            } else {
+                assert_eq!(actual, Err(expected.to_string()), "{declaration}: {update}");
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_discarded_callee_updates() {
+    let mut failures = Vec::new();
+    for (ty, kind) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        for target in ["b.p", "items[0].p", "ptr->p", "h.a[0].p", "(0, b).p"] {
+            for update in [
+                format!("++{target}"),
+                format!("{target}++"),
+                format!("--{target}"),
+                format!("{target}--"),
+                format!("{target} += 1"),
+                format!("{target} -= 1"),
+            ] {
+                for discarded in [update.clone(), format!("({update}, 0)")] {
+                    for probe in [
+                        "sizeof(f()) == sizeof(void *)",
+                        "_Generic((f(), 0), default: 1)",
+                        "_Generic((f(), 0), default: 1) && 1",
+                    ] {
+                        let program = format!(
+                            "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; \
+                             {ty} **f(void) {{ {ty} *slot=0; struct B b={{&slot}}, items[1]={{{{&slot}}}}; \
+                             struct B *ptr=&b; struct H h={{{{{{&slot}}}}}}; \
+                             {discarded}; return b.p; }} int main(void) {{ return {probe}; }}"
+                        );
+                        let actual = interpret(&program).map_err(|error| error.to_string());
+                        let expected = format!(
+                            "{kind} pointer output parameter reassignment is not supported"
+                        );
+                        if actual != Err(expected) {
+                            failures.push(format!("{ty}: {discarded}: {probe}: {actual:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_discarded_callee_assignment_types() {
+    let mut failures = Vec::new();
+    for (ty, wrong) in [
+        ("char", "int"),
+        ("int", "_Bool"),
+        ("_Bool", "double"),
+        ("double", "char"),
+    ] {
+        for target in ["b.p", "items[0].p", "ptr->p", "h.a[0].p", "(0, b).p"] {
+            for value in ["&wrong", "1"] {
+                for discarded in [
+                    format!("({target} = {value})"),
+                    format!("({target} = {value}, 0)"),
+                ] {
+                    for probe in ["sizeof(f())", "_Generic((f(), 0), default: 1)"] {
+                        let program = format!(
+                            "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; \
+                             {ty} **f(void) {{ {wrong} *wrong=0; struct B b={{0}}, items[1]={{{{0}}}}; \
+                             struct B *ptr=&b; struct H h={{{{{{0}}}}}}; \
+                             {discarded}; return b.p; }} int main(void) {{ return {probe}; }}"
+                        );
+                        let actual = interpret(&program).map_err(|error| error.to_string());
+                        if actual != Err("incompatible assignment type".to_string()) {
+                            failures.push(format!("{ty}: {discarded}: {probe}: {actual:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_unevaluated_callee_static_initializers() {
+    let mut failures = Vec::new();
+    for (ty, kind) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        for initializer in [
+            "g()",
+            "source.p",
+            "null_source->p",
+            "0",
+            "(void *)0",
+            "ZERO",
+            "&slot",
+            "&local",
+        ] {
+            for (declaration, returned) in [
+                (format!("struct B b={{{initializer}}};"), "b.p"),
+                (format!("struct H h={{{{{{{initializer}}}}}}};"), "h.a[0].p"),
+                (
+                    format!("struct B items[1]={{{{{initializer}}}}};"),
+                    "items[0].p",
+                ),
+            ] {
+                for probe in [
+                    "sizeof(f()) == sizeof(void *)",
+                    "_Generic((f(), 0), default: 1)",
+                    "_Generic((f(), 0), default: 1) && 1",
+                ] {
+                    let program = format!(
+                        "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; \
+                         {ty} *slot=0; struct B source={{&slot}}; struct B *null_source=0; int calls; \
+                         {ty} **g(void) {{ calls++; int fail=1/0; return &slot; }} \
+                         {ty} **f(void) {{ enum {{ ZERO=0 }}; static {ty} *local=0; \
+                         static {declaration} calls++; return {returned}; }} \
+                         int main(void) {{ int result = {probe}; return result && calls == 0; }}"
+                    );
+                    let expected = if ["g()", "source.p", "null_source->p"].contains(&initializer) {
+                        Err(format!(
+                            "static {kind} pointer object initializer must be null or the address of a mutable {ty} pointer variable with static storage duration"
+                        ))
+                    } else {
+                        Ok(1)
+                    };
+                    let actual = interpret(&program).map_err(|error| error.to_string());
+                    if actual != expected {
+                        failures.push(format!(
+                            "{ty}: {declaration}: {probe}: {actual:?}, expected {expected:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_unevaluated_static_pointer_compound_literals() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (body, returned) in [
+            ("static struct B *b = &(struct B){ g() };", "b->p"),
+            ("static struct B *b = (0, &(struct B){ g() });", "b->p"),
+            ("static struct B *b = (struct B[]){ { g() } };", "b->p"),
+            (
+                "static struct P holder = { &(struct B){ g() } };",
+                "holder.b->p",
+            ),
+        ] {
+            let function = format!(
+                "struct B {{ {ty} **p; }}; struct P {{ struct B *b; }}; {ty} *slot=0; \
+                 {ty} **g(void) {{ return &slot; }} {ty} **f(void) {{ {body} return {returned}; }}"
+            );
+            let evaluated = format!("{function} int main(void) {{ return f() != 0; }}");
+            let expected = interpret(&evaluated)
+                .expect_err(
+                    "evaluated static pointer initializer must reject automatic compound storage",
+                )
+                .to_string();
+            for probe in ["sizeof(f())", "_Generic(f(), default: 0)"] {
+                let unevaluated = format!("{function} int main(void) {{ return {probe}; }}");
+                assert_eq!(
+                    interpret(&unevaluated).map_err(|error| error.to_string()),
+                    Err(expected.clone()),
+                    "{ty}: {body}: {probe}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_nested_sizeof_validates_discarded_operations() {
+    for (ty, wrong, kind) in [
+        ("char", "int", "character"),
+        ("int", "_Bool", "integer"),
+        ("_Bool", "double", "boolean"),
+        ("double", "char", "double"),
+    ] {
+        for (operation, expected) in [
+            (
+                "b.p++",
+                format!("{kind} pointer output parameter reassignment is not supported"),
+            ),
+            (
+                "--b.p",
+                format!("{kind} pointer output parameter reassignment is not supported"),
+            ),
+            (
+                "b.p += 1",
+                format!("{kind} pointer output parameter reassignment is not supported"),
+            ),
+            ("b.p = &wrong", "incompatible assignment type".to_string()),
+            ("b.p = 1", "incompatible assignment type".to_string()),
+            (
+                "b.p + 1",
+                format!("{kind} pointer output arithmetic is not supported"),
+            ),
+            (
+                "&b.p",
+                format!("taking the address of a {kind} pointer output object is not supported"),
+            ),
+            ("(struct B){1}", "incompatible assignment type".to_string()),
+        ] {
+            let program = format!(
+                "struct B {{ {ty} **p; }}; {ty} *slot=0; {ty} **f(void) {{ \
+                 {wrong} *wrong=0; struct B b={{&slot}}; sizeof({operation}); return b.p; }} \
+                 int main(void) {{ return sizeof(f()); }}"
+            );
+            assert_eq!(
+                interpret(&program).map_err(|error| error.to_string()),
+                Err(expected),
+                "{ty}: {operation}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_validate_nested_aggregate_expression_initializers() {
+    for (ty, wrong) in [
+        ("char", "int"),
+        ("int", "_Bool"),
+        ("_Bool", "double"),
+        ("double", "char"),
+    ] {
+        for value in ["1", "&wrong", "&qualified"] {
+            for initializer in [
+                format!("(struct B){{{value}}}"),
+                format!("(0, (struct B){{{value}}})"),
+                format!("1 ? (struct B){{{value}}} : (struct B){{0}}"),
+                format!("_Generic(0, int: (struct B){{{value}}})"),
+            ] {
+                let function = format!(
+                    "struct B {{ {ty} **p; }}; struct H {{ struct B b; }}; {ty} *slot=0; \
+                     {ty} **f(void) {{ {wrong} *wrong=0; {ty} *volatile qualified=0; \
+                     struct H h={{{initializer}}}; return h.b.p; }}"
+                );
+                let unevaluated = format!("{function} int main(void) {{ return sizeof(f()); }}");
+                let result = interpret(&unevaluated);
+                assert!(
+                    result.is_err(),
+                    "{ty}: invalid nested aggregate initializer {initializer} was accepted: {result:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_bound_nested_literal_validation() {
+    let depth = 22;
+    let mut program = String::from("struct S0 { int **output; };\n");
+    for level in 1..=depth {
+        program.push_str(&format!(
+            "struct S{level} {{ struct S{} nested; }};\n",
+            level - 1
+        ));
+    }
+    let mut initializer = String::from("(struct S0){0}");
+    for level in 1..=depth {
+        initializer = format!("(struct S{level}){{{initializer}}}");
+    }
+    program.push_str(&format!(
+        "int f(void) {{ struct S{depth} value = {initializer}; return 0; }}\n\
+         int main(void) {{ return sizeof(f()) == sizeof(int); }}\n"
+    ));
+
+    let started = std::time::Instant::now();
+    assert_eq!(interpret(&program), Ok(1));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "nested aggregate literal validation exceeded the linear-time budget"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_bound_static_nested_initializer_validation() {
+    let depth = 20;
+    let mut program = String::from("struct S0 { int **output; };\n");
+    for level in 1..=depth {
+        program.push_str(&format!(
+            "struct S{level} {{ struct S{} nested; }};\n",
+            level - 1
+        ));
+    }
+    let mut initializer = String::from("{0}");
+    for _ in 1..=depth {
+        initializer = format!("{{{initializer}}}");
+    }
+    program.push_str(&format!(
+        "int f(void) {{ static struct S{depth} value = {initializer}; (void)value; return 0; }}\n\
+         int main(void) {{ return sizeof(f()) == sizeof(int); }}\n"
+    ));
+
+    let started = std::time::Instant::now();
+    assert_eq!(interpret(&program), Ok(1));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "nested aggregate literal validation exceeded the linear-time budget"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_local_literal_requires_static_storage() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (body, returned) in [
+            ("static struct B *b = &(struct B){0};", "b->p"),
+            ("static struct B *b = (0, &(struct B){0});", "b->p"),
+            ("static struct B *b = (struct B[]){{0}};", "b->p"),
+            (
+                "static struct P holder = { &(struct B){0} };",
+                "holder.b->p",
+            ),
+        ] {
+            let function = format!(
+                "struct B {{ {ty} **p; }}; struct P {{ struct B *b; }}; \
+             {ty} **f(void) {{ {body} return {returned}; }}"
+            );
+            for probe in ["f() != 0", "sizeof(f())", "_Generic(f(), default: 0)"] {
+                let program = format!("{function} int main(void) {{ return {probe}; }}");
+                assert_eq!(
+                    interpret(&program).map_err(|error| error.to_string()),
+                    Err("static pointer initializer requires static storage duration".to_string()),
+                    "{ty}: {body}: {probe}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_null_constants_use_callee_aliases() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (declaration, value, expected) in [
+            ("", "sizeof(b.p)-sizeof(b.p)", Ok(1)),
+            (
+                "",
+                "sizeof(\"x\")-sizeof(void *)",
+                Err("incompatible assignment type".to_string()),
+            ),
+            (
+                "char a[1];",
+                "sizeof(a)-sizeof(int)",
+                Err("incompatible assignment type".to_string()),
+            ),
+        ] {
+            let program = format!(
+                "struct B {{ {ty} **p; }}; {ty} **f(void) {{ \
+                 {declaration} struct B b={{0}}; b.p={value}; return b.p; }} \
+                 int main(void) {{ int a=0; return sizeof(f()) == sizeof(void *); }}"
+            );
+            let actual = interpret(&program).map_err(|error| error.to_string());
+            if actual != expected {
+                failures.push(format!("{ty}: {value}: {actual:?}, expected {expected:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_indexed_const_precedes_index_errors() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for bad in [
+            "double bad(void) { calls++; return 0.0; }",
+            "int bad(void) { int **q=0; q++; return 0; }",
+        ] {
+            let function = format!(
+                "struct B {{ {ty} **p; }}; int calls; {bad} \
+                 {ty} **f(void) {{ const struct B b[1]={{{{0}}}}; b[bad()].p=0; return 0; }}"
+            );
+            for probe in ["f() != 0", "sizeof(f())", "_Generic(f(), default: 0)"] {
+                let program = format!("{function} int main(void) {{ return {probe}; }}");
+                assert_eq!(
+                    interpret(&program).map_err(|error| error.to_string()),
+                    Err("cannot assign to const variable 'b'".to_string()),
+                    "{ty}: {bad}: {probe}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_sizeof_literal_is_unevaluated() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (value, expected) in [
+            ("g()", Ok(1)),
+            ("1", Err("incompatible assignment type".to_string())),
+        ] {
+            let function = format!(
+                "struct B {{ {ty} **p; }}; int calls; \
+                 {ty} **g(void) {{ calls++; return 0; }} \
+                 {ty} **f(void) {{ static struct B b={{sizeof((struct B){{{value}}})-sizeof(struct B)}}; \
+                 return b.p; }}"
+            );
+            for probe in ["f() == 0", "sizeof(f()) == sizeof(void *)"] {
+                let program =
+                    format!("{function} int main(void) {{ return ({probe}) && calls == 0; }}");
+                assert_eq!(
+                    interpret(&program).map_err(|error| error.to_string()),
+                    expected,
+                    "{ty}: {value}: {probe}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_local_wrapped_array_storage() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for literal in ["(struct B[]){{0}}", "_Generic(0, int: (struct B[]){{0}})"] {
+            for (declaration, returned) in [
+                (format!("struct B *b={literal};"), "b->p"),
+                (format!("struct P h={{{literal}}};"), "h.b->p"),
+                (format!("struct H h={{{{{literal}}}}};"), "h.inner.b->p"),
+            ] {
+                let types = format!(
+                    "struct B {{ {ty} **p; }}; struct P {{ struct B *b; }}; struct H {{ struct P inner; }};"
+                );
+                for probe in [
+                    "f() == 0",
+                    "sizeof(f()) == sizeof(void *)",
+                    "_Generic((f(), 0), default: 1)",
+                ] {
+                    let local = format!(
+                        "{types} {ty} **f(void) {{ static {declaration} return {returned}; }} int main(void) {{ return {probe}; }}"
+                    );
+                    let actual = interpret(&local).map_err(|e| e.to_string());
+                    let expected = Err(
+                        "static pointer initializer requires static storage duration".to_string(),
+                    );
+                    if actual != expected {
+                        failures.push(format!("{ty}: {declaration}: {probe}: {actual:?}"));
+                    }
+                    let global = format!(
+                        "{types} static {declaration} {ty} **f(void) {{ return {returned}; }} int main(void) {{ return {probe}; }}"
+                    );
+                    let actual = interpret(&global);
+                    if actual != Ok(1) {
+                        failures.push(format!(
+                            "file scope: {ty}: {declaration}: {probe}: {actual:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_complete_callee_array() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for declaration in [
+            "struct B a[3]={{0}};",
+            "const struct B a[3]={{0}};",
+            "static struct B a[3]={{0}};",
+        ] {
+            for (value, valid) in [
+                ("sizeof(a)-sizeof(void *)", false),
+                ("sizeof(a)-3*sizeof(struct B)", true),
+            ] {
+                for probe in [
+                    "f() == 0",
+                    "sizeof(f()) == sizeof(void *)",
+                    "_Generic((f(), 0), default: 1)",
+                ] {
+                    for storage in ["local", "global"] {
+                        let program = format!(
+                            "struct B {{ {ty} **p; }}; {} {ty} **f(void) {{ {} struct B b={{0}}; b.p={value}; return b.p; }} int main(void) {{ return {probe}; }}",
+                            if storage == "global" { declaration } else { "" },
+                            if storage == "local" { declaration } else { "" }
+                        );
+                        let expected = if valid {
+                            Ok(1)
+                        } else if probe == "f() == 0" {
+                            Err(format!(
+                                "function 'pointer output field assignment' parameter 'output' requires a {ty} pointer slot address"
+                            ))
+                        } else {
+                            Err("incompatible assignment type".to_string())
+                        };
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        if actual != expected {
+                            failures.push(format!(
+                                "{ty}: {storage}: {declaration}: {value}: {probe}: {actual:?}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_generic_control_is_unevaluated() {
+    let mut failures = Vec::new();
+    for (ty, kind) in [
+        ("char", "character"),
+        ("int", "integer"),
+        ("_Bool", "boolean"),
+        ("double", "double"),
+    ] {
+        for controlling in ["&(struct B){0}", "(struct B){g()}"] {
+            for value in [
+                format!("_Generic({controlling}, default: 0)"),
+                format!("_Generic({controlling}, int: 1, default: 0)"),
+            ] {
+                for storage in ["local", "global"] {
+                    for probe in [
+                        "f() == 0",
+                        "sizeof(f()) == sizeof(void *)",
+                        "_Generic((f(), 0), default: 1)",
+                    ] {
+                        let decl = format!("static struct B b={{{value}}};");
+                        let program = format!(
+                            "struct B {{ {ty} **p; }}; int calls; {ty} **g(void) {{ calls++; return 0; }} {} {ty} **f(void) {{ {} return b.p; }} int main(void) {{ return ({probe}) && calls == 0; }}",
+                            if storage == "global" { &decl } else { "" },
+                            if storage == "local" { &decl } else { "" }
+                        );
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        let expected = if storage == "global" && controlling.contains("g()") {
+                            Err(format!(
+                                "static {kind} pointer object initializer must be null or the address of a mutable {ty} pointer variable with static storage duration"
+                            ))
+                        } else {
+                            Ok(1)
+                        };
+                        if actual != expected {
+                            failures.push(format!("{ty}: {storage}: {value}: {probe}: {actual:?}"));
+                        }
+                    }
+                }
+            }
+        }
+        for value in [
+            "_Generic(0, default: (struct B){g()})",
+            "_Generic(0, default: (struct B){1})",
+        ] {
+            let function = format!(
+                "struct B {{ {ty} **p; }}; {ty} **g(void) {{ return 0; }} {ty} **f(void) {{ static struct B b={value}; return b.p; }}"
+            );
+            let expected = interpret(&format!("{function} int main(void) {{ return f() == 0; }}"))
+                .expect_err("selected initializer must remain invalid")
+                .to_string();
+            for probe in ["sizeof(f())", "_Generic((f(), 0), default: 1)"] {
+                let actual = interpret(&format!("{function} int main(void) {{ return {probe}; }}"))
+                    .map_err(|e| e.to_string());
+                if actual != Err(expected.clone()) {
+                    failures.push(format!(
+                        "selected: {ty}: {value}: {probe}: {actual:?}, expected {expected}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_reverse_address_callee_reconstruction() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (element, initializer, address, field) in [
+            ("struct B", "{&slot}", "&i[boxes]", "p"),
+            ("struct H", "{{&slot}}", "&i[boxes].inner", "inner.p"),
+        ] {
+            for (qualifier, index, value) in [
+                ("", "int i=1", "0"),
+                ("const", "int i=1", "0"),
+                ("", "double i=1", "0"),
+            ] {
+                let function = format!(
+                    "struct B {{ {ty} **p; }}; struct H {{ struct B inner; }}; {ty} *slot=0; {ty} **f(void) {{ {qualifier} {element} boxes[2]={{{initializer},{initializer}}}; {index}; ({address})->p={value}; return boxes[0].{field} == &slot ? boxes[1].{field} : &slot; }}"
+                );
+                let evaluated =
+                    interpret(&format!("{function} int main(void) {{ return f() == 0; }}"))
+                        .map_err(|e| e.to_string());
+                let expected = if !qualifier.is_empty() {
+                    Err("cannot assign through pointer to const".to_string())
+                } else if index.starts_with("double") {
+                    Err("array subscript requires an integer value".to_string())
+                } else {
+                    Ok(1)
+                };
+                if evaluated != expected {
+                    failures.push(format!(
+                        "runtime: {ty}: {address}: {qualifier}: {index}: {evaluated:?}"
+                    ));
+                }
+                for probe in [
+                    "sizeof(f()) == sizeof(void *)",
+                    "_Generic((f(), 0), default: 1)",
+                ] {
+                    let actual =
+                        interpret(&format!("{function} int main(void) {{ return {probe}; }}"))
+                            .map_err(|e| e.to_string());
+                    if actual != expected {
+                        failures.push(format!(
+                            "{ty}: {address}: {qualifier}: {index}: {probe}: {actual:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_nested_const_precedes_index_errors() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (holder, declaration, is_const) in [
+            (
+                "struct A { struct B a[1]; }; struct H { struct A inner; };",
+                "const struct H h={{{{0}}}};",
+                true,
+            ),
+            (
+                "struct A { struct B a[1]; }; struct H { const struct A inner; };",
+                "struct H h={{{{0}}}};",
+                true,
+            ),
+            (
+                "struct A { const struct B a[1]; }; struct H { struct A inner; };",
+                "struct H h={{{{0}}}};",
+                true,
+            ),
+            (
+                "struct A { const struct B *a; }; struct H { struct A inner; };",
+                "const struct B b[1]={{0}}; struct H h={{b}};",
+                true,
+            ),
+            (
+                "struct A { struct B *const a; }; struct H { struct A inner; };",
+                "struct B b[1]={{0}}; const struct H h={{b}};",
+                false,
+            ),
+        ] {
+            for bad in [
+                "double bad(void) { calls++; return 0.0; }",
+                "int bad(void) { int **q=0; q++; return 0; }",
+            ] {
+                if !is_const && bad.starts_with("int") {
+                    continue;
+                }
+                let function = format!(
+                    "struct B {{ {ty} **p; }}; {holder} int calls; {bad} {ty} **f(void) {{ {declaration} h.inner.a[bad()].p=0; return 0; }}"
+                );
+                let expected =
+                    interpret(&format!("{function} int main(void) {{ return f() == 0; }}"))
+                        .expect_err("invalid assignment or index")
+                        .to_string();
+                if expected.contains("const") != is_const {
+                    failures.push(format!("runtime: {ty}: {holder}: {bad}: {expected}"));
+                }
+                for probe in ["sizeof(f())", "_Generic((f(), 0), default: 1)"] {
+                    let actual =
+                        interpret(&format!("{function} int main(void) {{ return {probe}; }}"))
+                            .map_err(|e| e.to_string());
+                    if actual != Err(expected.clone()) {
+                        failures.push(format!(
+                            "{ty}: {holder}: {bad}: {probe}: {actual:?}, expected {expected}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_generic_assignment_slot_qualification_matrix() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for qualifier in ["volatile", "const", "const volatile", ""] {
+            for (setup, target) in [
+                ("struct B b={0};", "b.p"),
+                ("struct B b[1]={{0}};", "b[0].p"),
+                ("struct B b={0}; struct B *ptr=&b;", "ptr->p"),
+                ("struct H h={{{0}}};", "h.a[0].p"),
+                ("", "((struct B){0}).p"),
+            ] {
+                for association in [
+                    format!("_Generic(0, int: ({target}=&slot), default: 0)"),
+                    format!("_Generic(0, int: 0, default: ({target}=&slot))"),
+                    format!("_Generic(0, int: ({target}=&slot, 0), default: 0)"),
+                    format!("_Generic(0, int: 0, default: ({target}=&slot, 0))"),
+                    format!(
+                        "_Generic(_Generic(0, int: ({target}=&slot, 0), default: 0), default: 0)"
+                    ),
+                    format!(
+                        "_Generic(_Generic(0, int: 0, default: ({target}=&slot, 0)), default: 0)"
+                    ),
+                ] {
+                    let function = format!(
+                        "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; int calls; \
+                         {ty} **f(void) {{ {ty} *{qualifier} slot=0; {setup} sizeof({association}); calls++; return 0; }}"
+                    );
+                    for probe in [
+                        "f() == 0",
+                        "sizeof(f()) == sizeof(void *)",
+                        "_Generic((f(), 0), default: 1)",
+                    ] {
+                        let expected = if qualifier.is_empty() {
+                            Ok(1)
+                        } else if qualifier.contains("const") && probe != "f() == 0" {
+                            Err("cannot determine generic selection pointer type".to_string())
+                        } else {
+                            Err(format!(
+                                "function '{}' parameter 'value' requires the address of a mutable {ty} pointer variable",
+                                if probe == "f() == 0" {
+                                    "generic association"
+                                } else {
+                                    "discarded pointer output expression"
+                                }
+                            ))
+                        };
+                        let program = format!(
+                            "{function} int main(void) {{ return ({probe}) && calls == {}; }}",
+                            i32::from(probe == "f() == 0")
+                        );
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        if actual != expected {
+                            failures.push(format!("{ty}: {qualifier}: {association}: {probe}: {actual:?}, expected {expected:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_field_and_row_object_matrix() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (setup, object, size) in [
+            ("struct H h;", "h.a", "3*sizeof(struct B)"),
+            (
+                "struct H h; struct H *ptr=&h;",
+                "ptr->a",
+                "3*sizeof(struct B)",
+            ),
+            ("struct H h[1];", "h[0].a", "3*sizeof(struct B)"),
+            ("struct H h;", "h.values", "3*sizeof(Elem)"),
+            ("struct H h;", "h.rows", "6*sizeof(Elem)"),
+            ("struct Outer outer;", "outer.h.a", "3*sizeof(struct B)"),
+            ("struct Outer outer;", "outer.hs[0].a", "3*sizeof(struct B)"),
+            ("", "((struct H){.a={{0}}}).a", "3*sizeof(struct B)"),
+            (
+                "Elem values[2][3]={{0}}; Elem (*row)[3]=values;",
+                "*row",
+                "3*sizeof(Elem)",
+            ),
+            (
+                "int values[2][3]={{0}}; Row row=values;",
+                "*row",
+                "3*sizeof(int)",
+            ),
+        ] {
+            for (subtract, valid) in [("sizeof(void *)", false), (size, true)] {
+                for probe in [
+                    "f() == 0",
+                    "sizeof(f()) == sizeof(void *)",
+                    "_Generic((f(), 0), default: 1)",
+                ] {
+                    let program = format!(
+                        "typedef {ty} Elem; typedef int (*Row)[3]; struct B {{ {ty} **p; }}; \
+                         struct H {{ struct B a[3]; Elem values[3]; Elem rows[2][3]; }}; \
+                         struct Outer {{ struct H h; struct H hs[1]; }}; int calls; \
+                         {ty} **f(void) {{ {setup} struct B b={{0}}; b.p=sizeof({object})-({subtract}); calls++; return b.p; }} \
+                         int main(void) {{ return ({probe}) && calls == {}; }}",
+                        i32::from(probe == "f() == 0")
+                    );
+                    let expected = if valid {
+                        Ok(1)
+                    } else if probe == "f() == 0" {
+                        Err(format!(
+                            "function 'pointer output field assignment' parameter 'output' requires a {ty} pointer slot address"
+                        ))
+                    } else {
+                        Err("incompatible assignment type".to_string())
+                    };
+                    let actual = interpret(&program).map_err(|e| e.to_string());
+                    if actual != expected {
+                        failures.push(format!(
+                            "{ty}: {object}: {subtract}: {probe}: {actual:?}, expected {expected:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_sizeof_checks_nested_literal_constraints() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct B {{ {ty} **p; }}; {ty} **g(void) {{ return 0; }} \
+             static struct B b={{sizeof((struct B){{g()}})-sizeof(struct B)}}; \
+             int main(void) {{ return b.p != 0; }}"
+        );
+        assert_eq!(
+            interpret(&program).map_err(|error| error.to_string()),
+            Err(format!(
+                "static {} pointer object initializer must be null or the address of a mutable {ty} pointer variable with static storage duration",
+                match ty {
+                    "char" => "character",
+                    "int" => "integer",
+                    "_Bool" => "boolean",
+                    "double" => "double",
+                    _ => unreachable!(),
+                }
+            )),
+            "{ty}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_sizeof_checks_array_literal_nested_constraints() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct B {{ {ty} **p; }}; {ty} **g(void) {{ return 0; }} \
+             static struct B b={{sizeof(({ty}[]){{sizeof((struct B){{g()}})}})-sizeof({ty})}}; \
+             int main(void) {{ return b.p != 0; }}"
+        );
+        assert_eq!(
+            interpret(&program).map_err(|error| error.to_string()),
+            Err(format!(
+                "static {} pointer object initializer must be null or the address of a mutable {ty} pointer variable with static storage duration",
+                match ty {
+                    "char" => "character",
+                    "int" => "integer",
+                    "_Bool" => "boolean",
+                    "double" => "double",
+                    _ => unreachable!(),
+                }
+            )),
+            "{ty}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_file_scope_scalar_sizeof_checks_literal_constraints() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct B {{ {ty} **p; }}; {ty} **g(void) {{ return 0; }} \
+             int marker=sizeof((struct B){{g()}}); \
+             int main(void) {{ return marker != sizeof(struct B); }}"
+        );
+        assert_eq!(
+            interpret(&program).map_err(|error| error.to_string()),
+            Err(format!(
+                "static {} pointer object initializer must be null or the address of a mutable {ty} pointer variable with static storage duration",
+                match ty {
+                    "char" => "character",
+                    "int" => "integer",
+                    "_Bool" => "boolean",
+                    "double" => "double",
+                    _ => unreachable!(),
+                }
+            )),
+            "{ty}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_file_scope_array_sizeof_checks_literal_constraints() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct B {{ {ty} **p; }}; {ty} **g(void) {{ return 0; }} \
+             int marker[1]={{sizeof((struct B){{g()}})}}; \
+             int main(void) {{ return marker[0] != sizeof(struct B); }}"
+        );
+        assert!(
+            interpret(&program).is_err(),
+            "file-scope array initializer accepted a nonconstant {ty} output-field compound literal"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_file_scope_array2d_sizeof_checks_literal_constraints() {
+    let program = "struct B { int **p; }; int **g(void) { return 0; } \
+                   int marker[1][1]={{sizeof((struct B){g()})}}; \
+                   int main(void) { return marker[0][0] != sizeof(struct B); }";
+    assert!(
+        interpret(program).is_err(),
+        "file-scope 2D-array initializer accepted a nonconstant output-field compound literal"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_file_scope_output_object_sizeof_checks_literal_constraints()
+ {
+    let program = "struct B { int **p; }; int **g(void) { return 0; } \
+                   int **marker=(void *)(sizeof((struct B){g()})-sizeof(struct B)); \
+                   int main(void) { return marker != 0; }";
+    assert!(
+        interpret(program).is_err(),
+        "file-scope output object accepted a nonconstant output-field compound literal"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_file_scope_array_field_sizeof_checks_literal_constraints()
+{
+    let program = "struct B { int **p; }; struct Marker { int values[1]; }; \
+                   int **g(void) { return 0; } \
+                   struct Marker marker={{sizeof((struct B){g()})}}; \
+                   int main(void) { return marker.values[0] != sizeof(struct B); }";
+    assert!(
+        interpret(program).is_err(),
+        "file-scope aggregate array field accepted a nonconstant output-field compound literal"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_file_scope_array2d_field_sizeof_checks_literal_constraints()
+ {
+    let program = "struct B { int **p; }; struct Marker { int values[1][1]; }; \
+                   int **g(void) { return 0; } \
+                   struct Marker marker={{{sizeof((struct B){g()})}}}; \
+                   int main(void) { return marker.values[0][0] != sizeof(struct B); }";
+    assert!(
+        interpret(program).is_err(),
+        "file-scope aggregate 2D-array field accepted a nonconstant output-field compound literal"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_conditional_uses_selected_literal_storage() {
+    let program = "struct B { int **p; }; struct B global = {0}; \
+         int main(void) { \
+             static struct B *selected = 1 ? &global : &(struct B){0}; \
+             return selected != &global; \
+         }";
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_conditional_callee_analysis_uses_selected_literal_storage()
+ {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct B {{ {ty} **p; }}; struct B global={{0}}; \
+             {ty} **f(void) {{ static struct B *b=1 ? &global : &(struct B){{0}}; return b->p; }} \
+             int main(void) {{ return sizeof(f()) != sizeof(void *); }}"
+        );
+        assert_eq!(interpret(&program), Ok(0), "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_conditional_unselected_literal_calls_are_not_static_effects()
+ {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct B {{ {ty} **p; }}; struct B global={{0}}; {ty} **g(void) {{ return 0; }} \
+             int main(void) {{ \
+                 static struct B *b=1 ? &global : &(struct B){{g()}}; \
+                 return b != &global; \
+             }}"
+        );
+        assert_eq!(interpret(&program), Ok(0), "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_constraints_keep_nested_sizeof_conditionals_unevaluated()
+ {
+    let program = "int g(void) { return 0; } \
+                   int n=sizeof(g() ? 1 : 2); \
+                   int main(void) { return n != sizeof(int); }";
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_conditional_validation_is_bounded() {
+    let mut initializer = "&box".to_string();
+    for _ in 0..28 {
+        initializer = format!("1 ? ({initializer}) : &box");
+    }
+    let program = format!(
+        "struct B {{ int **p; }}; struct B box={{0}}; \
+         struct B *selected={initializer}; \
+         int main(void) {{ return selected != &box; }}"
+    );
+    let started = std::time::Instant::now();
+    assert_eq!(interpret(&program), Ok(0));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "nested static conditional validation exceeded the bounded two-second test budget"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_generic_unselected_literals_check_constraints() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let program = format!(
+            "struct B {{ {ty} **p; }}; struct B global={{0}}; {ty} **g(void) {{ return 0; }} \
+             static struct B *b=_Generic(0, int: &global, default: &(struct B){{g()}}); \
+             int main(void) {{ return b->p != 0; }}"
+        );
+        assert_eq!(
+            interpret(&program).map_err(|error| error.to_string()),
+            Err(format!(
+                "static {} pointer object initializer must be null or the address of a mutable {ty} pointer variable with static storage duration",
+                match ty {
+                    "char" => "character",
+                    "int" => "integer",
+                    "_Bool" => "boolean",
+                    "double" => "double",
+                    _ => unreachable!(),
+                }
+            )),
+            "{ty}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_generic_constraint_walk_scales_linearly() {
+    fn run(depth: usize) -> std::time::Duration {
+        let mut value = "0".to_string();
+        for _ in 0..depth {
+            value = format!("_Generic(0, default: {value})");
+        }
+        let program = format!(
+            "struct B {{ int **p; }}; static struct B b={{{value}}}; \
+             int main(void) {{ return b.p != 0; }}"
+        );
+        let started = std::time::Instant::now();
+        assert_eq!(interpret(&program), Ok(0));
+        started.elapsed()
+    }
+
+    let shallow = run(12).max(std::time::Duration::from_millis(10));
+    let deep = run(20);
+    let allowed = (shallow * 16).max(std::time::Duration::from_millis(200));
+    assert!(
+        deep < allowed,
+        "static generic constraint walk scaled nonlinearly: depth 12={shallow:?}, depth 20={deep:?}, budget={allowed:?}"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_generic_selected_storage_matrix() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for literal in ["&(struct B){0}", "(struct B[]){{0}}", "(0, &(struct B){0})"] {
+            for selected in [true, false] {
+                let initializer = if selected {
+                    format!("_Generic(0, int: {literal}, default: &global)")
+                } else {
+                    format!("_Generic(0, int: &global, default: {literal})")
+                };
+                for (declaration, returned) in [
+                    (format!("static struct B *b={initializer};"), "b->p"),
+                    (format!("static struct P h={{{initializer}}};"), "h.b->p"),
+                ] {
+                    for probe in [
+                        "f() == 0",
+                        "sizeof(f()) == sizeof(void *)",
+                        "_Generic((f(), 0), default: 1)",
+                    ] {
+                        let program = format!(
+                            "struct B {{ {ty} **p; }}; struct P {{ struct B *b; }}; struct B global={{0}}; int calls; \
+                             {ty} **f(void) {{ {declaration} calls++; return {returned}; }} \
+                             int main(void) {{ return ({probe}) && calls == {}; }}",
+                            i32::from(probe == "f() == 0")
+                        );
+                        let expected = if selected {
+                            Err(
+                                "static pointer initializer requires static storage duration"
+                                    .to_string(),
+                            )
+                        } else {
+                            Ok(1)
+                        };
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        if actual != expected {
+                            failures.push(format!("{ty}: selected={selected}: {declaration}: {probe}: {actual:?}, expected {expected:?}"));
+                        }
+                    }
+                }
+            }
+        }
+        for association in ["&(struct B){1}", "(struct B[]){{1}}"] {
+            for probe in [
+                "f() == 0",
+                "sizeof(f()) == sizeof(void *)",
+                "_Generic((f(), 0), default: 1)",
+            ] {
+                let program = format!(
+                    "struct B {{ {ty} **p; }}; struct B global={{0}}; \
+                     {ty} **f(void) {{ static struct B *b=_Generic(0, int: &global, default: {association}); return b->p; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                let actual = interpret(&program).map_err(|e| e.to_string());
+                let expected = Err("incompatible assignment type".to_string());
+                if actual != expected {
+                    failures.push(format!(
+                        "semantic: {ty}: {association}: {probe}: {actual:?}, expected {expected:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_initializer_graph_scales_linearly() {
+    fn run(depth: usize, generic: bool) -> std::time::Duration {
+        let mut program = String::from("struct S0 { int value; };\n");
+        for level in 1..=depth {
+            program.push_str(&format!(
+                "struct S{level} {{ struct S{} left; struct S{} right; }};\n",
+                level - 1,
+                level - 1
+            ));
+        }
+        let initializer = if generic {
+            "_Generic(0, default: source)"
+        } else {
+            "source"
+        };
+        program.push_str(&format!(
+            "struct Bad {{ int **output; }}; struct Root {{ struct Bad invalid; struct S{depth} graph; }}; \
+             int **f(void) {{ struct Root source; static struct Root copy={initializer}; return 0; }} \
+             int main(void) {{ return sizeof(f()) == sizeof(void *); }}"
+        ));
+        let started = std::time::Instant::now();
+        // The graph is visited before the invalid field; rejection must still scale.
+        assert_eq!(
+            interpret(&program).map_err(|error| error.to_string()),
+            Err("static integer pointer object initializer must be null or the address of a mutable int pointer variable with static storage duration".to_string()),
+        );
+        started.elapsed()
+    }
+    for generic in [false, true] {
+        let shallow = run(12, generic);
+        let deep = run(22, generic);
+        let allowed = (shallow * 16).max(std::time::Duration::from_millis(200));
+        assert!(
+            deep < allowed,
+            "static initializer graph: generic={generic}, depth 12={shallow:?}, depth 22={deep:?}, budget={allowed:?}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_generic_and_indexed_objects() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (setup, object, size) in [
+            ("struct B a[3];", "a", "3*sizeof(struct B)"),
+            ("struct H h;", "h.a", "3*sizeof(struct B)"),
+            (
+                "Elem rows[2][3]; Elem (*row)[3]=rows;",
+                "*row",
+                "3*sizeof(Elem)",
+            ),
+            ("Elem rows[2][3];", "rows[0]", "3*sizeof(Elem)"),
+            (
+                "Elem rows[2][3]; Elem (*row)[3]=rows;",
+                "row[0]",
+                "3*sizeof(Elem)",
+            ),
+            ("struct H h;", "h.rows[0]", "3*sizeof(Elem)"),
+        ] {
+            for selected in [
+                object.to_string(),
+                format!("_Generic(0, int: {object}, default: 0)"),
+                format!("_Generic(0, double: 0, default: {object})"),
+            ] {
+                let selected_size = size;
+                for (subtract, valid) in [("sizeof(void *)", false), (selected_size, true)] {
+                    for probe in [
+                        "f() == 0",
+                        "sizeof(f()) == sizeof(void *)",
+                        "_Generic((f(), 0), default: 1)",
+                    ] {
+                        let program = format!(
+                            "typedef {ty} Elem; struct B {{ {ty} **p; }}; struct H {{ struct B a[3]; Elem rows[2][3]; }}; int calls; \
+                             {ty} **f(void) {{ {setup} struct B b={{0}}; b.p=sizeof({selected})-({subtract}); calls++; return b.p; }} \
+                             int main(void) {{ return ({probe}) && calls == {}; }}",
+                            i32::from(probe == "f() == 0")
+                        );
+                        let expected = if valid {
+                            Ok(1)
+                        } else if probe == "f() == 0" {
+                            Err(format!(
+                                "function 'pointer output field assignment' parameter 'output' requires a {ty} pointer slot address"
+                            ))
+                        } else {
+                            Err("incompatible assignment type".to_string())
+                        };
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        if actual != expected {
+                            failures.push(format!("{ty}: {selected}: subtract={subtract}: {probe}: {actual:?}, expected {expected:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_generic_unselected_slot_addresses() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for qualifier in ["volatile", "const", "restrict", "_Atomic", ""] {
+            for (setup, target) in [
+                ("struct B b={0};", "b.p"),
+                ("struct B b[1]={{0}};", "b[0].p"),
+                ("struct B b={0}; struct B *ptr=&b;", "ptr->p"),
+                ("struct H h={{{0}}};", "h.a[0].p"),
+                ("", "((struct B){0}).p"),
+            ] {
+                for value in [
+                    "_Generic(0, int: 0, default: &slot)",
+                    "_Generic(0, double: &slot, default: 0)",
+                    "_Generic(0, int: 0, default: (calls++, &slot))",
+                    "_Generic(0, int: 0, default: _Generic(0, default: &slot))",
+                ] {
+                    for probe in [
+                        "f() == 0",
+                        "sizeof(f()) == sizeof(void *)",
+                        "_Generic((f(), 0), default: 1)",
+                    ] {
+                        let program = format!(
+                            "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; int calls; \
+                             {ty} **f(void) {{ {ty} *{qualifier} slot=0; {setup} {target}={value}; calls++; return 0; }} \
+                             int main(void) {{ return ({probe}) && calls == {}; }}",
+                            i32::from(probe == "f() == 0")
+                        );
+                        // Qualified pointer-slot addresses have no supported generic pointer type,
+                        // including when their association is unselected.
+                        let expected = if qualifier.is_empty() {
+                            Ok(1)
+                        } else if ty == "double" && probe == "f() == 0" {
+                            Err("double pointers are not supported".to_string())
+                        } else {
+                            Err("cannot determine generic selection pointer type".to_string())
+                        };
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        if actual != expected {
+                            failures.push(format!("{ty}: {qualifier}: {target}={value}: {probe}: {actual:?}, expected {expected:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_lexical_row_size_overflow() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for row in ["*row", "row[0]"] {
+            for object in [row.to_string(), format!("_Generic(0, default: {row})")] {
+                let program = format!(
+                    "struct B {{ {ty} **p; }}; \
+                     {ty} **f(void) {{ int (*row)[4611686018427387904]=0; \
+                     struct B b={{0}}; b.p=sizeof({object})-sizeof(void *); return b.p; }} \
+                     int main(void) {{ return sizeof(f()) == sizeof(void *); }}"
+                );
+                let actual =
+                    std::panic::catch_unwind(|| interpret(&program).map_err(|e| e.to_string()));
+                if !matches!(&actual, Ok(Err(error)) if error == "two-dimensional array row size overflow")
+                {
+                    failures.push(format!("{ty}: {object}: {actual:?}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_generic_array_literals() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (literal, size) in [
+            ("(int[3]){0}", "3*sizeof(int)"),
+            ("(int[]){[2]=0}", "3*sizeof(int)"),
+            ("(struct B[3]){{0}}", "3*sizeof(struct B)"),
+            ("(struct B[]){[2]={0}}", "3*sizeof(struct B)"),
+        ] {
+            for object in [
+                literal.to_string(),
+                format!("_Generic(0, default: {literal})"),
+                format!("_Generic(0, int: _Generic(0, default: {literal}), default: 0)"),
+            ] {
+                for (subtract, valid) in [(size, true), ("sizeof(void *)", false)] {
+                    for probe in ["f() == 0", "sizeof(f()) == sizeof(void *)"] {
+                        let program = format!(
+                            "struct B {{ {ty} **p; }}; int calls; \
+                             {ty} **f(void) {{ struct B b={{0}}; b.p=sizeof({object})-({subtract}); calls++; return b.p; }} \
+                             int main(void) {{ return ({probe}) && calls == {}; }}",
+                            i32::from(probe == "f() == 0")
+                        );
+                        let expected = if valid {
+                            Ok(1)
+                        } else if probe == "f() == 0" {
+                            Err(format!(
+                                "function 'pointer output field assignment' parameter 'output' requires a {ty} pointer slot address"
+                            ))
+                        } else {
+                            Err("incompatible assignment type".to_string())
+                        };
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        if actual != expected {
+                            failures.push(format!("{ty}: {object}: {subtract}: {probe}: {actual:?}, expected {expected:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_generic_discarded_slot_addresses() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for qualifier in [
+            "volatile",
+            "const",
+            "const volatile",
+            "restrict",
+            "_Atomic",
+            "",
+        ] {
+            for (setup, target) in [
+                ("struct B b={0};", "b.p"),
+                ("struct B b[1]={{0}};", "b[0].p"),
+                ("struct B b={0}; struct B *ptr=&b;", "ptr->p"),
+                ("struct H h={{{0}}};", "h.a[0].p"),
+                ("", "((struct B){0}).p"),
+            ] {
+                for value in [
+                    "_Generic(0, default: (&slot, 0))",
+                    "_Generic(0, int: 0, default: (&slot, 0))",
+                    "_Generic(0, int: 0, default: (calls++, (&slot, 0)))",
+                    "_Generic(0, int: 0, default: _Generic(0, default: (&slot, 0)))",
+                ] {
+                    let program = format!(
+                        "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; int calls; \
+                         {ty} **f(void) {{ {ty} *{qualifier} slot=0; {setup} {target}={value}; calls++; return 0; }} \
+                         int main(void) {{ return sizeof(f()) == sizeof(void *) && calls == 0; }}"
+                    );
+                    let expected = if !qualifier.is_empty() {
+                        Err("cannot determine generic selection pointer type".to_string())
+                    } else if value == "_Generic(0, default: (&slot, 0))" {
+                        // The selected comma expression is not an integer constant expression.
+                        Err("incompatible assignment type".to_string())
+                    } else {
+                        Ok(1)
+                    };
+                    let actual = interpret(&program).map_err(|e| e.to_string());
+                    if actual != expected {
+                        failures.push(format!(
+                            "{ty}: {qualifier}: {target}={value}: {actual:?}, expected {expected:?}"
+                        ));
+                    }
+                }
+                // An unselected assignment must not replace the safe aggregate pointer.
+                let program = format!(
+                    "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; struct B global={{0}}; int calls; \
+                     {ty} **f(void) {{ struct B *safe=&global; \
+                     _Generic(0, int: 0, default: (safe=&(struct B){{0}}, calls++)); return safe->p; }} \
+                     int main(void) {{ return sizeof(f()) == sizeof(void *) && f() == 0 && calls == 0; }}"
+                );
+                assert_eq!(interpret(&program), Ok(1), "unselected effects: {ty}");
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_wrapped_assignment_returns_keep_context() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for qualifier in ["volatile", "restrict", "_Atomic"] {
+            for (setup, target) in [
+                ("struct B b={0};", "b.p"),
+                ("struct B b[1]={{0}};", "b[0].p"),
+                ("struct B b={0}; struct B *ptr=&b;", "ptr->p"),
+                ("struct H h={{{0}}};", "h.a[0].p"),
+                ("", "((struct B){0}).p"),
+            ] {
+                for returned in [
+                    format!("{target}=&slot"),
+                    format!("(0, {target}=&slot)"),
+                    format!("1 ? ({target}=&slot) : 0"),
+                    format!("0 ? 0 : ({target}=&slot)"),
+                    format!("_Generic(0, default: ({target}=&slot))"),
+                    format!("_Generic(0, int: (0, 1 ? ({target}=&slot) : 0), default: 0)"),
+                ] {
+                    let function = format!(
+                        "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; \
+                         {ty} **f(void) {{ {ty} *{qualifier} slot=0; {setup} return {returned}; }}"
+                    );
+                    for probe in ["f() == 0", "sizeof(f()) == sizeof(void *)"] {
+                        let program = format!("{function} int main(void) {{ return {probe}; }}");
+                        let expected = Err(format!(
+                            "function 'pointer output return' parameter 'value' requires the address of a mutable {ty} pointer variable"
+                        ));
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        if actual != expected {
+                            failures.push(format!("{ty}: {qualifier}: {returned}: {probe}: {actual:?}, expected {expected:?}"));
+                        }
+                    }
+                }
+                let program = format!(
+                    "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; \
+                     {ty} **f(void) {{ {ty} *{qualifier} slot=0; {setup} \
+                     return _Generic(0, int: ({target}=0), default: ({target}=&slot)); }} \
+                     int main(void) {{ return sizeof(f()); }}"
+                );
+                assert_eq!(
+                    interpret(&program).map_err(|e| e.to_string()),
+                    Err(format!(
+                        "function 'generic association' parameter 'value' requires the address of a mutable {ty} pointer variable"
+                    )),
+                    "unselected return association: {ty}: {qualifier}: {target}"
+                );
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_wrapped_assignment_returns_preserve_slot_diagnostics() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (setup, target) in [
+            ("struct B b={0};", "b.p"),
+            ("struct B b[1]={{0}};", "b[0].p"),
+            ("struct B b={0}; struct B *ptr=&b;", "ptr->p"),
+            ("struct H h={{{0}}};", "h.a[0].p"),
+            ("", "((struct B){0}).p"),
+        ] {
+            let assignment = format!("({target}=&slot)");
+            for returned in [
+                format!("(0, {assignment})"),
+                format!("(1 ? {assignment} : 0)"),
+                format!("(0 ? 0 : {assignment})"),
+                format!("_Generic(0, int: {assignment}, default: 0)"),
+                format!("_Generic(0, int: 0, default: {assignment})"),
+                format!("(0, _Generic(0, int: {assignment}, default: 0))"),
+                format!("_Generic(0, int: (0, {assignment}), default: 0)"),
+                format!("_Generic(0, int: ({assignment}, 0), default: 0)"),
+                format!("_Generic(0, int: 0, default: ({assignment}, 0))"),
+            ] {
+                let function = format!(
+                    "struct B {{ {ty} **p; }}; struct H {{ struct B a[1]; }}; \
+                     {ty} **f(void) {{ {ty} *volatile slot=0; {setup} return {returned}; }}"
+                );
+                let expected =
+                    interpret(&format!("{function} int main(void) {{ return f() == 0; }}"))
+                        .expect_err("evaluated return must reject the volatile slot")
+                        .to_string();
+                for probe in ["sizeof(f())", "_Generic((f(), 0), default: 1)"] {
+                    let actual =
+                        interpret(&format!("{function} int main(void) {{ return {probe}; }}"))
+                            .map_err(|error| error.to_string());
+                    if actual != Err(expected.clone()) {
+                        failures.push(format!(
+                            "{ty}: {returned}: {probe}: {actual:?}, expected {expected}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_checked_object_size_products() {
+    let mut failures = Vec::new();
+    for (setup, object) in [
+        ("", "int[4611686018427387904]"),
+        ("", "struct B[4611686018427387904]"),
+        ("struct H { int a[4611686018427387904]; };", "struct H"),
+        ("struct H { struct B a[4611686018427387904]; };", "struct H"),
+        ("struct H { int a[2][4611686018427387904]; };", "struct H"),
+        (
+            "struct H { int a[4611686018427387904]; }; struct H *h=0;",
+            "h->a",
+        ),
+        (
+            "struct H { struct B a[4611686018427387904]; }; struct H *h=0;",
+            "h->a",
+        ),
+        (
+            "struct H { int a[2][4611686018427387904]; }; struct H *h=0;",
+            "h->a",
+        ),
+        ("", "(int[4611686018427387904]){0}"),
+        ("", "(struct B[4611686018427387904]){{0}}"),
+    ] {
+        for probe in ["f() == 0", "sizeof(f()) == sizeof(void *)"] {
+            let program = format!(
+                "struct B {{ int **p; }}; {setup} int **f(void) {{ \
+                 struct B b={{0}}; b.p=sizeof({object}); return b.p; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            let actual =
+                std::panic::catch_unwind(|| interpret(&program).map_err(|e| e.to_string()));
+            if !matches!(&actual, Ok(Err(error)) if error == "array size overflow") {
+                failures.push(format!("{object}: {probe}: {actual:?}"));
+            }
+        }
+    }
+    // The parser's integer-constant-expression literal path also sizes without allocation.
+    for object in [
+        "(int[4611686018427387904]){0}",
+        "(struct B[4611686018427387904]){{0}}",
+    ] {
+        let program = format!(
+            "struct B {{ int **p; }}; enum {{ N=sizeof({object}) }}; int main(void) {{ return 0; }}"
+        );
+        let actual = std::panic::catch_unwind(|| interpret(&program).map_err(|e| e.to_string()));
+        if !matches!(&actual, Ok(Err(error)) if error == "array size overflow at line 1, column 33")
+        {
+            failures.push(format!("enum: {object}: {actual:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_nested_generic_validation_is_bounded() {
+    const CHILD: &str = "CUST_AGGREGATE_GENERIC_TIMING_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        for leaf in ["0", "&slot"] {
+            for selected in [true, false] {
+                for depth in [12, 24, 40] {
+                    let mut value = String::from(leaf);
+                    for _ in 0..depth {
+                        value = if selected {
+                            format!("_Generic(0, int: {value}, default: 0)")
+                        } else {
+                            format!("_Generic(0, int: 0, default: {value})")
+                        };
+                    }
+                    let program = format!(
+                        "struct B {{ int **p; }}; int *slot=0; int **f(void) {{ struct B b={{0}}; \
+                         b.p={value}; return b.p; }} int main(void) {{ return sizeof(f()) == sizeof(void *); }}"
+                    );
+                    let expected = if depth > 32 {
+                        Err("generic selection validation nesting limit of 32 exceeded".to_string())
+                    } else {
+                        Ok(1)
+                    };
+                    assert_eq!(
+                        interpret(&program).map_err(|e| e.to_string()),
+                        expected,
+                        "depth {depth}: {leaf}: selected={selected}"
+                    );
+                }
+            }
+        }
+        return;
+    }
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_aggregate_fields_nested_generic_validation_is_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .spawn()
+        .unwrap();
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(
+                status.success(),
+                "nested generic validation child failed: {status}"
+            );
+            break;
+        }
+        if started.elapsed() >= std::time::Duration::from_secs(3) {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("nested generic metadata validation exceeded its three-second budget");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_pointer_selected_objects() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for object in [
+            "p->rows",
+            "(*p).rows",
+            "(p+0)->rows",
+            "p->rows[0]",
+            "(*p).rows[0]",
+            "(p+0)->rows[0]",
+            "*rows",
+            "*(rows+1)",
+            "*(1+rows)",
+            "*(rows-0)",
+            "*row",
+            "*(row+1)",
+            "*(1+row)",
+            "*(row-0)",
+            "*p->rows",
+            "*(p->rows+1)",
+            "*(h.rows+1)",
+        ] {
+            let full_size = if ["p->rows", "(*p).rows", "(p+0)->rows"].contains(&object) {
+                "6*sizeof(Elem)"
+            } else {
+                "3*sizeof(Elem)"
+            };
+            for object in [
+                object.to_string(),
+                format!("_Generic(0, default: {object})"),
+            ] {
+                for valid in [true, false] {
+                    for probe in [
+                        "f() == 0",
+                        "sizeof(f()) == sizeof(void *)",
+                        "_Generic((f(), 0), default: 1)",
+                    ] {
+                        let program = format!(
+                            "typedef {ty} Elem; struct B {{ {ty} **p; }}; struct H {{ Elem rows[2][3]; }}; int calls; \
+                             {ty} **f(void) {{ struct H h; struct H *p=&h; Elem rows[2][3]; Elem (*row)[3]=rows; \
+                             struct B b={{0}}; b.p=sizeof({object})-({}); calls++; return b.p; }} \
+                             int main(void) {{ return ({probe}) && calls == {}; }}",
+                            if valid { full_size } else { "sizeof(Elem)" },
+                            i32::from(probe == "f() == 0")
+                        );
+                        let expected = if valid {
+                            Ok(1)
+                        } else if probe == "f() == 0" {
+                            Err(format!(
+                                "function 'pointer output field assignment' parameter 'output' requires a {ty} pointer slot address"
+                            ))
+                        } else {
+                            Err("incompatible assignment type".to_string())
+                        };
+                        let actual = interpret(&program).map_err(|e| e.to_string());
+                        if actual != expected {
+                            failures.push(format!("{ty}: {object}: valid={valid}: {probe}: {actual:?}, expected {expected:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_conditional_generic_slot_qualification() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for qualifier in [
+            "volatile",
+            "const",
+            "const volatile",
+            "restrict",
+            "_Atomic",
+            "",
+        ] {
+            for association in [
+                "1 ? &slot : 0",
+                "0 ? 0 : &slot",
+                "1 ? 0 : (&slot, 0)",
+                "1 ? 0 : (calls++, (&slot, 0))",
+                "1 ? 0 : _Generic(0, default: (&slot, 0))",
+            ] {
+                for probe in [
+                    "f() == 0",
+                    "sizeof(f()) == sizeof(void *)",
+                    "_Generic((f(), 0), default: 1)",
+                ] {
+                    let program = format!(
+                        "struct B {{ {ty} **p; }}; int calls; \
+                         {ty} **f(void) {{ {ty} *{qualifier} slot=0; struct B b={{0}}; \
+                         b.p=_Generic(0, int: 0, default: {association}); calls++; return b.p; }} \
+                         int main(void) {{ return ({probe}) && calls == {}; }}",
+                        i32::from(probe == "f() == 0")
+                    );
+                    let expected = if qualifier.is_empty() {
+                        Ok(1)
+                    } else if ty == "double" && probe == "f() == 0" {
+                        Err("double pointers are not supported".to_string())
+                    } else {
+                        Err("cannot determine generic selection pointer type".to_string())
+                    };
+                    let actual = interpret(&program).map_err(|e| e.to_string());
+                    if actual != expected {
+                        failures.push(format!("{ty}: {qualifier}: {association}: {probe}: {actual:?}, expected {expected:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_checked_aggregate_size_sum() {
+    for object in ["struct H", "h->a"] {
+        let program = format!(
+            "struct H {{ char a[4611686018427387904]; char b[4611686018427387904]; }}; \
+             struct Holder {{ struct H a; }}; struct Holder *h=0; \
+             int main(void) {{ return sizeof({object}); }}"
+        );
+        let actual = std::panic::catch_unwind(|| interpret(&program).map_err(|e| e.to_string()));
+        assert!(
+            matches!(&actual, Ok(Err(error)) if error == "array size overflow"),
+            "{object}: {actual:?}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_distinct_generic_assignment_work_limit() {
+    const CHILD: &str = "CUST_DISTINCT_GENERIC_ASSIGNMENT_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        for depth in [4, 18, 4] {
+            let mut value = String::from("0");
+            for index in 0..depth {
+                value = format!("_Generic(0, default: (b[{index}].p={value}))");
+            }
+            let program = format!(
+                "struct B {{ int **p; }}; int **f(void) {{ struct B b[{depth}]={{{{0}}}}; \
+                 return {value}; }} int main(void) {{ return sizeof(f())==sizeof(void *) ? 0:1; }}"
+            );
+            let expected = if depth == 18 {
+                Err("generic selection validation work limit of 1024 exceeded".to_string())
+            } else {
+                Ok(0)
+            };
+            assert_eq!(interpret(&program).map_err(|e| e.to_string()), expected);
+        }
+        return;
+    }
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_aggregate_fields_distinct_generic_assignment_work_limit",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .spawn()
+        .unwrap();
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(
+                status.success(),
+                "generic assignment child failed: {status}"
+            );
+            break;
+        }
+        if started.elapsed() >= std::time::Duration::from_secs(3) {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("distinct generic assignment validation exceeded three seconds");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_hidden_conditional_assignments_are_validated() {
+    let mut failures = Vec::new();
+    for (setup, assignment) in [
+        ("int *volatile slot=0;", "b.p=&slot"),
+        ("int *restrict slot=0;", "b.p=&slot"),
+        ("int *_Atomic slot=0;", "b.p=&slot"),
+        ("char *wrong=0;", "b.p=&wrong"),
+        ("", "b.p=1"),
+        ("const struct B c={0};", "c.p=0"),
+    ] {
+        for association in [
+            format!("1 ? 0 : ({assignment}, 0)"),
+            format!("0 ? ({assignment}, 0) : 0"),
+            format!("1 ? 0 : _Generic(0, default: ({assignment}, 0))"),
+        ] {
+            for probe in ["f()==0", "sizeof(f())==sizeof(void *)"] {
+                let program = format!(
+                    "struct B {{ int **p; }}; int **f(void) {{ {setup} struct B b={{0}}; \
+                     b.p=_Generic(0, int: 0, default: ({association})); return b.p; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(value) = interpret(&program) {
+                    failures.push(format!("accepted {setup} {association}: {probe}: {value}"));
+                }
+            }
+        }
+    }
+    for probe in ["f()==0", "sizeof(f())==sizeof(void *)"] {
+        let program = format!(
+            "struct B {{ int **p; }}; int calls; int **f(void) {{ int *slot=0; \
+             struct B b={{0}}; b.p=_Generic(0, int: 0, \
+             default: (1 ? 0 : (b.p=&slot, calls++, 0))); return b.p; }} \
+             int main(void) {{ return ({probe}) && calls==0; }}"
+        );
+        assert_eq!(interpret(&program), Ok(1), "{probe}");
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_lexical_null_constants_and_array_literals() {
+    let mut failures = Vec::new();
+    for (setup, value) in [
+        ("enum {Z=0};", "(void *)Z"),
+        ("int i=0;", "(void *)(sizeof((int[3]){i})-3*sizeof(int))"),
+        (
+            "int i=0;",
+            "(void *)(sizeof((int[3]){i+bump()})-3*sizeof(int))",
+        ),
+        (
+            "int i=0;",
+            "(void *)(sizeof((struct S[2]){{i}})-2*sizeof(struct S))",
+        ),
+    ] {
+        for probe in ["f()==0", "sizeof(f())==sizeof(void *)"] {
+            let program = format!(
+                "struct B {{ int **p; }}; struct S {{ int x; }}; int calls; \
+                 int bump(void) {{ calls++; return 0; }} int **f(void) {{ {setup} struct B b={{0}}; b.p={value}; \
+                 {} calls++; return b.p; }} int main(void) {{ return ({probe}) \
+                 && calls=={}; }}",
+                if setup.starts_with("int i") {
+                    "calls+=i;"
+                } else {
+                    ""
+                },
+                i32::from(probe == "f()==0")
+            );
+            let actual = interpret(&program);
+            if actual != Ok(1) {
+                failures.push(format!("{value}: {probe}: {actual:?}"));
+            }
+        }
+    }
+    // A callee-local variable must not inherit the caller/global enum's constant value.
+    for probe in ["f()==0", "sizeof(f())==sizeof(void *)"] {
+        let program = format!(
+            "enum {{ Z=0 }}; struct B {{ int **p; }}; int **f(void) {{ int Z=0; \
+             struct B b={{0}}; b.p=(void *)Z; return b.p; }} \
+             int main(void) {{ return {probe}; }}"
+        );
+        if interpret(&program).is_ok() {
+            failures.push(format!("accepted shadowed enum: {probe}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_pointer_embedded_array_sizeof() {
+    let mut failures = Vec::new();
+    for (field, size) in [
+        ("a", "3*sizeof(int)"),
+        ("ss", "2*sizeof(struct S)"),
+        ("rows", "6*sizeof(int)"),
+    ] {
+        let types = "struct B { int **p; }; struct S { int x; }; \
+                     struct H { int a[3]; struct S ss[2]; int rows[2][3]; }; \
+                     struct O { struct H hs[1]; };";
+        let setup = "struct O o; struct O *p=&o;";
+        let direct = format!(
+            "{types} int main(void) {{ {setup} return sizeof(p->hs[0].{field})=={size}; }}"
+        );
+        let actual = interpret(&direct);
+        if actual != Ok(1) {
+            failures.push(format!("direct {field}: {actual:?}"));
+        }
+        for probe in ["f()==0", "sizeof(f())==sizeof(void *)"] {
+            let program = format!(
+                "{types} int calls; int **f(void) {{ {setup} struct B b={{0}}; \
+                 b.p=(void *)(sizeof(p->hs[0].{field})-({size})); calls++; return b.p; }} \
+                 int main(void) {{ return ({probe}) && calls=={}; }}",
+                i32::from(probe == "f()==0")
+            );
+            let actual = interpret(&program);
+            if actual != Ok(1) {
+                failures.push(format!("{field}: {probe}: {actual:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_runtime_generic_assignment_work_limit() {
+    for kind in ["assign", "selectassign", "unselected"] {
+        for probe in ["f()==0", "sizeof(f())==sizeof(void *)"] {
+            for depth in [2, 4, 16, 24, 32, 2] {
+                let mut value = String::from("0");
+                for index in 0..depth {
+                    value = match kind {
+                        "assign" => format!("(b[{index}].p=_Generic(0,default:{value}))"),
+                        "selectassign" => format!("_Generic(0,default:(b[{index}].p={value}))"),
+                        _ => format!("_Generic(0,int:0,default:(b[{index}].p={value}))"),
+                    };
+                }
+                let program = format!(
+                    "struct B {{int **p;}}; int **f(void) {{struct B b[{depth}]={{{{0}}}}; \
+                     struct B result={{0}}; result.p={value}; return result.p;}} int main(void){{return {probe}?0:1;}}"
+                );
+                let path = std::env::temp_dir()
+                    .join(format!("cust-generic-budget-{}.c", std::process::id()));
+                std::fs::write(&path, program).unwrap();
+                let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_cust"))
+                    .arg(&path)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                let started = std::time::Instant::now();
+                loop {
+                    if child.try_wait().unwrap().is_some() {
+                        break;
+                    }
+                    if started.elapsed() >= std::time::Duration::from_secs(3) {
+                        child.kill().unwrap();
+                        child.wait().unwrap();
+                        panic!("{kind}: {depth}: {probe}: exceeded three seconds");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                let output = child.wait_with_output().unwrap();
+                std::fs::remove_file(path).unwrap();
+                if depth <= 4 {
+                    assert!(output.status.success(), "{kind}: {probe}: {output:?}");
+                    assert_eq!(output.stdout, b"0\n");
+                } else {
+                    assert_eq!(
+                        output.status.code(),
+                        Some(1),
+                        "{kind}: {depth}: {probe}: {output:?}"
+                    );
+                    assert_eq!(
+                        String::from_utf8(output.stderr).unwrap().trim(),
+                        "cust: generic selection validation work limit of 1024 exceeded",
+                        "{kind}: {depth}: {probe}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_hidden_assignment_matrix_final() {
+    let mut failures = Vec::new();
+    for target in [
+        "b.p",
+        "a[0].p",
+        "p->p",
+        "o.bs[0].p",
+        "q->bs[0].p",
+        "(*p).p",
+        "_Generic(0, default:b).p",
+        "o.b.p",
+    ] {
+        for (setup, value, qualifier) in [
+            ("int *volatile slot=0;", "&slot", ""),
+            ("int *const slot=0;", "&slot", ""),
+            ("int *restrict slot=0;", "&slot", ""),
+            ("int *_Atomic slot=0;", "&slot", ""),
+            ("char *wrong=0;", "&wrong", ""),
+            ("", "1", ""),
+            ("", "0", "const"),
+            ("int *slot=0;", "(calls++, &slot)", ""),
+        ] {
+            let assignment = format!("{target}={value}");
+            for wrapper in [
+                format!("1?0:({assignment},0)"),
+                format!("0?({assignment},0):0"),
+                format!("({assignment},0)"),
+                format!("_Generic(0,default:({assignment},0))"),
+                format!("1?0:_Generic(0,default:({assignment},0))"),
+                format!("0 && ({assignment},0)"),
+                format!("1 || ({assignment},0)"),
+                format!("sizeof({assignment})"),
+            ] {
+                for probe in ["f()==0", "sizeof(f())==sizeof(void*)"] {
+                    let source = format!(
+                        "struct B {{ int **p; }}; struct O {{struct B bs[1]; struct B b;}}; int calls; int **f(void){{{setup} {qualifier} struct B b={{0}},a[1]={{{{0}}}}; {qualifier} struct B *p=&b; {qualifier} struct O o={{{{{{0}}}},{{0}}}}; {qualifier} struct O *q=&o; struct B result={{0}}; result.p=_Generic(0,int:0,default:({wrapper}));return result.p;}}int main(void){{return ({probe}) && calls==0;}}"
+                    );
+                    let result = interpret(&source);
+                    let valid = setup == "int *slot=0;";
+                    if (valid && result != Ok(1)) || (!valid && result.is_ok()) {
+                        failures.push(format!(
+                            "{target}: {setup}: {qualifier}: {wrapper}: {probe}: {result:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_complete_nested_object_matrix_final() {
+    let mut failures = Vec::new();
+    for ty in ["int", "double", "char", "_Bool"] {
+        for root in [
+            "h",
+            "hs[0]",
+            "p->h",
+            "(*p).h",
+            "(p+0)->h",
+            "p->hs[0]",
+            "(*p).hs[0]",
+            "(p+0)->hs[0]",
+            "o.hs[0]",
+            "os[0].hs[0]",
+            "q[0].hs[0]",
+            "0[q].hs[0]",
+            "p->hp[0]",
+        ] {
+            for (suffix, count) in [(".rows", 6), (".rows[0]", 3), (".rows[1][2]", 1)] {
+                let object = format!("{root}{suffix}");
+                for object in [object.clone(), format!("_Generic(0, default: {object})")] {
+                    for probe in ["f()==0", "sizeof(f())==sizeof(void*)"] {
+                        let source = format!(
+                            "typedef {ty} E; struct H {{ E rows[2][3]; }}; struct O {{struct H h; struct H hs[1]; struct H *hp;}}; struct B {{{ty} **p;}}; int calls; {ty} **f(void) {{struct H h,hs[1]; struct O o,os[1]; struct O *p=&o,*q=os; struct B b={{0}}; b.p=(void*)(sizeof({object})-{count}*sizeof(E)); calls++; return b.p;}} int main(void){{return ({probe}) && calls=={};}}",
+                            i32::from(probe == "f()==0")
+                        );
+                        let result = interpret(&source);
+                        if result != Ok(1) {
+                            failures.push(format!("{ty}: {object}: {probe}: {result:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_generic_literal_lexical_aliases_final() {
+    for value in [
+        "(void *)(sizeof((int[3]){i})-3*sizeof(int))",
+        "(void *)(sizeof((int[3]){i+bump()})-3*sizeof(int))",
+        "(void *)(sizeof((struct S[2]){{i}})-2*sizeof(struct S))",
+    ] {
+        for probe in ["f()==0", "sizeof(f())==sizeof(void*)"] {
+            let source = format!(
+                "struct B {{int **p;}}; struct S {{int x;}}; int calls; int bump(void) {{calls++; return 0;}} int **f(void) {{int i=0; struct B b={{0}}; b.p=_Generic(0,default:{value}); return b.p;}} int main(void) {{return ({probe}) && calls==0;}}"
+            );
+            assert_eq!(interpret(&source), Ok(1), "{value}: {probe}");
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_ordinary_generic_runtime_final() {
+    for control in [false, true] {
+        let mut value = String::from("0");
+        for _ in 0..24 {
+            value = if control {
+                format!("_Generic({value},default:0)")
+            } else {
+                format!("_Generic(0,default:{value})")
+            };
+        }
+        for probe in ["f()==0", "sizeof(f())==sizeof(void*)"] {
+            let source = format!(
+                "struct B {{int **p;}};int **f(void){{struct B b={{0}};b.p={value};return b.p;}}int main(void){{return {probe};}}"
+            );
+            assert_eq!(interpret(&source), Ok(1), "control={control}: {probe}");
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_generic_selected_const_lvalues_remain_const() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (declaration, base) in [
+            ("const struct B a[1]={{0}};", "a[0]"),
+            ("const struct B a[1]={{0}}; const struct B *p=a;", "*p"),
+            ("const struct B a[1]={{0}}; const struct B *p=a;", "p[0]"),
+            ("struct H h={{{0}}}; const struct H *p=&h;", "p->a[0]"),
+            (
+                "struct H h={{{0}}}; const struct H *q=&h;",
+                "q->nested[0].b",
+            ),
+        ] {
+            let function = format!(
+                "struct B {{ {ty} **p; }}; struct A {{ struct B b; }}; \
+                 struct H {{ struct B a[1]; struct A nested[1]; }}; {ty} **f(void) {{ \
+                 {declaration} struct B result={{0}}; result.p=_Generic(0,int:0,default:(1?0:(_Generic(0,default:{base}).p=0,0))); return result.p; }}"
+            );
+            let runtime = interpret(&format!("{function} int main(void) {{ return f()==0; }}"))
+                .expect_err("runtime assignment must reject the const base")
+                .to_string();
+            assert!(
+                runtime.contains("const"),
+                "{declaration}: {base}: {runtime}"
+            );
+            let metadata = interpret(&format!(
+                "{function} int main(void) {{ return sizeof(f())==sizeof(void *); }}"
+            ))
+            .map_err(|error| error.to_string());
+            if metadata != Err(runtime.clone()) {
+                failures.push(format!(
+                    "{ty}: {declaration}: {base}: {metadata:?}, expected {runtime}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_addressed_generic_nested_const_is_preserved() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        let function = format!(
+            "struct B {{ {ty} **p; }}; struct O {{ struct B inner; }}; \
+             {ty} **f(void) {{ const struct O o={{{{0}}}}; \
+             (&_Generic(0, default:o).inner)->p=0; return 0; }}"
+        );
+        let runtime = interpret(&format!("{function} int main(void) {{ return f()==0; }}"))
+            .map_err(|error| error.to_string());
+        let metadata = interpret(&format!(
+            "{function} int main(void) {{ return sizeof(f())==sizeof(void *); }}"
+        ))
+        .map_err(|error| error.to_string());
+        if !runtime.as_ref().is_err_and(|error| error.contains("const"))
+            || !metadata
+                .as_ref()
+                .is_err_and(|error| error.contains("const"))
+        {
+            failures.push(format!("{ty}: runtime={runtime:?}, metadata={metadata:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_conditional_null_constants_use_lexical_scope() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for null in [
+            "Z",
+            "(void *)Z",
+            "_Generic(0,default:Z)",
+            "_Generic(0,default:(void *)Z)",
+            "sizeof(values)-2*sizeof(int)",
+        ] {
+            let function = format!(
+                "struct B {{ {ty} **p; }}; {ty} **f(void) {{ enum {{ Z=0 }}; int values[2]; \
+                 struct B b={{0}}; b.p=1?b.p:{null}; return b.p; }}"
+            );
+            for probe in ["f()==0", "sizeof(f())==sizeof(void *)"] {
+                let actual = interpret(&format!("{function} int main(void) {{ return {probe}; }}"));
+                if actual != Ok(1) {
+                    failures.push(format!("local: {ty}: {null}: {probe}: {actual:?}"));
+                }
+            }
+        }
+        for null in ["Z", "(void *)Z"] {
+            let function = format!(
+                "enum {{ Z=0 }}; struct B {{ {ty} **p; }}; {ty} **f(void) {{ int Z=1; \
+                 struct B b={{0}}; (b.p=1?b.p:{null}); return b.p; }}"
+            );
+            let runtime = interpret(&format!("{function} int main(void) {{ return f()==0; }}"))
+                .map_err(|error| error.to_string());
+            let metadata = interpret(&format!(
+                "{function} int main(void) {{ return sizeof(f())==sizeof(void *); }}"
+            ))
+            .map_err(|error| error.to_string());
+            if runtime.is_ok() || metadata.is_ok() {
+                failures.push(format!(
+                    "shadow: {ty}: {null}: runtime={runtime:?}, metadata={metadata:?}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_static_initializers_use_selected_generic_value() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for initializer in ["_Generic(0,default:&slot)", "_Generic(0,default:(void *)0)"] {
+            for storage in ["local", "global"] {
+                let declaration = format!("static struct B b={{{initializer}}};");
+                let function = format!(
+                    "struct B {{ {ty} **p; }}; static {ty} *slot; {} {ty} **f(void) {{ {} return b.p; }}",
+                    if storage == "global" {
+                        &declaration
+                    } else {
+                        ""
+                    },
+                    if storage == "local" { &declaration } else { "" },
+                );
+                let probes = if initializer.contains("&slot") {
+                    ["f()==&slot", "sizeof(f())==sizeof(void *)"]
+                } else {
+                    ["f()==0", "sizeof(f())==sizeof(void *)"]
+                };
+                for probe in probes {
+                    let actual =
+                        interpret(&format!("{function} int main(void) {{ return {probe}; }}"));
+                    if actual != Ok(1) {
+                        failures.push(format!(
+                            "{ty}: {initializer}: {storage}: {probe}: {actual:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_file_scope_row_pointer_literal_constraints() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for size in [
+            "sizeof((struct B){g()})",
+            "_Generic(0, int: sizeof(struct B), default: sizeof((struct B){g()}))",
+        ] {
+            let program = format!(
+                "struct B {{ {ty} **p; }}; {ty} **g(void) {{ return 0; }} \
+                 int (*p)[1] = (void *)({size} - sizeof(struct B)); \
+                 int main(void) {{ return 0; }}"
+            );
+            if interpret(&program).is_ok() {
+                failures.push(format!("{ty}: {size}"));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "accepted nonconstant literals: {failures:?}"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_file_scope_static_assert_literal_constraints() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for size in [
+            "sizeof((struct B){g()})",
+            "_Generic(0, int: sizeof(struct B), default: sizeof((struct B){g()}))",
+        ] {
+            let program = format!(
+                "struct B {{ {ty} **p; }}; {ty} **g(void) {{ return 0; }} \
+                 _Static_assert({size} > 0, \"size\"); \
+                 int main(void) {{ return 0; }}"
+            );
+            if interpret(&program).is_ok() {
+                failures.push(format!("{ty}: {size}"));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "accepted nonconstant literals: {failures:?}"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_folded_sizeof_declared_type_constraints() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for literal in ["(struct B){VALUE}", "(struct B[]){{VALUE}}"] {
+            for size in [
+                format!("sizeof({literal})"),
+                format!("_Generic(0, int: sizeof(struct B), default: sizeof({literal}))"),
+                format!("sizeof(_Generic(0, int: (struct B){{0}}, default: {literal}))"),
+            ] {
+                for declaration in [format!("enum {{ N = {size} }};"), format!("int a[{size}];")] {
+                    for block_scope in [false, true] {
+                        for value in ["1", "0", "ZERO"] {
+                            let declaration = declaration.replace("VALUE", value);
+                            let program = if block_scope {
+                                format!(
+                                    "struct B {{ {ty} **p; }}; int main(void) {{ enum {{ ZERO = 0 }}; {declaration} return 0; }}"
+                                )
+                            } else {
+                                format!(
+                                    "struct B {{ {ty} **p; }}; enum {{ ZERO = 0 }}; {declaration} int main(void) {{ return 0; }}"
+                                )
+                            };
+                            let result = interpret(&program).map_err(|error| error.to_string());
+                            let correct = if value == "1" {
+                                result.as_ref().is_err_and(|error| {
+                                    error.contains("incompatible assignment type")
+                                })
+                            } else {
+                                result == Ok(0)
+                            };
+                            if !correct {
+                                failures.push(format!("{program}: {result:?}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_folded_sizeof_nested_expression_constraints() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for declaration in [
+            "enum { N=sizeof((struct O){.b=1}) };",
+            "int values[sizeof((struct O){.b=1})];",
+            "enum { N=_Generic(0,int:sizeof(struct O),default:sizeof((struct O){.b=1})) };",
+        ] {
+            let program = format!(
+                "struct B {{ {ty} **p; }}; struct O {{ struct B b; }}; \
+                 {declaration} int main(void) {{ return 0; }}"
+            );
+            let result = interpret(&program).map_err(|error| error.to_string());
+            if !result
+                .as_ref()
+                .is_err_and(|error| error.contains("incompatible assignment type"))
+            {
+                failures.push(format!("{ty}: {declaration}: {result:?}"));
+            }
+        }
+        for (fields, initializer) in [
+            ("int marker; TYPE **p;", "1"),
+            ("TYPE **p;", "0"),
+            ("TYPE **p;", "(void *)0"),
+            ("TYPE **p;", "(struct B){0}"),
+        ] {
+            let fields = fields.replace("TYPE", ty);
+            let program = format!(
+                "struct B {{ {fields} }}; struct O {{ struct B b; }}; \
+                 enum {{ N=sizeof((struct O){{.b={initializer}}}) }}; \
+                 int main(void) {{ return N==sizeof(struct O) ? 0 : 1; }}"
+            );
+            let result = interpret(&program);
+            if result != Ok(0) {
+                failures.push(format!("positive {ty}: {initializer}: {result:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_folded_generic_output_initializers() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for value in ["g()", "(double *)0", "0", "ZERO", "(void *)0"] {
+            for literal in ["(struct B){VALUE}", "(struct B[]){{VALUE}}"] {
+                let literal = literal.replace("VALUE", value);
+                let size =
+                    format!("_Generic(0, int: sizeof(struct B), default: sizeof({literal}))");
+                for declaration in [format!("enum {{ N = {size} }};"), format!("int a[{size}];")] {
+                    for block_scope in [false, true] {
+                        let prefix = format!(
+                            "struct B {{ {ty} **p; }}; int g(void) {{ return 0; }} enum {{ ZERO = 0 }};"
+                        );
+                        let program = if block_scope {
+                            format!("{prefix} int main(void) {{ {declaration} return 0; }}")
+                        } else {
+                            format!("{prefix} {declaration} int main(void) {{ return 0; }}")
+                        };
+                        let result = interpret(&program);
+                        let valid = matches!(value, "0" | "ZERO" | "(void *)0");
+                        if if valid {
+                            result != Ok(0)
+                        } else {
+                            result.is_ok()
+                        } {
+                            failures.push(format!("{program}: {result:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_sizeof_callee_static_assert_constraints() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for value in ["1", "(double *)0", "0", "ZERO", "g()"] {
+            for literal in ["(struct B){VALUE}", "(struct B[]){{VALUE}}"] {
+                let literal = literal.replace("VALUE", value);
+                for condition in [
+                    format!("sizeof({literal}) > 0"),
+                    format!("_Generic(0, int: 1, default: sizeof({literal}))"),
+                ] {
+                    let program = format!(
+                        "struct B {{ {ty} **p; }}; int calls; \
+                         {ty} **g(void) {{ calls++; return 0; }} \
+                         int f(void) {{ enum {{ ZERO = 0 }}; \
+                         _Static_assert({condition}, \"size\"); calls++; return 0; }} \
+                         int main(void) {{ return sizeof(f()) == sizeof(int) && calls == 0; }}"
+                    );
+                    let result = interpret(&program);
+                    let valid = matches!(value, "0" | "ZERO" | "g()");
+                    if if valid {
+                        result != Ok(1)
+                    } else {
+                        result.is_ok()
+                    } {
+                        failures.push(format!("{program}: {result:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

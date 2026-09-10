@@ -4,6 +4,84 @@ Research notes for the autonomous agent. Add links, summaries, and decisions her
 
 Queue authority: only the newest v0.58.0 release note and the final unchecked status items define current order. Every older “next” statement is historical as of its dated research entry.
 
+## 2026-09-10 — Final TODO 417 review closure
+
+- Recursive operand traversal is not semantic operation validation. Parser-folded generic walks validate the assignment, const, address, increment, compound-update, arithmetic, comparison, and complement rule at each field operation after validating its children.
+- Aggregate metadata must retain the real direct/reverse subscript base, addressed/composed aggregate route, recursive const ancestry, output-slot qualification, and ordinary-pointer pointee qualification. Returning `None` from a metadata helper is not safe when it silently disables a constraint.
+- Brace-elision validation applies destination-aware scalar or pointer conversion after selecting the nested subobject. It rejects nonzero integers and const discard for ordinary pointer destinations while accepting null pointer constants including `(void *)0`.
+- Work counters cover folded association/field traversal, including repeated composed, reverse-subscript, and output-comparison routes, so untrusted source receives deterministic diagnostics rather than host resource exhaustion.
+- Strict GCC and Clang were used only as external rejection/acceptance oracles. All 135 focused tests, the generated parity suite, compiler oracle, and canonical local/rebuilt-Docker gates pass; bounded v0.59.0 release closure is next.
+
+## 2026-09-10 — Aggregate metadata architecture reconciliation
+
+- Addressed aggregate lvalue classification needs a compound result: nominal aggregate type alone cannot preserve recursive const through `_Generic`; combine selected-expression const ancestry with field-level qualification before admitting mutation.
+- Parser-folded aggregate compound literals must validate both nested brace lists and aggregate-valued expression initializers against declared field metadata. For an expression initializer, infer its nominal aggregate type, require an exact match, then recurse through the expression's aggregate literal constraints.
+- `_Generic` selection remains semantically validated across every association, but only the chosen association supplies the addressed lvalue's type and const ancestry.
+- Pointer-output null conversion must preserve qualification before stripping a `void *` cast, including through selected nested `_Generic` expressions in unevaluated callee arguments.
+- Parser-folded `_Generic` constraints apply to the controlling expression as well as every association even though none are evaluated. Reuse the bounded recursive validator so nested generic controls cannot evade output-field constraints or exceed the deterministic work budget.
+- Aggregate-valued expression initializers need exact nominal compatibility with their destination subobject before brace-elision fallback; otherwise a different aggregate whose first field happens to fit can bypass nested output-field checks.
+- Generic-association constraint walks must descend through aggregate field selections, addresses, assignments, compound updates, and increments; validating only the selected result type allows invalid unselected aggregate initializers to disappear during folding.
+- Brace elision does not excuse incompatible pointer-valued expressions: after following the destination's first nested subobject, apply that subobject's scalar/array/aggregate conversion rules rather than treating an unrecognized type as valid.
+- Selected `_Generic` expressions used as tracked-output null initializers must be resolved recursively before stripping a `void *` cast, preserving qualification and non-evaluation.
+- Seven architecture/review regressions plus nine fresh-review regressions prove these bypasses and the 115-test package filter is GREEN. GCC and Clang were used only as external C11 rejection oracles.
+
+## 2026-09-10 — Static constraint/effect and folded-`sizeof` closure
+
+- Static aggregate-output initialization needs explicit recursive modes: constraint-only traversal checks nested unevaluated literals and every generic association, while selected-storage traversal alone applies block-scope compound-literal storage-duration rules.
+- Statement coverage must include scalar, pointer, output, array, 2D array, row-pointer, aggregate, aggregate-array, and `_Static_assert` routes; otherwise a file-scope `sizeof((struct B){g()})` can bypass an otherwise correct expression walk.
+- Parser-folded `sizeof` in enum initializers and array lengths runs before the interpreter exists. Aggregate compound-literal checking there must pair resolved initializer fields with their declared field types before folding; expression-shape validation alone loses invalid `T **` initializers.
+- Parser-folded `_Generic` must validate every association before selecting one for a folded result; swallowing a failed association type check recreates the same constraint bypass for nonconstant calls and incompatible pointers.
+- Unevaluated callee analysis must process `_Static_assert` conditions like any other semantically checked expression while suppressing runtime effects.
+- Do not run the full metadata classifier over every evaluated file-scope initializer merely to find aggregate-output literals: it can replace the ordinary runtime call-depth contract with the smaller analysis limit. The dedicated static constraint walk is sufficient outside alias-backed metadata-only analysis.
+- Strict GCC and Clang C11 checks confirm that file-scope nonconstant output-field compound literals remain constrained beneath `sizeof` and unselected `_Generic` associations, while unselected block-scope automatic compound literals do not impose static storage-duration effects.
+- The small-stack nested-assignment overflow reproduced on clean baseline ordinary-pointer code and is not attributed to TODO 417; the existing deterministic generic work budget remains the package boundary.
+- Final-review architecture boundary: aggregate type classification and const ancestry must travel together through addressed `_Generic` selections; inferring only the selected nominal aggregate type is insufficient for lvalue mutation safety.
+- Parser aggregate initializer normalization can represent nested aggregate fields as either nested initializer lists or expression initializers. Any pre-fold validation must handle both representations against the declared nested field type rather than recursively visiting only `StructInitializer::Struct`.
+- No external web documentation was required; findings came from minimized Cust regressions and GCC/Clang used only as external test oracles.
+
+## 2026-09-09 — Final TODO 417 review/fix-cycle findings
+
+- Static initialization has two separate recursive obligations: constant-expression/type constraints apply inside unevaluated `sizeof` operands and every `_Generic` association, while storage-duration effects for compound literals apply only to the selected/evaluated initializer value. A single validate-all or selected-only walk is unsound; use explicit validation modes.
+- Strict GCC and Clang accept an unselected block-scope automatic aggregate literal in a static generic initializer, but reject a nested nonconstant call in an unselected aggregate-literal association and reject the same call inside a file-scope `sizeof` operand. These three reductions define the next RED/GREEN contract.
+- A deterministic work counter must cover runtime and metadata generic-selection validation, not only lexical classification. A depth limit alone does not prevent repeated selected-subtree work; the current bounded contract returns `generic selection validation work limit of 1024 exceeded`.
+- Checked size closure requires both multiplication and aggregate-field addition. Shared `checked_array_size(...)` plus checked aggregate sums prevent source-controlled lengths from panicking the Rust host.
+- Generic-selected lvalue type metadata is insufficient for writes: recursive const ancestry belongs to the selected storage route and must survive indexed, dereferenced, arrow, and aggregate-array wrappers.
+- Conditional null-pointer classification must use callee lexical enum/array aliases end to end. Consulting runtime constant scopes during `sizeof(call)` both loses local enumerators and can resurrect a shadowed global enumerator.
+- Static output-field initialization must validate the selected `_Generic` association for null/static-storage eligibility while still semantically checking unselected associations without applying their storage effects.
+- Full-object `sizeof` classification must distinguish an aggregate already selected from a pointer needing dereference. The verified generated matrix covers direct, arrow, nested embedded-array, row, scalar-element, generic, runtime, and `sizeof(call)` routes.
+- The default small test-thread parser stack can still overflow on deeply parenthesized recursive expressions, but the same shape reproduces on clean HEAD with ordinary pointer fields; it is not a TODO 417 regression. Likewise, the Clang compiler-oracle harness warning comes from an unchanged inline-enum fixture.
+- No external documentation was required. Findings come from exact Cust reductions and strict GCC/Clang C11 checks used only as external oracles.
+
+## 2026-09-09 — Tracked-output aggregate-field wrapper review findings
+
+- Repeated local-arm fixes are insufficient: lexical object typing, `sizeof` arithmetic, `_Generic` semantic validation, and selected-only effects need one bounded shared contract. Duplicated object-size products must use checked multiplication everywhere, not only direct row branches.
+- A generic nesting-depth limit does not bound CPU when the selected subtree is classified repeatedly. Memoize/deduplicate selected-association analysis or consume a deterministic work budget.
+- Runtime and metadata-only generic validation must traverse the same conditional/comma/nested-generic semantic operands while suppressing effects from unselected associations; otherwise one path accepts qualified slot addresses that the other rejects.
+- Strict GCC/Clang C11 checks exposed invalid positive tests: comma expressions are not lvalues, and automatic objects/compound literals are not constant static initializers. Use valid lvalue/static-storage forms or assert exact rejection rather than treating current Cust acceptance as conformance.
+- `_Generic` requires two distinct obligations in metadata-only callee analysis: validate the controlling expression and every association semantically without evaluation, but apply storage-duration effects only to the selected association. Traversing all associations with evaluated-static-lifetime rules rejects valid C11 initializers.
+- Pointer-output assignment validation must not stop at compatible result types. Selected and unselected `_Generic` association trees still need output-slot eligibility checks, including volatile/qualified pointer slots.
+- Lexical `sizeof` needs the complete object type before ordinary expression decay. Aggregate array fields and dereferenced row-pointer aliases must retain their lengths/row widths for `sizeof`, while value contexts continue to decay them.
+- Nested aggregate-literal static validation must avoid validating the same initializer both as a generic expression tree and again through its declared field type; duplicate recursion becomes exponential on nested source even when each individual walk is bounded.
+- Reverse aggregate-address and const-before-index checks must preserve the actual root/index route before inspecting potentially invalid indexes. Runtime and non-evaluating diagnostics should agree without executing index expressions.
+- The clean-HEAD comparison is essential for scope control: the skipped `q++`-inside-index-helper validation gap and deep whole-program AST-clone overflow reproduce on both HEAD and the feature diff, so they are follow-up backlog candidates rather than regressions caused by TODO 417.
+- No external documentation was required. These decisions come from exact Cust probes and strict GCC/Clang C11 syntax checks used only as external oracles.
+
+## 2026-09-08 — Tracked-output aggregate-field review findings
+
+- Final-review boundary: metadata-only static validation must descend through pointer declarations and aggregate compound literals stored in pointer fields; validating only direct aggregate declarations is insufficient.
+- Nested non-evaluation composes: a discarded invalid update inside an inner `sizeof` must still be semantically validated while applying no runtime effect, even when the containing function is itself analyzed beneath `sizeof(call)` or `_Generic`.
+- Aggregate initializer validation must recurse into aggregate-valued expression initializers, not only nested brace lists. Compound literals containing nonzero, wrong-pointee, or qualified-slot output initializers must be rejected identically in evaluated and unevaluated calls.
+- Completion decision: non-evaluating function analysis must validate discarded assignment and update statements, not only expressions that contribute to the return value. Otherwise `sizeof(f())` can hide unsupported `field++`, compound updates, wrong-pointee writes, or ineligible slot addresses in `f`.
+- Static aggregate output-field constraints must run against lexical metadata during unevaluated callee analysis. Runtime-only validation admits nonconstant function-call/field-read initializers beneath `sizeof(call)`; accept null constants and addresses of eligible static pointer slots without executing initializers.
+- Callee analysis needs lexical `Array2DPointer`, adjusted-row, enum-constant, and aggregate-pointer facts. Falling back to runtime state for an unevaluated local produces undefined-variable errors or loses pointer/const shape.
+- Apply recursive const ancestry before inspecting irrelevant RHS/index callee bodies so deterministic const diagnostics retain precedence and no side effects are implied.
+- Aggregate-type graph inspection must be cycle-safe even when Cust otherwise accepts recursive by-value declarations. A naïve recursive `contains_pointer_output_storage()` walk can turn untrusted source into a Rust host stack abort; carry a visited set or an explicit bounded worklist and return a recoverable diagnostic for unsupported recursive layouts.
+- Recursive const checking must follow aggregate-pointer index selection before descending through nested aggregate fields. Both evaluated writes and metadata-only `sizeof` validation need the same ancestry path; proving only the final output slot mutable is insufficient.
+- Direct union output-field overlap is only coherent when the runtime can synchronize every admitted member representation. Pointee-filtered updates leave mixed `T **` members stale; until a type-erased shared identity exists, mixed-pointee output unions need a targeted parser/type diagnostic.
+- Non-evaluating call validation must recursively inspect aggregate-field assignment results and validate the assigned slot address/qualification without evaluating either side. A top-level call return classifier is not enough when the invalid conversion is nested in the return expression.
+- Reverse aggregate subscripting must classify which operand is the aggregate pointer before validating the integer operand. Constant and variable scalar indexes, including scalar fields such as `o.i[array]`, must share runtime and `sizeof` routing.
+- No external documentation was required. Conclusions come from exact Cust probes and strict native-compiler comparisons used only as test oracles.
+
 ## 2026-09-07 — v0.58.0 release consistency
 
 - Candidate evaluation compared the queue-leading bounded v0.58.0 release, a first safe tracked scalar-output aggregate-field slice, parser-diagnostic expansion, and CLI/product work. Release closure was selected because it packages an already independently reviewed 74-test parser/runtime/type/lifetime surface with bounded consistency risk; aggregate fields are the concrete post-release task.

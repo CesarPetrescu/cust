@@ -878,7 +878,7 @@ enum PointerOutputAliasBoundary {
     NonScalar,
     DeeperPointer,
     Array,
-    AggregateField,
+    AggregateFieldArray,
     Cast,
 }
 
@@ -888,7 +888,7 @@ impl PointerOutputAliasBoundary {
         Self::NonScalar,
         Self::DeeperPointer,
         Self::Array,
-        Self::AggregateField,
+        Self::AggregateFieldArray,
         Self::Cast,
     ];
 
@@ -930,11 +930,11 @@ impl PointerOutputAliasBoundary {
                 format!("{aliases} int main(void) {{ {output_type} outputs[2]; return 0; }}"),
                 "pointer array declarations are not supported",
             ),
-            Self::AggregateField => (
+            Self::AggregateFieldArray => (
                 format!(
-                    "{aliases} struct Box {{ {output_type} output; }}; int main(void) {{ return 0; }}"
+                    "{aliases} struct Box {{ {output_type} output[2]; }}; int main(void) {{ return 0; }}"
                 ),
-                "pointer-to-pointer struct fields are not supported",
+                "pointer array struct fields are not supported",
             ),
             Self::Cast => (
                 format!("{aliases} int main(void) {{ return ({output_type})0 != 0; }}"),

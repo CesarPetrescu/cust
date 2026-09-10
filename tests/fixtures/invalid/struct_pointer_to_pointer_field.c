@@ -1,5 +1,5 @@
 struct Bad {
-    int **slot;
+    int ***slot;
 };
 
 int main(void) {

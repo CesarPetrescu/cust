@@ -4,9 +4,25 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Last reviewed 2026-09-07 after bounded v0.58.0 publication. Fresh independent `APPROVED` review, formatting, warning-denied Clippy, all 2,309 local and rebuilt-Docker tests, runtime output `10`, exact Cargo/CLI/Compose version checks, repeated empty pre-publication tag checks, and diff hygiene passed. Release commit `6d910f7498b437ee38b2d63481db8616cabb9fa1` reached exact `origin/main` before annotated tag object `d4c9cdcf0a07d1fd04df40e47d63c21bbbcae4af` was created and pushed; local and remote refs peel to that release commit. This status-only evidence update does not move or recreate the tag. A first safe tracked scalar-output aggregate-field slice is the single current task.
+None.
 
 ## Resolved this run
+
+### 2026-09-10 — TODO 417 tracked scalar-output aggregate fields
+
+- Failure: runtime and parser-folded metadata disagreed across addressed/composed/reverse aggregate bases, field operations, brace-elided pointer subobjects, qualification, output-only operators, and nested initialization; several unselected `_Generic` routes could hide constraints.
+- Root causes: aggregate type, const ancestry, pointer-slot qualification, pointee qualification, and actual subscript base did not travel together through every metadata helper, while child traversal was sometimes mistaken for validating the enclosing operation.
+- RED/GREEN: all-four-pointee regressions first reproduced each review finding before bounded shared metadata and operation validation were corrected. The final focused filter runs 135 tests and covers valid controls, exact diagnostics, non-evaluation, and deterministic work limits.
+- Closure: all 135 focused tests, all eight output-parity tests, the registered compiler oracle, formatting, strict Clippy, all 2,449 local and rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. No active blocker remains.
+
+### 2026-09-08 — Tracked scalar-output aggregate fields review closure
+
+- Task attempted: numbered TODO 417, the first safe tracked `char **` / `int **` / `_Bool **` / `double **` aggregate-field slice.
+- What failed: successive reviews found recursive aggregate graph overflow, indexed recursive-const bypass, mixed-pointee union identity, recursive `sizeof(call)` assignment validation, field reverse indexing, host-stack call analysis, lexical equality/void-pointer classification, callee row metadata, const-diagnostic precedence, invalid historical test setup, discarded output updates, and unevaluated static aggregate initializer gaps.
+- Root causes: recursive metadata and callee analysis lacked independent bounded states; several non-evaluating routes used runtime rather than lexical metadata; assignment/update validation did not uniformly run for discarded statements; and static output restrictions lived only in runtime initialization.
+- Closure: cycle-safe memoized graph inspection, dedicated call/comma bounds, lexical output/array/row/enum facts, recursive const-first validation, explicit union restrictions, shared discarded-expression checks, and metadata-only static initializer validation now keep classifier/evaluator behavior in parity without host addresses or evaluation.
+- RED/GREEN: review probes and focused tests first reproduced every defect. Five first-cycle and three second-cycle regressions cover volatile/wrong-pointee/nonzero discarded assignments, increment/decrement/compound updates, enum-zero indexed assignments, equality/void conditionals, row parameters, and direct/nested/array static initializers across all four pointees.
+- Verification checkpoint: 41 focused aggregate-field tests, all eight output-parity tests, the compiler oracle, formatting, strict Clippy, diff hygiene, and all 2,355 local tests pass. Final fresh review and canonical Docker verification remain pending before commit/push.
 
 ### 2026-09-05 — Complete tracked-output alias parser closure
 
