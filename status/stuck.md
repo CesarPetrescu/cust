@@ -8,6 +8,11 @@ None.
 
 ## Resolved this run
 
+### 2026-09-14 — v0.60.0 publication closure
+
+- Ordering: verified release commit `de129577da875e2d7a96d973430464e3e6fff7d4` reached exact `origin/main` before the annotated tag was created and explicitly pushed.
+- Verification: local and remote tag object `97be4e5d9a7f22aa432a91bd70c82f2d4729151c` peels exactly to the release commit. This later status-only evidence update does not move or recreate `v0.60.0`; no blocker remains.
+
 ### 2026-09-14 — Right-associated call timing-gate false positive
 
 - Failure: the first v0.60.0 canonical run stopped before Docker when the 8-term/32-term timing ratio measured 5.40x against a 5x ceiling.
