@@ -8,6 +8,13 @@ None.
 
 ## Resolved this run
 
+### 2026-09-14 — Right-associated call timing-gate false positive
+
+- Failure: the first v0.60.0 canonical run stopped before Docker when the 8-term/32-term timing ratio measured 5.40x against a 5x ceiling.
+- Investigation: release changes did not touch interpreter production code, and five consecutive focused reruns were stable and GREEN. The same unchanged test produced a one-off 5.90x whole-suite excursion during v0.59.0 preparation, then passed focused and complete reruns.
+- Root cause: a 5x limit leaves only 25% headroom over the 4x work increase expected from linear traversal, so parallel whole-suite scheduler contention can inflate one sample enough to fail without a semantic or complexity regression.
+- Closure: the ceiling is 8x, consistent with the repository's existing timing policy; this tolerates bounded run noise but still rejects quadratic 16x growth. Focused GREEN, fresh complete-diff `APPROVED` review, and the complete post-edit 2,596-test local/no-cache-rebuilt-Docker gate pass. No active blocker remains.
+
 ### 2026-09-14 — TODO 419 tracked scalar-output array review closure
 
 - Failure: inherited final review reproduced pre-guard recursive AST clones, deep scalar compound-literal traversal, and loss of block-static initializer/identity across direct switch jumps; final re-review also caught an evaluated aggregate-index diagnostic regression and a warning-denied `Vec<Box<Stmt>>` lint.

@@ -38,6 +38,8 @@ Validate every controlling expression and selected/unselected association exactl
 
 AST-address scalar-type caches must be isolated for cloned function bodies without destroying the caller's cache. Swap in a fresh cache for callee execution and restore the caller cache afterward; clearing globally at every call makes right-associated arithmetic with nested calls quadratic.
 
+The right-associated call timing regression compares 8 with 32 terms, so linear work already predicts a 4x increase. A 5x ceiling proved too narrow under whole-suite scheduler contention: release gates measured isolated 5.90x and 5.40x excursions while five focused reruns in each of the two release preparations remained stable and GREEN. Use an 8x ceiling, matching the established timing-test policy: it tolerates parallel-run noise over expected linear work while still rejecting the 16x growth predicted by quadratic traversal.
+
 Whole-suite review matters beyond focused double tests: generic type validation must classify explicit one-level pointer casts from 2D row expressions by the cast destination before rejecting raw 2D controls, and `sizeof` dereference must preserve exact pointer-to-void subscript diagnostics before recursively validating the parser's pointer-addition lowering.
 
 ## TDD and review regressions

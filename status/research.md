@@ -2,7 +2,17 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: bounded v0.59.0 is published and fixed one-dimensional tracked scalar-output arrays are complete; bounded v0.60.0 release closure defines current order. Every older “next” statement is historical as of its dated research entry.
+Queue authority: fixed one-dimensional tracked scalar-output arrays are complete; bounded v0.60.0 release preparation defines current order and tracked-output aggregate-field arrays follow publication. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-14 — v0.60.0 release consistency preparation
+
+- Candidate evaluation compared bounded v0.60.0 release closure, a first tracked-output aggregate-field array slice, parser-diagnostic expansion, and CLI/product work. The queue-leading release was selected because it packages the already reviewed 135-test fixed-array feature with bounded consistency risk; aggregate-field output arrays are the concrete post-publication task.
+- Version-first TDD changed only exact CLI and Compose expectations. Both failed against package/images `0.59.0` and pass after Cargo/lock plus both Compose image tags moved to `0.60.0`.
+- Executable target listing yields 2,596 tests: `interpreter` 2,444 + `fuzz_safety` 101 + `cli` 33 + `pointer_classifier_parity` 6 + `pointer_output_parity` 8 + `docker_compose` 2 + `c_compat` 1 + `repository_license` 1. The non-interpreter/fuzz subtotal is 51, independently reconciling the total.
+- Central release claims expose direct and alias-backed fixed output arrays, automatic/file-global/block-static storage, positional/designated/default initialization, indexed reassignment/forwarding and typed indirect access, owner/lifetime/const/static metadata, non-evaluating full-array/element sizing, and deterministic parser/callee analysis. Retained boundaries include decay, whole-array/element addresses, adjusted parameters, aggregate-field arrays, deeper/multidimensional forms, casts, arithmetic, ordering, and updates.
+- Repeated local and remote `v0.60.0` tag preflight is empty. Fresh complete-diff review returned `APPROVED`; the complete post-edit canonical gate passes formatting, strict Clippy, all 2,596 local tests, a no-cache image rebuild, all 2,596 rebuilt-Docker tests, runtime output `10`, exact local/runtime/test-image versions, and diff hygiene. The annotated tag remains reserved until exact remote-main acceptance.
+- No external semantic source was required. Release consistency follows executable tests, the new fixed-array reference note, and the established release process; native C remains an external warning-denied compiler oracle only.
+- The first v0.60.0 canonical run stopped before Docker because `right_associated_double_call_arithmetic_evaluation_is_bounded` measured 5.40x growth (110.226 ms at 8 terms, 595.638 ms at 32) against a 5x ceiling. The release diff contained no interpreter production change; five consecutive focused reruns were stable and GREEN, matching the same test's 5.90x one-off seen during v0.59.0 preparation. Since the input itself scales 4x, an 8x ceiling follows the established timing policy, admits bounded parallel scheduling variance, and still rejects quadratic 16x growth. The focused test and complete post-edit gate are GREEN after that threshold correction.
 
 ## 2026-09-14 — Tracked-output array final review closure
 

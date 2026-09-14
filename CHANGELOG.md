@@ -6,6 +6,27 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.60.0 — 2026-09-14
+
+### Language subset
+
+- Added fixed one-dimensional tracked scalar-output arrays (`T **outputs[N]`) for unqualified `char`, `int`, `_Bool`, and `double` pointees across automatic, file-global, and block-static objects. Direct, inner-pointer-alias, complete-output-alias, and chained-alias element spellings preserve indexed output-slot identity through positional/designated or zero/default initialization, reassignment, forwarding, typed indirect access, declaration lists, and switch scopes without exposing host addresses.
+- Preserved lexical owner/lifetime, pointee and slot qualification checks, static-storage rules, and full-array/element `sizeof` metadata. Qualified pointees and qualified tracked output slots remain rejected. Runtime, parser-folded integer-constant expressions, and non-evaluating callee summaries validate the complete expression tree under deterministic depth and work limits without executing `sizeof` operand side effects.
+
+### Diagnostics and tests
+
+- The focused interpreter filter covers 135 tests; generated alias-boundary parity covers direct/inner/complete/chained spellings, and a warning-free C11 compiler-oracle fixture is registered. Review-driven tests close pre-clone aggregate-index depth checks, deep scalar compound-literal analysis, direct-switch-jump static/enum semantics, and established evaluated aggregate-index diagnostics. The right-associated call timing guard now allows bounded parallel-run scheduling noise above its expected 4x linear growth while continuing to reject quadratic 16x growth.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.60.0`.
+- Reconciled an executable inventory of 2,596 tests: 2,444 interpreter tests, 101 deterministic fuzz-safety tests, 33 CLI tests, 6 pointer-classifier parity tests, 8 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Tracked scalar-output arrays remain fixed, one-dimensional object arrays over unqualified scalar pointees. Array decay, whole-array addresses, element addresses, adjusted array parameters, aggregate-field arrays, deeper pointers, multidimensional arrays, tracked-output casts, element arithmetic, relational ordering, compound updates, and increment/decrement remain unsupported or retain targeted diagnostics.
+
 ## v0.59.0 — 2026-09-10
 
 ### Language subset

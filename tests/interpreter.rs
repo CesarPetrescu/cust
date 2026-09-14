@@ -15851,7 +15851,7 @@ fn right_associated_double_call_arithmetic_evaluation_is_bounded() {
 
     let shallow = run_chain(8, 300);
     let deep = run_chain(32, 300);
-    let allowed = (shallow * 5).max(std::time::Duration::from_millis(30));
+    let allowed = (shallow * 8).max(std::time::Duration::from_millis(30));
     assert!(
         deep < allowed,
         "right-associated double call evaluation scaled nonlinearly: {shallow:?} at 8 terms and {deep:?} at 32 terms"
