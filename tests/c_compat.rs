@@ -153,6 +153,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/pointer_typedef_output_objects.c",
     "tests/fixtures/compat/valid/tracked_scalar_output_function_returns.c",
     "tests/fixtures/compat/valid/tracked_scalar_output_aggregate_fields.c",
+    "tests/fixtures/compat/valid/tracked_scalar_output_arrays.c",
     "tests/fixtures/compat/valid/void_pointer_objects.c",
     "tests/fixtures/compat/valid/void_pointer_return_functions.c",
     "tests/fixtures/compat/valid/bounded_memory_copy_function.c",

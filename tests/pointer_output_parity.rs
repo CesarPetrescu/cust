@@ -945,7 +945,7 @@ impl PointerOutputAliasBoundary {
 }
 
 #[test]
-fn generated_complete_output_alias_spellings_retain_unsupported_shape_boundaries() {
+fn generated_complete_output_alias_spellings_retain_shape_boundaries() {
     let mut spelling_counts = [0; PointerOutputSpelling::COUNT];
     let mut boundary_counts = [0; PointerOutputAliasBoundary::COUNT];
     let mut cell_counts = [0; PointerOutputSpelling::COUNT * PointerOutputAliasBoundary::COUNT];
@@ -958,6 +958,14 @@ fn generated_complete_output_alias_spellings_retain_unsupported_shape_boundaries
                 1;
 
             let (source, expected) = boundary.program(spelling);
+            if matches!(boundary, PointerOutputAliasBoundary::Array) {
+                assert_eq!(
+                    interpret(&source),
+                    Ok(0),
+                    "scalar pointer-output arrays are supported for {spelling:?}"
+                );
+                continue;
+            }
             let error = panic::catch_unwind(|| interpret(&source))
                 .unwrap_or_else(|payload| {
                     panic!(

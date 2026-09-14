@@ -1,6 +1,3324 @@
 use cust::{format_tokens, interpret};
 
 #[test]
+fn folded_generic_validations_accept_unselected_void_calls() {
+    let source = r#"
+void sink(int **pointer) { (void)pointer; }
+int **outputs[1];
+int main(void) {
+    enum { VALUE = _Generic(0, int: 1, default: sink(outputs[0])) };
+    return VALUE - 1;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_output_array_analysis_preserves_aggregate_array_field_updates() {
+    for update in ["s.a[0] = 1", "s.a[0] += 1", "s.a[0]++"] {
+        for probe in ["sizeof(f())", "_Generic(f(), int: 1, default: 0)"] {
+            let source = format!(
+                "struct S {{ int a[1]; }}; int f(void) {{ struct S s = {{{{0}}}}; \
+                 {update}; return 0; }} int main(void) {{ return {probe} == 0; }}"
+            );
+            assert!(
+                interpret(&source).is_ok(),
+                "{update} via {probe}: {:?}",
+                interpret(&source)
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_output_array_analysis_rejects_writes_through_const_pointer_fields() {
+    for update in ["s.a[0] = 1", "s.a[0] += 1", "s.a[0]++"] {
+        for probe in ["sizeof(f())", "_Generic(f(), int: 1, default: 0)"] {
+            let source = format!(
+                "struct S {{ const int *a; }}; int f(void) {{ int v[1] = {{0}}; \
+                 struct S s = {{v}}; {update}; return 0; }} \
+                 int main(void) {{ return {probe} == 0; }}"
+            );
+            let error = interpret(&source).expect_err(&source).to_string();
+            assert!(
+                error.contains("cannot assign through pointer to const"),
+                "unexpected error for {update} via {probe}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_output_array_analysis_allows_pointee_writes_through_const_pointer_slots() {
+    for declaration in [
+        "struct S { int *a; }; const struct S s = {v};",
+        "struct S { int * const a; }; struct S s = {v};",
+    ] {
+        for update in ["s.a[0] = 1", "s.a[0] += 1", "s.a[0]++"] {
+            for probe in ["sizeof(f())", "_Generic(f(), int: 1, default: 0)"] {
+                let source = format!(
+                    "int f(void) {{ int v[1] = {{0}}; {declaration} {update}; return 0; }} \
+                     int main(void) {{ return {probe} == 0; }}"
+                );
+                assert_eq!(interpret(&source), Ok(0), "{update} via {probe}: {source}");
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_output_array_analysis_rejects_aggregate_field_output_consumers() {
+    for (body, expected) in [
+        ("return s.o;", "pointer output"),
+        (
+            "int *pointer = s.o; return pointer != 0;",
+            "expected pointer expression",
+        ),
+    ] {
+        for probe in ["sizeof(f())", "_Generic(f(), int: 1, default: 0)"] {
+            let source = format!(
+                "struct S {{ int **o; }}; int **a[1]; int f(void) {{ \
+                 struct S s = {{a[0]}}; {body} }} int main(void) {{ return {probe} == 0; }}"
+            );
+            let error = interpret(&source).expect_err(&source).to_string();
+            assert!(
+                error.contains(expected),
+                "unexpected error for {body} via {probe}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_output_array_analysis_rejects_const_pointer_field_increment_routes() {
+    for setup in [
+        "struct S s = {v}; struct S *p = &s;",
+        "struct S p[1] = {{v}};",
+    ] {
+        for target in ["p->a[0]++", "p[0].a[0]++"] {
+            if (setup.contains("*p") && target.contains("p[0]"))
+                || (!setup.contains("*p") && target.contains("p->"))
+            {
+                continue;
+            }
+            for probe in ["sizeof(f())", "_Generic(f(), int: 1, default: 0)"] {
+                let source = format!(
+                    "struct S {{ const int *a; }}; int f(void) {{ int v[1] = {{0}}; \
+                     {setup} {target}; return 0; }} int main(void) {{ return {probe}; }}"
+                );
+                let error = interpret(&source).expect_err(&source).to_string();
+                assert!(
+                    error.contains("cannot assign through pointer to const"),
+                    "unexpected error for {target} via {probe}: {error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_output_array_analysis_rejects_const_reverse_subscript_writes() {
+    for update in ["s.i[v] = 1", "s.i[v] += 1", "s.i[v]++"] {
+        for probe in ["sizeof(f())", "_Generic(f(), int: 1, default: 0)"] {
+            let source = format!(
+                "struct S {{ int i; }}; int f(void) {{ const int v[1] = {{0}}; \
+                 struct S s = {{0}}; {update}; return 0; }} int main(void) {{ return {probe}; }}"
+            );
+            let error = interpret(&source).expect_err(&source).to_string();
+            assert!(
+                error.contains("const") || error.contains("read-only"),
+                "unexpected error for {update} via {probe}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_output_array_analysis_accepts_aggregate_element_array_field_updates() {
+    for update in ["s[0].a[0] = 1", "s[0].a[0] += 1", "s[0].a[0]++"] {
+        for probe in ["sizeof(f())", "_Generic(f(), int: 1, default: 0)"] {
+            let source = format!(
+                "struct S {{ int a[1]; }}; int f(void) {{ struct S s[1] = {{{{{{0}}}}}}; \
+                 {update}; return 0; }} int main(void) {{ return {probe} == 0; }}"
+            );
+            assert_eq!(interpret(&source), Ok(0), "{update} via {probe}: {source}");
+        }
+    }
+}
+
+#[test]
+fn tracked_output_array_analysis_rejects_pointer_slot_address_consumers() {
+    for body in ["return &p;", "int *q = &p; return q != 0;"] {
+        for probe in ["sizeof(f())", "_Generic(f(), int: 1, default: 0)"] {
+            let source = format!(
+                "int f(void) {{ int *p = 0; int **a[1] = {{&p}}; {body} }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            assert!(
+                interpret(&source).is_err(),
+                "address consumer should fail for {body} via {probe}"
+            );
+        }
+    }
+}
+
+#[test]
+fn folded_generic_validations_reject_unselected_output_array_assignments() {
+    let source = r#"
+int main(void) {
+    int **outputs[1];
+    enum { VALUE = _Generic(0, int: 1, default: (outputs[0] = 1)) };
+    return VALUE - 1;
+}
+"#;
+
+    let error = interpret(source).expect_err("unselected association constraints must be valid");
+    assert!(
+        error.to_string().contains("integer pointer output"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_direct_assignment_results_validate_unevaluated_rhs_types() {
+    let mut failures = Vec::new();
+    for expression in [
+        "sizeof(values[0][0] = outputs[0])",
+        "_Generic((values[0][0] = outputs[0]), default: 0)",
+    ] {
+        let source = format!(
+            "int main(void) {{ int **outputs[1] = {{0}}; double values[1][1]; \
+             return {expression}; }}"
+        );
+        if let Ok(value) = interpret(&source) {
+            failures.push(format!("accepted {value}: {source}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_direct_compound_updates_validate_unevaluated_rhs_types() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for update in [
+            "(double){0} += outputs[0]",
+            "double_values[0] += outputs[0]",
+        ] {
+            let source = format!(
+                "int main(void) {{ {ty} **outputs[1] = {{0}}; double double_values[1]; \
+                 return sizeof({update}); }}"
+            );
+            if let Ok(value) = interpret(&source) {
+                failures.push(format!("{ty}: {update}: accepted {value}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_direct_type_queries_reject_decay_and_whole_array_addresses() {
+    let mut failures = Vec::new();
+    for expression in [
+        "sizeof((outputs, 0))",
+        "_Generic((outputs, 0), default: 0)",
+        "sizeof(&outputs)",
+        "_Generic(&outputs, default: 0)",
+    ] {
+        let source = format!("int main(void) {{ int **outputs[1] = {{0}}; return {expression}; }}");
+        if let Ok(value) = interpret(&source) {
+            failures.push(format!("accepted {value}: {source}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_pointer_initializers_validate_discarded_comma_operands() {
+    let mut failures = Vec::new();
+    for discarded in ["outputs", "(void)&outputs[0]"] {
+        for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+            let source = format!(
+                "int f(void) {{ int **outputs[1] = {{0}}; \
+                 int *pointer = ({discarded}, (int *)0); return pointer != 0; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            if let Ok(value) = interpret(&source) {
+                failures.push(format!("{discarded} via {probe}: accepted {value}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_compound_update_consumers_validate_unevaluated() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for update in ["(double[1]){0}[0] += outputs[0]", "*pointer += outputs[0]"] {
+            for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+                let source = format!(
+                    "int f(void) {{ {ty} **outputs[1] = {{0}}; double value = 0; \
+                     double *pointer = &value; {update}; return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(value) = interpret(&source) {
+                    failures.push(format!("{ty}: {update} via {probe}: accepted {value}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_returning_calls_validate_unevaluated_consumers() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for body in [
+            "return get();",
+            "double values[1]; values[0] = get(); return 0;",
+            "double values[1][1]; values[0][0] = get(); return 0;",
+            "double *pointer = get(); return 0;",
+            "return consume(get());",
+        ] {
+            for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+                let source = format!(
+                    "{ty} **outputs[1] = {{0}}; {ty} **get(void) {{ return outputs[0]; }} \
+                     double consume(double value) {{ return value; }} \
+                     int f(void) {{ {body} }} int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(value) = interpret(&source) {
+                    failures.push(format!("{ty}: {body} via {probe}: accepted {value}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_returning_calls_reject_aggregate_field_compound_updates() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for probe in ["sizeof(f())", "_Generic(f(), int: 0, default: 1)"] {
+            let source = format!(
+                "struct S {{ double value; }}; {ty} **outputs[1]; \
+                 {ty} **get(void) {{ return outputs[0]; }} \
+                 int f(void) {{ struct S s = {{0}}; s.value += get(); return 0; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            match interpret(&source).map_err(|error| error.to_string()) {
+                Err(error) if error == "compound assignment requires scalar operands" => {}
+                result => failures.push(format!("{ty} via {probe}: {result:?}")),
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_returning_calls_reject_aggregate_2d_field_assignments() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for probe in ["sizeof(f())", "_Generic(f(), int: 0, default: 1)"] {
+            let source = format!(
+                "struct S {{ double values[1][1]; }}; {ty} **outputs[1]; \
+                 {ty} **get(void) {{ return outputs[0]; }} \
+                 int f(void) {{ struct S s = {{0}}; s.values[0][0] = get(); return 0; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            match interpret(&source).map_err(|error| error.to_string()) {
+                Err(error) if error == "cannot assign pointer expression to double value" => {}
+                result => failures.push(format!("{ty} via {probe}: {result:?}")),
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_returning_calls_preserve_const_aggregate_destinations() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (body, expected) in [
+            (
+                "struct S { _Bool a[1][1]; }; const struct S s = {{{0}}}; s.a[0][0] = get();",
+                "cannot assign to const variable 's'",
+            ),
+            (
+                "struct S { const _Bool a[1]; }; struct S s[1] = {{{0}}}; s[0].a[0] = get();",
+                "cannot modify read-only array 'a'",
+            ),
+        ] {
+            for probe in ["sizeof(f())", "_Generic(f(), int: 0, default: 1)"] {
+                let source = format!(
+                    "{ty} **outputs[1]; {ty} **get(void) {{ return outputs[0]; }} \
+                     int f(void) {{ {body} return 0; }} int main(void) {{ return {probe}; }}"
+                );
+                match interpret(&source).map_err(|error| error.to_string()) {
+                    Err(error) if error == expected => {}
+                    result => failures.push(format!("{ty}: {body} via {probe}: {result:?}")),
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_const_aggregate_elements_preserve_pointee_qualification() {
+    let mut failures = Vec::new();
+    for slot in ["int *", "int *const", "const int *", "const int *const"] {
+        for update in ["=", "+="] {
+            for probe in ["f()", "sizeof(f())", "_Generic(f(), int: 1, default: 0)"] {
+                let source = format!(
+                    "struct S {{ {slot} p; }}; int f(void) {{ int v[1] = {{0}}; \
+                     const struct S s[1] = {{{{v}}}}; s[0].p[0] {update} 1; \
+                     return v[0]; }} int main(void) {{ return {probe} == 0; }}"
+                );
+                let result = interpret(&source);
+                let valid = if slot.starts_with("const int") {
+                    result.as_ref().is_err_and(|error| {
+                        let error = error.to_string();
+                        error.contains("const") || error.contains("read-only")
+                    })
+                } else {
+                    result == Ok(0)
+                };
+                if !valid {
+                    failures.push(format!("{slot}, {update}, {probe}: {result:?}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_discarded_decay_and_addresses_in_unevaluated_callees() {
+    let mut failures = Vec::new();
+    for statement in [
+        "outputs;",
+        "(void)outputs;",
+        "(outputs, 0);",
+        "(void)&outputs;",
+        "(void)&outputs[0];",
+    ] {
+        for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+            let source = format!(
+                "int f(void) {{ int **outputs[1] = {{0}}; {statement} return 0; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            if let Ok(value) = interpret(&source) {
+                failures.push(format!("{statement} via {probe}: accepted {value}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_nested_discarded_element_addresses_in_unevaluated_callees() {
+    let mut failures = Vec::new();
+    for statement in [
+        "!&outputs[0];",
+        "*&outputs[0];",
+        "&outputs[0] != 0;",
+        "&outputs[0] ? 0 : 0;",
+    ] {
+        for probe in ["sizeof(f())", "_Generic(f(), default: 0)"] {
+            let source = format!(
+                "int f(void) {{ int **outputs[1] = {{0}}; {statement} return 0; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            if let Ok(value) = interpret(&source) {
+                failures.push(format!("{statement} via {probe}: accepted {value}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_preserve_enum_null_pointer_assignments_in_unevaluated_callees() {
+    for (probe, expected) in [
+        ("f()", 0),
+        ("sizeof(f())", 8),
+        ("_Generic(f(), int: 0, default: 1)", 0),
+    ] {
+        let source = format!(
+            "int f(void) {{ enum {{ ZERO = 0 }}; int *pointer = 0; int **output = 0; \
+             pointer = ZERO; output = ZERO; return 0; }} \
+             int main(void) {{ return {probe}; }}"
+        );
+        assert_eq!(
+            interpret(&source),
+            Ok(expected),
+            "failed via {probe}: {source}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_unary_element_addresses_in_unevaluated_callees() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for statement in ["+&outputs[0];", "-&outputs[0];"] {
+            for probe in ["f()", "sizeof(f())", "_Generic(f(), default: 0)"] {
+                let source = format!(
+                    "int f(void) {{ {ty} **outputs[1] = {{0}}; {statement} return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(value) = interpret(&source) {
+                    failures.push(format!("{ty}: {statement} via {probe}: accepted {value}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_validate_discarded_aggregate_literal_field_conversions() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for value in ["outputs[0]", "get()"] {
+            for probe in ["f()", "sizeof(f())", "_Generic(f(), default: 0)"] {
+                let source = format!(
+                    "struct S {{ double value; }}; {ty} **outputs[1] = {{0}}; \
+                     {ty} **get(void) {{ return outputs[0]; }} \
+                     int f(void) {{ (struct S){{{value}}}; return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(result) = interpret(&source) {
+                    failures.push(format!("{ty}: {value} via {probe}: accepted {result}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_address_assignment_validation_never_panics() {
+    for statement in ["value = &outputs;", "(value = &outputs, 0);"] {
+        let source = format!(
+            "int f(void) {{ int **outputs[1] = {{0}}; int value; {statement} return 0; }} \
+             int main(void) {{ return sizeof(f()); }}"
+        );
+        assert!(interpret(&source).is_err(), "accepted: {statement}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_analysis_validates_scalar_literal_consumers() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for statement in ["(double){outputs[0]};", "(double){0} = outputs[0];"] {
+            for probe in ["sizeof(f())", "_Generic(f(), default: 0)"] {
+                let source = format!(
+                    "int f(void) {{ {ty} **outputs[1] = {{0}}; {statement} return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(value) = interpret(&source) {
+                    failures.push(format!("{ty}: {statement} via {probe}: accepted {value}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_scalar_literal_wrappers_reject_element_addresses() {
+    let mut failures = Vec::new();
+    for statement in [
+        "&(_Bool){&a[0]};",
+        "(_Bool){&a[0]} = 0;",
+        "(_Bool){&a[0]} += 0;",
+        "(_Bool){0} = &a[0];",
+        "(_Bool){0} += &a[0];",
+        "&(_Bool){(&a[0], 0)};",
+        "(_Bool){(&a[0], 0)} = 0;",
+        "(_Bool){0} = (&a[0], 0);",
+    ] {
+        for probe in ["f()", "sizeof(f())", "_Generic(f(), default: 0)"] {
+            let source = format!(
+                "int **a[1]; int f(void) {{ {statement} return 0; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            match interpret(&source) {
+                Err(error)
+                    if error.to_string().contains("pointer output array element")
+                        || (probe == "f()"
+                            && statement == "(_Bool){0} += &a[0];"
+                            && error.to_string().contains("pointer value used as scalar")) => {}
+                result => failures.push(format!("{statement} via {probe}: {result:?}")),
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_analysis_validates_nested_operands_and_conditions() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for statement in [
+            "(outputs[0] + 1, 0);",
+            "if (outputs) return 1;",
+            "if (outputs[1.5]) return 1;",
+        ] {
+            for probe in ["sizeof(f())", "_Generic(f(), default: 0)"] {
+                let source = format!(
+                    "int f(void) {{ {ty} **outputs[1] = {{0}}; {statement} return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(value) = interpret(&source) {
+                    failures.push(format!("{ty}: {statement} via {probe}: accepted {value}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_designator_validation_uses_declared_binding() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for declaration in [
+            format!("{ty} **a[2] = {{[sizeof(a)/sizeof(void*)-1] = &p}};"),
+            format!("typedef {ty} *P; P *a[2] = {{[sizeof(a)/sizeof(void*)-1] = &p}};"),
+        ] {
+            let source = format!(
+                "{ty} *p; {declaration} int main(void) {{ return a[0] != 0 || a[1] != &p; }}"
+            );
+            if interpret(&source) != Ok(0) {
+                failures.push(format!("global: {:?}: {source}", interpret(&source)));
+            }
+            for shadow in ["", "double a[7];"] {
+                for storage in ["", "static "] {
+                    // Apply storage to the object, not the typedef.
+                    let local = &declaration;
+                    let local = if local.starts_with("typedef") {
+                        local.replace("P *a", &format!("{storage}P *a"))
+                    } else {
+                        format!("{storage}{local}")
+                    };
+                    let source = format!(
+                        "{shadow} {ty} *p; int calls; int f(void) {{ {local} calls++; \
+                         return a[0] != 0 || a[1] != &p; }} \
+                         int main(void) {{ (void)sizeof(f()); (void)_Generic((f(), 0), default: 0); \
+                         if (calls) return 1; return f() || f() || calls != 2; }}"
+                    );
+                    if interpret(&source) != Ok(0) {
+                        failures.push(format!("local: {:?}: {source}", interpret(&source)));
+                    }
+                }
+            }
+        }
+    }
+    // The bound sees the outer binding; designators see the new binding.
+    let source = "char a[2]; int *p; int calls; int index(void) { calls++; return 0; } \
+                  int f(void) { int **a[sizeof(a)] = { \
+                  [sizeof(a)/sizeof(void*)-2] = &p, \
+                  [sizeof(a[index()])-sizeof(void*)+1] = &p}; \
+                  return a[0] != &p || a[1] != &p; } \
+                  int main(void) { (void)sizeof(f()); return f() || calls; }";
+    if interpret(source) != Ok(0) {
+        failures.push(format!(
+            "source order/non-evaluation: {:?}",
+            interpret(source)
+        ));
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_decay_and_addresses_in_unevaluated_array_element_assignments()
+ {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for value in [
+            "outputs",
+            "&outputs",
+            "&outputs[0]",
+            "(0, &outputs)",
+            "(outputs, 0)",
+        ] {
+            for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+                let source = format!(
+                    "int f(void) {{ {ty} **outputs[1] = {{0}}; double values[1]; \
+                     values[0] = {value}; return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(result) = interpret(&source) {
+                    failures.push(format!("accepted {result}: {source}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_slot_pointer_updates_validate_unevaluated() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+            let source = format!(
+                "int f(void) {{ {ty} values[2]; {ty} *slot = values; \
+                 {ty} **outputs[1] = {{&slot}}; (*outputs[0])++; return 0; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            if let Ok(result) = interpret(&source) {
+                failures.push(format!("accepted {result}: {source}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_slot_assignments_accept_folded_null_constants_unevaluated() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for zero in ["1 - 1", "ZERO", "sizeof(outputs) - sizeof(void*)"] {
+            let source = format!(
+                "int calls; int f(void) {{ enum {{ ZERO = 0 }}; {ty} *slot = 0; \
+                 {ty} **outputs[1] = {{&slot}}; *outputs[0] = {zero}; \
+                 calls++; return slot != 0; }} \
+                 int main(void) {{ (void)sizeof(f()); (void)_Generic((f(), 0), default: 0); \
+                 if (calls) return 1; return f() || calls != 1; }}"
+            );
+            assert_eq!(interpret(&source), Ok(0), "{source}");
+        }
+    }
+
+    for zero in ["1 - 1", "ZERO"] {
+        let ordinary_pointer = format!(
+            "int calls; int f(void) {{ enum {{ ZERO = 0 }}; int *slot = 0; \
+             *(&slot) = {zero}; calls++; return slot != 0; }} int main(void) {{ \
+             (void)sizeof(f()); (void)_Generic((f(), 0), default: 0); \
+             if (calls) return 1; return f() || calls != 1; }}"
+        );
+        assert_eq!(interpret(&ordinary_pointer), Ok(0), "{ordinary_pointer}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_element_assignment_consumers_validate_unevaluated() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (setup, value) in [("", "a[0]"), ("TYPE **p = a[0];", "p")] {
+            let setup = setup.replace("TYPE", ty);
+            for body in [
+                format!("double v[1]; v[0] += {value};"),
+                format!("double v[1]; (v[0] += {value}, 0);"),
+                format!("double v[1][1]; v[0][0] = {value};"),
+                format!("double v[1][1]; (v[0][0] = {value}, 0);"),
+                format!("double v[1][1]; v[0][0] += {value};"),
+            ] {
+                for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+                    let source = format!(
+                        "int f(void) {{ {ty} **a[1] = {{0}}; {setup} {body} return 0; }} \
+                         int main(void) {{ return {probe}; }}"
+                    );
+                    if let Ok(result) = interpret(&source) {
+                        failures.push(format!("accepted {result}: {source}"));
+                    }
+                }
+            }
+            let source = format!(
+                "int calls; int f(void) {{ {ty} **a[1] = {{0}}; {setup} \
+                 _Bool v[1][1]; v[0][0] = {value}; \
+                 double w[1]; w[0] += 2; calls++; return v[0][0] || w[0] != 2; }} \
+                 int main(void) {{ (void)sizeof(f()); (void)_Generic((f(), 0), default: 0); \
+                 if (calls) return 1; return f() || calls != 1; }}"
+            );
+            if interpret(&source) != Ok(0) {
+                failures.push(format!(
+                    "valid element assignment rejected or evaluated: {source}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_alias_consumers_validate_unevaluated() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (setup, value) in [
+            (format!("{ty} **p = a[0];"), "p"),
+            (
+                format!(
+                    "typedef {ty} *ValuePtr; typedef ValuePtr *Output; Output p = a[0]; Output q = (0, p);"
+                ),
+                "q",
+            ),
+        ] {
+            for body in [
+                format!("double v[1]; v[0] = {value}; return 0;"),
+                format!("double x; (x = {value}, 0); return 0;"),
+                format!("double v[1]; (v[0] = {value}, 0); return 0;"),
+                format!("take({value}); return 0;"),
+                format!("double *v = {value}; return 0;"),
+                format!("return {value};"),
+            ] {
+                for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+                    let source = format!(
+                        "int take(double x) {{ return 0; }} \
+                         int f(void) {{ {ty} **a[1] = {{0}}; {setup} {body} }} \
+                         int main(void) {{ return {probe}; }}"
+                    );
+                    if let Ok(result) = interpret(&source) {
+                        failures.push(format!("accepted {result}: {source}"));
+                    }
+                }
+            }
+            let source = format!(
+                "int calls; int take(_Bool x) {{ calls++; return x; }} \
+                 int f(void) {{ {ty} **a[1] = {{0}}; {setup} \
+                 _Bool v[1]; v[0] = {value}; _Bool x; (x = {value}, 0); \
+                 {ty} **r = {value}; return take(r); }} \
+                 int main(void) {{ (void)sizeof(f()); (void)_Generic((f(), 0), default: 0); \
+                 if (calls) return 1; return f() || calls != 1; }}"
+            );
+            if interpret(&source) != Ok(0) {
+                failures.push(format!(
+                    "valid alias consumer rejected or evaluated: {source}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_folded_parameter_shadowing_uses_nearest_binding() {
+    let void_pointer = r#"
+int **a[3];
+int f(void *a) {
+    enum { N = sizeof(a) };
+    int values[sizeof(a) == sizeof(void *) ? 1 : 2];
+    return N != sizeof(a) || sizeof(values) != sizeof(int);
+}
+int main(void) { return f(0); }
+"#;
+    assert_eq!(interpret(void_pointer), Ok(0));
+
+    let adjusted_row_pointer = r#"
+int **a[3];
+int f(int a[2][3]) {
+    enum { N = sizeof(a) };
+    int values[sizeof(a) == sizeof(void *) ? 1 : 2];
+    return N != sizeof(a) || sizeof(values) != sizeof(int);
+}
+int main(void) { int values[2][3]; return f(values); }
+"#;
+    assert_eq!(interpret(adjusted_row_pointer), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_folded_index_depth_is_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_FOLDED_INDEX_CHILD";
+    let declarations = [
+        "enum { N = sizeof(a[INDEX]) };",
+        "int values[sizeof(a[INDEX])];",
+        "int values[16] = {[sizeof(a[INDEX])] = 1};",
+        "enum { N = _Generic(a[INDEX], default: 0) };",
+    ];
+    if let Ok(context) = std::env::var(CHILD_ENV) {
+        let sum = std::iter::repeat_n("0", 1_000)
+            .collect::<Vec<_>>()
+            .join("+");
+        let declaration = declarations[context.parse::<usize>().unwrap()].replace("INDEX", &sum);
+        let source = format!("int **a[1]; int main(void) {{ {declaration} return 0; }}");
+        let error = interpret(&source).unwrap_err().to_string();
+        assert!(
+            error.contains("generic selection validation nesting limit of 32 exceeded"),
+            "{error}"
+        );
+        return;
+    }
+    let mut failures = Vec::new();
+    for context in 0..declarations.len() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tracked_scalar_output_arrays_folded_index_depth_is_bounded",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, context.to_string())
+            .env_remove("RUST_MIN_STACK")
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            failures.push(format!(
+                "{}: {}: {}",
+                declarations[context],
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_callee_switch_selectors_require_integer_values() {
+    for pointee in ["char", "int", "_Bool", "double"] {
+        for selector in ["a[0]", "get()", "_Generic(0, int: a[0])"] {
+            let source = format!(
+                "{pointee} **a[1]; \
+                 {pointee} **get(void) {{ return a[0]; }} \
+                 int f(void) {{ switch ({selector}) {{ default: return 0; }} }} \
+                 int main(void) {{ return sizeof(f()); }}"
+            );
+            let error = interpret(&source).unwrap_err().to_string();
+            assert!(
+                error.contains("switch expression requires an integer value"),
+                "{pointee} {selector}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_case_labels_keep_prior_declaration_bindings() {
+    for case_expr in ["sizeof(a)", "sizeof(a[0])"] {
+        let source = format!(
+            "int main(void) {{ \
+                 switch (0) {{ \
+                     case 0:; \
+                         int **a[1]; \
+                     case {case_expr}: \
+                         return 0; \
+                 }} \
+                 return 1; \
+             }}"
+        );
+        assert_eq!(interpret(&source).unwrap(), 0, "{case_expr}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_switch_preserves_cross_label_bindings() {
+    let mut failures = Vec::new();
+    for (outer, returned, valid) in [
+        ("int a[1];", "a[0]", false),
+        ("", "a[0]", false),
+        ("", "a[0] != 0", true),
+    ] {
+        for stop in ["", "break;"] {
+            for probe in ["sizeof(f()) == 0", "_Generic(f(), int: 0, default: 1)"] {
+                let source = format!(
+                    "{outer} int f(void) {{ switch (0) {{ \
+                     case 0:; int **a[1] = {{0}}; {stop} \
+                     case 1: return {returned}; }} return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                let result = interpret(&source);
+                let passed = if valid {
+                    result == Ok(0)
+                } else {
+                    result
+                        .as_ref()
+                        .is_err_and(|error| error.to_string().contains("pointer output return"))
+                };
+                if !passed {
+                    failures.push(format!("{source}: {result:?}"));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        interpret(
+            "int f(void) { switch (0) { case 0:; int **a[1] = {0}; \
+                   case 1: return a[0] != 0; } return 1; } \
+                   int main(void) { return f(); }"
+        ),
+        Ok(0)
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_switch_keeps_declarations_after_stops() {
+    let mut failures = Vec::new();
+    for outer in ["int a[1];", ""] {
+        for stop in ["break;", "return 0;"] {
+            for probe in ["sizeof(f())", "_Generic(f(), int: 0, default: 1)"] {
+                let source = format!(
+                    "{outer} int f(void) {{ switch (1) {{ \
+                     case 0: {stop} int **a[1]; case 1: return a[0]; }} return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                let result = interpret(&source);
+                if !result
+                    .as_ref()
+                    .is_err_and(|error| error.to_string().contains("pointer output return"))
+                {
+                    failures.push(format!("{source}: {result:?}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_switch_direct_jumps_keep_skipped_objects() {
+    let mut failures = Vec::new();
+    for outer in ["char a[1];", ""] {
+        for stop in [";", "break;"] {
+            let source = format!(
+                "{outer} int main(void) {{ switch (1) {{ \
+                 case 0: {stop} int **a[2]; \
+                 case 1: return sizeof(a) != 2 * sizeof(void *); }} return 1; }}"
+            );
+            let result = interpret(&source);
+            if result != Ok(0) {
+                failures.push(format!("{source}: {result:?}"));
+            }
+        }
+    }
+    // Dispatch skips initializers, while ordinary entry and fallthrough execute them once.
+    for selector in [0, 1] {
+        let source = format!(
+            "int calls; int *p; int **make(void) {{ ++calls; return &p; }} \
+             int main(void) {{ switch ({selector}) {{ \
+             case 0:; int n = ++calls, **a[2] = {{make()}}; \
+             case 1: if (sizeof(a) != 2 * sizeof(void *)) return 1; \
+                     if (calls != {}) return 2; \
+                     if ({selector} == 0 && (n != 1 || a[0] != &p)) return 3; \
+                     a[0] = &p; if (a[0] != &p) return 4; break; }} \
+             return 0; }}",
+            if selector == 0 { 2 } else { 0 }
+        );
+        let result = interpret(&source);
+        if result != Ok(0) {
+            failures.push(format!("{source}: {result:?}"));
+        }
+    }
+    for selector in [0, 1] {
+        let source = format!(
+            "int main(void) {{ switch ({selector}) {{ case 0:; int **a[2]; \
+             case 1:; int **a[2]; return 0; }} return 1; }}"
+        );
+        let result = interpret(&source);
+        if !result
+            .as_ref()
+            .is_err_and(|error| error.to_string().contains("already declared"))
+        {
+            failures.push(format!("{source}: {result:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_case_validations_run_before_switch_dispatch() {
+    let source = r#"
+int **outputs[1];
+int bad(void) { return outputs[0]; }
+int main(void) {
+    switch (0) {
+        case sizeof(outputs[bad()]): return 1;
+        default: return 0;
+    }
+}
+"#;
+
+    let error = interpret(source).expect_err("case validations must not depend on dispatch");
+    assert!(
+        error.to_string().contains("pointer output return"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_case_validations_support_direct_jumps() {
+    let source = r#"
+int main(void) {
+    switch (sizeof(void *)) {
+        case 0:;
+            int **outputs[1];
+        case sizeof(outputs): return 0;
+    }
+    return 1;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_switch_bindings_expire_after_switch() {
+    let source = r#"
+int **outputs[2];
+int main(void) {
+    switch (0) {
+        case 0:;
+            int **outputs[1];
+            break;
+    }
+    enum { N = sizeof(outputs) };
+    return N != sizeof(outputs);
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_nested_aggregate_indexes_are_bounded_before_cloning() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_AGGREGATE_INDEX_CLONE_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let source = format!(
+            "int **a[1]; struct S {{ int v[1]; }}; int main(void) {{ \
+             struct S s[1] = {{{{{{0}}}}}}; return sizeof(a[s[{}0].v[0]]); }}",
+            "0+".repeat(1_000)
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join()
+            .expect("aggregate index validation must not overflow the host stack");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("nesting limit"), "{error}");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_array_nested_aggregate_indexes_are_bounded_before_cloning",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_aggregate_indexes_are_bounded_before_cloning() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_CALLEE_AGGREGATE_INDEX_CLONE_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let source = format!(
+            "int **a[1]; struct S {{ int v[1]; }}; int f(void) {{ \
+             struct S s[1] = {{{{{{0}}}}}}; return a[s[{}0].v[0]] != 0; }} \
+             int main(void) {{ return sizeof(f()); }}",
+            "0+".repeat(512)
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join()
+            .expect("callee aggregate index validation must not overflow the host stack");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("nesting limit"), "{error}");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_array_callee_aggregate_indexes_are_bounded_before_cloning",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_pointer_aggregate_indexes_are_bounded_before_cloning() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_CALLEE_POINTER_AGGREGATE_INDEX_CLONE_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let source = format!(
+            "int **a[1]; struct S {{ int v[1]; }}; int f(void) {{ \
+             struct S s[1] = {{{{{{0}}}}}}; return a[(s + ({}0))->v[0]] != 0; }} \
+             int main(void) {{ return sizeof(f()); }}",
+            "0+".repeat(512)
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join()
+            .expect("callee pointer-aggregate index validation must not overflow the host stack");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("nesting limit"), "{error}");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_array_callee_pointer_aggregate_indexes_are_bounded_before_cloning",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_comma_wrapped_aggregate_indexes_are_stack_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_WRAPPED_AGGREGATE_INDEX_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let source = format!(
+            "int **a[1]; struct S {{ int v[1]; }}; int main(void) {{ \
+             struct S s[1] = {{{{{{0}}}}}}; return sizeof(a[s[(0, {}0)].v[0]]); }}",
+            "0+".repeat(1_000)
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join()
+            .expect("wrapped aggregate index validation must not overflow the host stack");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("nesting limit"), "{error}");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_array_comma_wrapped_aggregate_indexes_are_stack_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_scalar_literal_wrapped_aggregate_indexes_are_stack_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_SCALAR_WRAPPED_AGGREGATE_INDEX_CHILD";
+    let wrappers = ["comma", "conditional", "call", "generic"];
+    if let Ok(wrapper) = std::env::var(CHILD_ENV) {
+        let deep = format!("{}0", "0+".repeat(512));
+        let index = match wrapper.as_str() {
+            "comma" => format!("(0, {deep})"),
+            "conditional" => format!("1 ? {deep} : 0"),
+            "call" => format!("identity({deep})"),
+            "generic" => format!("_Generic(0, int: {deep})"),
+            _ => unreachable!(),
+        };
+        let source = format!(
+            "int **a[1]; struct S {{ int v[1]; }}; int identity(int value) {{ return value; }} \
+             int f(void) {{ struct S s[1] = {{{{{{0}}}}}}; \
+             (void)&(_Bool){{a[s[{index}].v[0]] != 0}}; return 0; }} \
+             int main(void) {{ return sizeof(f()); }}"
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join()
+            .expect("wrapped scalar-literal validation must not overflow the host stack");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("nesting limit"), "{wrapper}: {error}");
+        return;
+    }
+
+    let mut failures = Vec::new();
+    for wrapper in wrappers {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tracked_scalar_output_array_scalar_literal_wrapped_aggregate_indexes_are_stack_bounded",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, wrapper)
+            .env_remove("RUST_MIN_STACK")
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            failures.push(format!(
+                "{wrapper}: {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_scalar_literal_initializers_are_stack_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_SCALAR_LITERAL_DEPTH_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let source = format!(
+            "int **a[1]; int f(void) {{ (void)&(_Bool){{{}0 + (a[0] != 0)}}; return 0; }} \
+             int main(void) {{ return sizeof(f()); }}",
+            "0+".repeat(512)
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join()
+            .expect("scalar compound-literal validation must not overflow the host stack");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("nesting limit"), "{error}");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_array_scalar_literal_initializers_are_stack_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_scalar_literal_assignment_values_are_stack_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_SCALAR_LITERAL_ASSIGNMENT_DEPTH_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let source = format!(
+            "int **a[1]; int f(void) {{ (_Bool){{0}} = {}0 + (a[0] != 0); return 0; }} \
+             int main(void) {{ return sizeof(f()); }}",
+            "0+".repeat(512)
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join()
+            .expect(
+                "scalar compound-literal assignment validation must not overflow the host stack",
+            );
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("nesting limit"), "{error}");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_array_scalar_literal_assignment_values_are_stack_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_direct_switch_jumps_preserve_static_initializers() {
+    let source = r#"
+int *slot;
+int main(void) {
+    switch (1) {
+        case 0:;
+            static int **outputs[1] = { &slot };
+        case 1:
+            return outputs[0] != &slot;
+    }
+    return 1;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_direct_switch_jumps_preserve_enum_static_initializers() {
+    let source = r#"
+int main(void) {
+    switch (1) {
+        case 0:;
+            enum { NULL_OUTPUT = 0 };
+            static int **outputs[1] = { NULL_OUTPUT };
+        case 1:
+            return outputs[0] != 0;
+    }
+    return 1;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_switch_validates_static_declarations_after_stops() {
+    let source = r#"
+int f(void) {
+    switch (1) {
+        case 0: break;
+            static int **outputs[1] = { 1 };
+        case 1: return outputs[0] != 0;
+    }
+    return 1;
+}
+int main(void) { return sizeof(f()) != sizeof(int); }
+"#;
+
+    assert!(
+        interpret(source).is_err(),
+        "non-evaluating callee analysis must validate skipped static initializers"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_switch_keeps_enum_dependencies_after_stops() {
+    let source = r#"
+int f(void) {
+    switch (1) {
+        case 0: break;
+            enum { NULL_OUTPUT = 0 };
+        case 1:;
+            static int **outputs[1] = { NULL_OUTPUT };
+            return outputs[0] != 0;
+    }
+    return 1;
+}
+int main(void) { return sizeof(f()) != sizeof(int); }
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_static_initializer_depth_is_bounded_before_cloning() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_STATIC_INITIALIZER_DEPTH_CHILD";
+    let routes = ["global", "block-static", "unevaluated-block-static"];
+    if let Ok(route) = std::env::var(CHILD_ENV) {
+        let declaration = format!("int **a[1] = {{{}0}};", "0+".repeat(512));
+        let source = match route.as_str() {
+            "global" => format!("{declaration} int main(void) {{ return 0; }}"),
+            "block-static" => format!("int main(void) {{ static {declaration} return 0; }}"),
+            _ => format!(
+                "int f(void) {{ static {declaration} return 0; }} \
+                         int main(void) {{ return sizeof(f()); }}"
+            ),
+        };
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join()
+            .expect("initializer validation must not overflow the host stack");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("nesting limit"), "{route}: {error}");
+        return;
+    }
+    let mut failures = Vec::new();
+    for route in routes {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tracked_scalar_output_array_static_initializer_depth_is_bounded_before_cloning",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, route)
+            .env_remove("RUST_MIN_STACK")
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            failures.push(format!(
+                "{route}: {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_folded_generic_preserves_ordinary_sizeof_operands() {
+    let source = r#"
+int main(void) {
+    int values[1] = {0};
+    enum { N = _Generic(sizeof(values[0]), int: 1, default: 0) };
+    return N - 1;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_assignment_depth_is_bounded_before_ast_cloning() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_ASSIGNMENT_DEPTH_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let source = format!(
+            "int **a[1]; int main(void) {{ a[0] = {}a[0]; return 0; }}",
+            "0+".repeat(512)
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join();
+        assert!(
+            result.is_ok(),
+            "assignment validation overflowed the host stack"
+        );
+        let error = result.unwrap().unwrap_err().to_string();
+        assert!(error.contains("nesting limit"), "{error}");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_array_assignment_depth_is_bounded_before_ast_cloning",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_aggregate_element_assignment_depth_is_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_AGGREGATE_ELEMENT_DEPTH_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        for update in ["=", "+="] {
+            let source = format!(
+                "int **a[1]; struct S {{ int v[1]; }}; \
+                 int f(void) {{ struct S s[1] = {{{{{{0}}}}}}; \
+                 s[{}0].v[0] {update} a[0]; return 0; }} \
+                 int main(void) {{ return sizeof(f()); }}",
+                "0+".repeat(511)
+            );
+            let result = std::thread::Builder::new()
+                .stack_size(2 * 1024 * 1024)
+                .spawn(move || interpret(&source))
+                .unwrap()
+                .join()
+                .expect("aggregate element validation overflowed the host stack");
+            let error = result.unwrap_err().to_string();
+            assert!(error.contains("nesting limit"), "{update}: {error}");
+        }
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_array_aggregate_element_assignment_depth_is_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_callee_comma_analysis_is_stack_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_CALLEE_COMMA_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let source = format!(
+            "int **a[1]; int f(void) {{ (void)({}a[0]); return 0; }} \
+             int main(void) {{ return sizeof(f()); }}",
+            "0,".repeat(100)
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join();
+        assert!(result.is_ok(), "callee analysis overflowed the host stack");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_arrays_callee_comma_analysis_is_stack_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_final_review_validates_folded_generic_consumers() {
+    let programs = [
+        "int **a[1]; int f(void) { enum { N = _Generic(0, int: 0, default: (+&a[0])) }; return N; } int main(void) { return sizeof(f()); }",
+        "int **a[1]; int f(void) { enum { N = _Generic(0, int: 0, default: (-&a[0])) }; return N; } int main(void) { return sizeof(f()); }",
+        "struct S { double x; }; int **a[1]; int **get(void) { return a[0]; } int f(void) { enum { N = _Generic(0, int: 0, default: ((struct S){get()})) }; return N; } int main(void) { return sizeof(f()); }",
+        "struct S { double x; }; int **a[1]; int f(void) { enum { N = _Generic(0, int: 0, default: ((struct S){a[0]})) }; return N; } int main(void) { return sizeof(f()); }",
+        "int **a[1]; int **get(void) { return a[0]; } int f(void) { enum { N = _Generic(0, int: 0, default: ((double[1]){0}[0] += get())) }; return N; } int main(void) { return sizeof(f()); }",
+    ];
+
+    for source in programs {
+        assert!(interpret(source).is_err(), "accepted: {source}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_final_review_preserves_assignment_result_type() {
+    let consumers = [
+        "return (o = 0);",
+        "double *p = (o = 0); return p != 0;",
+        "double value = +(o = 0); return value != 0;",
+        "double value = 0; value += (o = 0); return value != 0;",
+        "return consume(o = 0);",
+    ];
+    for body in consumers {
+        for probe in ["sizeof(f())", "_Generic(f(), default: 0)"] {
+            let source = format!(
+                "int **a[1]; int **get(void) {{ return a[0]; }} \
+                 double consume(double value) {{ return value; }} \
+                 int f(void) {{ int **o = get(); {body} }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            assert!(interpret(&source).is_err(), "accepted: {source}");
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_final_review_binary_analysis_is_stack_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_BINARY_STACK_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let source = format!(
+            "int **a[1]; int f(void) {{ (void)({}+a[0]); return 0; }} \
+             int main(void) {{ return sizeof(f()); }}",
+            std::iter::repeat_n("0", 100).collect::<Vec<_>>().join("+")
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join();
+        assert!(result.is_ok(), "binary analysis overflowed the host stack");
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_arrays_final_review_binary_analysis_is_stack_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_generic_callee_binary_analysis_is_stack_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_GENERIC_BINARY_STACK_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let deep_value = format!("{}a[0]", "0+".repeat(512));
+        for body in [
+            format!("(void)({deep_value});"),
+            format!("int x; x = {deep_value};"),
+            format!("int x; int *p = &x; *p = {deep_value};"),
+            format!("int x[1]; x[0] = {deep_value};"),
+        ] {
+            let source = format!(
+                "int **a[1]; int f(void) {{ {body} return 0; }} \
+                 int main(void) {{ return _Generic(f(), default: 0); }}"
+            );
+            let result = std::thread::Builder::new()
+                .stack_size(2 * 1024 * 1024)
+                .spawn(move || interpret(&source))
+                .unwrap()
+                .join();
+            let error = result
+                .expect("generic callee analysis overflowed the host stack")
+                .expect_err("deep generic callee analysis should hit Cust's nesting limit");
+            assert_eq!(
+                error.to_string(),
+                "non-evaluating expression type nesting limit of 32 exceeded",
+                "body: {body}"
+            );
+        }
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_arrays_generic_callee_binary_analysis_is_stack_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_discarded_aggregate_array_literals_validate_initializers() {
+    for probe in ["sizeof(f())", "_Generic(f(), default: 0)"] {
+        let source = format!(
+            "struct S {{ double value; }}; int **outputs[1]; \
+             int f(void) {{ (struct S[1]){{{{outputs[0]}}}}; return 0; }} \
+             int main(void) {{ return {probe}; }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|error| error.to_string()),
+            Err("cannot assign pointer expression to double value".to_string()),
+            "probe: {probe}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_folded_calls_use_nearest_function_binding() {
+    let source = r#"
+int idx(void) { return 0; }
+int main(void) {
+    enum { idx = 1 };
+    {
+        int idx(void);
+        int **outputs[1];
+        enum { N = sizeof(outputs[idx()]) };
+        return N != sizeof(outputs[0]);
+    }
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_analysis_accepts_wrapped_void_slot_addresses() {
+    for value in [
+        "(0, &slot)",
+        "1 ? &slot : &slot",
+        "_Generic(0, int: &slot, default: &slot)",
+    ] {
+        let source = format!(
+            "int *slot; void *output(void) {{ return {value}; }} \
+             int main(void) {{ return sizeof(output()) != sizeof(void *); }}"
+        );
+        assert_eq!(interpret(&source), Ok(0), "value: {value}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_boundary_scan_is_stack_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_ARRAY_BOUNDARY_STACK_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let source = format!(
+            "int **a[1]; int f(void) {{ int x; x = {}a[0]; return 0; }} \
+             int main(void) {{ return _Generic(f(), default: 0); }}",
+            "0+".repeat(12_000)
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source))
+            .unwrap()
+            .join();
+        let error = result
+            .expect("boundary scan overflowed the host stack")
+            .expect_err("deep boundary expression should receive a recoverable Cust diagnostic");
+        assert_eq!(
+            error.to_string(),
+            "non-evaluating expression type nesting limit of 32 exceeded"
+        );
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_array_boundary_scan_is_stack_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_generic_callee_reverse_subscript_bool_assignment_preserves_conversion()
+ {
+    assert_eq!(
+        interpret(
+            "int f(void) {
+                int *slot = 0;
+                int **outputs[1] = {&slot};
+                _Bool values[1] = {0};
+                int i = 0;
+                i[values] = outputs[0];
+                return i[values];
+            }
+            int main(void) {
+                return _Generic(f(), int: f(), default: 99);
+            }"
+        )
+        .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_validate_discarded_dereference_updates_unevaluated() {
+    let mut failures = Vec::new();
+    for statement in ["(void)(*a[0] = 1);", "(void)(*&a[0] = 0);", "*a[0] += 1;"] {
+        for probe in ["sizeof(f())", "_Generic(f(), default: 0)"] {
+            let source = format!(
+                "int f(void) {{ int values[2] = {{0, 0}}; int *p = values; \
+                 int **a[1] = {{&p}}; {statement} return 0; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            if let Ok(value) = interpret(&source) {
+                failures.push(format!("{statement} via {probe}: accepted {value}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_same_enum_enumerator_shadowing() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let source = format!(
+            "{ty} **a[1]; int main(void) {{ \
+             enum {{ a = 0, N = _Generic(a, int: 7, default: 0) }}; return N != 7; }}"
+        );
+        assert_eq!(interpret(&source), Ok(0), "{source}");
+    }
+    let source = "int **a[1]; int f(void) { \
+                  enum { a = 0, N = _Generic(a, int: 7, default: 0) }; return N != 7; } \
+                  int main(void) { (void)sizeof(f()); \
+                  return _Generic((f(), 0), int: 0, default: 1) || f(); }";
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_callee_unary_and_cast_consumers_validate_unevaluated() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for statement in ["+a[0];", "(double)a[0];", "(int *)a[0];"] {
+            for probe in ["sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+                let source = format!(
+                    "int f(void) {{ {ty} **a[1] = {{0}}; {statement} return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(result) = interpret(&source) {
+                    failures.push(format!("accepted {result}: {source}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_folded_output_call_indexes_match_runtime_sizeof() {
+    let source = r#"
+int **outputs[1];
+int **get(void) { return outputs[0]; }
+int main(void) {
+    enum { ELEMENT_SIZE = sizeof(outputs[get() != 0]) };
+    return ELEMENT_SIZE != sizeof(outputs[0]);
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_compound_literal_initializer_validates_unevaluated() {
+    let source = "int f(void) { double *local = 0; double **a[1] = { &local }; double values[1] = { (double[1]) { a[0] } }; return 0; } int main(void) { return sizeof(f()); }";
+    assert!(interpret(source).is_err(), "accepted: {source}");
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_discarded_compound_literals_validate_initializers() {
+    let mut failures = Vec::new();
+    for statement in [
+        "(double[1]){a[0]};",
+        "(double){a[0]} += 1;",
+        "&(double){a[0]};",
+    ] {
+        for probe in ["sizeof(f())", "_Generic(f(), default: 0)"] {
+            let source = format!(
+                "int f(void) {{ int **a[1] = {{0}}; {statement} return 0; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            if let Ok(value) = interpret(&source) {
+                failures.push(format!("{statement} via {probe}: accepted {value}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_scalar_literals_reject_element_addresses_unevaluated() {
+    let mut failures = Vec::new();
+    for probe in ["f()", "sizeof(f())", "_Generic(f(), default: 0)"] {
+        let source = format!(
+            "int f(void) {{ int **a[1] = {{0}}; (_Bool){{&a[0]}}; return 0; }} \
+             int main(void) {{ return {probe}; }}"
+        );
+        if let Ok(value) = interpret(&source) {
+            failures.push(format!("{probe}: accepted {value}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_aggregate_array_field_assignment_validates_unevaluated() {
+    let source = "struct S { double values[1]; }; int f(void) { int **a[1] = {0}; struct S s[1]; s[0].values[0] = a[0]; return 0; } int main(void) { return sizeof(f()); }";
+    let error = interpret(source)
+        .expect_err("aggregate array-field assignment must reject pointer output")
+        .to_string();
+    assert_eq!(error, "cannot assign pointer expression to double value");
+}
+
+#[test]
+fn tracked_scalar_output_arrays_folded_callee_validation_metadata() {
+    let mut failures = Vec::new();
+    for declaration in [
+        "enum { N = sizeof(a[index(a[0])]) };",
+        "int values[sizeof(a[index(a[0])])];",
+        "int values[16] = {[sizeof(a[index(a[0])])] = 1};",
+        "int values[] = {[sizeof(a[index(a[0])])] = 1};",
+        "int values[_Generic((index(a[0]), 0), default: 1)];",
+        "int values[1] = {[_Generic((index(a[0]), 0), default: 0)] = 1};",
+    ] {
+        for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+            let source = format!(
+                "int index(int **output) {{ double v[1] = {{output}}; return 0; }} \
+                 int f(void) {{ int **a[1] = {{0}}; {declaration} return 0; }} \
+                 int main(void) {{ return {probe}; }}"
+            );
+            if let Ok(result) = interpret(&source) {
+                failures.push(format!("accepted {result}: {source}"));
+            }
+            let valid = format!(
+                "int calls = 0; int index(int **output) {{ _Bool v[1] = {{output}}; calls++; return 0; }} \
+                 int f(void) {{ int **a[1] = {{0}}; {declaration} return calls; }} \
+                 int main(void) {{ (void){probe}; return calls; }}"
+            );
+            if interpret(&valid) != Ok(0) {
+                failures.push(format!("valid folded call rejected or evaluated: {valid}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_callee_const_bool_assignment() {
+    let mut failures = Vec::new();
+    for (setup, value) in [("", "a[0]"), ("int **p = a[0];", "p")] {
+        for assignment in [format!("x = {value};"), format!("(x = {value}, 0);")] {
+            for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+                let source = format!(
+                    "int f(void) {{ int **a[1] = {{0}}; {setup} \
+                     const _Bool x = 0; {assignment} return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(result) = interpret(&source) {
+                    failures.push(format!("accepted {result}: {source}"));
+                }
+                let mutable = source.replace("const _Bool", "_Bool");
+                if let Err(error) = interpret(&mutable) {
+                    failures.push(format!("mutable assignment rejected: {mutable}: {error}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_callee_resolved_scalar_consumers() {
+    let mut failures = Vec::new();
+    for (setup, value) in [("", "a[0]"), ("int **p = a[0];", "p")] {
+        for body in [
+            format!("double x = 0; x += {value};"),
+            format!("double v[1][1] = {{{{{value}}}}};"),
+            format!("double x = {value};"),
+        ] {
+            for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+                let source = format!(
+                    "int f(void) {{ int **a[1] = {{0}}; {setup} {body} return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(result) = interpret(&source) {
+                    failures.push(format!("accepted {result}: {source}"));
+                }
+            }
+        }
+        for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+            let source = format!(
+                "int f(void) {{ int **a[1] = {{0}}; {setup} \
+                 _Bool x = {value}; _Bool v[1][1] = {{{{{value}}}}}; \
+                 double y = 0; y += 1; return 0; }} int main(void) {{ return {probe}; }}"
+            );
+            if let Err(error) = interpret(&source) {
+                failures.push(format!("valid consumer rejected: {source}: {error}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_aggregate_fields_temporary_assignment_type_cache() {
+    let program = r#"
+struct Box { double **output; };
+int assign(void) {
+    double value;
+    double *slot = &value;
+    struct Box boxes[1] = {{&slot}};
+    struct Box *view = boxes;
+    *boxes[0].output = &value;
+    **view->output = 2.75;
+    return 1;
+}
+int main(void) { return 1 && assign() ? 0 : 1; }
+"#;
+
+    // Temporary AST addresses can be reused during non-evaluating callee analysis.
+    for _ in 0..100 {
+        assert_eq!(interpret(program), Ok(0));
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_folded_nested_index_constraints() {
+    for index in ["!missing", "missing ? 0 : 0", "!(a[0]++)"] {
+        for declaration in [
+            format!("enum {{ N = sizeof(a[{index}]) }};"),
+            format!("int values[sizeof(a[{index}])];"),
+        ] {
+            let source = format!("int main(void) {{ int **a[1]; {declaration} return 0; }}");
+            assert!(interpret(&source).is_err(), "accepted: {source}");
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_folded_nearest_binding() {
+    for source in [
+        "enum { i = 0 }; int main(void) { double i = 0; int **a[1]; enum { N = sizeof(a[i]) }; return N; }",
+        "int i(void) { return 0; } int f(int *i) { int **a[1]; enum { N = sizeof(a[i()]) }; return N; } int main(void) { return sizeof(f(0)); }",
+    ] {
+        assert!(interpret(source).is_err(), "accepted: {source}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_dereference_uses_nearest_pointee_type() {
+    let program = r#"
+char **outputs[1];
+int read_local(void) {
+    int value = 0;
+    int *pointer = &value;
+    int **outputs[1] = {&pointer};
+    return **outputs[0];
+}
+int main(void) {
+    return sizeof(read_local()) == sizeof(int) ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_callee_element_consumers() {
+    let mut failures = Vec::new();
+    for body in [
+        "double values[1] = {a[0]};",
+        "double values[1]; values[0] = a[0];",
+        "double values[1]; (values[0] = a[0], 0);",
+        "double value; double *p = &value; *p = a[0];",
+        "double value; double *p = &value; (*p = a[0], 0);",
+        "sink(a[0]);",
+    ] {
+        for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+            let source = format!(
+                "void sink(double value) {{}} int f(void) {{ int **a[1] = {{0}}; {body} return 0; }} int main(void) {{ return {probe}; }}"
+            );
+            if let Ok(value) = interpret(&source) {
+                failures.push(format!("{body} via {probe}: accepted {value}"));
+            }
+            let valid_source = source.replace("double", "_Bool");
+            if let Err(error) = interpret(&valid_source) {
+                failures.push(format!(
+                    "valid _Bool consumer rejected: {valid_source}: {error}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_folded_call_conversions() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let source = format!(
+            "int calls = 0; int row({ty} values[1][2]) {{ calls++; return 0; }} \
+             int truth(_Bool value) {{ calls++; return value; }} \
+             int main(void) {{ {ty} values[1][2] = {{{{0, 0}}}}; {ty} **a[1] = {{0}}; \
+             enum {{ ROW = sizeof(a[row(values)]), TRUTH = sizeof(a[truth(a[0])]) }}; \
+             if (calls != 0 || ROW != sizeof(a[0]) || TRUTH != sizeof(a[0])) return 1; \
+             return row(values) != 0 || truth(a[0]) != 0 || calls != 2; }}"
+        );
+        assert_eq!(interpret(&source), Ok(0), "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_callee_local_truthiness() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for storage in ["", "static "] {
+            let source = format!(
+                "int calls = 0; int f(void) {{ {storage}{ty} **a[1] = {{0}}; calls++; return !!a[0]; }} \
+                 int main(void) {{ if (sizeof(f()) != sizeof(int)) return 1; \
+                 if (_Generic((f(), 0), int: 0, default: 1) || calls != 0) return 2; \
+                 return f() != 0 || calls != 1; }}"
+            );
+            assert_eq!(interpret(&source), Ok(0), "{storage}{ty}");
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_indexes_validate_nested_expression_constraints() {
+    for index in ["!missing", "missing ? 0 : 0", "!(a[0]++)"] {
+        let source = format!(
+            "int main(void) {{ int **a[1]; enum {{ N = sizeof(a[{index}]) }}; return N; }}"
+        );
+        assert!(
+            interpret(&source).is_err(),
+            "nested invalid index was accepted: {index}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_indexes_validate_update_and_cast_constraints() {
+    for (setup, index) in [
+        ("const int i = 0;", "i++"),
+        ("const int i = 0;", "(int)a[0]"),
+    ] {
+        let source = format!(
+            "int main(void) {{ {setup} int **a[1] = {{0}}; enum {{ N = sizeof(a[{index}]) }}; return N; }}"
+        );
+        assert!(
+            interpret(&source).is_err(),
+            "invalid nested folded index was accepted: {index}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_indexes_validate_nearest_ordinary_binding() {
+    let nearer_double = r#"
+enum { index = 0 };
+int main(void) {
+    double index = 0;
+    int **outputs[1];
+    enum { SIZE = sizeof(outputs[index]) };
+    return SIZE;
+}
+"#;
+    assert!(
+        interpret(nearer_double).is_err(),
+        "a nearer double object must not inherit an outer enum's integer type"
+    );
+
+    let parameter_shadows_function = r#"
+int index(void) { return 0; }
+int inspect(int *index) {
+    int **outputs[1];
+    enum { SIZE = sizeof(outputs[index()]) };
+    return SIZE;
+}
+int main(void) {
+    int *index = 0;
+    return sizeof(inspect(index));
+}
+"#;
+    assert!(
+        interpret(parameter_shadows_function).is_err(),
+        "a parameter must shadow an outer function during folded call lookup"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_static_generic_initializers_select_consistently() {
+    let mut failures = Vec::new();
+    for ty in ["char", "int", "_Bool", "double"] {
+        for init in [
+            "_Generic(0, int: &p)",
+            "_Generic(0, int: _Generic(0, default: &p))",
+        ] {
+            for (global, body) in [
+                (
+                    format!("{ty} *p=0; {ty} **a[1]={{{init}}};"),
+                    "return a[0]!=&p;".to_string(),
+                ),
+                (
+                    format!("{ty} *p=0;"),
+                    format!("static {ty} **a[1]={{{init}}}; return a[0]!=&p;"),
+                ),
+                (
+                    String::new(),
+                    format!("static {ty} *p=0; static {ty} **a[1]={{{init}}}; return a[0]!=&p;"),
+                ),
+            ] {
+                for probe in [
+                    "f()",
+                    "sizeof(f())!=sizeof(int)",
+                    "_Generic((f(), 0), default: 0)",
+                ] {
+                    let source = format!(
+                        "{global} int f(void) {{ {body} }} int main(void) {{ return {probe}; }}"
+                    );
+                    let actual = interpret(&source);
+                    if actual != Ok(0) {
+                        failures.push(format!("{source}: {actual:?}"));
+                    }
+                }
+            }
+        }
+    }
+    for (setup, init) in [
+        ("int *p=0;", "_Generic(0, int: &p)"),
+        ("static int *p=0;", "_Generic(0, int: (0, &p))"),
+        ("static int *volatile p=0;", "_Generic(0, int: &p)"),
+        ("static int *p=0;", "_Generic(0, int: &p, default: a)"),
+    ] {
+        for probe in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 0)"] {
+            let source = format!(
+                "int f(void) {{ {setup} static int **a[1]={{{init}}}; return 0; }} \
+                int main(void) {{ return {probe}; }}"
+            );
+            if let Ok(value) = interpret(&source) {
+                failures.push(format!("invalid initializer accepted {value}: {source}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_nested_sizeof_folds_the_result_size() {
+    for expression in [
+        "sizeof(sizeof(a))",
+        "sizeof(sizeof(int[2]))",
+        "sizeof(sizeof(sizeof(a)))",
+    ] {
+        let source = format!(
+            "int f(void) {{ int **a[2]; enum {{ N={expression} }}; \
+            return N!=8 || N!={expression} || sizeof(a)!=16; }} \
+            int main(void) {{ return f() || sizeof(f())!=sizeof(int); }}"
+        );
+        assert_eq!(interpret(&source), Ok(0), "{expression}");
+    }
+    for inner in ["+a[0]", "a[0]++", "(int *)a", "a[missing]"] {
+        for statement in [
+            format!("enum {{ N=sizeof(sizeof({inner})) }}; return N;"),
+            format!("return sizeof(sizeof({inner}));"),
+        ] {
+            let source = format!("int main(void) {{ int **a[2]; {statement} }}");
+            assert!(interpret(&source).is_err(), "{statement}");
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_truthiness_uses_lexical_element_type() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for storage in ["", "static "] {
+            let source = format!(
+                "int f(void) {{ {storage}{ty} **a[1] = {{0}}; return !!a[0]; }} int main(void) {{ return sizeof(f()) != sizeof(int); }}"
+            );
+            assert_eq!(interpret(&source), Ok(0), "{storage}{ty}");
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_analysis_rejects_incompatible_element_consumers() {
+    let mut failures = Vec::new();
+    for element in ["a[0]", "_Generic(0, int: a[0])", "(0, a[0])"] {
+        for (return_type, body) in [
+            ("int", format!("int *p={element}; return 0;")),
+            ("int", format!("int p={element}; return 0;")),
+            ("int", format!("double p={element}; return 0;")),
+            ("int", format!("int *p=0; p={element}; return 0;")),
+            ("int", format!("int *p=0; (p={element}, 0); return 0;")),
+            ("int *", format!("return {element};")),
+            ("void *", format!("return {element};")),
+            ("int", format!("return {element};")),
+            ("double", format!("return {element};")),
+            ("char **", format!("return {element};")),
+        ] {
+            for probe in ["f() != 0", "sizeof(f())", "_Generic((f(), 0), default: 1)"] {
+                let source = format!(
+                    "{return_type} f(void) {{ int **a[1]={{0}}; {body} }} \
+                    int main(void) {{ return {probe}; }}"
+                );
+                if let Ok(value) = interpret(&source) {
+                    failures.push(format!("{return_type}: {body} {probe}: accepted {value}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    let source = "void *memset(void *, int, unsigned long); double *p=0; \
+        void *f(void) { return &p; } \
+        int main(void) { return sizeof(memset(f(), 0, sizeof(p))); }";
+    assert_eq!(
+        interpret(source).map_err(|e| e.to_string()),
+        Err(
+            "pointer to double objects cannot be used with bounded byte-memory intrinsics"
+                .to_string()
+        )
+    );
+    for body in ["int **p=a[0]; return p;", "int **p=0; p=a[0]; return p;"] {
+        assert_eq!(
+            interpret(&format!(
+                "int **f(void) {{ int **a[1]={{0}}; {body} }} \
+            int main(void) {{ return f()!=0 || sizeof(f())!=sizeof(void *); }}"
+            )),
+            Ok(0)
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_nested_object_scope_wins_over_outer_enum() {
+    let source = r#"
+enum { outputs = 0 };
+int main(void) {
+    int **outputs[2];
+    for (int outer = 0; outer < 1; outer++) {
+        for (int inner = 0; inner < 1; inner++) {
+            enum { N = sizeof(outputs) };
+            return N != sizeof(outputs);
+        }
+    }
+    return 1;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_retained_enum_validations_see_prior_enumerators() {
+    let source = r#"
+enum { FIRST = 0, SECOND = sizeof(FIRST) };
+int main(void) { return SECOND != sizeof(int); }
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_callee_analysis_rejects_incompatible_body_consumers() {
+    for body in [
+        "double values[1] = {output}; return 0;",
+        "double value = 0; double *pointer = &value; *pointer = output; return 0;",
+        "return sink(output);",
+    ] {
+        let source = format!(
+            "double sink(double value) {{ return value; }}\nint index(int **output) {{ {body} }}\nint main(void) {{ int **a[1] = {{0}}; enum {{ N = sizeof(a[index(a[0])]) }}; return N; }}"
+        );
+        let error = match interpret(&source) {
+            Ok(value) => panic!("body accepted ({value}): {body}"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("cannot assign pointer expression to double value"),
+            "body: {body}\nerror: {error}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_sizeof_rejects_aggregate_indexes_on_all_routes() {
+    let mut failures = Vec::new();
+    for index in ["s", "aggregate_index()"] {
+        for statement in [
+            format!("enum {{ N=sizeof(a[{index}]) }}; return N;"),
+            format!("return sizeof(a[{index}]);"),
+        ] {
+            for call in ["f()", "sizeof(f())", "_Generic((f(), 0), default: 1)"] {
+                let source = format!(
+                    "struct S {{ int x; }}; \
+                    struct S aggregate_index(void) {{ struct S s={{0}}; return s; }} \
+                    int f(void) {{ struct S s={{0}}; int **a[1]; {statement} }} \
+                    int main(void) {{ return {call}; }}"
+                );
+                if let Ok(value) = interpret(&source) {
+                    failures.push(format!("{statement} {call}: accepted {value}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_generic_folding_respects_nearer_array_over_enum() {
+    let mut failures = Vec::new();
+    for setup in ["enum { a=0 };", ""] {
+        for statement in [
+            "enum { N=_Generic(a, int: 7, default: 0) }; return N;",
+            "return _Generic(a, int: 7, default: 0);",
+        ] {
+            for call in ["f()", "sizeof(f())"] {
+                let source = format!(
+                    "{setup} int f(void) {{ enum {{ a=0 }}; \
+                    {{ int **a[2]; {statement} }} }} int main(void) {{ return {call}; }}"
+                );
+                if let Ok(value) = interpret(&source) {
+                    failures.push(format!("{setup} {statement} {call}: accepted {value}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(
+        interpret(
+            "int **a[2]; int main(void) { enum { a=0 }; \
+        enum { N=_Generic(a, int: 7, default: 0) }; return N != 7; }"
+        ),
+        Ok(0)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_wrappers_validate_generic_controls_and_discarded_updates() {
+    let mut failures = Vec::new();
+    for expression in [
+        "_Generic((void *)a, default: 7)",
+        "_Generic(+a[0], default: 7)",
+        "_Generic(-a[0], default: 7)",
+        "_Generic((a[0]++, 0), default: 7)",
+        "_Generic(0, default: sizeof((a[0]++, 0)))",
+        "_Generic(sizeof((a[0]++, 0)), default: 7)",
+    ] {
+        for statement in [
+            format!("enum {{ N={expression} }}; return N;"),
+            format!("return {expression};"),
+        ] {
+            for call in ["f()", "sizeof(f())"] {
+                let source = format!(
+                    "int f(void) {{ int **a[1]; {statement} }} \
+                    int main(void) {{ return {call}; }}"
+                );
+                if let Ok(value) = interpret(&source) {
+                    failures.push(format!("{statement} {call}: accepted {value}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_indexes_validate_complete_assignments_and_calls() {
+    let mut failures = Vec::new();
+    for (setup, index) in [
+        ("const int i=0;", "i=0"),
+        ("const int i=0;", "i+=1"),
+        ("int i=0;", "i=missing"),
+        ("int i=0;", "i=\"bad\""),
+        ("int i=0;", "i+=\"bad\""),
+        ("", "index()"),
+        ("", "index(0, 1)"),
+        ("", "index(missing)"),
+        ("", "index(\"bad\")"),
+        ("const int i=0;", "index(i=0)"),
+    ] {
+        for probe in [
+            format!("enum {{ N=sizeof(a[{index}]) }}; return 0;"),
+            format!("return sizeof(a[{index}]);"),
+        ] {
+            for call in ["f()", "sizeof(f())"] {
+                let source = format!(
+                    "int index(int x) {{ return x; }} int f(void) {{ \
+                    {setup} int **a[1]; {probe} }} int main(void) {{ return {call}; }}"
+                );
+                if let Ok(value) = interpret(&source) {
+                    failures.push(format!("{setup} {probe} {call}: accepted {value}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_array_folded_calls_accept_runtime_compatible_conversions() {
+    let array_decay = r#"
+int index(int values[1][2]) { return values[0][0]; }
+int main(void) {
+    int values[1][2] = {{0, 0}};
+    int **a[1] = {0};
+    enum { N = sizeof(a[index(values)]) };
+    return N != sizeof(a[0]);
+}
+"#;
+    assert_eq!(interpret(array_decay), Ok(0));
+
+    let output_to_bool = r#"
+int index(_Bool value) { return value; }
+int main(void) {
+    int **a[1] = {0};
+    enum { N = sizeof(a[index(a[0])]) };
+    return N != sizeof(a[0]);
+}
+"#;
+    assert_eq!(interpret(output_to_bool), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_boundaries_preserve_generic_return_context() {
+    for (returned, context) in [
+        (
+            "_Generic(0, int: (b.p=&slot), default: 0)",
+            "pointer output return",
+        ),
+        (
+            "_Generic(0, int: 0, default: (b.p=&slot))",
+            "generic association",
+        ),
+    ] {
+        let source = format!(
+            "struct B {{ int **p; }}; int **f(void) {{ int *volatile slot=0; \
+             struct B b={{0}}; return {returned}; }} int main(void) {{ return sizeof(f()); }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|e| e.to_string()),
+            Err(format!(
+                "function '{context}' parameter 'value' requires the address of a mutable int pointer variable"
+            ))
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_sizeof_checks_unevaluated_index_types() {
+    for index in ["i = 0", "i += 1", "index()", "declared()", "values[i = 0]"] {
+        let source = format!(
+            "int calls = 0; int index(void) {{ calls++; return 0; }} int declared(void); \
+             int main(void) {{ int i = 1; int values[2] = {{0, 0}}; int **a[1]; \
+             enum {{ N = sizeof(a[{index}]) }}; \
+             return i != 1 || calls != 0 || N != sizeof(a[0]); }}"
+        );
+        assert_eq!(interpret(&source), Ok(0), "{index}");
+    }
+
+    for (declarations, index) in [
+        ("int *p = 0;", "p = 0"),
+        ("double d = 0;", "d = 0"),
+        ("double values[1];", "values[0]"),
+        ("struct S { int x; }; struct S s;", "s = s"),
+        ("struct S { int x; }; struct S values[1];", "values[0]"),
+        ("int index = 0;", "index()"),
+        ("", "pointer_index()"),
+        ("", "double_index()"),
+        ("", "aggregate_index()"),
+        ("", "undeclared()"),
+    ] {
+        let source = format!(
+            "int index(void); int *pointer_index(void); double double_index(void); \
+             struct R {{ int x; }}; struct R aggregate_index(void); \
+             int main(void) {{ {declarations} int **a[1]; \
+             enum {{ N = sizeof(a[{index}]) }}; return 0; }}"
+        );
+        let error = interpret(&source).expect_err(index).to_string();
+        assert!(
+            error.starts_with("array subscript requires an integer value at line 1, column ")
+                || error.starts_with("unsupported generic controlling expression in integer constant expression at line 1, column "),
+            "{index}: {error}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_generic_integer_constants_reject_element_updates() {
+    for update in ["a[0]++", "a[0]--", "++a[0]", "--a[0]"] {
+        let source = format!(
+            "int main(void) {{ int **a[1]; enum {{ N = _Generic({update}, default: 0) }}; return N; }}"
+        );
+        let error = interpret(&source).expect_err(update);
+        assert_eq!(
+            error.to_string(),
+            "integer pointer output array element increment/decrement is not supported",
+            "{update}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_integer_constant_sizeof_rejects_cast_decay() {
+    let source = r#"
+int main(void) {
+    int **a[1];
+    enum { N = sizeof((int *)a) };
+    return 0;
+}
+"#;
+    let error = interpret(source).expect_err("sizeof cast must reject output array decay");
+
+    assert_eq!(
+        error.to_string(),
+        "pointer output arrays do not decay to scalar pointers at line 4, column 16"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_generic_control_decay_in_unevaluated_callees() {
+    let source = "int f(void) { int **a[1]; return _Generic(a, int *: 0, default: 1); } int main(void) { return sizeof(f()) != sizeof(int); }";
+    let error = interpret(source).expect_err("generic control must reject output array decay");
+
+    assert_eq!(
+        error.to_string(),
+        "pointer output arrays do not decay to scalar pointers"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_decay_in_non_evaluating_callee_returns() {
+    let source = r#"
+int *f(void) {
+    int **outputs[1];
+    return outputs;
+}
+int main(void) { return sizeof(f()); }
+"#;
+    let error = interpret(source)
+        .expect_err("callee return analysis must reject pointer-output array decay")
+        .to_string();
+
+    assert_eq!(
+        error,
+        "pointer output arrays do not decay to scalar pointers"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_argument_decay_in_non_evaluating_callees() {
+    let source = r#"
+void consume(int *pointer) { (void)pointer; }
+int f(void) {
+    int **outputs[1];
+    consume(outputs);
+    return 0;
+}
+int main(void) { return sizeof(f()) != sizeof(int); }
+"#;
+    let error = interpret(source)
+        .expect_err("callee analysis must reject pointer-output array argument decay")
+        .to_string();
+
+    assert_eq!(
+        error,
+        "pointer output arrays do not decay to scalar pointers"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_generic_decay_in_integer_constant_expressions() {
+    let error = interpret(
+        "int main(void) { int **outputs[1]; enum { N = _Generic(outputs, int *: 1, default: 0) }; return N; }",
+    )
+    .expect_err("tracked pointer-output arrays must not decay in generic selections");
+
+    assert_eq!(
+        error.to_string(),
+        "pointer output arrays do not decay to scalar pointers"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_integer_constants_respect_enum_shadowing() {
+    let source = r#"
+int **outputs[1];
+int main(void) {
+    enum { outputs = 0 };
+    enum { N = sizeof(outputs[0]) };
+    return N;
+}
+"#;
+    let error = interpret(source)
+        .expect_err("a visible enum constant cannot be subscripted as the shadowed array")
+        .to_string();
+
+    assert_eq!(
+        error,
+        "unsupported sizeof expression in integer constant expression at line 5, column 16"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_array_sizeof_respects_lexical_object_shadowing_over_enum_constants() {
+    let source = r#"
+enum { outputs = 0 };
+int main(void) {
+    int **outputs[2];
+    enum { N = sizeof(outputs) };
+    return N != sizeof(outputs);
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_integer_constant_sizeof_rejects_pointer_unary_operators() {
+    for operator in ["+", "-", "~"] {
+        let source = format!(
+            "int main(void) {{ int **outputs[1]; enum {{ N = sizeof({operator}outputs[0]) }}; return N; }}"
+        );
+        let error = interpret(&source).expect_err(operator).to_string();
+        assert_eq!(
+            error, "pointer output used with unsupported unary operator at line 1, column 47",
+            "unexpected diagnostic for {operator}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_sizeof_allows_unevaluated_increment_indexes() {
+    let source = r#"
+int main(void) {
+    int **outputs[1];
+    int index = 0;
+    enum { ELEMENT_SIZE = sizeof(outputs[index++]) };
+    return ELEMENT_SIZE == sizeof(outputs[0]) && index == 0 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_sizeof_rejects_pointer_output_element_indexes() {
+    for declaration in ["int **outputs[1];", "int **outputs[1]; int values[1];"] {
+        let expression = if declaration.contains("values") {
+            "values[outputs[0]]"
+        } else {
+            "outputs[outputs[0]]"
+        };
+        let source = format!("int main(void) {{ {declaration} return sizeof({expression}); }}");
+        let error = interpret(&source).expect_err(expression).to_string();
+        assert_eq!(
+            error, "array subscript requires an integer value",
+            "unexpected diagnostic for {expression}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_sizeof_rejects_non_integer_indexes() {
+    for (declaration, index) in [("", "1.5"), ("int *slot = 0;", "slot")] {
+        let source = format!(
+            "int main(void) {{ int **outputs[1]; {declaration} enum {{ N = sizeof(outputs[{index}]) }}; return N; }}"
+        );
+        let error = interpret(&source).expect_err(index).to_string();
+        assert!(
+            error.starts_with("array subscript requires an integer value at line 1, column "),
+            "unexpected diagnostic for index {index}: {error}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_wrapped_decay_in_non_evaluating_callees() {
+    let source = r#"
+int f(void) {
+    int **outputs[1];
+    int *raw = (0, outputs);
+    return raw != 0;
+}
+int main(void) { return sizeof(f()); }
+"#;
+    let error = interpret(source)
+        .expect_err("comma wrappers must not hide tracked pointer-output array decay")
+        .to_string();
+
+    assert_eq!(
+        error,
+        "pointer output arrays do not decay to scalar pointers"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_conditional_cast_and_generic_decay_in_non_evaluating_callees()
+ {
+    for initializer in [
+        "1 ? outputs : outputs",
+        "(int *)outputs",
+        "_Generic(1, int: outputs)",
+    ] {
+        let source = format!(
+            "int f(void) {{ int **outputs[1]; int *raw = {initializer}; return raw != 0; }} int main(void) {{ return sizeof(f()); }}"
+        );
+        let error = interpret(&source).expect_err(initializer).to_string();
+        assert_eq!(
+            error, "pointer output arrays do not decay to scalar pointers",
+            "unexpected diagnostic for {initializer}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_decay_and_element_addresses_in_non_evaluating_assignments() {
+    for (value, expected) in [
+        (
+            "outputs",
+            "pointer output arrays do not decay to scalar pointers",
+        ),
+        (
+            "&outputs[0]",
+            "taking the address of a pointer output array element is not supported",
+        ),
+    ] {
+        let source = format!(
+            "int f(void) {{ int **outputs[1]; int *raw = 0; raw = {value}; return 0; }} int main(void) {{ return sizeof(f()); }}"
+        );
+        let error = interpret(&source).expect_err(value).to_string();
+        assert_eq!(error, expected, "unexpected diagnostic for {value}");
+    }
+}
+
+#[test]
+fn non_evaluating_generic_pointer_initializers_resolve_callee_local_scalar_types() {
+    let program = "int f(void) { int k = 0; int *p = _Generic(k, int: &k, default: &k); return p != 0; } int main(void) { return sizeof(f()) != sizeof(int); }";
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_elements_have_pointer_types_in_integer_constant_sizeof_expressions()
+{
+    let program = "int **outputs[1]; enum { N = sizeof(outputs[0] == 0) }; int main(void) { return N != sizeof(int); }";
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_support_indexed_local_objects() {
+    let source = r#"
+int write_value(int **output, int *value) {
+    *output = value;
+    return **output;
+}
+
+int main(void) {
+    int left_value = 7;
+    int right_value = 9;
+    int *left = &left_value;
+    int *right = &right_value;
+    int **outputs[2] = { &left, &right };
+
+    if (sizeof(outputs) != 2 * sizeof(outputs[0])) return 1;
+    if (outputs[0] != &left || outputs[1] != &right) return 2;
+    if (write_value(outputs[0], &right_value) != 9) return 3;
+    outputs[1] = &left;
+    *outputs[1] = &right_value;
+    if (**outputs[0] != 9 || **outputs[1] != 9) return 4;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_keep_for_clause_validations_inside_initializer_scope() {
+    let programs = [
+        r#"
+int main(void) {
+    for (int **outputs[1]; sizeof(int[sizeof(outputs)]) > 0;)
+        return 0;
+    return 1;
+}
+"#,
+        r#"
+int main(void) {
+    int count = 0;
+    for (int **outputs[1]; count < 1;
+         count += sizeof(int[sizeof(outputs)]) ? 1 : 1) {
+    }
+    return count == 1 ? 0 : 1;
+}
+"#,
+    ];
+
+    for program in programs {
+        assert_eq!(interpret(program), Ok(0), "{program}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_array_lengths_see_prior_mixed_declarators() {
+    let programs = [
+        "int main(void) { int *p = 0, **a[sizeof(p) / sizeof(p)]; return sizeof(a) == sizeof(p) ? 0 : 1; }",
+    ];
+    for program in programs {
+        assert_eq!(interpret(program), Ok(0), "{program}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_bind_each_comma_declarator_before_later_lengths() {
+    let programs = [
+        r#"
+int main(void) {
+    int **first[2], **second[sizeof(first) / sizeof(first[0])];
+    return sizeof(second) == sizeof(first) ? 0 : 1;
+}
+"#,
+        r#"
+int **first[2], **second[sizeof(first) / sizeof(first[0])];
+int main(void) {
+    return sizeof(second) == sizeof(first) ? 0 : 1;
+}
+"#,
+        r#"
+int main(void) {
+    static int **first[2], **second[sizeof(first) / sizeof(first[0])];
+    return sizeof(second) == sizeof(first) ? 0 : 1;
+}
+"#,
+    ];
+
+    for program in programs {
+        assert_eq!(interpret(program), Ok(0), "{program}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_bind_before_initializers() {
+    let source = r#"
+int main(void) {
+    int value = 9;
+    int *slot = &value;
+    int **outputs[2] = { &slot, outputs[0] };
+
+    **outputs[1] = 13;
+    return value != 13;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_designators_use_the_new_binding() {
+    let source = r#"
+int **outputs[1];
+int main(void) {
+    int *slot = 0;
+    int **outputs[2] = {
+        [sizeof(outputs) / sizeof(void *) - 1] = &slot
+    };
+    return outputs[1] != &slot;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_preserve_non_evaluating_element_assignment() {
+    let source = r#"
+int main(void) {
+    int value = 7;
+    int *slot = &value;
+    int **outputs[1] = { &slot };
+    int marker = 0;
+
+    if (sizeof(outputs[marker++] = &slot) != sizeof(outputs[0])) return 1;
+    if (marker != 0 || outputs[0] != &slot) return 2;
+    return 0;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_scalar_consumers() {
+    for body in [
+        "int scalar = outputs[0]; return scalar;",
+        "int scalar = (outputs[0] = 0); return scalar;",
+        "return outputs[0];",
+    ] {
+        let source =
+            format!("int main(void) {{ int *slot = 0; int **outputs[1] = {{ &slot }}; {body} }}");
+        let error = interpret(&source).expect_err(body).to_string();
+        assert!(
+            error.contains("pointer output") || error.contains("scalar value"),
+            "unexpected scalar-consumer diagnostic for {body}: {error}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_preserve_shadowed_scalar_array_types() {
+    let source = r#"
+int **outputs[1];
+int read_shadow(void) {
+    int outputs[1] = { 2 };
+    return outputs[0] + 1;
+}
+int main(void) { return sizeof(read_shadow()) == sizeof(int) ? 0 : 1; }
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_use_shadowed_local_lengths_in_non_evaluating_calls() {
+    let source = r#"
+int **outputs[1];
+int f(void) {
+    int **outputs[2];
+    outputs[0] = sizeof(outputs) - 2 * sizeof(void *);
+    return 0;
+}
+int main(void) { return sizeof(f()) != sizeof(int); }
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_do_not_bypass_non_evaluating_scalar_shadowing() {
+    let source = r#"
+int **outputs[2];
+int f(void) {
+    char outputs[1];
+    static int **saved[1] = { sizeof(outputs) - 1 };
+    return 0;
+}
+int main(void) { return sizeof(f()) != sizeof(int); }
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_updates_under_sizeof() {
+    for update in ["outputs[0] += 1", "outputs[0]++", "++outputs[0]"] {
+        let source = format!(
+            "int main(void) {{ int *slot = 0; int **outputs[1] = {{ &slot }}; return sizeof({update}); }}"
+        );
+        let error = interpret(&source).expect_err(update).to_string();
+        assert!(
+            error.contains("pointer output"),
+            "unexpected unevaluated update diagnostic for {update}: {error}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_support_static_storage_objects() {
+    let source = r#"
+int first_value = 3;
+int second_value = 5;
+int *first = &first_value;
+int *second = &second_value;
+int **global_outputs[2] = { &first, &second };
+
+int update(void) {
+    static int **outputs[2] = { &first, &second };
+    static int calls = 0;
+    if (calls++ == 0) outputs[0] = global_outputs[1];
+    if (outputs[0] != &second) return -1;
+    **outputs[0] += 1;
+    return **outputs[0];
+}
+
+int main(void) {
+    if (global_outputs[0] != &first || global_outputs[1] != &second) return 1;
+    if (update() != 6 || update() != 7) return 2;
+    return second_value == 7 ? 0 : 3;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_bind_before_static_self_sizeof_initializers() {
+    let source = r#"
+int **global_outputs[2] = {
+    sizeof(global_outputs) - 2 * sizeof(void *)
+};
+int main(void) {
+    static int **static_outputs[2] = {
+        sizeof(static_outputs) - 2 * sizeof(void *)
+    };
+    return global_outputs[0] != 0 || static_outputs[0] != 0;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_match_compiler_oracle_fixture() {
+    let source = include_str!("fixtures/compat/valid/tracked_scalar_output_arrays.c");
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_static_local_initializers_use_the_new_binding() {
+    let source = r#"
+int *outputs = 0;
+int main(void) {
+    static int **outputs[1] = { &outputs };
+    return 0;
+}
+"#;
+
+    assert!(
+        interpret(source).is_err(),
+        "the static local array must shadow the incompatible global pointer in its initializer"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_validate_callee_initializers_under_sizeof() {
+    for function in [
+        "int **source(void) { char *slot = 0; int **outputs[1] = { &slot }; return outputs[0]; }",
+        "int **source(void) { int * const slot = 0; int **outputs[1] = { &slot }; return outputs[0]; }",
+        "int **source(void) { int *slot = 0; static int **outputs[1] = { &slot }; return outputs[0]; }",
+    ] {
+        let source = format!("{function} int main(void) {{ return sizeof(source()); }}");
+        assert!(
+            interpret(&source).is_err(),
+            "non-evaluating call analysis must validate array initializers: {function}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_validate_discarded_callee_updates_under_sizeof() {
+    for update in ["outputs[0] = 42", "outputs[0] += 1", "outputs[0]++"] {
+        let source = format!(
+            "int **source(void) {{ int **outputs[1]; {update}; return outputs[0]; }} int main(void) {{ return sizeof(source()); }}"
+        );
+        assert!(
+            interpret(&source).is_err(),
+            "non-evaluating call analysis must reject discarded array update: {update}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_accept_sizeof_derived_null_constants() {
+    let source = r#"
+int main(void) {
+    int **outputs[2];
+    outputs[0] = sizeof(outputs) - 2 * sizeof(void *);
+    outputs[1] = sizeof(outputs[0]) - sizeof(void *);
+    return outputs[0] != 0 || outputs[1] != 0;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_sizes_are_integer_constant_expressions() {
+    let source = r#"
+int main(void) {
+    int **outputs[2];
+    enum { COUNT = sizeof(outputs) / sizeof(outputs[0]) };
+    int values[COUNT] = {
+        [sizeof(outputs[0]) / sizeof(void *) - 1] = 7,
+        [COUNT - 1] = 9
+    };
+    return values[0] == 7 && values[1] == 9 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_array_integer_constants_respect_two_dimensional_shadowing() {
+    let source = r#"
+int **outputs[3];
+
+int main(void) {
+    char outputs[1][2] = {{ 0, 0 }};
+    enum { WIDTH = sizeof(outputs) };
+    return WIDTH == 2 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_oversized_storage_without_panicking() {
+    let result = std::panic::catch_unwind(|| {
+        interpret("int main(void) { int **outputs[9223372036854775807]; return 0; }")
+    });
+
+    assert!(
+        matches!(result, Ok(Err(_))),
+        "oversized pointer-output array should return an interpreter error, got {result:?}"
+    );
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_raw_scalar_pointer_decay() {
+    for initializer in ["outputs", "&outputs[0]"] {
+        let source = format!(
+            "int main(void) {{ int *slot = 0; int **outputs[1] = {{ &slot }}; int *raw = {initializer}; raw[0] = 0; return outputs[0] != 0; }}"
+        );
+        assert!(
+            interpret(&source).is_err(),
+            "tracked pointer-output storage must not decay through {initializer}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_decay_and_addresses_in_non_evaluating_routes() {
+    for source in [
+        "int f(void) { int **outputs[1]; int *raw = outputs; return 0; } int main(void) { return sizeof(f()); }",
+        "int main(void) { int **outputs[1]; return sizeof(&outputs[0]); }",
+    ] {
+        let error = interpret(source).expect_err(source).to_string();
+        assert!(
+            error.contains("pointer output array"),
+            "unexpected non-evaluating boundary diagnostic: {error}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_arrays_reject_pointer_arithmetic_updates() {
+    for update in ["outputs[0] += 1", "outputs[0]++", "++outputs[0]"] {
+        let source = format!(
+            "int main(void) {{ int *slot = 0; int **outputs[1] = {{ &slot }}; {update}; return 0; }}"
+        );
+        let error = match interpret(&source) {
+            Ok(code) => panic!("{update} should fail, returned {code}"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("pointer output"),
+            "unexpected diagnostic for {update}: {error}"
+        );
+    }
+}
+
+#[test]
 fn tracked_scalar_output_aggregate_fields_blocker_folded_complement() {
     let mut failures = Vec::new();
     for (ty, kind) in [
@@ -13381,7 +16699,7 @@ struct Box { char *pointer; };
 void *hidden_storage(void) {
     struct Box box = {(void *)&safe};
     struct Box *pointer = &box;
-    _Generic(pointer, struct Box *: pointer)->pointer = &dangerous;
+    _Generic(pointer, struct Box *: pointer)->pointer = (char *)&dangerous;
     return box.pointer;
 }
 int main(void) {
@@ -29592,10 +32910,6 @@ fn pointer_typedef_outputs_keep_qualification_and_unsupported_shape_boundaries()
             "pointer-to-pointer declarations are not supported at line 2, column 28",
         ),
         (
-            "typedef int *ValuePtr;\nint main(void) { ValuePtr *outputs[2]; return 0; }\n",
-            "pointer array declarations are not supported at line 2, column 35",
-        ),
-        (
             "typedef int *ValuePtr;\nstruct Box { ValuePtr **output; };\nint main(void) { return 0; }\n",
             "pointer-to-pointer struct fields are not supported at line 2, column 24",
         ),
@@ -31364,10 +34678,6 @@ fn complete_pointer_output_typedef_aliases_remain_rejected_in_atomic_type_querie
 fn pointer_output_typedef_aliases_preserve_unsupported_type_boundaries() {
     let cases = [
         (
-            "typedef int *P; typedef P *O; int main(void) { O values[2]; return 0; }",
-            "pointer array declarations are not supported",
-        ),
-        (
             "typedef int *P; typedef P *O; struct H { O *value; }; int main(void) { return 0; }",
             "pointer-to-pointer struct fields are not supported",
         ),
@@ -31563,10 +34873,6 @@ fn double_pointer_output_objects_preserve_qualified_static_and_address_boundarie
         (
             "int main(void) { int *slot = 0; double **output = &slot; return 0; }\n",
             "double pointer object 'output' initializer requires null, another compatible pointer output object, or the address of a mutable double pointer variable",
-        ),
-        (
-            "int main(void) { double **outputs[2]; return 0; }\n",
-            "pointer array declarations are not supported at line 1, column 34",
         ),
         (
             "struct Box { double ***output; }; int main(void) { return 0; }\n",
@@ -33531,7 +36837,7 @@ fn character_pointer_object_conditional_sizeof_validation_remains_linear() {
 }
 
 #[test]
-fn character_pointer_objects_reject_deeper_and_array_declarators() {
+fn character_pointer_objects_reject_deeper_declarators() {
     for (source, expected) in [
         (
             "char ***output = 0; int main(void) { return 0; }",
@@ -33540,10 +36846,6 @@ fn character_pointer_objects_reject_deeper_and_array_declarators() {
         (
             "char **first = 0, ***second = 0; int main(void) { return 0; }",
             "pointer-to-pointer declarations are not supported at line 1, column 21",
-        ),
-        (
-            "char **outputs[2]; int main(void) { return 0; }",
-            "pointer array declarations are not supported at line 1, column 15",
         ),
     ] {
         let err = interpret(source).unwrap_err();
@@ -45075,10 +48377,6 @@ fn tracked_scalar_output_aggregate_fields_retain_address_cast_and_array_boundari
             (
                 format!("struct Box {{ {ty} **outputs[2]; }};"),
                 "pointer array struct fields are not supported",
-            ),
-            (
-                format!("{ty} **outputs[2];"),
-                "pointer array declarations are not supported",
             ),
         ] {
             let program = format!("{declaration} int main(void) {{ return 0; }}");

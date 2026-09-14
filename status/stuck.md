@@ -8,6 +8,13 @@ None.
 
 ## Resolved this run
 
+### 2026-09-14 — TODO 419 tracked scalar-output array review closure
+
+- Failure: inherited final review reproduced pre-guard recursive AST clones, deep scalar compound-literal traversal, and loss of block-static initializer/identity across direct switch jumps; final re-review also caught an evaluated aggregate-index diagnostic regression and a warning-denied `Vec<Box<Stmt>>` lint.
+- Root causes: depth checks followed rather than preceded clone/traversal sites; skipped-switch declaration synthesis erased storage-class and enum semantics; and strict non-evaluating index validation was reused before the established evaluated aggregate diagnostic path.
+- RED/GREEN: focused regressions first reproduced each semantic or bounded-resource defect. Pre-clone validation, bounded literal traversal, original static/enum analysis and execution, evaluated/non-evaluating index separation, and unboxed synthetic declarations make all focused tests and strict Clippy GREEN.
+- Closure: the 135-test tracked-array filter, all 2,596 local tests, Docker test container exit 0, rebuilt runtime output `10`, formatting, strict Clippy, diff hygiene, and fresh independent `AI_REVIEW:CLEAR` pass. No active blocker remains.
+
 ### 2026-09-10 — v0.59.0 publication evidence recovery
 
 - Recovery state: the release commit and annotated tag had already reached the remote, while authoritative status queues still described publication as pending.

@@ -2,7 +2,42 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: bounded v0.59.0 is published; the final unchecked status item, fixed one-dimensional tracked scalar-output arrays, defines current order. Every older “next” statement is historical as of its dated research entry.
+Queue authority: bounded v0.59.0 is published and fixed one-dimensional tracked scalar-output arrays are complete; bounded v0.60.0 release closure defines current order. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-14 — Tracked-output array final review closure
+
+- No external semantic source was required. Native C remained only a warning-denied compiler oracle for supported fixture behavior.
+- Guard recursive expression depth before cloning AST subtrees. A semantic walker that eventually enforces a limit cannot protect an earlier recursive `Clone` implementation.
+- Switch declarations after an always-stopping statement need storage-aware treatment: automatic objects contribute only lexical declaration metadata to later labels, while block-static declarations retain their original stable id and initializer and enum declarations retain their values and validation dependencies.
+- Keep evaluated and non-evaluating diagnostics separate when strict metadata validation intentionally closes a historical unevaluated hole. Aggregate indexes beneath `sizeof` must be rejected without evaluation, while an evaluated aggregate index should continue through the scalar evaluator to preserve its established aggregate-specific diagnostic.
+- Avoid `Vec<Box<T>>` when a vector already owns and indirection-sizes heterogeneous enum values adequately; strict Clippy correctly identified the redundant allocation in synthetic skipped-declaration metadata.
+- Fresh independent review returned `AI_REVIEW:CLEAR`; the focused tracked-array filter and complete 2,596-test local/Docker gate pass. Bounded v0.60.0 release closure is next.
+
+## 2026-09-13 — Tracked-output array switch and depth review findings
+
+- No external semantic source was required. Warning-denied native C was used only as an oracle for the static direct-switch-jump initializer/identity behavior.
+- Parser or analyzer depth checks must precede every recursive AST clone, not merely recursive semantic walks. `array2d_indexed_row_base` and static aggregate-output initializer reconstruction remain concrete pre-clone audit sites.
+- A non-evaluating compound-literal initializer can contain a deep scalar binary tree even when its result type is scalar. Enter the bounded expression walk before recursing into that initializer instead of relying on a later 128-level guard.
+- C switch labels do not introduce scopes. Declarations remain lexically visible after later labels even when an earlier statement stops control flow; direct jumps must expose declaration type/storage while skipping automatic initializer side effects. Block-static declarations are different: static initialization and stable identity exist independently of whether control executes the declaration statement, so replacing them with zeroed automatic placeholders is incorrect.
+- The two-cycle fail-closed review limit was reached with three proven blockers. Preserve the diff and do not run or claim the canonical gate until focused RED/GREEN and fresh approval close them.
+
+## 2026-09-12 — Tracked-output array recovery and final review findings
+
+- No external semantic source was required. Native C was used only as a strict compiler oracle for warning-free supported forms and to confirm invalid conversion constraints.
+- Parser-folded type walks must enter a depth/work budget before recursive typing or AST cloning. A 1,000-term index can otherwise overflow the host stack even when the evaluated `sizeof` path is already bounded.
+- Address-keyed expression caches are unsafe for temporary AST clones created by non-evaluating analysis because allocator address reuse can return a stale type. Bypass such caches while non-evaluating type depth is active or key by stable node identity.
+- Callee-summary validation must follow resolved `DeclType` values through aliases and function returns rather than depend on syntax identifying `a[index]`. Compound updates, discarded expressions, call results, and every scalar consumer remain semantically constrained even when no guest expression is evaluated.
+- Folded validations belong at the binding point that supplies their lexical environment. Self-designators require the current declaration to be installed, while later comma declarators may depend on earlier declarators from the same declaration list.
+- Review-cycle limit was reached with four proven parity gaps still open. Keep TODO 419 uncommitted until focused regressions, fresh approval, and the complete canonical gate close them.
+
+## 2026-09-11 — Tracked-output array classifier/evaluator recovery findings
+
+- No external semantic source was needed. The work uses Cust's established interpreter-owned tracked-output model and native C only through the registered warning-free compiler-oracle fixture.
+- Parser-folded and callee-summary typing must validate the complete unevaluated expression tree, not only its result `DeclType`. Logical/conditional/comma/update operands, assignment mutability and RHS compatibility, call arity/arguments, and scalar-consumer conversions remain semantically relevant even when no expression is evaluated.
+- Identifier lookup in folded analysis must compare lexical distance across ordinary objects/parameters, enum constants, and functions before classifying a name. Checking local constants or functions before a nearer object can silently bypass array markers or reject valid shadowing.
+- Runtime, parser-folded, and callee-summary index checks should share a positive rule—integer scalar result type—rather than independently excluding pointer/double/aggregate categories. Valid call conversions still need the same array-adjustment and scalar truth-conversion rules as evaluated calls.
+- Nested `sizeof` must validate the inner operand but return the deterministic size of Cust's `sizeof` result type, not recursively return the inner object's size.
+- Review-cycle limit was reached with five proven gaps still open. Keep the implementation uncommitted until targeted regressions, fresh approval, and canonical local/Docker verification close them.
 
 ## 2026-09-10 — v0.59.0 publication recovery
 

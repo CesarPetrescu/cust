@@ -1,10 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-09-10
+Last updated: 2026-09-14
 
 ## Latest autonomous verification
 
-Queue authority: numbered TODO 418 is complete: bounded v0.59.0 was published from release commit `19e451c2a38644e78bca096bd6c3a158ff3e0d1f` as annotated tag object `dc40e8523f06a9fb578f965e89ac29b617388d4c`, which peels to that exact commit. TODO 419, fixed one-dimensional tracked scalar-output arrays, is the single current implementation task. Every later dated “next” statement is historical as of this entry.
+Queue authority: numbered TODO 419 is complete. Fixed one-dimensional tracked scalar-output arrays are implemented and verified; bounded v0.60.0 release closure is the single current task. Every later dated “next” statement is historical as of this entry.
+
+Completion update (2026-09-14): TODO 419 now supports fixed `T **outputs[N]` objects for `char`, `int`, `_Bool`, and `double` across automatic, file-global, and block-static storage. Indexed initialization, assignment, forwarding, typed indirect access, owner/lifetime/const/static-storage rules, runtime and parser-folded non-evaluating checks, direct switch jumps, and exact decay/address/deeper/multidimensional boundaries share interpreter-owned metadata. Strict RED/GREEN and review closure added pre-clone depth guards, bounded scalar compound-literal analysis, original static/enum declaration semantics after stopping switch statements, preserved evaluated aggregate-index diagnostics, and warning-clean unboxed declaration metadata. The focused tracked-array filter passes 135 tests; the complete gate passes 2,596 tests (2,444 interpreter + 101 fuzz-safety + 33 CLI + six pointer-classifier parity + eight pointer-output parity + two Docker metadata + one compiler oracle + one license), formatting, warning-denied Clippy, Docker test exit 0, rebuilt runtime output `10`, and diff hygiene. Fresh independent re-review returned `AI_REVIEW:CLEAR`.
 
 Bounded v0.59.0 is published around tracked scalar-output aggregate fields. Recovery evidence records `origin/main` advancing by push to release commit `19e451c2a38644e78bca096bd6c3a158ff3e0d1f` at 2026-09-10T15:18:28+03:00, before the annotated tag's 2026-09-10T15:18:31+03:00 tagger time. The local tag is an annotated `tag` object; fresh remote verification reports tag object `dc40e8523f06a9fb578f965e89ac29b617388d4c`, peeled target `19e451c2a38644e78bca096bd6c3a158ff3e0d1f`, and the same release commit at remote `main`. This later status evidence does not move or recreate `v0.59.0`. Fixed one-dimensional tracked scalar-output arrays are next.
 
