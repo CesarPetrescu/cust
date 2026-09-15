@@ -41616,6 +41616,38 @@ fn supports_single_statement_control_bodies_else_if_and_dangling_else() {
 }
 
 #[test]
+fn rejects_missing_or_invalid_statement_after_else_with_context() {
+    let cases = [
+        (
+            "int main(void) { if (1) { return 0; } else }",
+            "expected statement after else, found RBrace at line 1, column 44",
+        ),
+        (
+            "int main(void) { if (1) return 0; else",
+            "expected statement after else, found Eof at line 1, column 39",
+        ),
+        (
+            "int main(void) { if (1) return 0; else , }",
+            "expected statement after else, found Comma at line 1, column 40",
+        ),
+        (
+            "int main(void) { if (1) return 0; else = 0; }",
+            "expected statement after else, found Assign at line 1, column 40",
+        ),
+        (
+            "int main(void) { if (1) return 0; else / 1; }",
+            "expected statement after else, found Slash at line 1, column 40",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_missing_colon_after_switch_case_label() {
     let program = include_str!("fixtures/invalid/switch_case_missing_colon.c");
 

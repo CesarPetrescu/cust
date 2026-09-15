@@ -2,7 +2,12 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, and explicit CLI `--` end-of-options support are complete. v0.63.0 tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` peels locally and remotely to release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80`; the next package is a concrete dangling-`else` missing-statement diagnostic. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, and dangling-`else` missing-statement diagnostics are complete. v0.63.0 tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` peels locally and remotely to release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80`; TODO 430 is next: a bounded missing-control-body diagnostic audit outside `else`. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-16 — Contextual dangling-`else` missing statements
+
+- The right recovery boundary is immediately after consuming `else`: missing-body markers (`}`, EOF) and tokens that cannot begin a Cust statement should use the `else` context, while valid empty, compound, expression, declaration, and control statements continue through the existing control-body parser. This preserves C's nearest-`if` association because no valid `else if` or nested `if` path is changed.
+- Strict RED/GREEN used exact interpreter diagnostics for `RBrace`, EOF, comma, assignment, and division. Independent review found operator starts were incompletely covered after the first implementation; adding the relevant non-statement-leading operator tokens fixed that narrow omission. The reviewer exercised 144 exact guarded-token diagnostics and 52 valid-body/dangling-else execution probes before returning `AI_REVIEW:CLEAR`. No external semantic lookup was required for this parser-local diagnostic decision.
 
 ## 2026-09-15 — v0.63.0 publication evidence recovery and next parser diagnostic
 

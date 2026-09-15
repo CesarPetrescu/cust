@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 428 v0.63.0 annotated-tag publication is recovered and verified; TODO 429 dangling-`else` diagnostics is the next implementation package, not an active blocker.
+None. TODO 429 dangling-`else` diagnostics is complete and verified; TODO 430 contextual missing-control-body diagnostics is the next implementation package, not an active blocker.
+
+### 2026-09-16 — TODO 429 dangling-`else` missing-statement diagnostics
+
+- Failure: `int main(void) { if (1) { return 0; } else }` reported generic `unexpected token in statement: RBrace` at the body closing brace.
+- Root cause: after consuming `else`, `parse_if()` delegated directly to generic control-body/statement parsing with no context-aware check for a missing or impossible statement start.
+- RED/GREEN: exact `RBrace`, EOF, comma, assignment, and division starts first failed against the required `expected statement after else, found <Token>` diagnostics. A narrow post-`else` guard makes them GREEN while valid empty/braced/expression/control bodies and nearest-`if` binding remain GREEN.
+- Closure: fresh independent Codex review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,661 local tests, Docker test exit 0 after the foreground wait window, rebuilt runtime output `10`, and diff hygiene pass. No blocker remains.
 
 ## Resolved this run
 
