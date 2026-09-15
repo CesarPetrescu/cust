@@ -6,6 +6,19 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.63.0 — 2026-09-15
+
+### CLI discovery and diagnostics
+
+- Added stable stdout-only `--help` and `-h` output that documents normal interpretation, `--tokens`, `--ast`, `--max-steps N`, and `--version` without requiring a source operand.
+- Preserved the missing-source stderr/64 usage contract and made top-level plus option-mode source positions reject unknown option-like operands before file I/O with exact stderr diagnostics and status 64.
+- A bare `--` end-of-options delimiter is intentionally not yet supported; an explicit relative or absolute path remains the safe spelling for dash-prefixed source filenames.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.63.0`.
+- Reconciled an executable inventory of 2,658 tests: 2,496 interpreter tests, 101 deterministic fuzz-safety tests, 41 CLI tests, 6 pointer-classifier parity tests, 10 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
 ## v0.62.0 — 2026-09-15
 
 ### Language subset and conformance

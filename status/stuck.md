@@ -4,9 +4,15 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 425 stable `--help`/`-h` CLI behavior is complete and canonically verified; TODO 426 bounded v0.63.0 release closure is next.
+None. TODO 426 bounded v0.63.0 release preparation is complete and canonically verified; its annotated tag is reserved until the release commit reaches `origin/main`. TODO 427 explicit CLI `--` end-of-options support is next.
 
 ## Resolved this run
+
+### 2026-09-15 — TODO 426 bounded v0.63.0 release preparation
+
+- RED/GREEN: exact CLI version and Docker Compose image assertions failed at `0.62.0` and pass after Cargo/lock plus both image tags moved to `0.63.0`.
+- Verification: fresh independent read-only release review returned `AI_REVIEW:CLEAR`; formatting, warning-denied Clippy, all 2,658 local tests, all 2,658 Docker tests, rebuilt runtime output `10`, and diff hygiene pass. The first foreground Docker observation reached its tool time window while the image-build test process still ran; no failure was inferred, and the retained process was later observed to exit 0 through the required `docker compose run --rm test` gate.
+- Publication guard: local and remote `v0.63.0` preflight refs were absent. The tag remains uncreated until the verified release commit is accepted by `origin/main`. No blocker remains.
 
 ### 2026-09-15 — TODO 425 stable CLI help and unknown-option contract
 

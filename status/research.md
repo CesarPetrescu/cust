@@ -2,7 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0 publication, expanded classifier/evaluator parity, and stable `--help`/`-h` CLI behavior are complete; bounded v0.63.0 release closure is the single next package. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, and bounded v0.63.0 release preparation are complete; explicit CLI `--` end-of-options support is the single next package. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-15 — v0.63.0 release preparation
+
+- Candidate evaluation selected the queue-leading release closure over immediate explicit `--` delimiter support and parser-diagnostic expansion because it publishes the independently reviewed CLI contract with bounded consistency risk and no interpreter-runtime expansion.
+- Version-first TDD changed only the exact CLI and Compose expectations. The CLI test failed with package version `0.62.0` where `0.63.0` was required; the Compose test failed because neither expected `v0.63.0` image tag was present. Both pass after Cargo/lock plus Compose metadata synchronization.
+- Executable `cargo test --test <target> -- --list` counts reconcile 2,658 tests: 2,496 interpreter + 101 fuzz-safety + 41 CLI + 6 pointer-classifier parity + 10 tracked pointer-output parity + 2 Docker metadata + 1 compiler oracle + 1 repository-license test. The non-interpreter subtotal is 162.
+- Fresh independent read-only review returned `AI_REVIEW:CLEAR`. Formatting, warning-denied Clippy, all 2,658 local and Docker tests, rebuilt runtime output `10`, and diff hygiene pass. Local and remote `v0.63.0` preflight refs were empty; tag creation remains reserved until the release commit is accepted on `origin/main`.
 
 ## 2026-09-15 — Stable CLI help contract
 
