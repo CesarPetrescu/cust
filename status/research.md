@@ -2,7 +2,27 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: bounded v0.60.0 is published around fixed one-dimensional tracked scalar-output arrays; tracked-output aggregate-field arrays are the single current implementation package. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays are complete; bounded v0.61.0 release closure is the sole next package. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-15 — Aggregate-field array folded metadata and unary resource bounds
+
+- Integer-constant-expression parsing has independent restoring unary and conditional depth counters. This covers hostile prefix and both true/false nested conditional branches in array lengths without coupling parser recursion to the later folded-expression validation depth/work budget.
+- Ordinary unary parsing must count logical/address/increment operators and batched dereference prefixes against one shared nesting ceiling. Batching only identical `*` tokens is safe only when the batch count is charged before parsing the operand; mixed batches otherwise create thousands of AST nodes beneath a shallow recursive call chain.
+- Parser depth wrappers count the terminal operand call, so a `depth > limit` entry guard allows exactly the configured number of unary operators and rejects the next while restoring state on every `Result` path. Ordinary unary/grouping parsing uses a 40-level ceiling; ordinary operands reached from integer constants retain the stricter shared-budget limit, and integer-constant parsing uses 64. Review proved that retaining the former 128-level ordinary-only allowance was unsafe: 44 ordinary groups followed by `sizeof(int[1])` exhausted a 2 MiB stack before the nested type-name budget activated, while 40 groups remain accepted and preserve established 40-level validation tests.
+- Parser-folded output-field-array element sizing must route `AggregateFieldGet` through the same aggregate type/path metadata helper as variable and pointer-backed fields. Runtime-only support is insufficient for enum constants and array lengths using `sizeof`.
+- Hostile 50,000-prefix inputs belong in subprocess CLI tests: expected rejection is exit code 1 with a source-located deterministic diagnostic, while a signal/abort produces no exit code and fails the regression without terminating the test harness.
+- Aggregate-copy static-initializer analysis must recurse through `StructFieldType::PointerOutputArray` as well as scalar `PointerOutput`; otherwise `sizeof(f())` can skip automatic-storage rejection that evaluated `f()` enforces.
+- Independent per-parser limits do not by themselves bound composed host-stack use. Mixed stack-unit accounting covers integer-first compositions and nested type-name/array-length routes, while a conservative 40-level ordinary ceiling is also required from the first ordinary frame because the parser cannot predict whether a later operand will enter a larger `sizeof` type-name route. Child-process tests on 2 MiB stacks cover both nesting directions and nested array type, inline enum, and array compound-literal `sizeof` forms. Existing stress tests that intentionally target later semantic limits must keep their parser nesting at or below 40; depth-33 generic trees still reach the 32-level semantic validator, and depth-16 assignment trees still exceed its 1,024-unit work budget. Fresh review and the complete local/Docker gate independently confirmed these downstream assertions.
+
+## 2026-09-14 — Tracked-output aggregate-field array review findings
+
+- No external semantic source was required. Native C remains only a warning-denied external oracle; Cust continues to use interpreter-owned pointer-output identities.
+- A field-array element selected from an aggregate-valued expression needs the same temporary-root handling as a scalar tracked-output field. Function-result temporaries must retain the existing call-depth lifetime attachment.
+- Unevaluated callee traversal must validate every field-array read, whole-array scalar use, index type, and wrapper/condition route, not only mutation operators. Semantic constraints remain active even when `sizeof` suppresses execution.
+- Preserve whether an intermediate field route is already aggregate-valued. Adding a synthetic dereference to `StructPtrArrayGet` can turn a valid embedded containing-object route into a false `expected pointer expression` diagnostic.
+- Runtime and metadata-only object-size paths both need explicit field-array element sizing. A shortcut in the evaluated `sizeof` path alone leaves nested callee summaries to decompose the subscript as ordinary pointer arithmetic.
+- Aggregate initializer shape and whole-array assignment boundaries must be rejected before value application. Letting an unbraced scalar initializer reach an array-only `unreachable!` arm is a host-safety defect, while checking only RHS decay misses direct field-array assignment beneath unevaluated calls.
+- Two initial review-fix cycles closed aggregate-valued runtime bases and general unevaluated read/decay validation. Recovery then closed all four later findings plus folded aggregate-literal sizing and unary resource-safety findings with focused RED/GREEN; fresh independent final review returned `APPROVED` and the canonical local/Docker gate passed.
 
 ## 2026-09-14 — v0.60.0 publication
 

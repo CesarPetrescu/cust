@@ -4,9 +4,22 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None.
+None. TODO 421 received fresh independent approval and passed the complete canonical local/Docker gate.
 
 ## Resolved this run
+
+### 2026-09-15 — TODO 421 ordinary-first mixed parser-depth host-stack overflow
+
+- Evidence: independent re-review found 44 ordinary grouped expressions followed by `sizeof(int[1])` aborted a 2 MiB Rust thread with SIGABRT before the nested type-name budget activated; the prior 40-group reverse regression missed this boundary.
+- Root cause: the ordinary parser retained its historical 128-level ceiling until entering integer/type/array parsing. With larger current parser frames, the host stack could be exhausted before a later route activated mixed-budget checks.
+- RED/GREEN: the exact 44-group child-process reproducer failed by SIGABRT. Lowering the ordinary unary/grouping ceiling to 40 makes it return a source-located nesting diagnostic, preserves acceptance at exactly 40 groups, and keeps the hostile CLI operator matrix GREEN. A first 32-level ceiling caused nine existing stress regressions; 40 preserves five unchanged and four adjusted tests retain their original downstream assertions.
+- Closure state: fresh independent final review returned `APPROVED`; formatting, warning-denied Clippy, all 2,652 local tests, all 2,652 Docker tests, rebuilt runtime output `10`, and diff hygiene pass. TODO 421 is complete.
+
+### 2026-09-15 — TODO 421 inherited review blockers and resource-safety closure
+
+- Recovery: preserved the inherited tracked scalar-output aggregate-field array diff and promoted every review proof to a focused regression before editing production code.
+- Root causes: initializer shape checks occurred after array-only runtime dispatch; embedded aggregate-valued routes were wrapped as pointers in metadata analysis; element-size and whole-array assignment classifiers were incomplete; batched dereferences and integer-constant unary/conditional recursion were not fully charged to deterministic parser depth limits; folded aggregate-literal field metadata omitted `AggregateFieldGet`.
+- Closure: braced-shape validation, aggregate-aware route metadata, complete non-evaluating operation classification, bounded ordinary/integer-constant unary and conditional parsing, and folded aggregate-literal metadata make 51 focused interpreter tests, ten pointer-output parity tests, three hostile CLI subprocess tests, and the compiler oracle GREEN. Reviews then reproduced 2 MiB-stack aborts across integer-constant, nested ordinary-operand, and ordinary-first type-query routes plus skipped static aggregate-copy validation. Dedicated RED/GREEN regressions lower integer-constant parsing to 64, use mixed stack-unit accounting, cap ordinary parsing globally at 40, and recurse through pointer-output array fields. The complete 2,495-test interpreter suite is GREEN after preserving meaningful downstream stress assertions within the safe parser ceiling. Fresh independent final review returned `APPROVED`; all 2,652 local and Docker tests pass with runtime output `10`. No external blocker remains.
 
 ### 2026-09-14 — v0.60.0 publication closure
 

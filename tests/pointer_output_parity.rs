@@ -958,7 +958,10 @@ fn generated_complete_output_alias_spellings_retain_shape_boundaries() {
                 1;
 
             let (source, expected) = boundary.program(spelling);
-            if matches!(boundary, PointerOutputAliasBoundary::Array) {
+            if matches!(
+                boundary,
+                PointerOutputAliasBoundary::Array | PointerOutputAliasBoundary::AggregateFieldArray
+            ) {
                 assert_eq!(
                     interpret(&source),
                     Ok(0),
@@ -986,4 +989,97 @@ fn generated_complete_output_alias_spellings_retain_shape_boundaries() {
     assert_eq!(spelling_counts, [5; 4]);
     assert_eq!(boundary_counts, [4; 5]);
     assert!(cell_counts.into_iter().all(|count| count == 1));
+}
+
+#[test]
+fn generated_tracked_scalar_output_field_arrays_preserve_route_parity() {
+    let routes = [
+        ("struct Box box = {{&slot, 0}};", "box.outputs"),
+        ("struct Box boxes[1] = {{{&slot, 0}}};", "boxes[0].outputs"),
+        ("struct Outer outer = {{{&slot, 0}}};", "outer.box.outputs"),
+        (
+            "struct Outer outer = {{{&slot, 0}}}; struct Outer *p = &outer;",
+            "p->box.outputs",
+        ),
+    ];
+    let mut cells = [0; 128];
+    for kind in PointerOutputKind::ALL {
+        let ty = kind.scalar_type();
+        for spelling in PointerOutputSpelling::ALL {
+            let output = spelling.type_name(ty);
+            for (route_index, (decl, route)) in routes.iter().enumerate() {
+                for (consumer, call) in ["run()", "sizeof(run())"].iter().enumerate() {
+                    let source = format!(
+                        r#"
+typedef {ty} *ValuePtr; typedef ValuePtr *CompleteOutput; typedef CompleteOutput ChainedOutput;
+struct Box {{ {output} outputs[2]; }}; struct Outer {{ struct Box box; }};
+int calls;
+{output} forward({output} out) {{ calls++; return out; }}
+int run(void) {{
+    {ty} values[8] = {values}; {ty} *slot = values;
+    {decl}
+    int index = 0;
+    {route}[1] = forward({route}[index++]);
+    *{route}[1] = &values[2];
+    if (sizeof(forward({route}[index++])) != sizeof(&slot)) return 1;
+    if (sizeof({route}) != 2 * sizeof({route}[0])) return 2;
+    if (sizeof(**{route}[0]) != sizeof(values[0])) return 3;
+    return index != 1 || {route}[0] != &slot || {route}[1] != &slot || **{route}[1] != values[2];
+}}
+int main(void) {{ return {call} != {expected} || calls != {calls}; }}
+"#,
+                        values = kind.values(),
+                        expected = if consumer == 0 { "0" } else { "sizeof(int)" },
+                        calls = if consumer == 0 { 1 } else { 0 }
+                    );
+                    assert_eq!(
+                        interpret(&source),
+                        Ok(0),
+                        "{kind:?}, {spelling:?}, {route}, {call}\n{source}"
+                    );
+                    cells[((kind.index() * 4 + spelling.index()) * 4 + route_index) * 2
+                        + consumer] += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(cells, [1; 128]);
+}
+
+#[test]
+fn generated_tracked_scalar_output_field_arrays_retain_union_and_deeper_boundaries() {
+    let mut cells = [0; 32];
+    for kind in PointerOutputKind::ALL {
+        let ty = kind.scalar_type();
+        for spelling in PointerOutputSpelling::ALL {
+            let output = spelling.type_name(ty);
+            for (boundary, (declaration, diagnostic, token)) in [
+                (
+                    format!("union Box {{ {output} outputs[1]; }};"),
+                    "pointer array union fields are not supported",
+                    "[1]",
+                ),
+                (
+                    format!("struct Box {{ {output} *extra[1]; }};"),
+                    "pointer-to-pointer struct fields are not supported",
+                    "*extra",
+                ),
+            ]
+            .iter()
+            .enumerate()
+            {
+                let source = format!(
+                    "typedef {ty} *ValuePtr; typedef ValuePtr *CompleteOutput; typedef CompleteOutput ChainedOutput; {declaration} int main(void) {{ return 0; }}"
+                );
+                let column = source.find(token).unwrap() + 1;
+                assert_eq!(
+                    interpret(&source).map_err(|e| e.to_string()),
+                    Err(format!("{diagnostic} at line 1, column {column}")),
+                    "{kind:?}, {spelling:?}, {declaration}"
+                );
+                cells[(kind.index() * 4 + spelling.index()) * 2 + boundary] += 1;
+            }
+        }
+    }
+    assert_eq!(cells, [1; 32]);
 }

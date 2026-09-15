@@ -1,6 +1,1065 @@
 use cust::{format_tokens, interpret};
 
 #[test]
+fn tracked_scalar_output_field_arrays_unevaluated_callee_reads_and_decay() {
+    let mut failures = Vec::new();
+    for route in [
+        "box.outputs",
+        "boxes[0].outputs",
+        "p->outputs",
+        "shell.boxes[0].outputs",
+        "((struct Box){{0}}).outputs",
+    ] {
+        for (statement, expected) in [
+            (
+                format!("{route}[0.5];"),
+                "array subscript requires an integer value",
+            ),
+            (
+                format!("(void){route}[0.5];"),
+                "array subscript requires an integer value",
+            ),
+            (
+                format!("!{route}[0.5];"),
+                "array subscript requires an integer value",
+            ),
+            (
+                format!("{route};"),
+                "pointer output arrays do not decay to scalar pointers",
+            ),
+            (
+                format!("(void){route};"),
+                "pointer output arrays do not decay to scalar pointers",
+            ),
+            (
+                format!("if ({route}) return 1;"),
+                "pointer output arrays do not decay to scalar pointers",
+            ),
+        ] {
+            for probe in ["f()", "sizeof(f())", "_Generic(f(), default: 0)"] {
+                let source = format!(
+                    "struct Box {{ int **outputs[1]; }}; struct Shell {{ struct Box boxes[1]; }}; \
+                     int f(void) {{ struct Box box = {{{{0}}}}, boxes[1] = {{{{{{0}}}}}}; \
+                     struct Box *p = &box; struct Shell shell; {statement} return 0; }} \
+                     int main(void) {{ return {probe}; }}"
+                );
+                let actual = interpret(&source).map_err(|e| e.to_string());
+                if actual != Err(expected.to_string()) {
+                    failures.push(format!(
+                        "{statement} via {probe}: expected {expected:?}, got {actual:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_reject_generic_decay_in_unevaluated_callees() {
+    for control in [
+        "box.outputs",
+        "p->outputs",
+        "boxes[0].outputs",
+        "shell.boxes[0].outputs",
+        "get().outputs",
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[2]; }}; struct Shell {{ struct Box boxes[1]; }}; \
+             struct Box get(void) {{ struct Box box = {{{{0}}}}; return box; }} \
+             int f(void) {{ struct Box box = {{{{0}}}}, boxes[1] = {{{{{{0}}}}}}; \
+             struct Box *p = &box; struct Shell shell; \
+             (void)_Generic({control}, default: 0); return 0; }} \
+             int main(void) {{ return sizeof(f()); }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|error| error.to_string()),
+            Err("pointer output arrays do not decay to scalar pointers".to_string()),
+            "{control}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_unevaluated_callee_reads_preserve_non_evaluation() {
+    let source = r#"
+struct Box { int **outputs[1]; };
+struct Shell { struct Box boxes[1]; };
+int calls, index;
+struct Box get(void) { calls++; struct Box box = {{0}}; return box; }
+int f(void) {
+    struct Box *p = 0; struct Shell shell;
+    (void)p->outputs[index++];
+    !get().outputs[999];
+    (void)shell.boxes[0].outputs[index++];
+    (void)sizeof(_Generic(0, default: p->outputs));
+    return sizeof(p->outputs) + sizeof(get().outputs) + sizeof(shell.boxes[0].outputs);
+}
+int main(void) {
+    return sizeof(f()) != sizeof(int) || _Generic(f(), int: 0, default: 1) || calls || index;
+}
+"#;
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_preserve_generic_result_array_type_in_sizeof() {
+    let sources = [
+        r#"
+struct Box { int **outputs[3]; };
+int f(void) {
+    struct Box box = {{0}};
+    return sizeof(_Generic(0, default: box.outputs)) == sizeof(box.outputs) ? 0 : 1;
+}
+int main(void) { return f(); }
+"#,
+        r#"
+struct Box { int **outputs[3]; };
+int f(void) {
+    struct Box box = {{0}};
+    (void)sizeof(_Generic(0, default: box.outputs));
+    return 0;
+}
+int main(void) { return sizeof(f()) == sizeof(int) ? 0 : 1; }
+"#,
+        r#"
+struct Box { int **outputs[3]; };
+int main(void) {
+    struct Box box = {{0}};
+    enum { N = sizeof(_Generic(0, default: box.outputs)) };
+    return N == sizeof(box.outputs) ? 0 : 1;
+}
+"#,
+    ];
+
+    for (index, source) in sources.into_iter().enumerate() {
+        assert_eq!(interpret(source), Ok(0), "source {index}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_fold_aggregate_literal_element_sizeof() {
+    let source = r#"
+struct Box { int **outputs[1]; };
+int main(void) {
+    enum { N = sizeof(((struct Box){{0}}).outputs[0]) };
+    return N != sizeof(int *);
+}
+"#;
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_aggregate_bases() {
+    let mut results = Vec::new();
+    for body in [
+        "return get(&slot).outputs[index++] != &slot || calls != 1 || index != 1;",
+        "return (((struct Box){{0}}).outputs[index++] = &slot) != &slot || ((struct Box){{&slot}}).outputs[0] != &slot || index != 1;",
+    ] {
+        for call in ["sizeof(run()) != sizeof(int)", "run()"] {
+            let source = format!(
+                r#"
+struct Box {{ int **outputs[1]; }};
+int calls;
+struct Box get(int **out) {{ calls++; struct Box box = {{{{out}}}}; return box; }}
+int run(void) {{ int value = 7; int *slot = &value; int index = 0; {body} }}
+int main(void) {{ return {call}; }}
+"#
+            );
+            results.push(interpret(&source));
+        }
+    }
+    assert_eq!(results, vec![Ok(0); 4]);
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_deep_queries_are_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_FIELD_ARRAY_DEPTH_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        for expression in [
+            format!("box.outputs[{}0]", "0+".repeat(512)),
+            format!("{}box.outputs[0]", "*".repeat(512)),
+        ] {
+            let source = format!(
+                "struct Box {{ int **outputs[1]; }}; int main(void) {{ struct Box box; enum {{ N = sizeof({expression}) }}; return N; }}"
+            );
+            let result = std::thread::Builder::new()
+                .stack_size(2 * 1024 * 1024)
+                .spawn(move || interpret(&source))
+                .unwrap()
+                .join()
+                .unwrap();
+            assert!(result.is_err(), "deep query must be rejected");
+        }
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_field_arrays_deep_queries_are_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_parenthesized_lengths_are_host_stack_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_FIELD_ARRAY_PAREN_DEPTH_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let accepted = format!(
+            "int main(void) {{ return {}1{}; }}",
+            "(".repeat(40),
+            ")".repeat(40)
+        );
+        let accepted_result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&accepted).map_err(|error| error.to_string()))
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(accepted_result, Ok(1));
+
+        let nested_sizeof_array_types = (0..64).fold("1".to_string(), |length, _| {
+            format!("sizeof(int[{length}])")
+        });
+        let nested_inline_enum_sizeof = (0..64).fold("1".to_string(), |value, depth| {
+            format!("sizeof(enum {{ E{depth} = {value} }})")
+        });
+        let nested_array_literal_sizeof = (0..64).fold("1".to_string(), |length, _| {
+            format!("sizeof((int[{length}]){{0}})")
+        });
+        for (route, length) in [
+            ("plain", format!("{}1{}", "(".repeat(128), ")".repeat(128))),
+            (
+                "sizeof",
+                format!("sizeof({}1{})", "(".repeat(64), ")".repeat(64)),
+            ),
+            (
+                "mixed",
+                format!(
+                    "{}sizeof({}1{}){}",
+                    "(".repeat(40),
+                    "(".repeat(30),
+                    ")".repeat(30),
+                    ")".repeat(40)
+                ),
+            ),
+            ("nested sizeof array types", nested_sizeof_array_types),
+            ("nested inline enum sizeof", nested_inline_enum_sizeof),
+            ("nested array literal sizeof", nested_array_literal_sizeof),
+        ] {
+            let source = format!(
+                "struct Box {{ int **outputs[{length}]; }}; int main(void) {{ return 0; }}"
+            );
+            let result = std::thread::Builder::new()
+                .stack_size(2 * 1024 * 1024)
+                .spawn(move || interpret(&source).map_err(|error| error.to_string()))
+                .unwrap()
+                .join()
+                .unwrap();
+            let error = result.expect_err("deep parenthesized length must be rejected");
+            assert!(
+                error.contains("nesting limit"),
+                "{route}: expected a bounded nesting diagnostic, got {error:?}"
+            );
+        }
+
+        let source = format!(
+            "int main(void) {{ return {}sizeof(int[1]){}; }}",
+            "(".repeat(44),
+            ")".repeat(44)
+        );
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || interpret(&source).map_err(|error| error.to_string()))
+            .unwrap()
+            .join()
+            .unwrap();
+        let error = result.expect_err("reverse mixed parser nesting must be rejected");
+        assert!(
+            error.contains("nesting limit"),
+            "reverse mixed parser route: expected a bounded nesting diagnostic, got {error:?}"
+        );
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_field_arrays_parenthesized_lengths_are_host_stack_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_deep_assignment_routes_are_bounded() {
+    const CHILD_ENV: &str = "CUST_OUTPUT_FIELD_ARRAY_ASSIGNMENT_DEPTH_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let deep_index = format!("{}0", "0+".repeat(512));
+        for statement in [
+            format!("sizeof(boxes[{deep_index}].outputs = 0);"),
+            format!("boxes[{deep_index}].outputs[0] = 0;"),
+        ] {
+            let source = format!(
+                "struct Box {{ int **outputs[1]; }}; int main(void) {{ struct Box boxes[1]; {statement} return 0; }}"
+            );
+            let result = std::thread::Builder::new()
+                .stack_size(2 * 1024 * 1024)
+                .spawn(move || interpret(&source).map_err(|error| error.to_string()))
+                .unwrap()
+                .join()
+                .unwrap();
+            let error = result.expect_err("deep assignment must be rejected");
+            assert!(
+                error.contains("nesting limit"),
+                "expected a bounded nesting diagnostic, got {error:?}"
+            );
+        }
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_field_arrays_deep_assignment_routes_are_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_exact_parser_boundaries() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (declaration, expected, token) in [
+            (
+                format!("union Box {{ {ty} **outputs[1]; }};"),
+                "pointer array union fields are not supported",
+                "[1]",
+            ),
+            (
+                format!("struct Box {{ {ty} ***outputs[1]; }};"),
+                "pointer-to-pointer struct fields are not supported",
+                "*outputs",
+            ),
+            (
+                format!("struct Box {{ {ty} **outputs[1][1]; }};"),
+                "multidimensional pointer output array fields are not supported",
+                "[1];",
+            ),
+            (
+                format!("struct Box {{ {ty} **outputs[]; }};"),
+                "flexible array aggregate fields are not supported",
+                "]",
+            ),
+            (
+                format!(
+                    "struct Inner {{ {ty} **outputs[1]; }}; union Box {{ struct Inner box; }};"
+                ),
+                "union fields containing nested pointer output storage are not supported",
+                "struct Inner box",
+            ),
+        ] {
+            let column = declaration.find(token).unwrap() + 1;
+            let source = format!("{declaration} int main(void) {{ return 0; }}");
+            assert_eq!(
+                interpret(&source).map_err(|e| e.to_string()),
+                Err(format!("{expected} at line 1, column {column}")),
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_exact_assignment_and_index_boundaries() {
+    for route in ["box.outputs", "boxes[0].outputs", "p->outputs"] {
+        for call in ["f()", "sizeof(f())"] {
+            for rhs in ["1", "&wrong"] {
+                let source = format!(
+                    "struct Box {{ int **outputs[1]; }}; int f(void) {{ double *wrong = 0; const int *qualified = 0; struct Box box, boxes[1]; struct Box *p = &box; {route}[0] = {rhs}; return 0; }} int main(void) {{ return {call}; }}"
+                );
+                assert_eq!(interpret(&source).map_err(|e|e.to_string()), Err("function 'pointer output array assignment' parameter 'output' requires an int pointer slot address".to_string()), "{route}, {call}, {rhs}");
+            }
+            let source = format!(
+                "struct Box {{ int **outputs[1]; }}; int f(void) {{ struct Box box, boxes[1]; struct Box *p = &box; return {route}[0.5] != 0; }} int main(void) {{ return {call}; }}"
+            );
+            assert_eq!(
+                interpret(&source).map_err(|e| e.to_string()),
+                Err("array subscript requires an integer value".to_string()),
+                "{route}, {call}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_folded_generic_decay_is_rejected() {
+    let source = "struct Box { int **outputs[1]; }; int main(void) { struct Box box; enum { N = _Generic(box.outputs, default: 0) }; return N; }";
+    assert_eq!(
+        interpret(source).map_err(|e| e.to_string()),
+        Err("pointer output arrays do not decay to scalar pointers".to_string())
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_nested_generic_decay_is_rejected_by_scalar_consumers() {
+    for control in [
+        "(int)_Generic(0, default: box.outputs)",
+        "(int *)_Generic(0, default: box.outputs)",
+        "(_Generic(0, default: box.outputs), 0)",
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int main(void) {{ struct Box box; enum {{ N = _Generic({control}, default: 0) }}; return N; }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|error| error.to_string()),
+            Err("pointer output arrays do not decay to scalar pointers".to_string()),
+            "{control}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_unselected_nested_generic_decay_is_rejected_under_sizeof_call()
+ {
+    for association in [
+        "(int)_Generic(0, default: box.outputs)",
+        "(int *)_Generic(0, default: box.outputs)",
+        "(_Generic(0, default: box.outputs), 0)",
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int f(void) {{ struct Box box; (void)_Generic(0, double: {association}, default: 0); return 0; }} int main(void) {{ return sizeof(f()); }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|error| error.to_string()),
+            Err("pointer output arrays do not decay to scalar pointers".to_string()),
+            "{association}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_folded_initializer_constraints() {
+    let source = "struct Box { int **outputs[1]; }; int main(void) { enum { N = sizeof((struct Box){{1}}) }; return N; }";
+    assert_eq!(
+        interpret(source).map_err(|e| e.to_string()),
+        Err("incompatible assignment type".to_string())
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_folded_generic_controls_preserve_element_constraints() {
+    for (control, expected) in [
+        (
+            "box.outputs[0] = 0",
+            "cannot assign to const variable 'box'",
+        ),
+        (
+            "box.outputs[0]++",
+            "integer pointer output parameter reassignment is not supported",
+        ),
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int main(void) {{ const struct Box box={{{{0}}}}; enum {{ N = _Generic(({control}), default: 0) }}; return N; }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|error| error.to_string()),
+            Err(expected.to_string()),
+            "{control}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_folded_generic_controls_preserve_update_and_decay_boundaries()
+{
+    for (control, expected) in [
+        (
+            "box.outputs[0] += 0",
+            "integer pointer output parameter reassignment is not supported",
+        ),
+        (
+            "box.outputs + 0",
+            "pointer output arrays do not decay to scalar pointers",
+        ),
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int main(void) {{ struct Box box; enum {{ N = _Generic(({control}), default: 0) }}; return N; }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|error| error.to_string()),
+            Err(expected.to_string()),
+            "{control}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_require_braced_field_initializers_without_panicking() {
+    for probe in ["f()", "sizeof(f())"] {
+        let source = format!(
+            "struct Box {{ int **outputs[2]; }}; int f(void) {{ struct Box box = {{0}}; return 0; }} int main(void) {{ return {probe}; }}"
+        );
+        let result = std::panic::catch_unwind(|| interpret(&source).map_err(|e| e.to_string()));
+        assert!(
+            result.is_ok(),
+            "unbraced field-array initializer panicked via {probe}"
+        );
+        assert_eq!(
+            result.unwrap(),
+            Err("pointer output array fields require a braced initializer".to_string()),
+            "{probe}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_assignment_results_and_forwarded_returns() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let source = format!(
+            r#"
+struct Box {{ {ty} **outputs[2]; }};
+{ty} **select(struct Box *p) {{ return p->outputs[1] = p->outputs[0]; }}
+int main(void) {{
+    {ty} value = 1; {ty} *slot = &value; struct Box box = {{{{&slot}}}};
+    {ty} **copy = select(&box);
+    if (copy != &slot || copy != box.outputs[1]) return 1;
+    box.outputs[0] = (void *)0;
+    box.outputs[0] = (0, copy);
+    if (sizeof(select(&box)) != sizeof(&slot)) return 2;
+    return box.outputs[0] != &slot || !box.outputs[1];
+}}
+"#
+        );
+        assert_eq!(interpret(&source), Ok(0), "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_designators_aliases_and_embedded_routes() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let source = format!(
+            r#"
+typedef {ty} *Ptr; typedef Ptr *Output; typedef Output Alias;
+struct Box {{ Alias outputs[3], extra[1]; }};
+struct Shell {{ struct Box boxes[1]; }};
+int main(void) {{
+    {ty} value = 1; {ty} *slot = &value;
+    struct Box box = {{ .outputs[2] = &slot, .extra = {{ &slot }} }};
+    struct Shell shell; shell.boxes[0].outputs[0] = &slot;
+    shell.boxes[0].outputs[1] = box.extra[0];
+    struct Shell *p = &shell;
+    p->boxes[0].outputs[2] = p->boxes[0].outputs[1];
+    return box.outputs[0] != 0 || box.outputs[2] != &slot
+        || shell.boxes[0].outputs[1] != &slot || p->boxes[0].outputs[2] != &slot;
+}}
+"#
+        );
+        assert_eq!(interpret(&source), Ok(0), "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_replacement_initializer_zeroes_omitted_elements() {
+    let source = "struct Box { int **outputs[2]; }; int main(void) { int *slot = 0; struct Box box = {.outputs[1] = &slot, .outputs = {0}}; return box.outputs[1] != 0; }";
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_containing_and_referenced_owners() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for (body, expired) in [
+            (
+                "struct Box *alias = 0; { struct Box box = {{&slot}}; alias = &box; } return alias->outputs[0] != 0;",
+                "box",
+            ),
+            (
+                "struct Box box; { TYPE *inner = &value; box.outputs[0] = &inner; } return box.outputs[0] != 0;",
+                "inner",
+            ),
+            (
+                "struct Box box = {{&slot}}; { TYPE local[1] = {1}; *box.outputs[0] = local; } return **box.outputs[0] != 0;",
+                "local",
+            ),
+        ] {
+            let source = format!("struct Box {{ {ty} **outputs[1]; }}; int main(void) {{ {ty} value = 1; {ty} *slot = &value; {body} }}").replace("TYPE", ty);
+            assert_eq!(
+                interpret(&source).map_err(|e| e.to_string()),
+                Err(format!("pointer to out-of-scope variable '{expired}'")),
+                "{ty}, {body}"
+            );
+        }
+        let source = format!(
+            "struct Box {{ {ty} **outputs[1]; }}; int main(void) {{ {ty} value = 1; {ty} *slot = &value; struct Box copy; {{ struct Box box = {{{{&slot}}}}; copy = box; }} return copy.outputs[0] != &slot; }}"
+        );
+        assert_eq!(interpret(&source), Ok(0));
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_reject_updates_without_evaluation() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for route in ["box.outputs[0]", "boxes[0].outputs[0]", "p->outputs[0]"] {
+            for op in ["++", " += 0"] {
+                for call in ["f()", "sizeof(f())"] {
+                    let source = format!(
+                        "struct Box {{ {ty} **outputs[1]; }}; int f(void) {{ struct Box box, boxes[1]; struct Box *p = &box; {route}{op}; return 0; }} int main(void) {{ return {call}; }}"
+                    );
+                    let kind = match ty {
+                        "char" => "character",
+                        "int" => "integer",
+                        "_Bool" => "boolean",
+                        _ => "double",
+                    };
+                    assert_eq!(
+                        interpret(&source).map_err(|e| e.to_string()),
+                        Err(format!(
+                            "{kind} pointer output parameter reassignment is not supported"
+                        )),
+                        "{ty}, {route}, {op}, {call}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_non_evaluating_bounds_and_null_containers() {
+    let source = r#"
+struct Box { int **outputs[2]; };
+int calls;
+struct Box *get(void) { calls++; return 0; }
+int main(void) {
+    struct Box *p = 0; int i = 0;
+    if (sizeof(p->outputs[i++]) != sizeof(int *)) return 1;
+    if (sizeof(get()->outputs) != 2 * sizeof(int *)) return 2;
+    if (sizeof(p->outputs[999]) != sizeof(int *)) return 3;
+    return i || calls;
+}
+"#;
+    assert_eq!(interpret(source), Ok(0));
+    for index in ["-1", "1"] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int main(void) {{ struct Box box; return box.outputs[{index}] != 0; }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|e| e.to_string()),
+            Err("pointer output array field index out of bounds".to_string())
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_qualified_slot_initializers_remain_rejected() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        for slot in [
+            format!("const {ty} *slot = 0;"),
+            format!("{ty} *const slot = 0;"),
+            format!("{ty} *volatile slot = 0;"),
+        ] {
+            for call in ["f()", "sizeof(f())"] {
+                let source = format!(
+                    "struct Box {{ {ty} **outputs[1]; }}; int f(void) {{ {slot} struct Box box = {{{{&slot}}}}; return 0; }} int main(void) {{ return {call}; }}"
+                );
+                let expected = if ty == "char" {
+                    "character pointer object 'outputs' initializer requires null, another character pointer output object, or the address of a mutable char pointer variable".to_string()
+                } else {
+                    format!(
+                        "{ty} pointer object 'outputs' initializer requires null, another compatible pointer output object, or the address of a mutable {ty} pointer variable"
+                    )
+                };
+                assert_eq!(
+                    interpret(&source).map_err(|e| e.to_string()),
+                    Err(expected),
+                    "{ty}, {slot}, {call}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_reject_whole_array_consumers() {
+    for expr in [
+        "_Generic(box.outputs, default: 0)",
+        "sizeof((0, box.outputs))",
+        "sizeof(box.outputs + 0)",
+        "sizeof(&box.outputs[0])",
+        "sizeof(box.outputs = box.outputs)",
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int main(void) {{ struct Box box; return {expr}; }}"
+        );
+        let expected = if expr.contains("= box.outputs") {
+            "pointer output array fields are not assignable"
+        } else if expr.contains("&box.outputs") {
+            "taking the address of a pointer output array element is not supported"
+        } else {
+            "pointer output arrays do not decay to scalar pointers"
+        };
+        assert_eq!(
+            interpret(&source).map_err(|e| e.to_string()),
+            Err(expected.to_string()),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_reject_whole_array_assignments_in_unevaluated_callees() {
+    for assignment in ["boxes[0].outputs = 0", "p->outputs = 0"] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int f(void) {{ struct Box boxes[1]; struct Box *p = boxes; {assignment}; return 0; }} int main(void) {{ return sizeof(f()); }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|e| e.to_string()),
+            Err("pointer output array fields are not assignable".to_string()),
+            "{assignment}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_reject_whole_array_assignments_in_folded_callees() {
+    let source = "struct Box { int **outputs[1]; }; int f(void) { struct Box box; _Generic((box.outputs = 0), default: 0); return 0; } int main(void) { return sizeof(f()); }";
+    assert_eq!(
+        interpret(source).map_err(|error| error.to_string()),
+        Err("pointer output array fields are not assignable".to_string())
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_reject_unselected_whole_array_increment_in_unevaluated_callees()
+ {
+    let source = "struct Box { int **outputs[1]; }; int f(void) { struct Box box; (void)_Generic(0, int: 0, default: box.outputs++); return 0; } int main(void) { return sizeof(f()); }";
+    assert_eq!(
+        interpret(source).map_err(|error| error.to_string()),
+        Err("pointer output array fields are not assignable".to_string())
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_reject_embedded_arrow_whole_array_assignments() {
+    let source = "struct Box { int **outputs[1]; }; struct Shell { struct Box boxes[1]; }; int f(void) { struct Shell shell; struct Shell *p=&shell; p->boxes[0].outputs=0; return 0; } int main(void) { return sizeof(f()); }";
+    assert_eq!(
+        interpret(source).map_err(|error| error.to_string()),
+        Err("pointer output array fields are not assignable".to_string())
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_reject_whole_array_updates_in_type_queries() {
+    for query in [
+        "sizeof(box.outputs += 0)",
+        "sizeof(box.outputs++)",
+        "_Generic((box.outputs += 0), default: 0)",
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[2]; }}; int main(void) {{ struct Box box; return {query}; }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|error| error.to_string()),
+            Err("pointer output array fields are not assignable".to_string()),
+            "{query}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_scalar_routes_and_non_evaluation() {
+    for (ty, initial, changed) in [
+        ("char", "65", "66"),
+        ("int", "7", "9"),
+        ("_Bool", "0", "1"),
+        ("double", "1.25", "2.75"),
+    ] {
+        for (decl, route) in [
+            ("struct Box box = {{&slot, 0}};", "box.outputs"),
+            ("struct Box boxes[1] = {{{&slot, 0}}};", "boxes[0].outputs"),
+            ("struct Outer outer = {{{&slot, 0}}};", "outer.box.outputs"),
+            (
+                "struct Outer outer = {{{&slot, 0}}}; struct Outer *p = &outer;",
+                "p->box.outputs",
+            ),
+        ] {
+            for probe in ["f()", "sizeof(f())"] {
+                let source = format!(
+                    r#"
+struct Box {{ {ty} **outputs[2]; }};
+struct Outer {{ struct Box box; }};
+int calls;
+{ty} **forward({ty} **out) {{ calls++; return out; }}
+void set({ty} **out, {ty} *value) {{ *out = value; }}
+int f(void) {{
+    {ty} value = {initial}; {ty} *slot = &value;
+    {decl}
+    int i = 0;
+    {route}[1] = forward({route}[i++]);
+    set({route}[1], &value);
+    **{route}[1] = {changed};
+    if (sizeof(forward({route}[i++])) != sizeof(&slot)) return 1;
+    if (sizeof(**{route}[0]) != sizeof(value)) return 2;
+    return i != 1 || value != {changed} || {route}[0] != {route}[1];
+}}
+int main(void) {{ int result = {probe}; return (result != {expected}) || calls != {calls}; }}
+"#,
+                    expected = if probe == "sizeof(f())" {
+                        "sizeof(int)"
+                    } else {
+                        "0"
+                    },
+                    calls = if probe == "f()" { 1 } else { 0 }
+                );
+                assert_eq!(
+                    interpret(&source),
+                    Ok(0),
+                    "{ty}, {route}, {probe}\n{source}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_sizes_fold_without_evaluation() {
+    let source = r#"
+struct Box { double **outputs[3]; };
+int main(void) {
+    struct Box boxes[1]; struct Box *p = boxes; int i = 0;
+    enum { A = sizeof(boxes[i++].outputs), B = sizeof(p->outputs[i++]), C = sizeof(**p->outputs[i++]) };
+    return A != 3 * sizeof(double *) || B != sizeof(double *) || C != sizeof(double) || i != 0;
+}
+"#;
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_copy_const_and_static_storage() {
+    for ty in ["char", "int", "_Bool", "double"] {
+        let source = format!(
+            r#"
+struct Box {{ {ty} **outputs[2]; }};
+{ty} value; {ty} *slot = &value;
+struct Box global = {{ {{ &slot, [1] = &slot }} }};
+int f(void) {{
+    static struct Box persistent = {{ {{ &slot }} }};
+    struct Box copy = global; struct Box assigned; assigned = copy;
+    copy.outputs[0] = 0;
+    const struct Box frozen = assigned;
+    *frozen.outputs[0] = &value; **frozen.outputs[0] = 1;
+    persistent.outputs[1] = frozen.outputs[0];
+    return copy.outputs[0] != 0 || assigned.outputs[0] != &slot || persistent.outputs[1] != &slot || value != 1;
+}}
+int main(void) {{ return f() || f(); }}
+"#
+        );
+        assert_eq!(interpret(&source), Ok(0), "{ty}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_reject_decay_and_explicit_addresses() {
+    for (expr, expected) in [
+        (
+            "box.outputs",
+            "pointer output arrays do not decay to scalar pointers",
+        ),
+        (
+            "&box.outputs",
+            "taking the address of a pointer output array is not supported",
+        ),
+        (
+            "&box.outputs[0]",
+            "taking the address of a pointer output array element is not supported",
+        ),
+        (
+            "&p->outputs",
+            "taking the address of a pointer output array is not supported",
+        ),
+        (
+            "&p->outputs[0]",
+            "taking the address of a pointer output array element is not supported",
+        ),
+        (
+            "&boxes[0].outputs",
+            "taking the address of a pointer output array is not supported",
+        ),
+        (
+            "&boxes[0].outputs[0]",
+            "taking the address of a pointer output array element is not supported",
+        ),
+    ] {
+        for call in ["f()", "sizeof(f())"] {
+            let source = format!(
+                "struct Box {{ int **outputs[1]; }}; int f(void) {{ struct Box box; struct Box boxes[1]; struct Box *p = &box; (void)({expr}); return 0; }} int main(void) {{ return {call}; }}"
+            );
+            assert_eq!(
+                interpret(&source).map_err(|e| e.to_string()),
+                Err(expected.to_string()),
+                "{expr}, {call}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_validate_unevaluated_initializers() {
+    for (init, expected) in [
+        ("1", "incompatible assignment type"),
+        ("&bad", "incompatible assignment type"),
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int f(void) {{ double *bad = 0; struct Box box = {{{{{init}}}}}; return 0; }} int main(void) {{ return sizeof(f()); }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|e| e.to_string()),
+            Err(expected.to_string()),
+            "{init}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_static_initializers_reject_automatic_slots() {
+    for call in ["f()", "sizeof(f())"] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int f(void) {{ int *slot = 0; static struct Box box = {{{{&slot}}}}; return 0; }} int main(void) {{ return {call}; }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|e| e.to_string()),
+            Err("static pointer initializer requires static storage duration".to_string()),
+            "{call}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_static_copies_validate_automatic_slots_unevaluated() {
+    for call in ["f()", "sizeof(f())"] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int f(void) {{ int *slot = 0; struct Box source = {{{{&slot}}}}; static struct Box copy = source; return 0; }} int main(void) {{ return {call}; }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|error| error.to_string()),
+            Err("static pointer initializer requires static storage duration".to_string()),
+            "{call}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_const_routes_reject_assignment() {
+    for (decl, route, expected) in [
+        (
+            "const struct Box box;",
+            "box.outputs",
+            "cannot assign to const variable 'box'",
+        ),
+        (
+            "const struct Box boxes[1];",
+            "boxes[0].outputs",
+            "cannot assign to const variable 'boxes'",
+        ),
+        (
+            "struct Box box; const struct Box *p = &box;",
+            "p->outputs",
+            "cannot assign through pointer to const",
+        ),
+        (
+            "struct Outer outer;",
+            "outer.box.outputs",
+            "cannot assign to const struct field 'box'",
+        ),
+    ] {
+        for call in ["f()", "sizeof(f())"] {
+            let source = format!(
+                "struct Box {{ int **outputs[1]; }}; struct Outer {{ const struct Box box; }}; int f(void) {{ {decl} {route}[0] = 0; return 0; }} int main(void) {{ return {call}; }}"
+            );
+            assert_eq!(
+                interpret(&source).map_err(|e| e.to_string()),
+                Err(expected.to_string()),
+                "{route}, {call}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_forward_indexed_nested_arrow_slots() {
+    let source = r#"
+struct Box { int **outputs[3]; };
+struct Outer { struct Box box; };
+void set(int **output, int *value) { *output = value; }
+int main(void) {
+    int value = 7;
+    int *first = &value, *second = 0;
+    struct Outer boxes[2] = { { { { &first, [2] = &second } } } };
+    struct Outer *view = boxes;
+    int i = 0;
+    boxes[i++].box.outputs[1] = view->box.outputs[0];
+    set(view->box.outputs[2], &value);
+    **boxes[0].box.outputs[1] = 9;
+    return i != 1 || first != second || value != 9
+        || sizeof(view->box.outputs) != 3 * sizeof(view->box.outputs[0]);
+}
+"#;
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_embedded_pointer_updates_match_unevaluated_callees() {
+    for probe in ["f()", "sizeof(f()) != sizeof(int)"] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; struct Shell {{ struct Box boxes[1]; }}; \
+             int f(void) {{ struct Shell shell; struct Shell *p = &shell; \
+             p->boxes[0].outputs[0] = 0; return p->boxes[0].outputs[0] != 0; }} \
+             int main(void) {{ return {probe}; }}"
+        );
+        assert_eq!(interpret(&source), Ok(0), "{probe}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_embedded_element_size_matches_unevaluated_callees() {
+    for probe in ["f()", "sizeof(f()) != sizeof(int)"] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; struct Shell {{ struct Box boxes[1]; }}; \
+             int f(void) {{ struct Shell shell; \
+             if (sizeof(shell.boxes[0].outputs[0]) != sizeof(int *)) return 1; return 0; }} \
+             int main(void) {{ return {probe}; }}"
+        );
+        assert_eq!(interpret(&source), Ok(0), "{probe}");
+    }
+}
+
+#[test]
 fn folded_generic_validations_accept_unselected_void_calls() {
     let source = r#"
 void sink(int **pointer) { (void)pointer; }
@@ -23015,7 +24074,7 @@ fn memcmp_preserves_character_storage_safety_diagnostics() {
 #[test]
 fn sizeof_memcmp_is_nested_non_evaluating_and_preserves_integer_size() {
     let mut expression = "memcmp(left(), right(), count())".to_string();
-    for _ in 0..30 {
+    for _ in 0..16 {
         expression = format!("+({expression})");
     }
     let program = format!(
@@ -36828,7 +37887,7 @@ fn character_pointer_object_conditional_sizeof_validation_remains_linear() {
     }
 
     let shallow = run_nested(8, 100);
-    let deep = run_nested(40, 100);
+    let deep = run_nested(32, 100);
     let allowed = (shallow * 8).max(std::time::Duration::from_millis(30));
     assert!(
         deep < allowed,
@@ -48375,8 +49434,8 @@ fn tracked_scalar_output_aggregate_fields_retain_address_cast_and_array_boundari
                 "pointer-to-pointer struct fields are not supported",
             ),
             (
-                format!("struct Box {{ {ty} **outputs[2]; }};"),
-                "pointer array struct fields are not supported",
+                format!("struct Box {{ {ty} **outputs[2][2]; }};"),
+                "multidimensional pointer output array fields are not supported",
             ),
         ] {
             let program = format!("{declaration} int main(void) {{ return 0; }}");
@@ -50910,7 +51969,7 @@ fn tracked_scalar_output_aggregate_fields_nested_generic_validation_is_bounded()
     if std::env::var_os(CHILD).is_some() {
         for leaf in ["0", "&slot"] {
             for selected in [true, false] {
-                for depth in [12, 24, 40] {
+                for depth in [12, 24, 33] {
                     let mut value = String::from(leaf);
                     for _ in 0..depth {
                         value = if selected {
@@ -51273,7 +52332,7 @@ fn tracked_scalar_output_aggregate_fields_pointer_embedded_array_sizeof() {
 fn tracked_scalar_output_aggregate_fields_runtime_generic_assignment_work_limit() {
     for kind in ["assign", "selectassign", "unselected"] {
         for probe in ["f()==0", "sizeof(f())==sizeof(void *)"] {
-            for depth in [2, 4, 16, 24, 32, 2] {
+            for depth in [2, 4, 8, 12, 16, 2] {
                 let mut value = String::from("0");
                 for index in 0..depth {
                     value = match kind {
@@ -51802,4 +52861,213 @@ fn tracked_scalar_output_aggregate_fields_sizeof_callee_static_assert_constraint
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_match_compiler_oracle_fixture() {
+    assert_eq!(
+        interpret(include_str!(
+            "fixtures/compat/valid/tracked_scalar_output_field_arrays.c"
+        )),
+        Ok(0)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_size_queries_validate_containing_routes() {
+    for expression in ["get(1)->outputs", "get(1)->outputs[0]"] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; struct Box *get(int **out) {{ return 0; }} int main(void) {{ return sizeof({expression}); }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|e| e.to_string()),
+            Err("function 'get' parameter 'out' requires an int pointer slot address".to_string()),
+            "{expression}"
+        );
+    }
+    for expression in ["boxes[0.5].outputs", "boxes[0.5].outputs[0]"] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int main(void) {{ struct Box boxes[1]; return sizeof({expression}); }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|e| e.to_string()),
+            Err("array subscript requires an integer value".to_string()),
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_folded_containing_depth_is_bounded() {
+    const CHILD: &str = "CUST_FOLDED_CONTAINING_DEPTH_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        for field in ["outputs", "ordinary"] {
+            let source = format!(
+                "struct Box {{ int **outputs[1]; int ordinary; }}; struct Shell {{ struct Box boxes[1]; }}; int main(void) {{ struct Shell shell; enum {{ N = sizeof(shell.boxes[{}0].{field}) }}; return N; }}",
+                "0+".repeat(512)
+            );
+            let result = std::thread::Builder::new()
+                .stack_size(2 * 1024 * 1024)
+                .spawn(move || interpret(&source).map_err(|e| e.to_string()))
+                .unwrap()
+                .join()
+                .unwrap();
+            assert!(result.unwrap_err().contains("nesting limit"));
+        }
+        assert_eq!(
+            interpret(
+                "struct Box { int ordinary; }; struct Shell { struct Box boxes[1]; }; int main(void) { struct Shell shell; return sizeof(shell.boxes[0].ordinary) == sizeof(int) ? 0 : 1; }"
+            ),
+            Ok(0)
+        );
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tracked_scalar_output_field_arrays_folded_containing_depth_is_bounded",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_incremental_designators_preserve_elements() {
+    for initializer in [
+        ".outputs[0] = &a, .outputs[1] = &b",
+        ".outputs = {&a}, .outputs[1] = &b",
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[2]; }}; int main(void) {{ int *a = 0, *b = 0; struct Box box = {{{initializer}}}; return box.outputs[0] != &a || box.outputs[1] != &b; }}"
+        );
+        assert_eq!(interpret(&source), Ok(0), "{initializer}");
+    }
+    assert_eq!(
+        interpret(
+            "struct Box { int **outputs[2]; }; int main(void) { int *a = 0; struct Box box = {.outputs[1] = &a, .outputs = {0}}; return box.outputs[0] != 0 || box.outputs[1] != 0; }"
+        ),
+        Ok(0)
+    );
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_folded_unselected_element_constraints() {
+    for (declaration, expression, expected) in [
+        (
+            "const struct Box box = {{0}};",
+            "box.outputs[0] = 0",
+            "cannot assign to const variable 'box'",
+        ),
+        (
+            "struct Box box; double *wrong = 0;",
+            "box.outputs[0] = &wrong",
+            "incompatible assignment type",
+        ),
+        (
+            "struct Box box;",
+            "box.outputs[0]++",
+            "integer pointer output parameter reassignment is not supported",
+        ),
+        (
+            "struct Box box;",
+            "box.outputs[0] += 0",
+            "integer pointer output parameter reassignment is not supported",
+        ),
+        (
+            "struct Box box;",
+            "box.outputs[0.5]",
+            "array subscript requires an integer value",
+        ),
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int main(void) {{ {declaration} enum {{ N = _Generic(0, int: 0, default: ({expression})) }}; return N; }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|e| e.to_string()),
+            Err(expected.to_string()),
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_folded_wrappers_and_indexes_reject_decay() {
+    for expression in [
+        "!box.outputs",
+        "(int)box.outputs",
+        "(_Bool)box.outputs",
+        "(void *)box.outputs",
+        "(box.outputs, 0)",
+        "(0, box.outputs)",
+        "box.outputs[!box.outputs]",
+        "box.outputs[(int)box.outputs]",
+        "box.outputs[(box.outputs, 0)]",
+    ] {
+        for query in [
+            format!("sizeof({expression})"),
+            format!("_Generic(({expression}), default: 0)"),
+        ] {
+            let source = format!(
+                "struct Box {{ int **outputs[1]; }}; int main(void) {{ struct Box box; enum {{ N = {query} }}; return N; }}"
+            );
+            let expected = if query.starts_with("sizeof") {
+                "pointer output arrays do not decay to scalar pointers at line 1, column 79"
+            } else {
+                "pointer output arrays do not decay to scalar pointers"
+            };
+            assert_eq!(
+                interpret(&source).map_err(|e| e.to_string()),
+                Err(expected.to_string()),
+                "{query}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_folded_containing_indexes_are_validated() {
+    for expression in [
+        "boxes[0.5].outputs[0]",
+        "shell.boxes[0.5].outputs[0]",
+        "p->boxes[0.5].outputs[0]",
+        "(&boxes[0.5])->outputs[0]",
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; struct Shell {{ struct Box boxes[1]; }}; int main(void) {{ struct Box boxes[1]; struct Shell shell; struct Shell *p = &shell; enum {{ N = _Generic({expression}, default: 0) }}; return N; }}"
+        );
+        assert_eq!(
+            interpret(&source).map_err(|e| e.to_string()),
+            Err("array subscript requires an integer value".to_string()),
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_reverse_containing_subscripts_preserve_folded_parity() {
+    for body in [
+        "return i[boxes].outputs[0] != 0;",
+        "enum { N = sizeof(i[boxes].outputs[0]) }; return N != sizeof(int *);",
+        "enum { N = _Generic(0, default: sizeof(i[boxes].outputs[0])) }; return N != sizeof(int *);",
+    ] {
+        let source = format!(
+            "struct Box {{ int **outputs[1]; }}; int main(void) {{ struct Box boxes[1]; int i = 0; {body} }}"
+        );
+        assert_eq!(interpret(&source), Ok(0), "{body}");
+    }
+}
+
+#[test]
+fn tracked_scalar_output_field_arrays_preserve_sizeof_generic_rows() {
+    let source = "struct Box { int rows[2][3]; }; int main(void) { struct Box box; return sizeof(_Generic(0, default: box.rows[0])) == 3 * sizeof(int) ? 0 : 1; }";
+    assert_eq!(interpret(source), Ok(0));
 }

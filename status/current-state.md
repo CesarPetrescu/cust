@@ -1,10 +1,12 @@
 # Cust Current State
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 ## Latest autonomous verification
 
-Queue authority: bounded v0.60.0 is published. Numbered TODO 421, a first tracked scalar-output aggregate-field array slice, is the single current implementation task. Every later dated “next” statement is historical as of this entry.
+Queue authority: numbered TODO 421 is complete. Numbered TODO 422, bounded v0.61.0 release closure, is the sole next package. Every later dated “next” statement is historical as of this entry.
+
+Review checkpoint (2026-09-15): recovery preserved and advanced TODO 421 rather than selecting new work. Fixed tracked scalar-output aggregate-field arrays cover `char **`, `int **`, `_Bool **`, and `double **` across direct/indexed/nested/arrow/embedded containing-object routes, aggregate-valued temporary bases, initialization/replacement/copy, forwarding and returns, recursive const, lexical owner/lifetime, static-storage checks, runtime and parser-folded non-evaluation, and exact union/deeper/decay/address/update boundaries. Fifty-one focused interpreter tests, all 2,495 interpreter tests, ten pointer-output parity tests including 160 generated field-array programs, three hostile CLI depth regressions, and the registered compiler oracle are GREEN. Review-driven 2 MiB-stack regressions now cover plain grouping, ordinary-first and integer-first mixed nesting, nested array type names, inline enum definitions, and array compound literals under `sizeof`. The final ordinary-first reproducer failed with SIGABRT before the parser limit and passes after lowering the ordinary unary/grouping ceiling from 128 to 40, with the 40-level boundary accepted. Four pre-existing deep-validation tests were reduced within the new parser ceiling while preserving their downstream non-evaluation, linearity, generic-depth, and generic-work assertions. Fresh independent final review returned `APPROVED`; the complete canonical gate passes formatting, warning-denied Clippy, all 2,652 local tests, all 2,652 Docker tests, rebuilt runtime output `10`, and diff hygiene. TODO 421 is complete and bounded v0.61.0 release closure is next; no commit/push is claimed yet.
 
 Publication update (2026-09-14): verified release commit `de129577da875e2d7a96d973430464e3e6fff7d4` reached exact `origin/main` before annotated tag creation. Local and remote tag object `97be4e5d9a7f22aa432a91bd70c82f2d4729151c` peels exactly to that release commit. This later status-only publication-evidence update is separate from the tagged release commit and does not move or recreate `v0.60.0`. Tracked scalar-output aggregate-field arrays are next.
 

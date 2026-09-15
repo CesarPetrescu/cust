@@ -156,6 +156,100 @@ fn ast_flag_reports_parser_errors_without_interpreting_source() {
 }
 
 #[test]
+fn run_mode_rejects_excessive_unary_nesting_without_aborting() {
+    let mut prefixes = ["*", "!", "+ ", "- ", "~", "& ", "++", "--"]
+        .into_iter()
+        .map(|operator| (operator.to_string(), operator.repeat(50_000)))
+        .collect::<Vec<_>>();
+    prefixes.push((
+        "mixed dereference/logical-not batches".to_string(),
+        (0..=124)
+            .step_by(2)
+            .map(|offset| format!("{}!", "*".repeat(128 - offset)))
+            .collect(),
+    ));
+    for (operator, prefix) in prefixes {
+        let source = format!("int main(void) {{ return {prefix}0; }}\n");
+        let path = write_temp_source(&source);
+
+        let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+            .arg(&path)
+            .output()
+            .expect("cust binary should reject excessive unary nesting");
+
+        fs::remove_file(&path).expect("temporary source should be removable");
+        assert_eq!(output.status.code(), Some(1), "operator {operator:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).starts_with(
+                "cust: unary expression nesting limit of 40 exceeded at line 1, column "
+            ),
+            "operator {operator:?}, stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn run_mode_rejects_excessive_integer_constant_unary_nesting_without_aborting() {
+    let source = format!(
+        "struct Box {{ int **outputs[{}1]; }};\nint main(void) {{ return 0; }}\n",
+        "+ ".repeat(50_000)
+    );
+    let path = write_temp_source(&source);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg(&path)
+        .output()
+        .expect("cust binary should reject excessive integer constant nesting");
+
+    fs::remove_file(&path).expect("temporary source should be removable");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).starts_with(
+            "cust: integer constant expression nesting limit of 64 exceeded at line 1, column "
+        ),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn run_mode_rejects_excessive_integer_constant_conditional_nesting_without_aborting() {
+    let sources = [
+        format!(
+            "struct Box {{ int **outputs[{}1]; }};\nint main(void) {{ return 0; }}\n",
+            "0 ? 1 : ".repeat(50_000)
+        ),
+        format!(
+            "struct Box {{ int **outputs[{}1{}]; }};\nint main(void) {{ return 0; }}\n",
+            "1 ? ".repeat(50_000),
+            " : 0".repeat(50_000)
+        ),
+    ];
+    for (branch, source) in ["else", "then"].into_iter().zip(sources) {
+        let path = write_temp_source(&source);
+
+        let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+            .arg(&path)
+            .output()
+            .expect("cust binary should reject excessive integer constant nesting");
+
+        fs::remove_file(&path).expect("temporary source should be removable");
+        assert_eq!(output.status.code(), Some(1), "{branch} branch");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).starts_with(
+                "cust: integer constant expression nesting limit of 64 exceeded at line 1, column "
+            ),
+            "{branch} branch stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn run_mode_surfaces_interpreted_termination_without_terminating_the_test_host() {
     let exit_path =
         write_temp_source("void exit(int status);\nint main(void) { exit(29); return 0; }\n");
