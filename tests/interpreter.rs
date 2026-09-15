@@ -150,6 +150,19 @@ int main(void) {
 }
 
 #[test]
+fn tracked_scalar_output_field_arrays_fold_conditional_aggregate_element_sizeof() {
+    let source = r#"
+struct Box { int **outputs[1]; };
+int main(void) {
+    struct Box box = {{0}};
+    enum { N = sizeof((1 ? box : box).outputs[0]) };
+    return N != sizeof(int *);
+}
+"#;
+    assert_eq!(interpret(source), Ok(0));
+}
+
+#[test]
 fn tracked_scalar_output_field_arrays_aggregate_bases() {
     let mut results = Vec::new();
     for body in [

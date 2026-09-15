@@ -13,7 +13,7 @@ This note records the bounded v0.61.0 implementation and release contract for fi
 
 ## Runtime and non-evaluating parity
 
-Runtime evaluation, parser-folded integer constant expressions, `_Generic`, and callee-summary analysis validate containing-object indexes, field-array initializers, selected-element assignments, calls, scalar consumers, and unsupported updates without executing `sizeof` operands. Aggregate-valued temporary bases are captured once so initializer side effects and hidden lexical owners are preserved.
+Runtime evaluation, parser-folded integer constant expressions, `_Generic`, and callee-summary analysis validate containing-object indexes, field-array initializers, selected-element assignments, calls, scalar consumers, and unsupported updates without executing `sizeof` operands. Aggregate-valued direct objects, indexed/nested/arrow selections, literals, returned temporaries, copies, static objects, conditionals, commas, assignment results, and `_Generic` selections preserve their direct `DeclType::Struct` metadata; temporary bases are captured once so initializer side effects and hidden lexical owners are preserved.
 
 A full field-array query keeps array-object type and returns `N * sizeof(T *)`; a selected element returns Cust's fixed pointer size. Whole-array use in a scalar or pointer-value context does not decay. Aggregate copies deep-clone the array container while preserving each selected caller-owned output-slot identity.
 
@@ -46,10 +46,10 @@ Keep evaluated and non-evaluating diagnostics in parity where the language const
 
 ## Acceptance evidence
 
-- Focused interpreter filter: 51 tests (`cargo test --test interpreter tracked_scalar_output_field_arrays -- --nocapture`).
-- Generated pointer-output parity: 128 positive route/spelling/consumer programs plus 32 union/deeper-shape boundary programs.
+- Focused interpreter filter: 52 tests (`cargo test --test interpreter tracked_scalar_output_field_arrays -- --nocapture`).
+- Generated pointer-output parity: 1,456 positive programs (four pointees × four spellings × 13 routes × seven consumers) plus 160 exact safety-boundary programs (four pointees × four spellings × ten boundaries).
 - Hostile CLI coverage: three parser-depth subprocess tests, including 50,000-token unary and integer-constant inputs.
 - Registered warning-free C11 compiler oracle: `tests/fixtures/compat/valid/tracked_scalar_output_field_arrays.c`.
-- Executable v0.61.0 inventory: 2,652 tests = 2,495 interpreter + 101 fuzz-safety + 36 CLI + 6 pointer-classifier parity + 10 tracked pointer-output parity + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test.
+- Post-v0.61.0 executable inventory: 2,653 tests = 2,496 interpreter + 101 fuzz-safety + 36 CLI + 6 pointer-classifier parity + 10 tracked pointer-output parity + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test.
 
 Native C compilers remain external test oracles only; Cust uses no host addresses or native runtime path.

@@ -14862,14 +14862,20 @@ impl Parser {
         }
         let (mut type_name, mut is_const) = match aggregate {
             Expr::Conditional { .. } => {
-                let DeclType::Pointer {
-                    pointee: PointeeType::Struct(type_name),
-                    points_to_const,
-                } = self.generic_integer_constant_expr_type(aggregate, local_constants)?
-                else {
-                    return Ok(None);
-                };
-                (type_name, points_to_const)
+                match self.generic_integer_constant_expr_type(aggregate, local_constants)? {
+                    DeclType::Struct(type_name) => (type_name, false),
+                    DeclType::Pointer {
+                        pointee: PointeeType::Struct(type_name),
+                        points_to_const,
+                    } => (type_name, points_to_const),
+                    _ => return Ok(None),
+                }
+            }
+            Expr::Call { .. } | Expr::Assign { .. } => {
+                match self.generic_integer_constant_expr_type(aggregate, local_constants)? {
+                    DeclType::Struct(type_name) => (type_name, false),
+                    _ => return Ok(None),
+                }
             }
             Expr::AggregateLiteral {
                 type_name,
@@ -16579,6 +16585,9 @@ impl Parser {
                     ReturnType::Scalar(ty) => *ty,
                     ReturnType::PointerOutput(pointee) => {
                         return Ok(DeclType::PointerOutput(*pointee));
+                    }
+                    ReturnType::Struct(type_name) => {
+                        return Ok(DeclType::Struct(type_name.clone()));
                     }
                     _ => {
                         return Err(CustError::new(

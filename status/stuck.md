@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 422 is published and verified; TODO 423 has no active blocker.
+None. TODO 423 is implemented and verified; TODO 424 has no active blocker.
 
 ## Resolved this run
+
+### 2026-09-15 — TODO 423 aggregate-field-array folded classifier parity
+
+- Failure: the expanded matrix reached parser-folded `sizeof` through aggregate-valued conditional, function-return, and assignment-result bases. Conditional aggregate values were accepted only as struct pointers, while calls and assignments had no direct aggregate-result classification, so valid selected output-array fields failed metadata analysis.
+- Root cause: `integer_constant_aggregate_field_info()` and function-call type inference omitted `DeclType::Struct` result paths even though runtime aggregate evaluation already supported them.
+- RED/GREEN: the focused conditional regression and generated matrix failed before production changes and pass after bounded metadata-only aggregate-value inference. The final matrix runs 1,456 success and 160 exact boundary programs across all pointees/spellings without host addresses or operand evaluation.
+- Closure: two independent reviews returned `AI_REVIEW:CLEAR`; review suggestions restored prior routes and strengthened exact/independent test oracles. Formatting, warning-denied Clippy, all 2,653 local and Docker tests, runtime output `10`, compiler oracle, and diff hygiene pass. No blocker remains.
 
 ### 2026-09-15 — v0.61.0 publication closure
 

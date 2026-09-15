@@ -527,6 +527,28 @@ impl PointerOutputSpelling {
             Self::ChainedCompleteAlias => "ChainedOutput".to_owned(),
         }
     }
+
+    fn qualified_type_name(self, scalar_type: &str) -> (String, String) {
+        match self {
+            Self::Direct => (String::new(), format!("const {scalar_type} **")),
+            Self::InnerAlias => (
+                format!("typedef const {scalar_type} *QualifiedValuePtr;"),
+                "QualifiedValuePtr *".to_owned(),
+            ),
+            Self::CompleteAlias => (
+                format!(
+                    "typedef const {scalar_type} *QualifiedValuePtr; typedef QualifiedValuePtr *QualifiedOutput;"
+                ),
+                "QualifiedOutput".to_owned(),
+            ),
+            Self::ChainedCompleteAlias => (
+                format!(
+                    "typedef const {scalar_type} *QualifiedValuePtr; typedef QualifiedValuePtr *QualifiedOutput; typedef QualifiedOutput ChainedQualifiedOutput;"
+                ),
+                "ChainedQualifiedOutput".to_owned(),
+            ),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -991,95 +1013,491 @@ fn generated_complete_output_alias_spellings_retain_shape_boundaries() {
     assert!(cell_counts.into_iter().all(|count| count == 1));
 }
 
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum PointerOutputFieldArrayRoute {
+    DirectObject,
+    AggregateArray,
+    NestedField,
+    StructPointer,
+    AggregateLiteral,
+    ReturnedTemporary,
+    AggregateCopy,
+    FileStatic,
+    BlockStatic,
+    Conditional,
+    Comma,
+    AssignmentResult,
+    Generic,
+}
+
+impl PointerOutputFieldArrayRoute {
+    const COUNT: usize = 13;
+    const ALL: [Self; Self::COUNT] = [
+        Self::DirectObject,
+        Self::AggregateArray,
+        Self::NestedField,
+        Self::StructPointer,
+        Self::AggregateLiteral,
+        Self::ReturnedTemporary,
+        Self::AggregateCopy,
+        Self::FileStatic,
+        Self::BlockStatic,
+        Self::Conditional,
+        Self::Comma,
+        Self::AssignmentResult,
+        Self::Generic,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn expression(self) -> &'static str {
+        match self {
+            Self::DirectObject => "source.outputs",
+            Self::AggregateArray => "boxes[0].outputs",
+            Self::NestedField => "outer.box.outputs",
+            Self::StructPointer => "outer_pointer->box.outputs",
+            Self::AggregateLiteral => "((struct Box){{mark(&slot), &other_slot}}).outputs",
+            Self::ReturnedTemporary => "make(&slot).outputs",
+            Self::AggregateCopy => "copy.outputs",
+            Self::FileStatic => "file_box.outputs",
+            Self::BlockStatic => "block_box.outputs",
+            Self::Conditional => "(choose() ? source : other).outputs",
+            Self::Comma => "(touch(), source).outputs",
+            Self::AssignmentResult => "(scratch = source).outputs",
+            Self::Generic => "_Generic(generic_control(), int: source, default: other).outputs",
+        }
+    }
+
+    fn evaluated_sequence(self) -> i64 {
+        match self {
+            Self::AggregateLiteral => 1,
+            Self::ReturnedTemporary => 2,
+            Self::Conditional => 3,
+            Self::Comma => 4,
+            Self::AggregateCopy
+            | Self::DirectObject
+            | Self::AggregateArray
+            | Self::NestedField
+            | Self::StructPointer
+            | Self::FileStatic
+            | Self::BlockStatic
+            | Self::AssignmentResult
+            | Self::Generic => 0,
+        }
+    }
+
+    fn evaluates_assignment(self) -> bool {
+        matches!(self, Self::AssignmentResult)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum PointerOutputFieldArrayConsumer {
+    Initializer,
+    Assignment,
+    Argument,
+    Equality,
+    Truthiness,
+    Sizeof,
+    FoldedSizeof,
+}
+
+impl PointerOutputFieldArrayConsumer {
+    const COUNT: usize = 7;
+    const ALL: [Self; Self::COUNT] = [
+        Self::Initializer,
+        Self::Assignment,
+        Self::Argument,
+        Self::Equality,
+        Self::Truthiness,
+        Self::Sizeof,
+        Self::FoldedSizeof,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn evaluates(self) -> bool {
+        !matches!(self, Self::Sizeof | Self::FoldedSizeof)
+    }
+
+    fn retargets_slot(self) -> bool {
+        matches!(self, Self::Initializer | Self::Assignment | Self::Argument)
+    }
+
+    fn body(self, route: PointerOutputFieldArrayRoute, output_type: &str) -> String {
+        let expression = route.expression();
+        let operation = match self {
+            Self::Initializer => {
+                format!("{output_type} result = ({expression})[0]; *result = values + 7;")
+            }
+            Self::Assignment => format!(
+                "{output_type} result = 0; result = ({expression})[0]; *result = values + 7;"
+            ),
+            Self::Argument => format!("retarget(({expression})[0], values + 7);"),
+            Self::Equality => {
+                format!("if (({expression})[0] != &slot) return 1;")
+            }
+            Self::Truthiness => format!("if (!({expression})[0]) return 1;"),
+            Self::Sizeof => format!(
+                "if (sizeof({expression}) != 2 * sizeof(int *)) return 1; \
+                 if (sizeof(({expression})[0]) != sizeof(int *)) return 2;"
+            ),
+            Self::FoldedSizeof => format!(
+                "enum {{ ARRAY_BYTES = sizeof({expression}), ELEMENT_BYTES = sizeof(({expression})[0]) }}; \
+                 if (ARRAY_BYTES != 2 * sizeof(int *)) return 1; \
+                 if (ELEMENT_BYTES != sizeof(int *)) return 2;"
+            ),
+        };
+        let expected_sequence = if self.evaluates() {
+            route.evaluated_sequence()
+        } else {
+            0
+        };
+        let expected_slot = if self.retargets_slot() {
+            "values + 7"
+        } else {
+            "values"
+        };
+        let expected_scratch = if self.evaluates() && route.evaluates_assignment() {
+            "&slot"
+        } else {
+            "&other_slot"
+        };
+        format!(
+            "{operation} \
+             if (slot != {expected_slot}) return 3; \
+             if (sequence != {expected_sequence}) return 4; \
+             if (scratch.outputs[0] != {expected_scratch}) return 5; \
+             return 0;"
+        )
+    }
+
+    fn program(
+        self,
+        kind: PointerOutputKind,
+        spelling: PointerOutputSpelling,
+        route: PointerOutputFieldArrayRoute,
+    ) -> String {
+        let scalar_type = kind.scalar_type();
+        let output_type = spelling.type_name(scalar_type);
+        let body = self.body(route, &output_type);
+        format!(
+            r#"
+typedef {scalar_type} *ValuePtr;
+typedef ValuePtr *CompleteOutput;
+typedef CompleteOutput ChainedOutput;
+{scalar_type} values[8] = {values};
+{scalar_type} *slot = values;
+{scalar_type} *other_slot = values + 1;
+struct Box {{ {output_type} outputs[2]; }};
+struct Outer {{ struct Box box; }};
+struct Box file_box = {{{{&slot, &other_slot}}}};
+int sequence;
+{output_type} mark({output_type} output) {{ sequence = sequence * 10 + 1; return output; }}
+struct Box make({output_type} output) {{
+    struct Box box = {{{{output, &other_slot}}}};
+    sequence = sequence * 10 + 2;
+    return box;
+}}
+int choose(void) {{ sequence = sequence * 10 + 3; return 1; }}
+int touch(void) {{ sequence = sequence * 10 + 4; return 0; }}
+int generic_control(void) {{ sequence = sequence * 10 + 5; return 0; }}
+void retarget({output_type} output, {scalar_type} *value) {{ *output = value; }}
+int main(void) {{
+    struct Box source = {{{{&slot, &other_slot}}}};
+    struct Box other = {{{{&other_slot, &slot}}}};
+    struct Box boxes[1] = {{{{{{&slot, &other_slot}}}}}};
+    struct Outer outer = {{{{{{&slot, &other_slot}}}}}};
+    struct Outer *outer_pointer = &outer;
+    struct Box copy = source;
+    struct Box scratch = other;
+    static struct Box block_box = {{{{&slot, &other_slot}}}};
+    slot = values;
+    other_slot = values + 1;
+    sequence = 0;
+    {body}
+}}
+"#,
+            values = kind.values()
+        )
+    }
+}
+
 #[test]
 fn generated_tracked_scalar_output_field_arrays_preserve_route_parity() {
-    let routes = [
-        ("struct Box box = {{&slot, 0}};", "box.outputs"),
-        ("struct Box boxes[1] = {{{&slot, 0}}};", "boxes[0].outputs"),
-        ("struct Outer outer = {{{&slot, 0}}};", "outer.box.outputs"),
-        (
-            "struct Outer outer = {{{&slot, 0}}}; struct Outer *p = &outer;",
-            "p->box.outputs",
-        ),
-    ];
-    let mut cells = [0; 128];
+    let mut kind_counts = [0; PointerOutputKind::COUNT];
+    let mut spelling_counts = [0; PointerOutputSpelling::COUNT];
+    let mut route_counts = [0; PointerOutputFieldArrayRoute::COUNT];
+    let mut consumer_counts = [0; PointerOutputFieldArrayConsumer::COUNT];
+    let mut cells = [0; PointerOutputKind::COUNT
+        * PointerOutputSpelling::COUNT
+        * PointerOutputFieldArrayRoute::COUNT
+        * PointerOutputFieldArrayConsumer::COUNT];
+
     for kind in PointerOutputKind::ALL {
-        let ty = kind.scalar_type();
         for spelling in PointerOutputSpelling::ALL {
-            let output = spelling.type_name(ty);
-            for (route_index, (decl, route)) in routes.iter().enumerate() {
-                for (consumer, call) in ["run()", "sizeof(run())"].iter().enumerate() {
-                    let source = format!(
-                        r#"
-typedef {ty} *ValuePtr; typedef ValuePtr *CompleteOutput; typedef CompleteOutput ChainedOutput;
-struct Box {{ {output} outputs[2]; }}; struct Outer {{ struct Box box; }};
-int calls;
-{output} forward({output} out) {{ calls++; return out; }}
-int run(void) {{
-    {ty} values[8] = {values}; {ty} *slot = values;
-    {decl}
-    int index = 0;
-    {route}[1] = forward({route}[index++]);
-    *{route}[1] = &values[2];
-    if (sizeof(forward({route}[index++])) != sizeof(&slot)) return 1;
-    if (sizeof({route}) != 2 * sizeof({route}[0])) return 2;
-    if (sizeof(**{route}[0]) != sizeof(values[0])) return 3;
-    return index != 1 || {route}[0] != &slot || {route}[1] != &slot || **{route}[1] != values[2];
-}}
-int main(void) {{ return {call} != {expected} || calls != {calls}; }}
-"#,
-                        values = kind.values(),
-                        expected = if consumer == 0 { "0" } else { "sizeof(int)" },
-                        calls = if consumer == 0 { 1 } else { 0 }
-                    );
+            for route in PointerOutputFieldArrayRoute::ALL {
+                for consumer in PointerOutputFieldArrayConsumer::ALL {
+                    kind_counts[kind.index()] += 1;
+                    spelling_counts[spelling.index()] += 1;
+                    route_counts[route.index()] += 1;
+                    consumer_counts[consumer.index()] += 1;
+                    let cell = (((kind.index() * PointerOutputSpelling::COUNT + spelling.index())
+                        * PointerOutputFieldArrayRoute::COUNT
+                        + route.index())
+                        * PointerOutputFieldArrayConsumer::COUNT)
+                        + consumer.index();
+                    cells[cell] += 1;
+
+                    let source = consumer.program(kind, spelling, route);
+                    let result = panic::catch_unwind(|| interpret(&source)).unwrap_or_else(|payload| {
+                        panic!(
+                            "tracked output field-array route panicked for {kind:?}, {spelling:?}, {route:?}, {consumer:?}: {payload:?}"
+                        )
+                    });
                     assert_eq!(
-                        interpret(&source),
-                        Ok(0),
-                        "{kind:?}, {spelling:?}, {route}, {call}\n{source}"
+                        result.unwrap_or_else(|error| panic!(
+                            "tracked output field-array route failed for {kind:?}, {spelling:?}, {route:?}, {consumer:?}: {error}\nsource:\n{source}"
+                        )),
+                        0,
+                        "tracked output field-array route returned the wrong value for {kind:?}, {spelling:?}, {route:?}, {consumer:?}\nsource:\n{source}"
                     );
-                    cells[((kind.index() * 4 + spelling.index()) * 4 + route_index) * 2
-                        + consumer] += 1;
                 }
             }
         }
     }
-    assert_eq!(cells, [1; 128]);
+
+    assert_eq!(
+        kind_counts,
+        [PointerOutputSpelling::COUNT
+            * PointerOutputFieldArrayRoute::COUNT
+            * PointerOutputFieldArrayConsumer::COUNT; PointerOutputKind::COUNT]
+    );
+    assert_eq!(
+        spelling_counts,
+        [PointerOutputKind::COUNT
+            * PointerOutputFieldArrayRoute::COUNT
+            * PointerOutputFieldArrayConsumer::COUNT; PointerOutputSpelling::COUNT]
+    );
+    assert_eq!(
+        route_counts,
+        [PointerOutputKind::COUNT
+            * PointerOutputSpelling::COUNT
+            * PointerOutputFieldArrayConsumer::COUNT; PointerOutputFieldArrayRoute::COUNT]
+    );
+    assert_eq!(
+        consumer_counts,
+        [PointerOutputKind::COUNT
+            * PointerOutputSpelling::COUNT
+            * PointerOutputFieldArrayRoute::COUNT; PointerOutputFieldArrayConsumer::COUNT]
+    );
+    assert!(cells.into_iter().all(|count| count == 1));
 }
 
-#[test]
-fn generated_tracked_scalar_output_field_arrays_retain_union_and_deeper_boundaries() {
-    let mut cells = [0; 32];
-    for kind in PointerOutputKind::ALL {
-        let ty = kind.scalar_type();
-        for spelling in PointerOutputSpelling::ALL {
-            let output = spelling.type_name(ty);
-            for (boundary, (declaration, diagnostic, token)) in [
-                (
-                    format!("union Box {{ {output} outputs[1]; }};"),
-                    "pointer array union fields are not supported",
-                    "[1]",
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum PointerOutputFieldArrayBoundary {
+    QualifiedPointee,
+    ConstContainer,
+    ExpiredContainer,
+    ExpiredSlot,
+    UnionField,
+    Decay,
+    WholeArrayAddress,
+    ElementAddress,
+    DeeperPointer,
+    Multidimensional,
+}
+
+impl PointerOutputFieldArrayBoundary {
+    const COUNT: usize = 10;
+    const ALL: [Self; Self::COUNT] = [
+        Self::QualifiedPointee,
+        Self::ConstContainer,
+        Self::ExpiredContainer,
+        Self::ExpiredSlot,
+        Self::UnionField,
+        Self::Decay,
+        Self::WholeArrayAddress,
+        Self::ElementAddress,
+        Self::DeeperPointer,
+        Self::Multidimensional,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn program(self, kind: PointerOutputKind, spelling: PointerOutputSpelling) -> (String, String) {
+        let scalar_type = kind.scalar_type();
+        if matches!(self, Self::QualifiedPointee) {
+            let (qualified_aliases, qualified_output) = spelling.qualified_type_name(scalar_type);
+            let source = format!(
+                "{qualified_aliases} struct Box {{ {qualified_output} outputs[1]; }}; int main(void) {{ return 0; }}"
+            );
+            let column = match spelling {
+                PointerOutputSpelling::Direct => source.find("**").unwrap() + 2,
+                PointerOutputSpelling::InnerAlias => {
+                    source.find("QualifiedValuePtr * outputs").unwrap()
+                        + "QualifiedValuePtr ".len()
+                        + 1
+                }
+                PointerOutputSpelling::CompleteAlias => {
+                    source.find("QualifiedOutput outputs").unwrap() + 1
+                }
+                PointerOutputSpelling::ChainedCompleteAlias => {
+                    source.find("ChainedQualifiedOutput outputs").unwrap() + 1
+                }
+            };
+            return (
+                source,
+                format!(
+                    "qualified pointer output aggregate fields are not supported at line 1, column {column}"
                 ),
-                (
-                    format!("struct Box {{ {output} *extra[1]; }};"),
-                    "pointer-to-pointer struct fields are not supported",
-                    "*extra",
+            );
+        }
+
+        let aliases = format!(
+            "typedef {scalar_type} *ValuePtr; typedef ValuePtr *CompleteOutput; typedef CompleteOutput ChainedOutput;"
+        );
+        let output_type = spelling.type_name(scalar_type);
+        match self {
+            Self::QualifiedPointee => unreachable!(),
+            Self::ConstContainer => (
+                format!(
+                    "{aliases} struct Box {{ {output_type} outputs[1]; }}; int main(void) {{ {scalar_type} value = 0; {scalar_type} *slot = &value; const struct Box box = {{{{&slot}}}}; box.outputs[0] = 0; return 0; }}"
                 ),
-            ]
-            .iter()
-            .enumerate()
-            {
+                "cannot assign to const variable 'box'".to_owned(),
+            ),
+            Self::ExpiredContainer => (
+                format!(
+                    "{aliases} struct Box {{ {output_type} outputs[1]; }}; int main(void) {{ {scalar_type} *slot = 0; struct Box *alias = 0; {{ struct Box box = {{{{&slot}}}}; alias = &box; }} return alias->outputs[0] != 0; }}"
+                ),
+                "pointer to out-of-scope variable 'box'".to_owned(),
+            ),
+            Self::ExpiredSlot => (
+                format!(
+                    "{aliases} struct Box {{ {output_type} outputs[1]; }}; int main(void) {{ struct Box box = {{{{0}}}}; {{ {scalar_type} *local_slot = 0; box.outputs[0] = &local_slot; }} return box.outputs[0] != 0; }}"
+                ),
+                "pointer to out-of-scope variable 'local_slot'".to_owned(),
+            ),
+            Self::UnionField => {
                 let source = format!(
-                    "typedef {ty} *ValuePtr; typedef ValuePtr *CompleteOutput; typedef CompleteOutput ChainedOutput; {declaration} int main(void) {{ return 0; }}"
+                    "{aliases} union Box {{ {output_type} outputs[1]; }}; int main(void) {{ return 0; }}"
                 );
-                let column = source.find(token).unwrap() + 1;
-                assert_eq!(
-                    interpret(&source).map_err(|e| e.to_string()),
-                    Err(format!("{diagnostic} at line 1, column {column}")),
-                    "{kind:?}, {spelling:?}, {declaration}"
+                let column = source.find("outputs[1]").unwrap() + "outputs".len() + 1;
+                (
+                    source,
+                    format!(
+                        "pointer array union fields are not supported at line 1, column {column}"
+                    ),
+                )
+            }
+            Self::Decay => (
+                format!(
+                    "{aliases} struct Box {{ {output_type} outputs[1]; }}; int main(void) {{ struct Box box = {{{{0}}}}; (void)box.outputs; return 0; }}"
+                ),
+                "pointer output arrays do not decay to scalar pointers".to_owned(),
+            ),
+            Self::WholeArrayAddress => (
+                format!(
+                    "{aliases} struct Box {{ {output_type} outputs[1]; }}; int main(void) {{ struct Box box = {{{{0}}}}; (void)&box.outputs; return 0; }}"
+                ),
+                "taking the address of a pointer output array is not supported".to_owned(),
+            ),
+            Self::ElementAddress => (
+                format!(
+                    "{aliases} struct Box {{ {output_type} outputs[1]; }}; int main(void) {{ struct Box box = {{{{0}}}}; (void)&box.outputs[0]; return 0; }}"
+                ),
+                "taking the address of a pointer output array element is not supported".to_owned(),
+            ),
+            Self::DeeperPointer => {
+                let source = format!(
+                    "{aliases} struct Box {{ {output_type} *extra[1]; }}; int main(void) {{ return 0; }}"
                 );
-                cells[(kind.index() * 4 + spelling.index()) * 2 + boundary] += 1;
+                let column = source.find("*extra").unwrap() + 1;
+                (
+                    source,
+                    format!(
+                        "pointer-to-pointer struct fields are not supported at line 1, column {column}"
+                    ),
+                )
+            }
+            Self::Multidimensional => {
+                let source = format!(
+                    "{aliases} struct Box {{ {output_type} outputs[1][1]; }}; int main(void) {{ return 0; }}"
+                );
+                let column = source.find("outputs[1][1]").unwrap() + "outputs[1]".len() + 1;
+                (
+                    source,
+                    format!(
+                        "multidimensional pointer output array fields are not supported at line 1, column {column}"
+                    ),
+                )
             }
         }
     }
-    assert_eq!(cells, [1; 32]);
+}
+
+#[test]
+fn generated_tracked_scalar_output_field_arrays_retain_safety_boundaries() {
+    let mut kind_counts = [0; PointerOutputKind::COUNT];
+    let mut spelling_counts = [0; PointerOutputSpelling::COUNT];
+    let mut boundary_counts = [0; PointerOutputFieldArrayBoundary::COUNT];
+    let mut cells = [0; PointerOutputKind::COUNT
+        * PointerOutputSpelling::COUNT
+        * PointerOutputFieldArrayBoundary::COUNT];
+
+    for kind in PointerOutputKind::ALL {
+        for spelling in PointerOutputSpelling::ALL {
+            for boundary in PointerOutputFieldArrayBoundary::ALL {
+                kind_counts[kind.index()] += 1;
+                spelling_counts[spelling.index()] += 1;
+                boundary_counts[boundary.index()] += 1;
+                let cell = (kind.index() * PointerOutputSpelling::COUNT + spelling.index())
+                    * PointerOutputFieldArrayBoundary::COUNT
+                    + boundary.index();
+                cells[cell] += 1;
+
+                let (source, expected) = boundary.program(kind, spelling);
+                let error = panic::catch_unwind(|| interpret(&source))
+                    .unwrap_or_else(|payload| {
+                        panic!(
+                            "tracked output field-array boundary panicked for {kind:?}, {spelling:?}, {boundary:?}: {payload:?}"
+                        )
+                    })
+                    .expect_err(&format!(
+                        "tracked output field-array boundary unexpectedly passed for {kind:?}, {spelling:?}, {boundary:?}\nsource:\n{source}"
+                    ))
+                    .to_string();
+                assert_eq!(
+                    error, expected,
+                    "tracked output field-array boundary mismatch for {kind:?}, {spelling:?}, {boundary:?}: {error}\nsource:\n{source}"
+                );
+            }
+        }
+    }
+
+    assert_eq!(
+        kind_counts,
+        [PointerOutputSpelling::COUNT * PointerOutputFieldArrayBoundary::COUNT;
+            PointerOutputKind::COUNT]
+    );
+    assert_eq!(
+        spelling_counts,
+        [PointerOutputKind::COUNT * PointerOutputFieldArrayBoundary::COUNT;
+            PointerOutputSpelling::COUNT]
+    );
+    assert_eq!(
+        boundary_counts,
+        [PointerOutputKind::COUNT * PointerOutputSpelling::COUNT;
+            PointerOutputFieldArrayBoundary::COUNT]
+    );
+    assert!(cells.into_iter().all(|count| count == 1));
 }

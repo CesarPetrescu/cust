@@ -2,7 +2,15 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays and bounded v0.61.0 publication are complete; expanded classifier/evaluator parity is the sole next package. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0 publication, and expanded classifier/evaluator parity are complete; bounded v0.62.0 release closure is the sole next package. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-15 — Aggregate-field-array classifier/evaluator parity
+
+- No external semantic source was required. Native C remains an external warning-denied oracle only; generated property programs exercise Cust's interpreter-owned pointer identities directly.
+- An aggregate-valued expression and a pointer to an aggregate are distinct metadata shapes. Field classification must admit both `DeclType::Struct(name)` and `DeclType::Pointer { pointee: Struct(name), ... }` where each is valid, rather than requiring every conditional field base to be a pointer.
+- Function calls require return-signature metadata in parser-folded integer constant expressions. Returning `DeclType::Struct` for `ReturnType::Struct` enables non-evaluating field queries without executing the callee; assignment expressions reuse the aggregate LHS result type through the same bounded classifier.
+- Generated parity must retain previously covered ordinary object/indexed/nested/arrow routes when adding temporaries and wrappers. Independent size expectations (`sizeof(int *)`), exact source-located diagnostics, identity-keyed cell counts, one-time sequence markers, and scratch-assignment witnesses reduce false-positive risk.
+- The completed matrix has 1,456 success programs (four pointees × four spellings × 13 routes × seven consumers) and 160 exact boundary programs (four pointees × four spellings × ten boundaries). Fresh independent re-review returned `AI_REVIEW:CLEAR`; the 2,653-test local/Docker gate passes. Bounded v0.62.0 release closure is next.
 
 ## 2026-09-15 — v0.61.0 publication
 
