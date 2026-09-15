@@ -1,6 +1,6 @@
 # Tracked scalar-output aggregate-field arrays
 
-This note records the bounded v0.61.0 implementation and release contract for fixed one-dimensional tracked scalar-output arrays embedded in supported struct fields, such as `struct Box { int **outputs[N]; }`.
+This note records the bounded v0.62.0 parity-release contract for fixed one-dimensional tracked scalar-output arrays embedded in supported struct fields, such as `struct Box { int **outputs[N]; }`.
 
 ## Supported slice
 
@@ -50,6 +50,6 @@ Keep evaluated and non-evaluating diagnostics in parity where the language const
 - Generated pointer-output parity: 1,456 positive programs (four pointees × four spellings × 13 routes × seven consumers) plus 160 exact safety-boundary programs (four pointees × four spellings × ten boundaries).
 - Hostile CLI coverage: three parser-depth subprocess tests, including 50,000-token unary and integer-constant inputs.
 - Registered warning-free C11 compiler oracle: `tests/fixtures/compat/valid/tracked_scalar_output_field_arrays.c`.
-- Post-v0.61.0 executable inventory: 2,653 tests = 2,496 interpreter + 101 fuzz-safety + 36 CLI + 6 pointer-classifier parity + 10 tracked pointer-output parity + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test.
+- v0.62.0 executable inventory: 2,653 tests = 2,496 interpreter + 101 fuzz-safety + 36 CLI + 6 pointer-classifier parity + 10 tracked pointer-output parity + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test.
 
 Native C compilers remain external test oracles only; Cust uses no host addresses or native runtime path.

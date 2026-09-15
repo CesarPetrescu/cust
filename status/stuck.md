@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 423 is implemented and verified; TODO 424 has no active blocker.
+None. TODO 424 has independent approval and a passing canonical gate; tag publication is intentionally deferred until the verified release commit is accepted by `origin/main`.
 
 ## Resolved this run
 

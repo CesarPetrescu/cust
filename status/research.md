@@ -2,7 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0 publication, and expanded classifier/evaluator parity are complete; bounded v0.62.0 release closure is the sole next package. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0 publication, and expanded classifier/evaluator parity are complete; bounded v0.62.0 is the release package in verification and stable `--help`/`-h` CLI behavior is the post-publication package. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-15 — v0.62.0 release preparation
+
+- Candidate evaluation selected release closure over stable `--help`/`-h` behavior, parser diagnostics, and broader C-subset work because the 1,456-success/160-boundary aggregate-field-array parity package is already independently reviewed and can be published without widening runtime semantics.
+- Version-first TDD changed only exact CLI and Compose expectations: both fail while Cargo/Compose remain at `0.61.0` and pass after Cargo/lock plus both image tags move to `0.62.0`.
+- Executable `cargo test --test <target> -- --list` inventory is 2,653: 2,496 interpreter + 101 fuzz-safety + 36 CLI + 6 pointer-classifier parity + 10 pointer-output parity + 2 Docker metadata + 1 compiler-oracle + 1 license. The non-interpreter subtotal is 157.
+- Fresh read-only review returned `APPROVED`; formatting, strict Clippy, all 2,653 local tests, rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. The tag is not yet published: exact remote-main acceptance remains required before annotated `v0.62.0` creation and peeled-target verification.
 
 ## 2026-09-15 — Aggregate-field-array classifier/evaluator parity
 

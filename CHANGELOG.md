@@ -6,6 +6,22 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.62.0 — 2026-09-15
+
+### Language subset and conformance
+
+- Adds deterministic classifier/evaluator parity for fixed one-dimensional tracked scalar-output arrays embedded in supported struct fields. The identity-keyed matrix covers all four supported scalar pointees, direct/inner/complete/chained alias spellings, 13 direct/indexed/nested/arrow/temporary/copy/return/static/conditional/comma/assignment-result/`_Generic` routes, and seven evaluated or non-evaluating consumers.
+- Parser-folded aggregate field classification now retains direct aggregate result metadata for conditional expressions, aggregate-returning calls, and assignment results without evaluating the operand. The existing fixed-field-array boundaries remain unchanged: union fields, decay, addresses, qualification, deeper/flexible/multidimensional forms, casts, whole-array assignment, arithmetic, ordering, and update operators are outside the slice.
+
+### Diagnostics and tests
+
+- Added a 1,456-program exact success matrix and 160 exact boundary programs. Together with 52 focused interpreter regressions, hostile CLI parser-depth coverage, and the registered warning-free C11 compiler oracle, these prove identity, one-time evaluation, qualification, const, lifetime, union, decay, address, deeper-pointer, and multidimensional boundaries.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.62.0`.
+- Reconciled an executable inventory of 2,653 tests: 2,496 interpreter tests, 101 deterministic fuzz-safety tests, 36 CLI tests, 6 pointer-classifier parity tests, 10 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
 ## v0.61.0 — 2026-09-15
 
 ### Language subset
