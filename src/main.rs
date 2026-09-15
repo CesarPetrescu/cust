@@ -1,12 +1,34 @@
 use std::env;
 use std::process;
 
+const USAGE: &str = "Usage: cust [--tokens|--ast|--max-steps N] <file.c>";
+const HELP: &str = concat!(
+    "Usage: cust [--tokens|--ast|--max-steps N] <file.c>\n",
+    "\n",
+    "Interpret a supported C source file.\n",
+    "\n",
+    "Modes:\n",
+    "  <file.c>                     Interpret the source file.\n",
+    "  --tokens <file.c>            Print lexer tokens without interpreting.\n",
+    "  --ast <file.c>               Print the parsed AST without interpreting.\n",
+    "  --max-steps N <file.c>       Limit total loop iterations to positive N.\n",
+    "\n",
+    "Options:\n",
+    "  -h, --help                   Print this help message and exit.\n",
+    "  --version                    Print the Cust version and exit.\n",
+);
+
 fn main() {
     let mut args = env::args().skip(1);
     let Some(first_arg) = args.next() else {
-        eprintln!("Usage: cust [--tokens|--ast|--max-steps N] <file.c>");
+        eprintln!("{USAGE}");
         process::exit(64);
     };
+
+    if first_arg == "--help" || first_arg == "-h" {
+        print!("{HELP}");
+        return;
+    }
 
     if first_arg == "--version" {
         println!("cust {}", env!("CARGO_PKG_VERSION"));
@@ -15,13 +37,13 @@ fn main() {
 
     let (mode, path) = if first_arg == "--tokens" {
         let Some(path) = args.next() else {
-            eprintln!("Usage: cust [--tokens|--ast|--max-steps N] <file.c>");
+            eprintln!("{USAGE}");
             process::exit(64);
         };
         (Mode::Tokens, path)
     } else if first_arg == "--ast" {
         let Some(path) = args.next() else {
-            eprintln!("Usage: cust [--tokens|--ast|--max-steps N] <file.c>");
+            eprintln!("{USAGE}");
             process::exit(64);
         };
         (Mode::Ast, path)
@@ -39,7 +61,7 @@ fn main() {
             process::exit(64);
         }
         let Some(path) = args.next() else {
-            eprintln!("Usage: cust [--tokens|--ast|--max-steps N] <file.c>");
+            eprintln!("{USAGE}");
             process::exit(64);
         };
         (
@@ -48,6 +70,10 @@ fn main() {
             },
             path,
         )
+    } else if first_arg.starts_with('-') {
+        eprintln!("cust: unknown option '{first_arg}'");
+        eprintln!("{USAGE}");
+        process::exit(64);
     } else {
         (
             Mode::Run {
@@ -57,8 +83,14 @@ fn main() {
         )
     };
 
+    if path.starts_with('-') {
+        eprintln!("cust: unknown option '{path}'");
+        eprintln!("{USAGE}");
+        process::exit(64);
+    }
+
     if args.next().is_some() {
-        eprintln!("Usage: cust [--tokens|--ast|--max-steps N] <file.c>");
+        eprintln!("{USAGE}");
         process::exit(64);
     }
 

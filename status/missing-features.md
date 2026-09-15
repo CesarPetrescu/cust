@@ -2,7 +2,9 @@
 
 Prioritized backlog for autonomous implementation.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0 publication, and expanded classifier/evaluator parity are complete. The next concrete package is stable `--help`/`-h` CLI behavior. Every later dated “next” statement is historical as of this entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0 publication, expanded classifier/evaluator parity, and stable `--help`/`-h` CLI behavior are complete. The next concrete package is bounded v0.63.0 release closure for this CLI contract. Every later dated “next” statement is historical as of this entry.
+
+Completion update (2026-09-15): stable CLI discovery is complete. `--help` and `-h` emit byte-identical exact help to stdout with no source required; it documents normal run, `--tokens`, `--ast`, `--max-steps N`, and `--version`. Missing-source usage remains stderr/64. Unknown option-like arguments at the top level and wherever an existing option mode expects its source fail closed on stderr with status 64 instead of becoming I/O paths. Focused CLI RED/GREEN, 42 independent read-only contract probes, fresh `AI_REVIEW:CLEAR`, formatting, strict Clippy, full local/Docker tests, rebuilt runtime output `10`, and diff hygiene pass. Bounded v0.63.0 release closure is next.
 
 Publication update (2026-09-15): v0.62.0 packages the completed 1,456-success/160-exact-boundary deterministic aggregate-field-array classifier/evaluator matrix. Version-first CLI/Compose assertions were RED at `0.61.0` and GREEN at `0.62.0`; executable listings reconcile 2,653 tests. Fresh independent review returned `APPROVED`; formatting, strict Clippy, all local and rebuilt-Docker tests, runtime output `10`, and diff hygiene passed. Release commit `fdf8c0b0ae0e87743d173f9dfcf66a69e24798a5` reached exact `origin/main` before annotated tag object `c9076ee432116ebd382685fa958dbece6795e4f7` was created and pushed; local and remote `v0.62.0` refs peel exactly to that release commit. This later status-only evidence update does not move or recreate the tag; stable `--help`/`-h` CLI behavior is next.
 

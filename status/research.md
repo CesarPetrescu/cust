@@ -2,7 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0 publication, and expanded classifier/evaluator parity are complete; stable `--help`/`-h` CLI behavior is the single next package. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0 publication, expanded classifier/evaluator parity, and stable `--help`/`-h` CLI behavior are complete; bounded v0.63.0 release closure is the single next package. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-15 — Stable CLI help contract
+
+- Candidate evaluation selected TODO 425 over immediate release work and broader parser features because it is the first unchecked package, has bounded surface area, and can close all current CLI modes with direct subprocess tests.
+- The implementation keeps the historical missing-source usage string as one shared `USAGE` constant. Help is a distinct stdout-only long-form contract; ordinary usage and unknown-option errors remain stderr with EX_USAGE-style exit status 64.
+- Option-like source arguments must be rejected before file I/O for `--tokens`, `--ast`, and `--max-steps N`, as well as at top level. Explicit `./-name.c` remains available for a real dash-prefixed filename.
+- TDD RED/GREEN covered long help, alias equivalence, top-level unknown options, and all option-mode source positions. The existing no-argument behavior was immediate-GREEN preservation coverage. An independent Codex reviewer ran 42 read-only CLI contract probes and returned `AI_REVIEW:CLEAR`; no external documentation lookup was needed for this internal compatibility decision.
 
 ## 2026-09-15 — v0.62.0 release preparation
 

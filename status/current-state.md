@@ -4,7 +4,9 @@ Last updated: 2026-09-15
 
 ## Latest autonomous verification
 
-Queue authority: numbered TODOs 421-424 are complete. TODO 425, stable `--help`/`-h` behavior across every existing CLI mode, is the single next implementation package. Every later dated “next” statement is historical as of this entry.
+Queue authority: numbered TODOs 421-425 are complete. TODO 426, bounded v0.63.0 release closure for the stable CLI contract, is the single next package. Every later dated “next” statement is historical as of this entry.
+
+Completion update (2026-09-15): TODO 425 adds a stable, exact stdout-only `--help`/`-h` reference for normal execution, `--tokens`, `--ast`, `--max-steps N`, and `--version`. Shared usage text preserves all existing missing-argument output. Top-level and mode-position option-like source arguments now fail closed with exit 64, an exact unknown-option error, and usage on stderr rather than being mistaken for paths. Strict TDD recorded RED for long help, short alias, top-level unknown option, and every existing option mode; the existing no-argument contract was an immediate-GREEN preservation test. A fresh Codex review returned `AI_REVIEW:CLEAR` after 42 read-only CLI contract probes. Formatting, strict Clippy, all local tests, Docker tests, rebuilt Docker runtime output `10`, and diff hygiene pass. TODO 426 is next.
 
 Publication update (2026-09-15): v0.62.0 packages the independently reviewed 1,456-success/160-boundary aggregate-field-array parity contract. Version-first CLI/Compose RED at `0.61.0` is GREEN at `0.62.0`; executable listing reconciles 2,653 tests. Fresh independent review returned `APPROVED`; formatting, warning-denied Clippy, all local and rebuilt-Docker tests, runtime output `10`, and diff hygiene passed. Release commit `fdf8c0b0ae0e87743d173f9dfcf66a69e24798a5` reached exact `origin/main` before annotated tag object `c9076ee432116ebd382685fa958dbece6795e4f7` was created and pushed; local and remote `v0.62.0` refs peel exactly to that release commit. This later status-only evidence update is separate from the tagged release commit and does not move or recreate `v0.62.0`; TODO 425 is next.
 

@@ -10,6 +10,112 @@ use std::time::{SystemTime, UNIX_EPOCH};
 static TEMP_SOURCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn help_flag_prints_stable_cli_reference_without_requiring_a_source_file() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--help")
+        .output()
+        .expect("cust binary should run");
+
+    assert!(
+        output.status.success(),
+        "--help should exit successfully, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        concat!(
+            "Usage: cust [--tokens|--ast|--max-steps N] <file.c>\n",
+            "\n",
+            "Interpret a supported C source file.\n",
+            "\n",
+            "Modes:\n",
+            "  <file.c>                     Interpret the source file.\n",
+            "  --tokens <file.c>            Print lexer tokens without interpreting.\n",
+            "  --ast <file.c>               Print the parsed AST without interpreting.\n",
+            "  --max-steps N <file.c>       Limit total loop iterations to positive N.\n",
+            "\n",
+            "Options:\n",
+            "  -h, --help                   Print this help message and exit.\n",
+            "  --version                    Print the Cust version and exit.\n",
+        )
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[test]
+fn short_help_alias_matches_long_help_output() {
+    let long = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--help")
+        .output()
+        .expect("cust binary should run");
+    let short = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("-h")
+        .output()
+        .expect("cust binary should run");
+
+    assert!(long.status.success());
+    assert!(short.status.success());
+    assert_eq!(long.stdout, short.stdout);
+    assert_eq!(long.stderr, short.stderr);
+    assert_eq!(String::from_utf8_lossy(&short.stderr), "");
+}
+
+#[test]
+fn unknown_option_fails_with_usage_on_standard_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--unknown")
+        .output()
+        .expect("cust binary should run");
+
+    assert_eq!(output.status.code(), Some(64));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "cust: unknown option '--unknown'\nUsage: cust [--tokens|--ast|--max-steps N] <file.c>\n"
+    );
+}
+
+#[test]
+fn option_modes_reject_option_like_source_arguments() {
+    for args in [
+        vec!["--tokens", "--unknown"],
+        vec!["--ast", "--unknown"],
+        vec!["--max-steps", "1", "--unknown"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+            .args(&args)
+            .output()
+            .expect("cust binary should run");
+
+        assert_eq!(output.status.code(), Some(64), "args: {args:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "",
+            "args: {args:?}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "cust: unknown option '--unknown'\nUsage: cust [--tokens|--ast|--max-steps N] <file.c>\n",
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn no_arguments_preserve_usage_on_standard_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .output()
+        .expect("cust binary should run");
+
+    assert_eq!(output.status.code(), Some(64));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "Usage: cust [--tokens|--ast|--max-steps N] <file.c>\n"
+    );
+}
+
+#[test]
 fn version_flag_prints_package_version_without_requiring_a_source_file() {
     let output = Command::new(env!("CARGO_BIN_EXE_cust"))
         .arg("--version")

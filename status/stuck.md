@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 424 is published: release commit `fdf8c0b0ae0e87743d173f9dfcf66a69e24798a5` reached exact `origin/main` before annotated tag object `c9076ee432116ebd382685fa958dbece6795e4f7` was created and pushed; local and remote `v0.62.0` refs peel to that commit. TODO 425 is the next package.
+None. TODO 425 stable `--help`/`-h` CLI behavior is complete and canonically verified; TODO 426 bounded v0.63.0 release closure is next.
 
 ## Resolved this run
+
+### 2026-09-15 — TODO 425 stable CLI help and unknown-option contract
+
+- Failure: `cust --help` was interpreted as a source path and failed with I/O status 66; option-like source positions after `--tokens`, `--ast`, and `--max-steps N` followed the same path.
+- Root cause: command-line dispatch recognized only `--version` before treating its first unrecognized argument as a filename, with no shared option-like path guard.
+- RED/GREEN: exact subprocess regressions first observed the status-66 behavior, then pass with stdout-only byte-stable help, stderr-only unknown-option diagnostics, and status 64. Existing no-argument usage remained immediate-GREEN preservation coverage.
+- Closure: fresh independent Codex review returned `AI_REVIEW:CLEAR` after 42 read-only CLI contract probes. Formatting, strict Clippy, all local tests, Docker tests, rebuilt runtime output `10`, and diff hygiene pass. No blocker remains.
 
 ### 2026-09-15 — TODO 423 aggregate-field-array folded classifier parity
 
