@@ -2,7 +2,16 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays are complete; bounded v0.61.0 release closure is the sole next package. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays are complete; bounded v0.61.0 release closure is in progress, with expanded classifier/evaluator parity queued after publication. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-15 — v0.61.0 release consistency preparation
+
+- Candidate evaluation compared queue-leading bounded v0.61.0, expanded tracked-output field-array parity, parser diagnostics, and CLI/product work. Release closure was selected because it packages the reviewed 51-test language/resource-safety slice without widening runtime behavior; expanded parity is the concrete post-publication package.
+- Version-first TDD changed only exact CLI and Compose expectations. Both failed against package/images `0.60.0` and pass after Cargo/lock plus both Compose image tags moved to `0.61.0`.
+- Executable `cargo test --test <target> -- --list` counts reconcile 2,652 tests: 2,495 interpreter + 101 fuzz-safety + 36 CLI + 6 pointer-classifier parity + 10 tracked pointer-output parity + 2 Docker metadata + 1 compiler-oracle harness + 1 repository-license test. The non-interpreter subtotal is 157.
+- Central release claims expose all-four-pointee direct/alias field-array spellings; direct/indexed/nested/arrow/embedded/reverse/temporary/copy/return routes; positional/designated/default/replacement initialization; typed identity, owner/lifetime/recursive-const/static guarantees; non-evaluating full-array/element sizing; and 40-level ordinary plus 64-level integer-constant parser ceilings. Retained boundaries include union fields, decay, whole-array/element addresses, qualified outputs, deeper/flexible/multidimensional forms, casts, whole-array assignment, arithmetic, ordering, and updates.
+- Review found that the current README still called all fixed output arrays unsupported and that release prose omitted the field array's required nested braces. Current limitations now distinguish supported fixed direct-object/struct-field slices from other tracked-output arrays; README, changelog, and the reference document `{{0}}` support plus targeted flat `{0}` rejection. Fresh re-review returned `APPROVED`.
+- Formatting, warning-denied Clippy, all 2,652 local tests, a no-cache image rebuild, all 2,652 rebuilt-Docker tests, runtime output `10`, exact local/runtime/test-image versions, and diff hygiene pass. Local and remote `v0.61.0` preflight remains empty; annotated-tag creation stays reserved until release-commit push and exact remote-main acceptance.
 
 ## 2026-09-15 — Aggregate-field array folded metadata and unary resource bounds
 

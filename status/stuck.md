@@ -4,7 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 421 received fresh independent approval and passed the complete canonical local/Docker gate.
+None. TODO 421 received fresh independent approval and passed the complete canonical local/Docker gate; TODO 422 release preparation has no active blocker.
+
+## In progress this run
+
+### 2026-09-15 — v0.61.0 release closure
+
+- Version-first CLI and Compose assertions failed against `0.60.0` and pass at `0.61.0`.
+- Local and remote `v0.61.0` tag preflight is empty.
+- Independent review corrected a current-limitations contradiction and missing nested-brace initialization boundary; fresh re-review returned `APPROVED`.
+- Formatting, strict Clippy, all 2,652 local tests, a no-cache image rebuild, all 2,652 rebuilt-Docker tests, runtime output `10`, exact versions, and diff hygiene pass. Release commit and annotated-tag publication still follow the bounded release procedure; no publication is claimed before exact remote-main acceptance.
 
 ## Resolved this run
 

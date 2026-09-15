@@ -6,6 +6,28 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 No changes yet.
 
+## v0.61.0 — 2026-09-15
+
+### Language subset
+
+- Added fixed one-dimensional tracked scalar-output arrays embedded in supported struct fields (`struct Box { T **outputs[N]; }`) for unqualified `char`, `int`, `_Bool`, and `double` pointees. Direct, inner-pointer-alias, complete-output-alias, and chained-alias element spellings preserve output-slot identity through direct, indexed, nested, arrow, embedded-containing-array, reverse-subscript, aggregate-valued temporary, copy, and return routes.
+- Added positional, designated, incremental-designator, zero/default, and replacement initialization; the array field requires nested braces such as `struct Box box = {{0}};`, while flat `{0}` aggregate initialization retains a targeted rejection. Indexed reassignment and forwarding, typed indirect access, stable containing-object and referenced-pointee owner/lifetime metadata, recursive const checks, and static-storage validation are preserved. Full-field-array and selected-element `sizeof` preserve their object types and suppress side effects while validating nested constraints.
+
+### Diagnostics and tests
+
+- Added 51 focused interpreter regressions, 160 generated route/spelling/consumer and union/deeper-boundary programs, three hostile CLI subprocess regressions, and one registered warning-free C11 compiler-oracle fixture.
+- Bounded ordinary unary/grouping syntax at 40 levels and integer-constant unary/conditional syntax at 64 levels, with shared mixed-route accounting. Exact 2 MiB-stack child-process coverage spans both ordinary/integer nesting directions, nested array type names, inline enum definitions, array compound literals, and deep field assignments so hostile source returns recoverable diagnostics instead of aborting the host.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.61.0`.
+- Reconciled an executable inventory of 2,652 tests: 2,495 interpreter tests, 101 deterministic fuzz-safety tests, 36 CLI tests, 6 pointer-classifier parity tests, 10 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
+
+### Known limitations
+
+- Cust remains a deterministic educational C subset, not a full C implementation or native-ABI emulator.
+- Tracked scalar-output field arrays remain fixed, one-dimensional struct fields over unqualified scalar pointees. Union fields, array decay, whole-array and element addresses, adjusted array parameters, qualified outputs, deeper pointers, flexible members, multidimensional arrays, tracked-output casts, whole-array assignment, element arithmetic, relational ordering, compound updates, and increment/decrement remain unsupported or retain targeted diagnostics.
+
 ## v0.60.0 — 2026-09-14
 
 ### Language subset
