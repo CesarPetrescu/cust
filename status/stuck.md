@@ -4,9 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 427 explicit CLI `--` end-of-options support is complete and canonically verified. The reserved v0.63.0 annotated-tag publication is a release follow-up, not an active implementation blocker.
+None. TODO 428 v0.63.0 annotated-tag publication is recovered and verified; TODO 429 dangling-`else` diagnostics is the next implementation package, not an active blocker.
 
 ## Resolved this run
+
+### 2026-09-15 — TODO 428 v0.63.0 publication evidence recovery
+
+- Evidence: local `origin/main` reflog records `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80` as `update by push` at `2026-09-15T19:24:02+03:00`; the local annotated `v0.63.0` tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` has tagger timestamp `2026-09-15T19:24:03+03:00` and peels to that release commit.
+- Verification: a fresh remote query reports the same unpeeled tag object and peeled release target; remote main has advanced to later branch commit `f005cff302f6b3d073072d470e40f1dc31cbd438`. This status-only evidence commit is separate from and untagged by v0.63.0; it does not move or recreate the tag. No blocker remains.
 
 ### 2026-09-15 — TODO 427 explicit CLI end-of-options delimiter
 

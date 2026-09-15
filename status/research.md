@@ -2,7 +2,12 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, bounded v0.63.0 release preparation, and explicit CLI `--` end-of-options support are complete. The reserved v0.63.0 annotated-tag publication is the release follow-up before a concrete parser-diagnostic package. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, and explicit CLI `--` end-of-options support are complete. v0.63.0 tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` peels locally and remotely to release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80`; the next package is a concrete dangling-`else` missing-statement diagnostic. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-15 — v0.63.0 publication evidence recovery and next parser diagnostic
+
+- The release-closure recovery rule is satisfied by local evidence: `origin/main` reflog records acceptance of `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80` at `2026-09-15T19:24:02+03:00`, which precedes the annotated tagger timestamp `2026-09-15T19:24:03+03:00`. `git cat-file -t v0.63.0` reports `tag`; local and fresh remote unpeeled refs are `d997dce6aac3454076bf19e7e66f89167f8cb1ac`, and local/fresh remote peeled refs are the release commit. The branch now points to later commit `f005cff302f6b3d073072d470e40f1dc31cbd438`; this status-only evidence commit is separate from and untagged by v0.63.0, and publication evidence must not imply that a later branch commit is tagged.
+- Candidate evaluation after closing publication: a broad diagnostics sweep has unclear acceptance scope; additional CLI changes would compete with the newly released contract; `int main(void) { if (1) { return 0; } else }` is a deterministic, minimal parser gap. It currently reports `unexpected token in statement: RBrace at line 1, column 44`. The selected TODO 429 will first add exact RED cases for `RBrace`, EOF, and invalid starts after `else`, then emit a source-located `expected statement after else, found ...` diagnostic while preserving empty, block, expression, control, and nearest-`if` `else` bodies.
 
 ## 2026-09-15 — CLI `--` end-of-options delimiter
 
