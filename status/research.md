@@ -2,9 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays are complete; bounded v0.61.0 release closure is in progress, with expanded classifier/evaluator parity queued after publication. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays and bounded v0.61.0 publication are complete; expanded classifier/evaluator parity is the sole next package. Every older “next” statement is historical as of its dated research entry.
 
-## 2026-09-15 — v0.61.0 release consistency preparation
+## 2026-09-15 — v0.61.0 publication
+
+- Release commit `ff76d129fb4a24bdd05bbfbe1d79516ec490290e` reached exact `origin/main` while local and remote `v0.61.0` refs were absent. Annotated tag object `7bd7eac8d28dda9a6eb76759c1cbad4a2073c8fa` was then created and explicitly pushed; fresh local and remote checks peel it exactly to the release commit and identify the tag object separately from that commit.
+- This later status-only publication evidence is separate from the tagged release commit and does not move or recreate `v0.61.0`. Expanded tracked-output aggregate-field-array classifier/evaluator parity is the sole next package.
+
+## 2026-09-15 — v0.61.0 release consistency preparation (historical)
 
 - Candidate evaluation compared queue-leading bounded v0.61.0, expanded tracked-output field-array parity, parser diagnostics, and CLI/product work. Release closure was selected because it packages the reviewed 51-test language/resource-safety slice without widening runtime behavior; expanded parity is the concrete post-publication package.
 - Version-first TDD changed only exact CLI and Compose expectations. Both failed against package/images `0.60.0` and pass after Cargo/lock plus both Compose image tags moved to `0.61.0`.

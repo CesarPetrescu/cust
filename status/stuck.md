@@ -4,18 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 421 received fresh independent approval and passed the complete canonical local/Docker gate; TODO 422 release preparation has no active blocker.
-
-## In progress this run
-
-### 2026-09-15 — v0.61.0 release closure
-
-- Version-first CLI and Compose assertions failed against `0.60.0` and pass at `0.61.0`.
-- Local and remote `v0.61.0` tag preflight is empty.
-- Independent review corrected a current-limitations contradiction and missing nested-brace initialization boundary; fresh re-review returned `APPROVED`.
-- Formatting, strict Clippy, all 2,652 local tests, a no-cache image rebuild, all 2,652 rebuilt-Docker tests, runtime output `10`, exact versions, and diff hygiene pass. Release commit and annotated-tag publication still follow the bounded release procedure; no publication is claimed before exact remote-main acceptance.
+None. TODO 422 is published and verified; TODO 423 has no active blocker.
 
 ## Resolved this run
+
+### 2026-09-15 — v0.61.0 publication closure
+
+- Ordering: verified release commit `ff76d129fb4a24bdd05bbfbe1d79516ec490290e` reached exact `origin/main` while local and remote `v0.61.0` refs were absent; the annotated tag was then created and explicitly pushed.
+- Verification: local and remote tag object `7bd7eac8d28dda9a6eb76759c1cbad4a2073c8fa` peels exactly to the release commit, while the remote branch still identified that commit at tag verification. This later status-only evidence update is separate from the tagged release commit and does not move or recreate `v0.61.0`; no blocker remains.
 
 ### 2026-09-15 — TODO 421 ordinary-first mixed parser-depth host-stack overflow
 
