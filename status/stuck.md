@@ -4,9 +4,16 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 426 bounded v0.63.0 release preparation is complete and canonically verified; its annotated tag is reserved until the release commit reaches `origin/main`. TODO 427 explicit CLI `--` end-of-options support is next.
+None. TODO 427 explicit CLI `--` end-of-options support is complete and canonically verified. The reserved v0.63.0 annotated-tag publication is a release follow-up, not an active implementation blocker.
 
 ## Resolved this run
+
+### 2026-09-15 — TODO 427 explicit CLI end-of-options delimiter
+
+- Failure: `cust -- -program.c` returned stderr `unknown option '--'`; a bare `cust --` returned the same unknown-option diagnostic instead of the missing-source usage contract.
+- Root cause: command-line dispatch treated every top-level dash-prefixed first argument as an option and separately rejected every dash-prefixed mode source operand, with no representation for an intentionally literal operand.
+- RED/GREEN: exact subprocess tests first failed in normal, token, AST, and max-step source modes plus bare-delimiter usage. A shared delimiter-aware source-operand helper and a top-level delimiter route make all tests GREEN without changing help/version or undelimited unknown-option dispatch.
+- Closure: independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,660 local tests, Docker test container exit 0 after the foreground observation window, rebuilt runtime output `10`, and diff hygiene pass. No blocker remains.
 
 ### 2026-09-15 — TODO 426 bounded v0.63.0 release preparation
 

@@ -102,6 +102,81 @@ fn option_modes_reject_option_like_source_arguments() {
 }
 
 #[test]
+fn end_of_options_delimiter_accepts_dash_prefixed_sources_in_every_source_mode() {
+    let directory = temp_source_directory("end-of-options");
+    let source_name = "-program.c";
+    fs::write(directory.join(source_name), "int main() { return 7; }\n")
+        .expect("dash-prefixed source should be writable");
+
+    for (args, expected_stdout) in [
+        (vec!["--", source_name], "7\n"),
+        (
+            vec!["--tokens", "--", source_name],
+            concat!(
+                "1:1 Int\n",
+                "1:5 Ident(\"main\")\n",
+                "1:9 LParen\n",
+                "1:10 RParen\n",
+                "1:12 LBrace\n",
+                "1:14 Return\n",
+                "1:21 Number(7)\n",
+                "1:22 Semi\n",
+                "1:24 RBrace\n",
+                "2:1 Eof\n",
+            ),
+        ),
+        (
+            vec!["--ast", "--", source_name],
+            concat!(
+                "function main\n",
+                "  params: []\n",
+                "  body: [Return(Some(Number(7)))]\n",
+            ),
+        ),
+        (vec!["--max-steps", "1", "--", source_name], "7\n"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+            .args(&args)
+            .current_dir(&directory)
+            .output()
+            .expect("cust binary should run");
+
+        assert!(
+            output.status.success(),
+            "args: {args:?}, stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            expected_stdout,
+            "args: {args:?}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "",
+            "args: {args:?}"
+        );
+    }
+
+    fs::remove_dir_all(&directory).expect("temporary source directory should be removable");
+}
+
+#[test]
+fn end_of_options_delimiter_requires_a_literal_source_operand() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cust"))
+        .arg("--")
+        .output()
+        .expect("cust binary should run");
+
+    assert_eq!(output.status.code(), Some(64));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "Usage: cust [--tokens|--ast|--max-steps N] <file.c>\n"
+    );
+}
+
+#[test]
 fn no_arguments_preserve_usage_on_standard_error() {
     let output = Command::new(env!("CARGO_BIN_EXE_cust"))
         .output()

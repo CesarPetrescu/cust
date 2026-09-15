@@ -4,7 +4,10 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
-No changes yet.
+### CLI
+
+- Added explicit `--` end-of-options support for normal interpretation, `--tokens`, `--ast`, and `--max-steps N`. The delimiter accepts a dash-prefixed literal source operand without disabling ordinary `--help` or `--version` dispatch before it.
+- Added exact subprocess coverage for every source-taking mode and for the missing-operand status-64 usage contract.
 
 ## v0.63.0 — 2026-09-15
 

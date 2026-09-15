@@ -35,18 +35,30 @@ fn main() {
         return;
     }
 
-    let (mode, path) = if first_arg == "--tokens" {
+    let (mode, path, path_is_delimited) = if first_arg == "--" {
         let Some(path) = args.next() else {
             eprintln!("{USAGE}");
             process::exit(64);
         };
-        (Mode::Tokens, path)
+        (
+            Mode::Run {
+                max_loop_iterations: None,
+            },
+            path,
+            true,
+        )
+    } else if first_arg == "--tokens" {
+        let Some((path, path_is_delimited)) = next_source_operand(&mut args) else {
+            eprintln!("{USAGE}");
+            process::exit(64);
+        };
+        (Mode::Tokens, path, path_is_delimited)
     } else if first_arg == "--ast" {
-        let Some(path) = args.next() else {
+        let Some((path, path_is_delimited)) = next_source_operand(&mut args) else {
             eprintln!("{USAGE}");
             process::exit(64);
         };
-        (Mode::Ast, path)
+        (Mode::Ast, path, path_is_delimited)
     } else if first_arg == "--max-steps" {
         let Some(limit) = args.next() else {
             eprintln!("cust: --max-steps requires a positive integer");
@@ -60,7 +72,7 @@ fn main() {
             eprintln!("cust: --max-steps requires a positive integer");
             process::exit(64);
         }
-        let Some(path) = args.next() else {
+        let Some((path, path_is_delimited)) = next_source_operand(&mut args) else {
             eprintln!("{USAGE}");
             process::exit(64);
         };
@@ -69,6 +81,7 @@ fn main() {
                 max_loop_iterations: Some(max_loop_iterations),
             },
             path,
+            path_is_delimited,
         )
     } else if first_arg.starts_with('-') {
         eprintln!("cust: unknown option '{first_arg}'");
@@ -80,10 +93,11 @@ fn main() {
                 max_loop_iterations: None,
             },
             first_arg,
+            false,
         )
     };
 
-    if path.starts_with('-') {
+    if !path_is_delimited && path.starts_with('-') {
         eprintln!("cust: unknown option '{path}'");
         eprintln!("{USAGE}");
         process::exit(64);
@@ -102,6 +116,15 @@ fn main() {
             eprintln!("cust: {err}");
             process::exit(if err.is_io_error() { 66 } else { 1 });
         }
+    }
+}
+
+fn next_source_operand(args: &mut impl Iterator<Item = String>) -> Option<(String, bool)> {
+    let operand = args.next()?;
+    if operand == "--" {
+        args.next().map(|path| (path, true))
+    } else {
+        Some((operand, false))
     }
 }
 

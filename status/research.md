@@ -2,7 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, and bounded v0.63.0 release preparation are complete; explicit CLI `--` end-of-options support is the single next package. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, bounded v0.63.0 release preparation, and explicit CLI `--` end-of-options support are complete. The reserved v0.63.0 annotated-tag publication is the release follow-up before a concrete parser-diagnostic package. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-15 — CLI `--` end-of-options delimiter
+
+- The delimiter is intentionally recognized only where Cust accepts a source operand: top-level normal execution and after `--tokens`, `--ast`, or a validated `--max-steps N` value. This keeps `cust --help` and `cust --version` as early dispatch actions while making `cust -- --help` a literal-path request.
+- Keep the delimiter state separate from the path string. The existing fail-closed `starts_with('-')` guard must still apply to undelimited operands, while a delimited path must reach the normal file-open path and retain ordinary I/O diagnostics.
+- Exact subprocess assertions should validate full normal/token/AST output, max-step execution, empty stderr on success, and the bare-delimiter EX_USAGE 64 contract. A focused test failed first because the former parser reported `unknown option '--'`; it passes after the bounded dispatch change. No external semantic lookup was required for this CLI compatibility decision.
 
 ## 2026-09-15 — v0.63.0 release preparation
 
