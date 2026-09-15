@@ -2,14 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0 publication, and expanded classifier/evaluator parity are complete; bounded v0.62.0 is the release package in verification and stable `--help`/`-h` CLI behavior is the post-publication package. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0 publication, and expanded classifier/evaluator parity are complete; stable `--help`/`-h` CLI behavior is the single next package. Every older “next” statement is historical as of its dated research entry.
 
 ## 2026-09-15 — v0.62.0 release preparation
 
 - Candidate evaluation selected release closure over stable `--help`/`-h` behavior, parser diagnostics, and broader C-subset work because the 1,456-success/160-boundary aggregate-field-array parity package is already independently reviewed and can be published without widening runtime semantics.
 - Version-first TDD changed only exact CLI and Compose expectations: both fail while Cargo/Compose remain at `0.61.0` and pass after Cargo/lock plus both image tags move to `0.62.0`.
 - Executable `cargo test --test <target> -- --list` inventory is 2,653: 2,496 interpreter + 101 fuzz-safety + 36 CLI + 6 pointer-classifier parity + 10 pointer-output parity + 2 Docker metadata + 1 compiler-oracle + 1 license. The non-interpreter subtotal is 157.
-- Fresh read-only review returned `APPROVED`; formatting, strict Clippy, all 2,653 local tests, rebuilt-Docker tests, runtime output `10`, and diff hygiene pass. The tag is not yet published: exact remote-main acceptance remains required before annotated `v0.62.0` creation and peeled-target verification.
+- Fresh read-only review returned `APPROVED`; formatting, strict Clippy, all 2,653 local tests, rebuilt-Docker tests, runtime output `10`, and diff hygiene passed. Release commit `fdf8c0b0ae0e87743d173f9dfcf66a69e24798a5` reached exact `origin/main` before annotated tag object `c9076ee432116ebd382685fa958dbece6795e4f7` was created and pushed; local and remote `v0.62.0` refs peel exactly to the release commit. The status-only evidence commit following this note does not move or recreate the release tag.
 
 ## 2026-09-15 — Aggregate-field-array classifier/evaluator parity
 
@@ -17,7 +17,7 @@ Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0 publicat
 - An aggregate-valued expression and a pointer to an aggregate are distinct metadata shapes. Field classification must admit both `DeclType::Struct(name)` and `DeclType::Pointer { pointee: Struct(name), ... }` where each is valid, rather than requiring every conditional field base to be a pointer.
 - Function calls require return-signature metadata in parser-folded integer constant expressions. Returning `DeclType::Struct` for `ReturnType::Struct` enables non-evaluating field queries without executing the callee; assignment expressions reuse the aggregate LHS result type through the same bounded classifier.
 - Generated parity must retain previously covered ordinary object/indexed/nested/arrow routes when adding temporaries and wrappers. Independent size expectations (`sizeof(int *)`), exact source-located diagnostics, identity-keyed cell counts, one-time sequence markers, and scratch-assignment witnesses reduce false-positive risk.
-- The completed matrix has 1,456 success programs (four pointees × four spellings × 13 routes × seven consumers) and 160 exact boundary programs (four pointees × four spellings × ten boundaries). Fresh independent re-review returned `AI_REVIEW:CLEAR`; the 2,653-test local/Docker gate passes. Bounded v0.62.0 release closure is next.
+- The completed matrix has 1,456 success programs (four pointees × four spellings × 13 routes × seven consumers) and 160 exact boundary programs (four pointees × four spellings × ten boundaries). Fresh independent re-review returned `AI_REVIEW:CLEAR`; the 2,653-test local/Docker gate passes. Bounded v0.62.0 release closure became next at that checkpoint and is published above.
 
 ## 2026-09-15 — v0.61.0 publication
 

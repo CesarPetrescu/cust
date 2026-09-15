@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 424 has independent approval and a passing canonical gate; tag publication is intentionally deferred until the verified release commit is accepted by `origin/main`.
+None. TODO 424 is published: release commit `fdf8c0b0ae0e87743d173f9dfcf66a69e24798a5` reached exact `origin/main` before annotated tag object `c9076ee432116ebd382685fa958dbece6795e4f7` was created and pushed; local and remote `v0.62.0` refs peel to that commit. TODO 425 is the next package.
 
 ## Resolved this run
 
