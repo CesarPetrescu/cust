@@ -2,7 +2,12 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, and dangling-`else` missing-statement diagnostics are complete. v0.63.0 tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` peels locally and remotely to release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80`; TODO 430 is next: a bounded missing-control-body diagnostic audit outside `else`. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, and contextual control-body diagnostics are complete. v0.63.0 tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` peels locally and remotely to release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80`; TODO 431 is next: a bounded malformed-`for`-clause diagnostic audit. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-16 — Contextual missing control bodies
+
+- Source inspection established two parser shapes: `if`, `while`, `do`, and `for` all route statement bodies through `parse_control_body_after()`, whereas `switch` deliberately requires an opening block brace. A shared guard is therefore the narrow implementation point for demonstrated generic fallbacks; changing `switch` would duplicate already-contextual behavior.
+- The bounded exact matrix uses `RBrace`, EOF, and comma as missing/impossible body starts across all five controls. It first exposed the shared generic fallback for the four statement-bodied controls; `switch` immediately retained `expected '{' after switch expression`. Keep declaration, empty, expression, block, and control bodies delegated to the existing statement parser so the diagnostic refinement does not change grammar acceptance. See `references/cust-missing-control-body-diagnostics.md`.
 
 ## 2026-09-16 — Contextual dangling-`else` missing statements
 

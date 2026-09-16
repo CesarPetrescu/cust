@@ -10336,8 +10336,61 @@ impl Parser {
         if self.check(&Token::LBrace) {
             Ok(vec![Stmt::Block(self.parse_block_after(context)?)])
         } else {
+            self.reject_missing_or_invalid_control_body(context)?;
             Ok(vec![self.parse_stmt()?])
         }
+    }
+
+    fn reject_missing_or_invalid_control_body(&self, context: &str) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Else
+                | Token::RBrace
+                | Token::Eof
+                | Token::Comma
+                | Token::Colon
+                | Token::Dot
+                | Token::Arrow
+                | Token::LBracket
+                | Token::Question
+                | Token::RParen
+                | Token::RBracket
+                | Token::PlusAssign
+                | Token::MinusAssign
+                | Token::StarAssign
+                | Token::SlashAssign
+                | Token::PercentAssign
+                | Token::AmpAssign
+                | Token::PipeAssign
+                | Token::CaretAssign
+                | Token::ShiftLeftAssign
+                | Token::ShiftRightAssign
+                | Token::Slash
+                | Token::Percent
+                | Token::AndAnd
+                | Token::Pipe
+                | Token::OrOr
+                | Token::Caret
+                | Token::Assign
+                | Token::Eq
+                | Token::Ne
+                | Token::Lt
+                | Token::Le
+                | Token::ShiftLeft
+                | Token::Gt
+                | Token::Ge
+                | Token::ShiftRight
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected statement after {context}, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+
+        Ok(())
     }
 
     fn parse_stmt(&mut self) -> CustResult<Stmt> {
@@ -17583,50 +17636,6 @@ impl Parser {
         let inline_enum_decl = self.take_pending_inline_enum_decl();
         let then_branch = self.parse_control_body_after("if condition")?;
         let else_branch = if self.matches(&Token::Else) {
-            if matches!(
-                self.peek(),
-                Token::Else
-                    | Token::RBrace
-                    | Token::Eof
-                    | Token::Comma
-                    | Token::Colon
-                    | Token::Dot
-                    | Token::Arrow
-                    | Token::LBracket
-                    | Token::Question
-                    | Token::RParen
-                    | Token::RBracket
-                    | Token::PlusAssign
-                    | Token::MinusAssign
-                    | Token::StarAssign
-                    | Token::SlashAssign
-                    | Token::PercentAssign
-                    | Token::AmpAssign
-                    | Token::PipeAssign
-                    | Token::CaretAssign
-                    | Token::ShiftLeftAssign
-                    | Token::ShiftRightAssign
-                    | Token::Slash
-                    | Token::Percent
-                    | Token::AndAnd
-                    | Token::Pipe
-                    | Token::OrOr
-                    | Token::Caret
-                    | Token::Assign
-                    | Token::Eq
-                    | Token::Ne
-                    | Token::Lt
-                    | Token::Le
-                    | Token::ShiftLeft
-                    | Token::Gt
-                    | Token::Ge
-                    | Token::ShiftRight
-            ) {
-                return Err(Self::error_at(
-                    format!("expected statement after else, found {:?}", self.peek()),
-                    self.peek_located(),
-                ));
-            }
             self.parse_control_body_after("else")?
         } else {
             Vec::new()

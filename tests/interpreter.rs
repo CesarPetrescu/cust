@@ -41648,6 +41648,78 @@ fn rejects_missing_or_invalid_statement_after_else_with_context() {
 }
 
 #[test]
+fn rejects_missing_or_invalid_control_bodies_with_context() {
+    let cases = [
+        (
+            "int main(void) {\nif (1) }\n}",
+            "expected statement after if condition, found RBrace at line 2, column 8",
+        ),
+        (
+            "int main(void) {\nwhile (1) }\n}",
+            "expected statement after while condition, found RBrace at line 2, column 11",
+        ),
+        (
+            "int main(void) {\ndo }\n}",
+            "expected statement after do, found RBrace at line 2, column 4",
+        ),
+        (
+            "int main(void) {\nfor (;;) }\n}",
+            "expected statement after for clauses, found RBrace at line 2, column 10",
+        ),
+        (
+            "int main(void) {\nif (1)",
+            "expected statement after if condition, found Eof at line 2, column 7",
+        ),
+        (
+            "int main(void) {\nwhile (1)",
+            "expected statement after while condition, found Eof at line 2, column 10",
+        ),
+        (
+            "int main(void) {\ndo",
+            "expected statement after do, found Eof at line 2, column 3",
+        ),
+        (
+            "int main(void) {\nfor (;;)",
+            "expected statement after for clauses, found Eof at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nif (1) ,\n}",
+            "expected statement after if condition, found Comma at line 2, column 8",
+        ),
+        (
+            "int main(void) {\nwhile (1) ,\n}",
+            "expected statement after while condition, found Comma at line 2, column 11",
+        ),
+        (
+            "int main(void) {\ndo ,\n}",
+            "expected statement after do, found Comma at line 2, column 4",
+        ),
+        (
+            "int main(void) {\nfor (;;) ,\n}",
+            "expected statement after for clauses, found Comma at line 2, column 10",
+        ),
+        (
+            "int main(void) {\nswitch (1) }\n}",
+            "expected '{' after switch expression, found RBrace at line 2, column 12",
+        ),
+        (
+            "int main(void) {\nswitch (1)",
+            "expected '{' after switch expression, found Eof at line 2, column 11",
+        ),
+        (
+            "int main(void) {\nswitch (1) ,\n}",
+            "expected '{' after switch expression, found Comma at line 2, column 12",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn rejects_missing_colon_after_switch_case_label() {
     let program = include_str!("fixtures/invalid/switch_case_missing_colon.c");
 

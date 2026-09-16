@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 429 dangling-`else` diagnostics is complete and verified; TODO 430 contextual missing-control-body diagnostics is the next implementation package, not an active blocker.
+None. TODO 430 contextual missing-control-body diagnostics is complete and verified; TODO 431 malformed-`for`-clause diagnostics is the next implementation package, not an active blocker.
+
+### 2026-09-16 — TODO 430 contextual missing-control-body diagnostics
+
+- Failure: missing `if`, `while`, `do`, and `for` bodies fell from shared control-body parsing into generic `unexpected token in statement: RBrace` diagnostics.
+- Root cause: `parse_control_body_after()` selected blocks specially but otherwise delegated directly to generic statement parsing, so the control context was discarded before an impossible body start was rejected.
+- RED/GREEN: a 15-case matrix first failed at `if (1) }`; a shared guard now produces exact context and locations for `RBrace`, EOF, and comma starts for all four statement-bodied controls. `switch` was confirmed to require `{` and already reports its own contextual opening-brace error.
+- Review/gate: independent Codex review found one rustfmt-only issue, corrected before the final test gate. Formatting, strict Clippy, all 2,662 local tests, Docker test exit 0, rebuilt runtime output `10`, and diff hygiene pass. No blocker remains.
 
 ### 2026-09-16 — TODO 429 dangling-`else` missing-statement diagnostics
 
