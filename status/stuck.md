@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 433 canonical v0.64.0 preparation is complete and ready for release-commit-first publication; local/remote tag preflight is empty, and no external blocker exists.
+None. TODO 433 v0.64.0 is published and verified; TODO 434 malformed nonempty `while` condition diagnostics is next, not an active blocker.
 
 ### 2026-09-16 — TODO 432 malformed nonempty-`return` expression diagnostics
 
