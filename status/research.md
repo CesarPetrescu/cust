@@ -2,7 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0/v0.64.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, and TODO 432 malformed nonempty-`return` expression diagnostics are complete. v0.64.0 tag object `8d66b0961c977f62db4f02f429eb3a88e77d48fe` peels locally and remotely to release commit `273554251e5826c82b394a3209994d9ede605945`; TODO 434 malformed nonempty `while` condition diagnostics is next. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0/v0.64.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, malformed nonempty `return` expression diagnostics, and TODO 434 malformed nonempty `while` condition diagnostics are complete. v0.64.0 tag object `8d66b0961c977f62db4f02f429eb3a88e77d48fe` peels locally and remotely to release commit `273554251e5826c82b394a3209994d9ede605945`; TODO 435 malformed nonempty `do-while` condition diagnostics is next. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-16 — Contextual malformed nonempty `while` condition starts
+
+- Candidate evaluation compared the explicit queue-leading TODO 434 with broad parser-diagnostic expansion, a conformance-only fixture, and CLI work. The while package was selected because it repairs a deterministic generic fallback with a narrow parser-local boundary and exact RED/GREEN evidence.
+- Strict RED showed `while (/)`, `while (=)`, `while (==)`, `while (&&)`, `while (%=)`, and `while (<)` all fell through to generic `expected expression` errors. The shared structural/keyword control-condition guard deliberately omitted operator starts, which isolated the root cause to the `while` parser route.
+- Preserve diagnostic precedence by retaining `reject_missing_control_condition_expr("while")` first, then applying a `while`-only impossible-operator guard before `parse_expr()`. This preserves valid unary, grouped, and scalar conditions and avoids changing `if` or `do-while` diagnostics. No external semantic lookup was needed; this is a Cust-local parser diagnostic decision. See `references/cust-while-invalid-expression-start-diagnostics.md`.
 
 ## 2026-09-16 — v0.64.0 release preparation
 

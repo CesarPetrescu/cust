@@ -2,6 +2,10 @@
 
 Last updated: 2026-09-16
 
+## Latest autonomous verification
+
+Completion update (2026-09-16): TODO 434 closes malformed nonempty `while` condition expression starts. `parse_while()` now retains existing structural and keyword diagnostics, then rejects binary-only, assignment, equality, relational, and shift starts with exact source-located `expected expression after while, found <Token>` errors before generic expression parsing. Strict TDD first observed six generic `expected expression` fallbacks for `/`, `=`, `==`, `&&`, `%=`, and `<`; the focused matrix is GREEN and preserves legal unary, grouped, and scalar conditions. Independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,665 local tests, Docker test exit 0 after a retained container outlived the foreground client window, rebuilt Docker runtime output `10`, and diff hygiene pass. See `references/cust-while-invalid-expression-start-diagnostics.md`.
+
 ## v0.64.0 release preparation
 
 Publication update (2026-09-16): release commit `273554251e5826c82b394a3209994d9ede605945` reached exact `origin/main` before annotated tag creation. Local and remote annotated `v0.64.0` tag object `8d66b0961c977f62db4f02f429eb3a88e77d48fe` both peel exactly to that release commit; the tag object and peeled commit are distinct. This status-only evidence update is separate from the tagged release and does not move or recreate it. TODO 434, a bounded audit of malformed nonempty `while` condition starts, is next.
@@ -12,7 +16,7 @@ Preparation record (2026-09-16): TODO 433 selected the queue-leading bounded v0.
 
 Completion update (2026-09-16): TODO 432 closes the demonstrated generic malformed nonempty-`return` expression starts. `reject_missing_return_expr()` now gives source-located `expected expression after return, found <Token>` diagnostics for binary-only, assignment, equality, and relational operator starts while preserving its existing punctuation/EOF and keyword-specific paths. Strict TDD first exposed six generic `expected expression` fallbacks; the focused matrix is GREEN and preserves a valid void bare return plus scalar, pointer, and aggregate returns. The final independent read-only Codex review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,664 local tests, Docker test exit 0 after the foreground wait window, rebuilt Docker runtime output `10`, and diff hygiene pass. See `references/cust-return-invalid-expression-start-diagnostics.md`.
 
-Queue authority: numbered TODOs 421-433 are complete. The v0.64.0 annotated tag is published as documented above; TODO 434 is next. Every later dated “next” statement is historical as of this entry.
+Queue authority: numbered TODOs 421-434 are complete. The v0.64.0 annotated tag is published as documented above; TODO 435, a bounded audit of malformed nonempty `do-while` condition starts, is next. Every later dated “next” statement is historical as of this entry.
 
 Publication update (2026-09-15): recovered local ordering evidence records `origin/main` accepting release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80` by push at `2026-09-15T19:24:02+03:00`, before the annotated tagger timestamp `2026-09-15T19:24:03+03:00`. Fresh remote refs report main at subsequent commit `f005cff302f6b3d073072d470e40f1dc31cbd438`, unpeeled `v0.63.0` at tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac`, and peeled `v0.63.0^{}` at the verified release commit. This status evidence is separate from the tagged release and does not move or recreate the tag. Parser probes found `int main(void) { if (1) { return 0; } else }` currently reports the generic `unexpected token in statement: RBrace`; TODO 429 will add a source-located `expected statement after else` diagnostic while preserving valid `else` statements and existing dangling-else binding.
 

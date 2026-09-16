@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 433 v0.64.0 is published and verified; TODO 434 malformed nonempty `while` condition diagnostics is next, not an active blocker.
+None. TODO 434 malformed nonempty `while` condition diagnostics is complete; TODO 435 malformed nonempty `do-while` condition diagnostics is next, not an active blocker.
+
+### 2026-09-16 — TODO 434 malformed nonempty `while` condition diagnostics
+
+- Failure: `while (/)`, `while (=)`, `while (==)`, `while (&&)`, `while (%=)`, and `while (<)` all reported generic `expected expression` diagnostics.
+- Root cause: the shared control-condition guard covered structural/EOF and keyword starts but intentionally did not classify binary-only, assignment, equality, relational, or shift tokens; `parse_while()` therefore reached generic primary-expression parsing.
+- RED/GREEN: a six-case exact source-location matrix failed as expected against generic messages. A narrow post-shared-guard `while` helper now reports `expected expression after while, found <Token>` while legal unary, grouped, and scalar conditions remain GREEN.
+- Review/gate: independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,665 local tests, Docker test exit 0 after a retained container outlived the foreground client window, rebuilt runtime output `10`, and diff hygiene pass. No external blocker remains.
 
 ### 2026-09-16 — TODO 432 malformed nonempty-`return` expression diagnostics
 

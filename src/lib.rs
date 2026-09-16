@@ -17627,6 +17627,43 @@ impl Parser {
         Ok(())
     }
 
+    fn reject_invalid_while_condition_expr(&self) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Slash
+                | Token::Percent
+                | Token::AndAnd
+                | Token::Pipe
+                | Token::OrOr
+                | Token::Caret
+                | Token::Assign
+                | Token::PlusAssign
+                | Token::MinusAssign
+                | Token::StarAssign
+                | Token::SlashAssign
+                | Token::PercentAssign
+                | Token::AmpAssign
+                | Token::PipeAssign
+                | Token::CaretAssign
+                | Token::ShiftLeftAssign
+                | Token::ShiftRightAssign
+                | Token::Eq
+                | Token::Ne
+                | Token::Lt
+                | Token::Le
+                | Token::ShiftLeft
+                | Token::Gt
+                | Token::Ge
+                | Token::ShiftRight
+        ) {
+            return Err(Self::error_at(
+                format!("expected expression after while, found {:?}", self.peek()),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
     fn reject_invalid_for_clause_expression_start(&self, context: &str) -> CustResult<()> {
         if matches!(
             self.peek(),
@@ -17729,6 +17766,7 @@ impl Parser {
         self.expect(Token::While)?;
         self.expect_opening_paren_after("while")?;
         self.reject_missing_control_condition_expr("while")?;
+        self.reject_invalid_while_condition_expr()?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("while condition")?;
         let inline_enum_decl = self.take_pending_inline_enum_decl();
