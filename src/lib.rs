@@ -17748,6 +17748,7 @@ impl Parser {
         self.expect(Token::If)?;
         self.expect_opening_paren_after("if")?;
         self.reject_missing_control_condition_expr("if")?;
+        self.reject_invalid_control_condition_expr("if")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("if condition")?;
         let inline_enum_decl = self.take_pending_inline_enum_decl();

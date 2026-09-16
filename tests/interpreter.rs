@@ -42509,6 +42509,53 @@ fn rejects_invalid_nonempty_while_condition_starts_with_context() {
 }
 
 #[test]
+fn rejects_invalid_nonempty_if_condition_starts_with_context() {
+    let cases = [
+        (
+            "int main(void) { if (/) { return 1; } return 0; }",
+            "expected expression after if, found Slash at line 1, column 22",
+        ),
+        (
+            "int main(void) { if (=) { return 1; } return 0; }",
+            "expected expression after if, found Assign at line 1, column 22",
+        ),
+        (
+            "int main(void) { if (==) { return 1; } return 0; }",
+            "expected expression after if, found Eq at line 1, column 22",
+        ),
+        (
+            "int main(void) { if (&&) { return 1; } return 0; }",
+            "expected expression after if, found AndAnd at line 1, column 22",
+        ),
+        (
+            "int main(void) { if (%=) { return 1; } return 0; }",
+            "expected expression after if, found PercentAssign at line 1, column 22",
+        ),
+        (
+            "int main(void) { if (<) { return 1; } return 0; }",
+            "expected expression after if, found Lt at line 1, column 22",
+        ),
+    ];
+
+    let actual: Vec<_> = cases
+        .iter()
+        .map(|(program, _)| interpret(program).unwrap_err().to_string())
+        .collect();
+    let expected: Vec<_> = cases.iter().map(|(_, expected)| *expected).collect();
+    assert_eq!(actual, expected);
+
+    assert_eq!(interpret("int main(void) { if (-1) return 1; }"), Ok(1));
+    assert_eq!(
+        interpret("int main(void) { int value = 1; if ((value)) return value; }"),
+        Ok(1)
+    );
+    assert_eq!(
+        interpret("int main(void) { int value = 0; if (value) return 1; return 0; }"),
+        Ok(0)
+    );
+}
+
+#[test]
 fn rejects_invalid_nonempty_do_while_condition_starts_with_context() {
     let cases = [
         (

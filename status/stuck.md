@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 435 malformed nonempty `do-while` condition diagnostics is complete; TODO 436 malformed nonempty `if` condition diagnostics is next, not an active blocker.
+None. TODO 436 malformed nonempty `if` condition diagnostics is complete; TODO 437 malformed nonempty `switch` controlling-expression diagnostics is next, not an active blocker.
+
+### 2026-09-16 — TODO 436 malformed nonempty `if` condition diagnostics
+
+- Failure: `if (/)`, `if (=)`, `if (==)`, `if (&&)`, `if (%=)`, and `if (<)` all reported generic `expected expression` diagnostics.
+- Root cause: `parse_if()` ran the shared structural/keyword condition guard and then delegated operator starts to generic primary-expression parsing; the shared invalid-operator condition guard was used by `while` and `do-while` but omitted from the if route.
+- RED/GREEN: a six-case exact source-location matrix failed as expected. Calling the shared guard after structural/keyword validation makes the matrix GREEN and retains legal unary, grouped, and scalar if conditions.
+- Review/gate: independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,667 local tests, Docker test exit 0 after the foreground client window, rebuilt runtime output `10`, and diff hygiene pass. No external blocker remains.
 
 ### 2026-09-16 — TODO 435 malformed nonempty `do-while` condition diagnostics
 
