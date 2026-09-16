@@ -2,7 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, and TODO 431 malformed-`for` clause diagnostics are complete. v0.63.0 tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` peels locally and remotely to release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80`; TODO 432 is next: a bounded malformed nonempty-`return` expression diagnostic audit. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, and TODO 432 malformed nonempty-`return` expression diagnostics are complete. v0.63.0 tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` peels locally and remotely to release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80`; bounded v0.64.0 release closure is next. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-16 — Contextual malformed nonempty `return` expression starts
+
+- Candidate evaluation considered a v0.64.0 release closure, broader malformed-expression diagnostics, a conformance-only fixture addition, and TODO 432. The explicit queue leader was selected because it has a narrow parser-local boundary and can prove exact diagnostic improvement without widening Cust's C subset.
+- Strict RED showed `return /;`, `return =;`, `return ==;`, `return &&;`, `return %=;`, and `return <;` all fell through to generic `expected expression` errors. The root cause was `reject_missing_return_expr()` handling punctuation/EOF and keyword starts but omitting binary-only, assignment, equality, and relational tokens.
+- Implementation keeps bare `return;` outside the guard and preserves legal unary/grouped/primary starts plus `reject_keyword_start_expression("return")` precedence. The exact matrix also protects valid void bare returns and scalar/pointer/aggregate returns. No external documentation was needed; this is a Cust-local parser diagnostic decision. See `references/cust-return-invalid-expression-start-diagnostics.md`.
 
 ## 2026-09-16 — Contextual malformed `for` clause expression starts
 

@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 431 malformed-`for` clause diagnostics is complete and verified; TODO 432 malformed nonempty-`return` expression diagnostics is the next implementation package, not an active blocker.
+None. TODO 432 malformed nonempty-`return` expression diagnostics is complete and verified; bounded v0.64.0 release closure is next, not an active blocker.
+
+### 2026-09-16 — TODO 432 malformed nonempty-`return` expression diagnostics
+
+- Failure: `return /;`, `return =;`, `return ==;`, `return &&;`, `return %=;`, and `return <;` all reported generic `expected expression` diagnostics.
+- Root cause: `reject_missing_return_expr()` covered structural punctuation/EOF and delegated keyword starts to the contextual shared helper, but omitted operators which cannot legally begin a Cust expression.
+- RED/GREEN: a six-case exact source-location matrix failed as expected against the generic messages. The narrow token guard now produces `expected expression after return, found <Token>` for all six while preserving bare void return plus valid scalar, pointer, and aggregate return behavior.
+- Review/gate: final independent read-only Codex review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,664 local tests, Docker test exit 0 after the foreground wait window, rebuilt runtime output `10`, and diff hygiene pass. No external blocker remains.
 
 ### 2026-09-16 — TODO 431 malformed-`for` expression-start diagnostics
 

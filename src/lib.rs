@@ -17555,7 +17555,32 @@ impl Parser {
     fn reject_missing_return_expr(&self) -> CustResult<()> {
         if matches!(
             self.peek(),
-            Token::Comma
+            Token::Slash
+                | Token::Percent
+                | Token::AndAnd
+                | Token::Pipe
+                | Token::OrOr
+                | Token::Caret
+                | Token::Assign
+                | Token::PlusAssign
+                | Token::MinusAssign
+                | Token::StarAssign
+                | Token::SlashAssign
+                | Token::PercentAssign
+                | Token::AmpAssign
+                | Token::PipeAssign
+                | Token::CaretAssign
+                | Token::ShiftLeftAssign
+                | Token::ShiftRightAssign
+                | Token::Eq
+                | Token::Ne
+                | Token::Lt
+                | Token::Le
+                | Token::ShiftLeft
+                | Token::Gt
+                | Token::Ge
+                | Token::ShiftRight
+                | Token::Comma
                 | Token::Colon
                 | Token::RParen
                 | Token::RBracket

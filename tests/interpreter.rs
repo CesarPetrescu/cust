@@ -42407,6 +42407,61 @@ fn rejects_missing_return_expressions_with_context() {
 }
 
 #[test]
+fn rejects_invalid_nonempty_return_expression_starts_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    return /;\n}\n",
+            "expected expression after return, found Slash at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    return =;\n}\n",
+            "expected expression after return, found Assign at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    return ==;\n}\n",
+            "expected expression after return, found Eq at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    return &&;\n}\n",
+            "expected expression after return, found AndAnd at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    return %=;\n}\n",
+            "expected expression after return, found PercentAssign at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    return <;\n}\n",
+            "expected expression after return, found Lt at line 2, column 12",
+        ),
+    ];
+
+    let actual: Vec<_> = cases
+        .iter()
+        .map(|(program, _)| interpret(program).unwrap_err().to_string())
+        .collect();
+    let expected: Vec<_> = cases.iter().map(|(_, expected)| *expected).collect();
+    assert_eq!(actual, expected);
+
+    assert_eq!(
+        interpret("void leave(void) { return; } int main(void) { leave(); return 0; }"),
+        Ok(0)
+    );
+    assert_eq!(interpret("int main(void) { return 7; }"), Ok(7));
+    assert_eq!(
+        interpret(
+            "int value; int *get(void) { return &value; } int main(void) { return get() == &value; }"
+        ),
+        Ok(1)
+    );
+    assert_eq!(
+        interpret(
+            "struct Point { int x; }; struct Point get(void) { return (struct Point){7}; } int main(void) { return get().x; }"
+        ),
+        Ok(7)
+    );
+}
+
+#[test]
 fn rejects_missing_declaration_initializer_expressions_with_context() {
     let cases = [
         (
