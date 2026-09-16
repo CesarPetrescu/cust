@@ -2,7 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0/v0.64.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, malformed nonempty `return` expression diagnostics, and TODO 434 malformed nonempty `while` condition diagnostics are complete. v0.64.0 tag object `8d66b0961c977f62db4f02f429eb3a88e77d48fe` peels locally and remotely to release commit `273554251e5826c82b394a3209994d9ede605945`; TODO 435 malformed nonempty `do-while` condition diagnostics is next. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0/v0.64.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, and malformed nonempty `return`/`while`/`do-while` expression diagnostics are complete. v0.64.0 tag object `8d66b0961c977f62db4f02f429eb3a88e77d48fe` peels locally and remotely to release commit `273554251e5826c82b394a3209994d9ede605945`; TODO 436 malformed nonempty `if` condition diagnostics is next. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-16 — Contextual malformed nonempty `do-while` condition starts
+
+- Candidate evaluation compared queue-leading TODO 435 with a broad parser-diagnostic sweep, compiler-oracle fixtures, and CLI work. The do-while package was selected because it has a deterministic one-command RED, shares a proven parser-local pattern, and closes the immediately adjacent contextual-diagnostic gap.
+- Strict RED showed `/`, `=`, `==`, `&&`, `%=`, and `<` after `do { } while (` reached generic primary-expression diagnostics at the right token location. Structural delimiter/EOF and keyword starts were already contextualized by `reject_missing_control_condition_expr(...)`.
+- The smallest complete fix parameterizes the existing while-only invalid-operator guard with a context string and invokes it after the structural/keyword guard in both loops. This preserves legal unary, grouped, and scalar conditions and stable while output.
+- Independent read-only Codex review returned `AI_REVIEW:CLEAR`; see `references/cust-do-while-invalid-expression-start-diagnostics.md`.
 
 ## 2026-09-16 — Contextual malformed nonempty `while` condition starts
 

@@ -42509,6 +42509,56 @@ fn rejects_invalid_nonempty_while_condition_starts_with_context() {
 }
 
 #[test]
+fn rejects_invalid_nonempty_do_while_condition_starts_with_context() {
+    let cases = [
+        (
+            "int main(void) { do { } while (/); }",
+            "expected expression after do-while, found Slash at line 1, column 32",
+        ),
+        (
+            "int main(void) { do { } while (=); }",
+            "expected expression after do-while, found Assign at line 1, column 32",
+        ),
+        (
+            "int main(void) { do { } while (==); }",
+            "expected expression after do-while, found Eq at line 1, column 32",
+        ),
+        (
+            "int main(void) { do { } while (&&); }",
+            "expected expression after do-while, found AndAnd at line 1, column 32",
+        ),
+        (
+            "int main(void) { do { } while (%=); }",
+            "expected expression after do-while, found PercentAssign at line 1, column 32",
+        ),
+        (
+            "int main(void) { do { } while (<); }",
+            "expected expression after do-while, found Lt at line 1, column 32",
+        ),
+    ];
+
+    let actual: Vec<_> = cases
+        .iter()
+        .map(|(program, _)| interpret(program).unwrap_err().to_string())
+        .collect();
+    let expected: Vec<_> = cases.iter().map(|(_, expected)| *expected).collect();
+    assert_eq!(actual, expected);
+
+    assert_eq!(
+        interpret("int main(void) { do return 1; while (-1); }"),
+        Ok(1)
+    );
+    assert_eq!(
+        interpret("int main(void) { int value = 1; do return value; while ((value)); }"),
+        Ok(1)
+    );
+    assert_eq!(
+        interpret("int main(void) { int value = 0; do { } while (value); return 0; }"),
+        Ok(0)
+    );
+}
+
+#[test]
 fn rejects_missing_declaration_initializer_expressions_with_context() {
     let cases = [
         (

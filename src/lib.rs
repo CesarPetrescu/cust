@@ -17627,7 +17627,7 @@ impl Parser {
         Ok(())
     }
 
-    fn reject_invalid_while_condition_expr(&self) -> CustResult<()> {
+    fn reject_invalid_control_condition_expr(&self, keyword: &str) -> CustResult<()> {
         if matches!(
             self.peek(),
             Token::Slash
@@ -17657,7 +17657,10 @@ impl Parser {
                 | Token::ShiftRight
         ) {
             return Err(Self::error_at(
-                format!("expected expression after while, found {:?}", self.peek()),
+                format!(
+                    "expected expression after {keyword}, found {:?}",
+                    self.peek()
+                ),
                 self.peek_located(),
             ));
         }
@@ -17766,7 +17769,7 @@ impl Parser {
         self.expect(Token::While)?;
         self.expect_opening_paren_after("while")?;
         self.reject_missing_control_condition_expr("while")?;
-        self.reject_invalid_while_condition_expr()?;
+        self.reject_invalid_control_condition_expr("while")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("while condition")?;
         let inline_enum_decl = self.take_pending_inline_enum_decl();
@@ -17783,6 +17786,7 @@ impl Parser {
         self.expect_keyword_after(&Token::While, "do body")?;
         self.expect_opening_paren_after("do-while")?;
         self.reject_missing_control_condition_expr("do-while")?;
+        self.reject_invalid_control_condition_expr("do-while")?;
         let cond = self.parse_expr()?;
         self.expect_closing_paren_after("do-while condition")?;
         self.expect_semicolon_after("do-while condition")?;

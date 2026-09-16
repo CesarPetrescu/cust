@@ -4,6 +4,8 @@ Last updated: 2026-09-16
 
 ## Latest autonomous verification
 
+Completion update (2026-09-16): TODO 435 closes malformed nonempty `do-while` condition expression starts. `parse_do_while()` now shares the existing `while` invalid-operator guard after structural and keyword validation, reporting exact source-located `expected expression after do-while, found <Token>` errors instead of generic primary-expression fallbacks. Strict TDD first observed six generic errors for `/`, `=`, `==`, `&&`, `%=`, and `<`; the focused matrix is GREEN and retains legal unary, grouped, and scalar conditions. Independent read-only review returned `AI_REVIEW:CLEAR`; canonical verification is recorded with this run. See `references/cust-do-while-invalid-expression-start-diagnostics.md`.
+
 Completion update (2026-09-16): TODO 434 closes malformed nonempty `while` condition expression starts. `parse_while()` now retains existing structural and keyword diagnostics, then rejects binary-only, assignment, equality, relational, and shift starts with exact source-located `expected expression after while, found <Token>` errors before generic expression parsing. Strict TDD first observed six generic `expected expression` fallbacks for `/`, `=`, `==`, `&&`, `%=`, and `<`; the focused matrix is GREEN and preserves legal unary, grouped, and scalar conditions. Independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,665 local tests, Docker test exit 0 after a retained container outlived the foreground client window, rebuilt Docker runtime output `10`, and diff hygiene pass. See `references/cust-while-invalid-expression-start-diagnostics.md`.
 
 ## v0.64.0 release preparation
