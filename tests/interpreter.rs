@@ -19806,6 +19806,88 @@ fn rejects_invalid_start_for_initializer_expressions_with_context() {
 }
 
 #[test]
+fn rejects_invalid_for_clause_expression_starts_with_context() {
+    let cases = [
+        (
+            "int main(void) {\n    for (=; ; ) { }\n    return 0;\n}\n",
+            "expected expression after for initializer, found Assign at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (]; ; ) { }\n    return 0;\n}\n",
+            "expected expression after for initializer, found RBracket at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (,; ; ) { }\n    return 0;\n}\n",
+            "expected expression after for initializer, found Comma at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (+=; ; ) { }\n    return 0;\n}\n",
+            "expected expression after for initializer, found PlusAssign at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (); ; ) { }\n    return 0;\n}\n",
+            "expected expression after for initializer, found RParen at line 2, column 10",
+        ),
+        (
+            "int main(void) {\n    for (; ,; ) { }\n    return 0;\n}\n",
+            "expected expression after for condition, found Comma at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    for (; =; ) { }\n    return 0;\n}\n",
+            "expected expression after for condition, found Assign at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    for (; ]; ) { }\n    return 0;\n}\n",
+            "expected expression after for condition, found RBracket at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    for (; ==; ) { }\n    return 0;\n}\n",
+            "expected expression after for condition, found Eq at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    for (; }; ) { }\n    return 0;\n}\n",
+            "expected expression after for condition, found RBrace at line 2, column 12",
+        ),
+        (
+            "int main(void) {\n    for (; ; ,) { }\n    return 0;\n}\n",
+            "expected expression after for increment, found Comma at line 2, column 14",
+        ),
+        (
+            "int main(void) {\n    for (; ; =) { }\n    return 0;\n}\n",
+            "expected expression after for increment, found Assign at line 2, column 14",
+        ),
+        (
+            "int main(void) {\n    for (; ; ]) { }\n    return 0;\n}\n",
+            "expected expression after for increment, found RBracket at line 2, column 14",
+        ),
+        (
+            "int main(void) {\n    for (; ; ;) { }\n    return 0;\n}\n",
+            "expected expression after for increment, found Semi at line 2, column 14",
+        ),
+        (
+            "int main(void) {\n    for (; ; ",
+            "expected expression after for increment, found Eof at line 2, column 14",
+        ),
+    ];
+
+    let actual: Vec<_> = cases
+        .iter()
+        .map(|(program, _)| interpret(program).unwrap_err().to_string())
+        .collect();
+    let expected: Vec<_> = cases.iter().map(|(_, expected)| *expected).collect();
+
+    assert_eq!(actual, expected);
+    assert_eq!(
+        interpret("int main(void) { for (; ~0; ) { return 7; } return 1; }"),
+        Ok(7)
+    );
+    assert_eq!(
+        interpret("int main(void) { for (int i = 0; i < 1;) { return i; } return 1; }"),
+        Ok(0)
+    );
+}
+
+#[test]
 fn rejects_statement_only_control_flow_in_for_clauses_with_context() {
     let cases = [
         (

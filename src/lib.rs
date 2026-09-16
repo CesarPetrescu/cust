@@ -17602,6 +17602,58 @@ impl Parser {
         Ok(())
     }
 
+    fn reject_invalid_for_clause_expression_start(&self, context: &str) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::Slash
+                | Token::Percent
+                | Token::AndAnd
+                | Token::Pipe
+                | Token::OrOr
+                | Token::Caret
+                | Token::Assign
+                | Token::PlusAssign
+                | Token::MinusAssign
+                | Token::StarAssign
+                | Token::SlashAssign
+                | Token::PercentAssign
+                | Token::AmpAssign
+                | Token::PipeAssign
+                | Token::CaretAssign
+                | Token::ShiftLeftAssign
+                | Token::ShiftRightAssign
+                | Token::Eq
+                | Token::Ne
+                | Token::Lt
+                | Token::Le
+                | Token::ShiftLeft
+                | Token::Gt
+                | Token::Ge
+                | Token::ShiftRight
+                | Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::Comma
+                | Token::Semi
+                | Token::Colon
+                | Token::LBracket
+                | Token::LBrace
+                | Token::Question
+                | Token::Dot
+                | Token::Arrow
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after {context}, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
     fn reject_keyword_start_expression(&self, context: &str) -> CustResult<()> {
         if self.check(&Token::Generic) {
             return Ok(());
@@ -17725,26 +17777,11 @@ impl Parser {
             Some(Box::new(self.parse_assign()?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(true)?))
-        } else if matches!(
-            self.peek(),
-            Token::LBracket
-                | Token::LBrace
-                | Token::Question
-                | Token::Comma
-                | Token::Colon
-                | Token::Dot
-                | Token::Arrow
-        ) {
-            return Err(Self::error_at(
-                format!(
-                    "expected expression after for initializer, found {:?}",
-                    self.peek()
-                ),
-                self.peek_located(),
-            ));
-        } else if let Some(message) = self.statement_only_control_flow_error("for initializer") {
-            return Err(Self::error_at(message, self.peek_located()));
         } else {
+            self.reject_invalid_for_clause_expression_start("for initializer")?;
+            if let Some(message) = self.statement_only_control_flow_error("for initializer") {
+                return Err(Self::error_at(message, self.peek_located()));
+            }
             return Err(Self::error_at(
                 format!("unexpected token in for initializer: {:?}", self.peek()),
                 self.peek_located(),
@@ -17759,6 +17796,7 @@ impl Parser {
             None
         } else {
             self.reject_missing_control_condition_expr("for condition")?;
+            self.reject_invalid_for_clause_expression_start("for condition")?;
             let expr = self.parse_expr()?;
             self.expect_semicolon_after("for condition")?;
             Some(expr)
@@ -17772,30 +17810,17 @@ impl Parser {
             Some(Box::new(self.parse_assign_with_semi(false)?))
         } else if self.starts_expr() {
             Some(Box::new(self.parse_expr_stmt_with_semi(false)?))
-        } else if matches!(
-            self.peek(),
-            Token::LBracket
-                | Token::LBrace
-                | Token::Question
-                | Token::Colon
-                | Token::Dot
-                | Token::Arrow
-        ) {
-            return Err(Self::error_at(
-                format!(
-                    "expected expression after for increment, found {:?}",
-                    self.peek()
-                ),
-                self.peek_located(),
-            ));
-        } else if let Some(message) = self.statement_only_control_flow_error("for increment") {
-            return Err(Self::error_at(message, self.peek_located()));
-        } else if let Some(label) = self.integer_constant_invalid_start_label() {
-            return Err(Self::error_at(
-                format!("expected expression after for increment before '{label}'"),
-                self.peek_located(),
-            ));
         } else {
+            self.reject_invalid_for_clause_expression_start("for increment")?;
+            if let Some(message) = self.statement_only_control_flow_error("for increment") {
+                return Err(Self::error_at(message, self.peek_located()));
+            }
+            if let Some(label) = self.integer_constant_invalid_start_label() {
+                return Err(Self::error_at(
+                    format!("expected expression after for increment before '{label}'"),
+                    self.peek_located(),
+                ));
+            }
             return Err(Self::error_at(
                 format!("unexpected token in for increment: {:?}", self.peek()),
                 self.peek_located(),

@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 430 contextual missing-control-body diagnostics is complete and verified; TODO 431 malformed-`for`-clause diagnostics is the next implementation package, not an active blocker.
+None. TODO 431 malformed-`for` clause diagnostics is complete and verified; TODO 432 malformed nonempty-`return` expression diagnostics is the next implementation package, not an active blocker.
+
+### 2026-09-16 — TODO 431 malformed-`for` expression-start diagnostics
+
+- Failure: malformed initializer, condition, and increment starts such as `for (=; ; )`, `for (; ==; )`, and `for (; ; ])` reached generic clause or primary-expression diagnostics.
+- Root cause: `parse_for()` had separate partial route-local guards; conditions delegated straight to `parse_expr()`, while initializer/increment coverage omitted several operator and delimiter tokens.
+- RED/GREEN: the 15-case exact source-location matrix first exposed the generic fallbacks. One shared clause-start guard now covers impossible expression starts while deliberately retaining unary `~`, empty clauses, declaration initialization, and pre-existing specific control-flow/integer-constant diagnostics.
+- Review/gate: final independent Codex review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,663 local tests, Docker test exit 0, rebuilt runtime output `10`, and diff hygiene pass. No blocker remains.
 
 ### 2026-09-16 — TODO 430 contextual missing-control-body diagnostics
 

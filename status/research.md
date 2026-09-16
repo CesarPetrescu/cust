@@ -2,7 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, and contextual control-body diagnostics are complete. v0.63.0 tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` peels locally and remotely to release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80`; TODO 431 is next: a bounded malformed-`for`-clause diagnostic audit. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, and TODO 431 malformed-`for` clause diagnostics are complete. v0.63.0 tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` peels locally and remotely to release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80`; TODO 432 is next: a bounded malformed nonempty-`return` expression diagnostic audit. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-16 — Contextual malformed `for` clause expression starts
+
+- Candidate evaluation favored TODO 431 over a broad parser sweep, fresh conformance-only fixtures, and a new fuzz/property matrix: it was the explicit queue leader, has a small parser-local boundary, and could use exact deterministic RED/GREEN diagnostics without widening Cust's supported C subset.
+- `for` clauses share expression syntax but differ in their legal empty delimiters. The correct narrow hook is immediately before parsing a nonempty expression in each clause, after the empty delimiter check. Guard only tokens that cannot begin an expression; specifically preserve unary `+`, `-`, `++`, `--`, `!`, `~`, `*`, `&`, `sizeof`, `_Generic`, and `(`.
+- Maintain diagnostic precedence by applying the existing statement-only-control-flow and integer-constant-start checks after the shared invalid-start guard. The focused matrix and an independent review's additional unary/empty probes confirmed that no valid clause grammar changed. No external semantic lookup was required; this is a parser-local recovery decision. See `references/cust-for-clause-invalid-expression-start-diagnostics.md`.
 
 ## 2026-09-16 — Contextual missing control bodies
 
