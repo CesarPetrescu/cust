@@ -2,7 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0/v0.64.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, and malformed nonempty `return`/`while`/`do-while`/`if` expression diagnostics are complete. v0.64.0 tag object `8d66b0961c977f62db4f02f429eb3a88e77d48fe` peels locally and remotely to release commit `273554251e5826c82b394a3209994d9ede605945`; TODO 437 malformed nonempty `switch` controlling-expression diagnostics is next. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0/v0.64.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, and malformed nonempty `return`/`while`/`do-while`/`if`/`switch` expression diagnostics are complete. v0.64.0 tag object `8d66b0961c977f62db4f02f429eb3a88e77d48fe` peels locally and remotely to release commit `273554251e5826c82b394a3209994d9ede605945`; TODO 438 malformed keyword starts in `switch` controlling expressions is next. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-16 — Contextual malformed nonempty `switch` condition starts
+
+- Candidate evaluation compared queue-leading TODO 437 with a broad parser-diagnostic sweep, compiler-oracle fixtures, and CLI work. The switch package was selected because it has a deterministic one-command RED, reuses the adjacent control-condition guard, and closes a current generic fallback without widening Cust's C subset.
+- Strict RED showed `/`, `=`, `==`, `&&`, `%=`, and `<` after `switch (` reached generic primary-expression diagnostics at the correct token location. Structural delimiter/EOF starts were already contextualized by `reject_missing_switch_expr(...)`.
+- The smallest complete fix calls `reject_invalid_control_condition_expr("switch")` after the structural guard and before `parse_expr()`. Positive coverage retains unary, grouped, scalar, and enum condition evaluation. Native compiler-oracle coverage is inappropriate because the changed programs are invalid; see `references/cust-switch-invalid-expression-start-diagnostics.md`.
 
 ## 2026-09-16 — Contextual malformed nonempty `if` condition starts
 

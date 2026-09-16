@@ -41890,6 +41890,68 @@ fn rejects_missing_switch_expressions_with_context() {
 }
 
 #[test]
+fn rejects_invalid_start_switch_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) {\nswitch (/) { default: return 0; }\n}",
+            "expected expression after switch, found Slash at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nswitch (=) { default: return 0; }\n}",
+            "expected expression after switch, found Assign at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nswitch (==) { default: return 0; }\n}",
+            "expected expression after switch, found Eq at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nswitch (&&) { default: return 0; }\n}",
+            "expected expression after switch, found AndAnd at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nswitch (%=) { default: return 0; }\n}",
+            "expected expression after switch, found PercentAssign at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nswitch (<) { default: return 0; }\n}",
+            "expected expression after switch, found Lt at line 2, column 9",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn supports_unary_grouped_scalar_and_enum_switch_expressions() {
+    let cases = [
+        (
+            "int main(void) { switch (-1) { case -1: return 3; default: return 0; } }",
+            3,
+        ),
+        (
+            "int main(void) { switch ((1 + 1)) { case 2: return 4; default: return 0; } }",
+            4,
+        ),
+        (
+            "int main(void) { int value = 3; switch (value) { case 3: return 5; default: return 0; } }",
+            5,
+        ),
+        (
+            "enum Choice { Selected = 4 }; int main(void) { switch (Selected) { case Selected: return 6; default: return 0; } }",
+            6,
+        ),
+    ];
+
+    for (program, expected) in cases {
+        assert_eq!(interpret(program), Ok(expected));
+    }
+}
+
+#[test]
 fn rejects_keyword_start_return_and_control_expressions_with_context() {
     let cases = [
         (

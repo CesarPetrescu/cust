@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 436 malformed nonempty `if` condition diagnostics is complete; TODO 437 malformed nonempty `switch` controlling-expression diagnostics is next, not an active blocker.
+None. TODO 437 malformed nonempty `switch` controlling-expression diagnostics is complete; TODO 438 malformed keyword starts in `switch` controlling expressions is next, not an active blocker.
+
+### 2026-09-16 — TODO 437 malformed nonempty `switch` condition diagnostics
+
+- Failure: `switch (/)`, `switch (=)`, `switch (==)`, `switch (&&)`, `switch (%=)`, and `switch (<)` all reported generic `expected expression` diagnostics.
+- Root cause: `parse_switch()` ran only its structural missing-expression guard and then delegated invalid operator starts to generic primary-expression parsing, omitting the shared invalid-control-condition guard used by `if`, `while`, and `do-while`.
+- RED/GREEN: a six-case exact source-location matrix first failed with `expected expression, found Slash`. Calling the shared guard after structural validation makes the matrix GREEN and retains legal unary, grouped, scalar, and enum switch conditions.
+- Review/gate: independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,669 local tests, Docker test exit 0 after the foreground client timeout, rebuilt runtime output `10`, and diff hygiene pass. No external blocker remains.
 
 ### 2026-09-16 — TODO 436 malformed nonempty `if` condition diagnostics
 

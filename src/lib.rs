@@ -17928,6 +17928,7 @@ impl Parser {
         self.expect(Token::Switch)?;
         self.expect_opening_paren_after("switch")?;
         self.reject_missing_switch_expr()?;
+        self.reject_invalid_control_condition_expr("switch")?;
         let expr = self.parse_expr()?;
         self.expect_closing_paren_after("switch expression")?;
         let inline_enum_decl = self.take_pending_inline_enum_decl();
