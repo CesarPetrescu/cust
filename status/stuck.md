@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 432 malformed nonempty-`return` expression diagnostics is complete and verified; bounded v0.64.0 release closure is next, not an active blocker.
+None. TODO 433 canonical v0.64.0 preparation is complete and ready for release-commit-first publication; local/remote tag preflight is empty, and no external blocker exists.
 
 ### 2026-09-16 — TODO 432 malformed nonempty-`return` expression diagnostics
 

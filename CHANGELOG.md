@@ -4,10 +4,22 @@ All notable changes to Cust are documented here. Cust is still a small education
 
 ## Unreleased
 
+## v0.64.0 — 2026-09-16
+
 ### CLI
 
 - Added explicit `--` end-of-options support for normal interpretation, `--tokens`, `--ast`, and `--max-steps N`. The delimiter accepts a dash-prefixed literal source operand without disabling ordinary `--help` or `--version` dispatch before it.
 - Added exact subprocess coverage for every source-taking mode and for the missing-operand status-64 usage contract.
+
+### Parser diagnostics
+
+- Added source-located contextual diagnostics for missing or impossible statement bodies after `else`, `if`, `while`, `do`, and `for`, while preserving `switch`'s block-only diagnostic and normal valid-body parsing.
+- Added exact contextual diagnostics for malformed nonempty `for` initializer, condition, and increment expression starts, plus malformed nonempty `return` expression starts. Legal empty clauses, unary expressions, declaration clauses, bare `return;`, and scalar/pointer/aggregate returns retain their existing behavior.
+
+### CLI, packaging, and verification
+
+- Versioned the Cargo package, exact CLI output, and Docker Compose runtime/test images as `0.64.0`.
+- Reconciled an executable inventory of 2,664 tests: 2,500 interpreter tests, 101 deterministic fuzz-safety tests, 43 CLI tests, 6 pointer-classifier parity tests, 10 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
 
 ## v0.63.0 — 2026-09-15
 

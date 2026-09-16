@@ -2,7 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, and TODO 432 malformed nonempty-`return` expression diagnostics are complete. v0.63.0 tag object `d997dce6aac3454076bf19e7e66f89167f8cb1ac` peels locally and remotely to release commit `fe64b66b4ac5faa3fa824f4d847fbdf1195f7a80`; bounded v0.64.0 release closure is next. Every older “next” statement is historical as of its dated research entry.
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, and TODO 432 malformed nonempty-`return` expression diagnostics are complete. v0.64.0 metadata, independent review, and canonical local/Docker gates are complete; release-commit-first annotated-tag publication remains. Every older “next” statement is historical as of its dated research entry.
+
+## 2026-09-16 — v0.64.0 release preparation
+
+- Candidate evaluation compared the queue-leading bounded release closure with a broader parser-diagnostic sweep, new conformance-only fixtures, and further CLI expansion. The release was selected because it publishes five independently reviewed parser/CLI closures without widening the supported C subset or adding new runtime semantics.
+- Version-first TDD updated exact CLI and Compose release assertions before changing package metadata. The CLI focused test failed with `0.63.0` where `0.64.0` was expected; Compose image assertions failed because neither `v0.64.0` tag was present. Cargo/lock and both image tags make both focused checks GREEN.
+- Executable release inventory is derived from `cargo test --test <target> -- --list`, not source annotations: 2,500 interpreter + 101 fuzz-safety + 43 CLI + 6 pointer-classifier parity + 10 pointer-output parity + 2 Docker metadata + 1 compiler oracle + 1 license = 2,664. The independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all local tests, Docker test exit 0 after a bounded wait window, and rebuilt runtime output `10` pass. Local and remote `v0.64.0` tag preflight refs are empty. The release must still push its verified commit before creating an annotated tag.
 
 ## 2026-09-16 — Contextual malformed nonempty `return` expression starts
 
