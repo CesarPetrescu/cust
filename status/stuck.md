@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 437 malformed nonempty `switch` controlling-expression diagnostics is complete; TODO 438 malformed keyword starts in `switch` controlling expressions is next, not an active blocker.
+None. TODO 438 malformed keyword starts in nonempty `switch` controlling expressions is complete; TODO 439 selector-token starts in `switch` expressions is next, not an active blocker.
+
+### 2026-09-17 — TODO 438 malformed keyword starts in `switch` expressions
+
+- Failure: `switch (int)`, `switch (struct)`, `switch (return)`, and `switch (if)` reached generic primary-expression parsing and reported `expected expression, found <Token>`.
+- Root cause: switch used its route-specific delimiter guard and the new invalid-operator guard but omitted the established keyword-start guard invoked by the other control condition routes.
+- RED/GREEN: the four-case exact source-location matrix first failed at `Int`; adding `reject_keyword_start_expression("switch")` after switch delimiter validation makes it GREEN. Direct CLI coverage confirms legal `_Generic` selectors remain valid and non-evaluating.
+- Review/gate: independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,670 local tests, Docker test exit 0 after the foreground client time window, rebuilt runtime output `10`, and diff hygiene pass. No external blocker remains.
 
 ### 2026-09-16 — TODO 437 malformed nonempty `switch` condition diagnostics
 

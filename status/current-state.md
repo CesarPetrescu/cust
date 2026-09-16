@@ -1,8 +1,10 @@
 # Cust Current State
 
-Last updated: 2026-09-16
+Last updated: 2026-09-17
 
 ## Latest autonomous verification
+
+Completion update (2026-09-17): TODO 438 closes malformed keyword starts in nonempty `switch` controlling expressions. `reject_missing_switch_expr()` now delegates non-delimiter starts to the existing shared keyword guard after retaining its switch-specific punctuation precedence, so declaration/control starts (`int`, `struct`, `return`, `if`) report exact source-located `expected expression after switch before '<keyword>'` diagnostics instead of generic primary-expression errors. Strict TDD observed the generic `Int` fallback before the one-line parser change; the four-case matrix and the complete switch filter are GREEN. A direct CLI smoke test confirms a legal `_Generic` switch selector remains accepted and non-evaluating (output `7`). Independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,670 local tests, Docker test exit 0 after the foreground client time window, rebuilt Docker runtime output `10`, and diff hygiene pass. See `references/cust-switch-keyword-condition-diagnostics.md`.
 
 Completion update (2026-09-16): TODO 437 closes malformed nonempty `switch` controlling-expression starts. `parse_switch()` now calls the established narrow invalid-control-condition guard after structural missing-expression validation and before generic expression parsing, producing exact source-located `expected expression after switch, found <Token>` diagnostics for `/`, `=`, `==`, `&&`, `%=`, and `<` instead of generic primary-expression fallbacks. Strict TDD first observed the generic Slash error; the six-case matrix is GREEN, and unary, grouped, scalar, and enum switch conditions remain covered. Independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,669 local tests, Docker test exit 0 (observed from the retained container after the foreground client timeout), rebuilt Docker runtime output `10`, and diff hygiene pass. See `references/cust-switch-invalid-expression-start-diagnostics.md`.
 

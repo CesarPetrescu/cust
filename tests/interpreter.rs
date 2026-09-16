@@ -41926,6 +41926,34 @@ fn rejects_invalid_start_switch_expressions_with_context() {
 }
 
 #[test]
+fn rejects_keyword_start_switch_expressions_with_context() {
+    let cases = [
+        (
+            "int main(void) {\nswitch (int) { default: return 0; }\n}",
+            "expected expression after switch before 'int' at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nswitch (struct) { default: return 0; }\n}",
+            "expected expression after switch before 'struct' at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nswitch (return) { default: return 0; }\n}",
+            "expected expression after switch before 'return' at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nswitch (if) { default: return 0; }\n}",
+            "expected expression after switch before 'if' at line 2, column 9",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn supports_unary_grouped_scalar_and_enum_switch_expressions() {
     let cases = [
         (

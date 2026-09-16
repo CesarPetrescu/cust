@@ -18114,6 +18114,7 @@ impl Parser {
                 self.peek_located(),
             ));
         }
+        self.reject_keyword_start_expression("switch")?;
         Ok(())
     }
 

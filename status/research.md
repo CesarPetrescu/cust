@@ -2,7 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
-Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0/v0.64.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, and malformed nonempty `return`/`while`/`do-while`/`if`/`switch` expression diagnostics are complete. v0.64.0 tag object `8d66b0961c977f62db4f02f429eb3a88e77d48fe` peels locally and remotely to release commit `273554251e5826c82b394a3209994d9ede605945`; TODO 438 malformed keyword starts in `switch` controlling expressions is next. Every older “next” statement is historical as of its dated research entry.
+## 2026-09-17 — Contextual malformed keyword starts in `switch` selectors
+
+- Candidate evaluation compared queue-leading TODO 438 with a broad parser-diagnostic sweep, selector-token coverage, compiler-oracle conformance work, and CLI/product tasks. It was selected because it exposed a deterministic generic parser fallback, reuses an established narrow helper, and has a small verified surface.
+- Root cause: unlike `if`, `while`, and `do-while`, `parse_switch()` called the switch-specific delimiter guard plus the invalid-operator guard, but `reject_missing_switch_expr()` did not invoke `reject_keyword_start_expression("switch")`. `switch (int)` therefore reached generic primary-expression parsing as `expected expression, found Int`.
+- Strict TDD: a four-case declaration/control matrix first failed at `Int` with the generic diagnostic, then passed after the one-line helper call. Existing delimiter precedence stays in `reject_missing_switch_expr()`, so this intentionally does not route switch through the generic control-condition helper.
+- The existing helper deliberately treats `Token::Generic` as an allowed expression start. A direct Cargo CLI smoke program using `switch (_Generic(selected++, int: 2, default: 3))` prints `7`, proving the selected association remains valid and the generic controlling expression stays unevaluated. No external documentation was needed. See `references/cust-switch-keyword-condition-diagnostics.md`.
+
+Queue authority: tracked-output aggregate-field arrays, bounded v0.61.0/v0.62.0/v0.63.0/v0.64.0 publication, expanded classifier/evaluator parity, stable `--help`/`-h` CLI behavior, explicit CLI `--` end-of-options support, contextual control-body diagnostics, malformed `for` clause starts, and malformed nonempty `return`/`while`/`do-while`/`if`/`switch` expression diagnostics are complete. v0.64.0 tag object `8d66b0961c977f62db4f02f429eb3a88e77d48fe` peels locally and remotely to release commit `273554251e5826c82b394a3209994d9ede605945`; TODO 439 selector-token starts in `switch` controlling expressions is next. Every older “next” statement is historical as of its dated research entry.
 
 ## 2026-09-16 — Contextual malformed nonempty `switch` condition starts
 
