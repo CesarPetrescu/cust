@@ -2,6 +2,12 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-17 — Contextual leading-comma start in `switch` expressions
+
+- Candidate evaluation considered queue-leading TODO 440, a broader control-condition comma audit, compiler-oracle conformance work, and CLI/product work. TODO 440 was selected because `switch (,)` had a deterministic generic fallback, requires one narrow switch-local parser change, and completes the declared switch comma/operator audit without widening grammar.
+- Strict TDD: `switch (,)` first reported `expected expression, found Comma at line 2, column 9`; adding `Token::Comma` to `reject_missing_switch_expr()` makes the exact switch-context diagnostic GREEN.
+- Audit result: `Pipe`, `Caret`, `Percent`, shifts, assignments, comparisons, and logical starts are already rejected by `reject_invalid_control_condition_expr("switch")`. Prefix `++`, `--`, `*`, `&`, `!`, and `~` are valid Cust unary starts, so their missing-operand diagnostics must not be reclassified. No external semantic lookup or native compiler oracle is appropriate for this Cust-local invalid-program diagnostic. See `references/cust-switch-leading-comma-condition-diagnostics.md`.
+
 ## 2026-09-17 — Contextual selector-token starts in `switch` expressions
 
 - Candidate evaluation compared queue-leading TODO 439 with a broad parser-diagnostic sweep, compiler-oracle conformance work, and CLI/product tasks. It was selected because `switch (.)` has a deterministic generic fallback, shares the established switch structural guard, and has a tightly bounded acceptance surface.

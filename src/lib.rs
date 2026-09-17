@@ -18102,6 +18102,7 @@ impl Parser {
             self.peek(),
             Token::RParen
                 | Token::Semi
+                | Token::Comma
                 | Token::Colon
                 | Token::RBrace
                 | Token::LBracket

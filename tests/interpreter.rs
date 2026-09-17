@@ -41893,6 +41893,10 @@ fn rejects_missing_switch_expressions_with_context() {
 fn rejects_invalid_start_switch_expressions_with_context() {
     let cases = [
         (
+            "int main(void) {\nswitch (,) { default: return 0; }\n}",
+            "expected expression after switch, found Comma at line 2, column 9",
+        ),
+        (
             "int main(void) {\nswitch (/) { default: return 0; }\n}",
             "expected expression after switch, found Slash at line 2, column 9",
         ),

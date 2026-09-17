@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 439 selector-token starts in nonempty `switch` controlling expressions is complete; TODO 440 remaining comma/operator starts is next, not an active blocker.
+None. TODO 440 leading-comma diagnostics in nonempty `switch` controlling expressions is complete; TODO 441 leading-comma condition starts in `if`, `while`, and `do-while` is next, not an active blocker.
+
+### 2026-09-17 — TODO 440 leading comma in `switch` expressions
+
+- Failure: `switch (,)` reached generic primary-expression parsing and reported `expected expression, found Comma`.
+- Root cause: `reject_missing_switch_expr()` intentionally covered structural delimiters, selectors, and conditional markers but omitted `Token::Comma`; unlike all remaining impossible binary/assignment operators, comma was not classified by `reject_invalid_control_condition_expr()`.
+- RED/GREEN: the exact source-location regression first failed with the generic Comma message. Adding `Token::Comma` to the switch-only structural guard makes it GREEN; all remaining impossible operator starts are already contextual, and valid unary prefixes retain their dedicated missing-operand diagnostics.
+- Review/gate: independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,670 local tests, Docker test exit 0 confirmed from the retained container after the foreground client timeout, rebuilt runtime output `10`, and diff hygiene pass. No external blocker remains.
 
 ### 2026-09-17 — TODO 439 selector-token starts in `switch` expressions
 
