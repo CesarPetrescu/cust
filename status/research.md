@@ -2,6 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-17 — Exhaustive postfix-only control-condition audit
+
+- Candidate evaluation considered the queue-leading TODO 443 coverage audit, a broader lexer-token diagnostic audit, compiler-oracle conformance work, and CLI/product work. TODO 443 was selected because the immediately preceding structural parser changes needed a complete, bounded four-control acceptance proof before expanding diagnostics again.
+- Audit result: `.`, `->`, and `]` are the only Cust postfix-only starts. A direct CLI probe of all 12 token × control combinations confirmed `expected expression after <context>, found Dot/Arrow/RBracket` at the offending token. `(`, `+`, `-`, `*`, `&`, `++`, and `--` remain legal expression prefixes and must not be pre-rejected.
+- Coverage closure: `rejects_postfix_only_control_condition_starts_with_context` was intentionally immediate GREEN because `reject_missing_control_condition_expr()` and `reject_missing_switch_expr()` already covered the complete token set. `supports_subscript_expressions_in_control_conditions` remains GREEN as the legal-postfix preservation check.
+- No external C specification lookup or compiler oracle applies to Cust-local invalid-program wording. See `references/cust-postfix-only-control-condition-diagnostics.md`.
+
 ## 2026-09-17 — Contextual leading-`]` starts in control conditions
 
 - Candidate evaluation considered queue-leading TODO 442, a broader postfix-start diagnostic audit, compiler-oracle conformance work, and CLI/product work. TODO 442 was selected because it is a deterministic generic fallback with two narrow shared parser guards and a complete four-control acceptance surface.

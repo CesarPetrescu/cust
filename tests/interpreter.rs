@@ -42139,6 +42139,66 @@ int main(void) {
 }
 
 #[test]
+fn rejects_postfix_only_control_condition_starts_with_context() {
+    let cases = [
+        (
+            "int main(void) { if (.) { return 0; } return 0; }",
+            "expected expression after if, found Dot at line 1, column 22",
+        ),
+        (
+            "int main(void) { if (->field) { return 0; } return 0; }",
+            "expected expression after if, found Arrow at line 1, column 22",
+        ),
+        (
+            "int main(void) { if (]) { return 0; } return 0; }",
+            "expected expression after if, found RBracket at line 1, column 22",
+        ),
+        (
+            "int main(void) { while (.) { return 0; } return 0; }",
+            "expected expression after while, found Dot at line 1, column 25",
+        ),
+        (
+            "int main(void) { while (->field) { return 0; } return 0; }",
+            "expected expression after while, found Arrow at line 1, column 25",
+        ),
+        (
+            "int main(void) { while (]) { return 0; } return 0; }",
+            "expected expression after while, found RBracket at line 1, column 25",
+        ),
+        (
+            "int main(void) { do { } while (.); return 0; }",
+            "expected expression after do-while, found Dot at line 1, column 32",
+        ),
+        (
+            "int main(void) { do { } while (->field); return 0; }",
+            "expected expression after do-while, found Arrow at line 1, column 32",
+        ),
+        (
+            "int main(void) { do { } while (]); return 0; }",
+            "expected expression after do-while, found RBracket at line 1, column 32",
+        ),
+        (
+            "int main(void) { switch (.) { default: return 0; } }",
+            "expected expression after switch, found Dot at line 1, column 26",
+        ),
+        (
+            "int main(void) { switch (->field) { default: return 0; } }",
+            "expected expression after switch, found Arrow at line 1, column 26",
+        ),
+        (
+            "int main(void) { switch (]) { default: return 0; } }",
+            "expected expression after switch, found RBracket at line 1, column 26",
+        ),
+    ];
+
+    for (program, expected) in cases {
+        let err = interpret(program).unwrap_err();
+
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
 fn supports_subscript_expressions_in_control_conditions() {
     let program = r#"
 int main(void) {
