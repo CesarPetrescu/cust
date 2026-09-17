@@ -2,6 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-17 — Contextual leading-comma starts in control conditions
+
+- Candidate evaluation considered queue-leading TODO 441, a broader `]` control-condition audit, compiler-oracle conformance work, and CLI/product work. TODO 441 was selected because it has a deterministic generic fallback, one shared parser guard, and closes the immediately adjacent `switch` comma-diagnostic work without changing supported grammar.
+- Root cause: `reject_missing_control_condition_expr()` covered `)`, `;`, delimiters, postfix-only tokens, EOF, and keyword starts, while comma was omitted. `parse_expr()` therefore fell through to generic primary parsing for all three statement controls.
+- Strict TDD: exact `if (,)`, `while (,)`, and `do { } while (,);` expectations first reported the generic Comma error; adding `Token::Comma` to the shared structural guard is GREEN. A positive execution test covering all three controls confirms commas remain legal after a primary expression.
+- No external C specification lookup or compiler oracle is appropriate for this Cust-local invalid-program diagnostic. Next candidate: `]` is still impossible at condition start in `if`/`while`/`do-while`/`switch`, while valid `items[index]` must remain accepted after its primary. See `references/cust-control-condition-leading-comma-diagnostics.md`.
+
 ## 2026-09-17 — Contextual leading-comma start in `switch` expressions
 
 - Candidate evaluation considered queue-leading TODO 440, a broader control-condition comma audit, compiler-oracle conformance work, and CLI/product work. TODO 440 was selected because `switch (,)` had a deterministic generic fallback, requires one narrow switch-local parser change, and completes the declared switch comma/operator audit without widening grammar.

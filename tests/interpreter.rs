@@ -42039,6 +42039,10 @@ fn rejects_keyword_start_return_and_control_expressions_with_context() {
 fn rejects_missing_control_flow_condition_expressions_with_context() {
     let cases = [
         (
+            "int main(void) {\nif (, ) { return 1; }\nreturn 0;\n}\n",
+            "expected expression after if, found Comma at line 2, column 5",
+        ),
+        (
             "int main(void) { if () { return 1; } return 0; }",
             "expected expression after if, found RParen at line 1, column 22",
         ),
@@ -42059,6 +42063,10 @@ fn rejects_missing_control_flow_condition_expressions_with_context() {
             "expected expression after while, found Semi at line 1, column 25",
         ),
         (
+            "int main(void) {\nwhile (, ) { return 1; }\nreturn 0;\n}\n",
+            "expected expression after while, found Comma at line 2, column 8",
+        ),
+        (
             "int main(void) { while (?) { return 1; } return 0; }",
             "expected expression after while, found Question at line 1, column 25",
         ),
@@ -42069,6 +42077,10 @@ fn rejects_missing_control_flow_condition_expressions_with_context() {
         (
             "int main(void) { do { } while (); }",
             "expected expression after do-while, found RParen at line 1, column 32",
+        ),
+        (
+            "int main(void) {\ndo { } while (,);\n}\n",
+            "expected expression after do-while, found Comma at line 2, column 15",
         ),
         (
             "int main(void) { do { } while ([); }",
@@ -42093,6 +42105,21 @@ fn rejects_missing_control_flow_condition_expressions_with_context() {
 
         assert_eq!(err.to_string(), expected);
     }
+}
+
+#[test]
+fn supports_comma_expressions_after_control_condition_primaries() {
+    let program = r#"
+int main(void) {
+    int value = 0;
+    if (0, 1) value++;
+    while (value, value < 2) value++;
+    do { value++; } while (value, value < 4);
+    return value == 4 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
 }
 
 #[test]

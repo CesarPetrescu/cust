@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 440 leading-comma diagnostics in nonempty `switch` controlling expressions is complete; TODO 441 leading-comma condition starts in `if`, `while`, and `do-while` is next, not an active blocker.
+None. TODO 441 leading-comma diagnostics in nonempty `if`, `while`, and `do-while` conditions is complete; TODO 442 leading `]` control-condition starts is next, not an active blocker.
+
+### 2026-09-17 — TODO 441 leading comma in control conditions
+
+- Failure: `if (,)`, `while (,)`, and `do { } while (,);` reached generic primary-expression parsing and reported `expected expression, found Comma`.
+- Root cause: `reject_missing_control_condition_expr()` classified structural delimiters and postfix-only starts but omitted `Token::Comma`, unlike the completed switch-specific structural guard.
+- RED/GREEN: the three-case exact source-location regression first failed at the `if` case. Adding `Token::Comma` to the shared structural guard makes all three GREEN; a separate execution regression proves commas after valid primaries still parse and run.
+- Review/gate: independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,671 local tests, Docker test exit 0 after the foreground Compose client timeout, rebuilt Docker runtime output `10`, and diff hygiene pass. No external blocker remains.
 
 ### 2026-09-17 — TODO 440 leading comma in `switch` expressions
 
