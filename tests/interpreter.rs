@@ -41916,6 +41916,14 @@ fn rejects_invalid_start_switch_expressions_with_context() {
             "int main(void) {\nswitch (<) { default: return 0; }\n}",
             "expected expression after switch, found Lt at line 2, column 9",
         ),
+        (
+            "int main(void) {\nswitch (.) { default: return 0; }\n}",
+            "expected expression after switch, found Dot at line 2, column 9",
+        ),
+        (
+            "int main(void) {\nswitch (->field) { default: return 0; }\n}",
+            "expected expression after switch, found Arrow at line 2, column 9",
+        ),
     ];
 
     for (program, expected) in cases {
@@ -41971,6 +41979,10 @@ fn supports_unary_grouped_scalar_and_enum_switch_expressions() {
         (
             "enum Choice { Selected = 4 }; int main(void) { switch (Selected) { case Selected: return 6; default: return 0; } }",
             6,
+        ),
+        (
+            "struct Choice { int value; }; int main(void) { struct Choice choice = {2}; switch (choice.value) { case 2: return 7; default: return 0; } }",
+            7,
         ),
     ];
 

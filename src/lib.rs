@@ -18106,6 +18106,8 @@ impl Parser {
                 | Token::RBrace
                 | Token::LBracket
                 | Token::LBrace
+                | Token::Dot
+                | Token::Arrow
                 | Token::Question
                 | Token::Eof
         ) {

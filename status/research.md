@@ -2,6 +2,12 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-17 — Contextual selector-token starts in `switch` expressions
+
+- Candidate evaluation compared queue-leading TODO 439 with a broad parser-diagnostic sweep, compiler-oracle conformance work, and CLI/product tasks. It was selected because `switch (.)` has a deterministic generic fallback, shares the established switch structural guard, and has a tightly bounded acceptance surface.
+- Strict TDD: `switch (.)` first reported `expected expression, found Dot at line 2, column 9`; the paired `switch (->field)` regression protects the other postfix-only token. Adding both token kinds to `reject_missing_switch_expr()` produces exact switch-context diagnostics before generic expression parsing.
+- Positive coverage for `switch (choice.value)` is immediate-GREEN conformance closure: it exits 7 and proves the guard applies only at expression start, not to valid postfix member access after a primary expression. This is Cust-local parser behavior; no external semantic lookup was needed. See `references/cust-switch-selector-token-condition-diagnostics.md`.
+
 ## 2026-09-17 — Contextual malformed keyword starts in `switch` selectors
 
 - Candidate evaluation compared queue-leading TODO 438 with a broad parser-diagnostic sweep, selector-token coverage, compiler-oracle conformance work, and CLI/product tasks. It was selected because it exposed a deterministic generic parser fallback, reuses an established narrow helper, and has a small verified surface.

@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 438 malformed keyword starts in nonempty `switch` controlling expressions is complete; TODO 439 selector-token starts in `switch` expressions is next, not an active blocker.
+None. TODO 439 selector-token starts in nonempty `switch` controlling expressions is complete; TODO 440 remaining comma/operator starts is next, not an active blocker.
+
+### 2026-09-17 — TODO 439 selector-token starts in `switch` expressions
+
+- Failure: `switch (.)` and `switch (->field)` reached generic primary-expression parsing and reported `expected expression, found Dot/Arrow`.
+- Root cause: the switch-specific structural guard covered delimiters, braces, brackets, and conditional markers but omitted the two postfix-only selector tokens.
+- RED/GREEN: the exact two-case source-location matrix first failed at `Dot`; adding `Token::Dot` and `Token::Arrow` to `reject_missing_switch_expr()` makes it GREEN. `switch (choice.value)` remains accepted, proving postfix member access after a primary expression is unchanged.
+- Review/gate: independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,670 local tests, Docker test exit 0 after the foreground client wait, rebuilt runtime output `10`, and diff hygiene pass. No external blocker remains.
 
 ### 2026-09-17 — TODO 438 malformed keyword starts in `switch` expressions
 
