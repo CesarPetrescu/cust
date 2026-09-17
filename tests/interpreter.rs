@@ -41893,6 +41893,10 @@ fn rejects_missing_switch_expressions_with_context() {
 fn rejects_invalid_start_switch_expressions_with_context() {
     let cases = [
         (
+            "int main(void) {\nswitch (]) { default: return 0; }\n}",
+            "expected expression after switch, found RBracket at line 2, column 9",
+        ),
+        (
             "int main(void) {\nswitch (,) { default: return 0; }\n}",
             "expected expression after switch, found Comma at line 2, column 9",
         ),
@@ -42039,6 +42043,10 @@ fn rejects_keyword_start_return_and_control_expressions_with_context() {
 fn rejects_missing_control_flow_condition_expressions_with_context() {
     let cases = [
         (
+            "int main(void) {\nif (]) { return 1; }\nreturn 0;\n}\n",
+            "expected expression after if, found RBracket at line 2, column 5",
+        ),
+        (
             "int main(void) {\nif (, ) { return 1; }\nreturn 0;\n}\n",
             "expected expression after if, found Comma at line 2, column 5",
         ),
@@ -42067,6 +42075,10 @@ fn rejects_missing_control_flow_condition_expressions_with_context() {
             "expected expression after while, found Comma at line 2, column 8",
         ),
         (
+            "int main(void) {\nwhile (]) { return 1; }\nreturn 0;\n}\n",
+            "expected expression after while, found RBracket at line 2, column 8",
+        ),
+        (
             "int main(void) { while (?) { return 1; } return 0; }",
             "expected expression after while, found Question at line 1, column 25",
         ),
@@ -42081,6 +42093,10 @@ fn rejects_missing_control_flow_condition_expressions_with_context() {
         (
             "int main(void) {\ndo { } while (,);\n}\n",
             "expected expression after do-while, found Comma at line 2, column 15",
+        ),
+        (
+            "int main(void) {\ndo { } while (]);\n}\n",
+            "expected expression after do-while, found RBracket at line 2, column 15",
         ),
         (
             "int main(void) { do { } while ([); }",
@@ -42116,6 +42132,33 @@ int main(void) {
     while (value, value < 2) value++;
     do { value++; } while (value, value < 4);
     return value == 4 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn supports_subscript_expressions_in_control_conditions() {
+    let program = r#"
+int main(void) {
+    int values[2] = {1, 1};
+    int total = 0;
+    if (values[1]) total += 1;
+    while (values[0]) {
+        total += 2;
+        values[0] = 0;
+    }
+    values[0] = 1;
+    do {
+        total += 3;
+        values[0] = 0;
+    } while (values[0]);
+    switch (values[1]) {
+        case 1: total += 4; break;
+        default: return 1;
+    }
+    return total == 10 ? 0 : 1;
 }
 "#;
 

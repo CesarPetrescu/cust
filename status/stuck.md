@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 441 leading-comma diagnostics in nonempty `if`, `while`, and `do-while` conditions is complete; TODO 442 leading `]` control-condition starts is next, not an active blocker.
+None. TODO 442 leading-`]` diagnostics in nonempty `if`, `while`, `do-while`, and `switch` conditions is complete; TODO 443 bounded postfix-start audit is next, not an active blocker.
 
 ### 2026-09-17 — TODO 441 leading comma in control conditions
 

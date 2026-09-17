@@ -2,6 +2,13 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-17 — Contextual leading-`]` starts in control conditions
+
+- Candidate evaluation considered queue-leading TODO 442, a broader postfix-start diagnostic audit, compiler-oracle conformance work, and CLI/product work. TODO 442 was selected because it is a deterministic generic fallback with two narrow shared parser guards and a complete four-control acceptance surface.
+- Root cause: `reject_missing_control_condition_expr()` and `reject_missing_switch_expr()` both classified impossible delimiters and postfix-only prefixes but omitted `Token::RBracket`, so `if (])`, `while (])`, `do { } while (])`, and `switch (])` reached generic primary parsing.
+- Strict TDD: exact `if`, `while`, `do-while`, and `switch` cases first reported generic `expected expression, found RBracket`; adding `Token::RBracket` to both structural guards is GREEN. A dedicated valid program proves `values[index]` still works in all four controls because the guards run only before expression parsing.
+- No external C specification lookup or compiler oracle is appropriate for this Cust-local invalid-program diagnostic. See `references/cust-control-condition-leading-rbracket-diagnostics.md`.
+
 ## 2026-09-17 — Contextual leading-comma starts in control conditions
 
 - Candidate evaluation considered queue-leading TODO 441, a broader `]` control-condition audit, compiler-oracle conformance work, and CLI/product work. TODO 441 was selected because it has a deterministic generic fallback, one shared parser guard, and closes the immediately adjacent `switch` comma-diagnostic work without changing supported grammar.

@@ -17608,6 +17608,7 @@ impl Parser {
                 | Token::Semi
                 | Token::Comma
                 | Token::Colon
+                | Token::RBracket
                 | Token::RBrace
                 | Token::LBracket
                 | Token::LBrace
@@ -18105,6 +18106,7 @@ impl Parser {
                 | Token::Semi
                 | Token::Comma
                 | Token::Colon
+                | Token::RBracket
                 | Token::RBrace
                 | Token::LBracket
                 | Token::LBrace
