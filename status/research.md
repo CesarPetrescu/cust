@@ -2,6 +2,12 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-17 — Complete control-condition start-token audit
+
+- Candidate evaluation compared the queue-leading all-token control-condition audit, a narrower comma-operator diagnostic audit, compiler-oracle conformance work, and CLI/product work. The all-token audit was selected because recent condition diagnostics needed a complete bounded proof before expanding to a new expression seam.
+- Audit result: every lexer token that can reach an ordinary nonempty control-condition expression start is either a valid prefix, a preprocessing-only/internal form, or already classified by `reject_missing_control_condition_expr`, `reject_missing_switch_expr`, `reject_invalid_control_condition_expr`, or `reject_keyword_start_expression`. The regression exercises 11 structural/postfix-only tokens, 25 binary/assignment-only operators, 41 keyword tokens, and EOF in each of `if`, `while`, `do-while`, and `switch` (312 exact invalid cells). It also proves grouped/unary `+`, `-`, `--`, `!`, `~`, `*`, and `&` starts execute normally.
+- Review closure: the first independent review found EOF was omitted because generated malformed programs always had a suffix. Prefix-only sources now assert the contextual EOF error and column for all four controls. No parser production change is justified; adding structural rejections would risk rejecting legal expression prefixes. See `references/cust-control-condition-start-token-audit.md`.
+
 ## 2026-09-17 — Exhaustive postfix-only control-condition audit
 
 - Candidate evaluation considered the queue-leading TODO 443 coverage audit, a broader lexer-token diagnostic audit, compiler-oracle conformance work, and CLI/product work. TODO 443 was selected because the immediately preceding structural parser changes needed a complete, bounded four-control acceptance proof before expanding diagnostics again.

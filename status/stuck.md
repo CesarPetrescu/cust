@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 443 exhaustive postfix-only control-condition audit is complete; TODO 444 lexer-token audit is next, not an active blocker.
+None. TODO 444 exhaustive control-condition start-token audit is complete; TODO 445 comma-operator RHS audit is next, not an active blocker.
 
 ### 2026-09-17 — TODO 441 leading comma in control conditions
 

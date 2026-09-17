@@ -42226,6 +42226,171 @@ int main(void) {
 }
 
 #[test]
+fn audits_rejected_control_condition_start_tokens_with_context() {
+    let structural_starts = [
+        (")", "RParen"),
+        (";", "Semi"),
+        (",", "Comma"),
+        (":", "Colon"),
+        ("]", "RBracket"),
+        ("}", "RBrace"),
+        ("[", "LBracket"),
+        ("{", "LBrace"),
+        ("?", "Question"),
+        (".", "Dot"),
+        ("->", "Arrow"),
+    ];
+    let operator_starts = [
+        ("/", "Slash"),
+        ("%", "Percent"),
+        ("&&", "AndAnd"),
+        ("|", "Pipe"),
+        ("||", "OrOr"),
+        ("^", "Caret"),
+        ("=", "Assign"),
+        ("+=", "PlusAssign"),
+        ("-=", "MinusAssign"),
+        ("*=", "StarAssign"),
+        ("/=", "SlashAssign"),
+        ("%=", "PercentAssign"),
+        ("&=", "AmpAssign"),
+        ("|=", "PipeAssign"),
+        ("^=", "CaretAssign"),
+        ("<<=", "ShiftLeftAssign"),
+        (">>=", "ShiftRightAssign"),
+        ("==", "Eq"),
+        ("!=", "Ne"),
+        ("<", "Lt"),
+        ("<=", "Le"),
+        ("<<", "ShiftLeft"),
+        (">", "Gt"),
+        (">=", "Ge"),
+        (">>", "ShiftRight"),
+    ];
+    let keyword_starts = [
+        ("int", "int"),
+        ("char", "char"),
+        ("_Bool", "_Bool"),
+        ("float", "float"),
+        ("double", "double"),
+        ("_Complex", "_Complex"),
+        ("_Imaginary", "_Imaginary"),
+        ("signed", "signed"),
+        ("unsigned", "unsigned"),
+        ("long", "long"),
+        ("short", "short"),
+        ("const", "const"),
+        ("volatile", "volatile"),
+        ("restrict", "restrict"),
+        ("_Atomic", "_Atomic"),
+        ("static", "static"),
+        ("extern", "extern"),
+        ("_Thread_local", "_Thread_local"),
+        ("inline", "inline"),
+        ("_Noreturn", "_Noreturn"),
+        ("auto", "auto"),
+        ("register", "register"),
+        ("void", "void"),
+        ("enum", "enum"),
+        ("struct", "struct"),
+        ("union", "union"),
+        ("typedef", "typedef"),
+        ("_Alignas", "_Alignas"),
+        ("_Static_assert", "_Static_assert"),
+        ("return", "return"),
+        ("if", "if"),
+        ("else", "else"),
+        ("while", "while"),
+        ("do", "do"),
+        ("for", "for"),
+        ("switch", "switch"),
+        ("case", "case"),
+        ("default", "default"),
+        ("break", "break"),
+        ("continue", "continue"),
+        ("goto", "goto"),
+    ];
+    let controls = [
+        ("if", "int main(void) { if (", ") { return 0; } return 0; }"),
+        (
+            "while",
+            "int main(void) { while (",
+            ") { return 0; } return 0; }",
+        ),
+        (
+            "do-while",
+            "int main(void) { do { } while (",
+            "); return 0; }",
+        ),
+        (
+            "switch",
+            "int main(void) { switch (",
+            ") { default: return 0; } }",
+        ),
+    ];
+
+    for (context, prefix, suffix) in controls {
+        let expected = format!(
+            "expected expression after {context}, found Eof at line 1, column {}",
+            prefix.len() + 1
+        );
+        assert_eq!(interpret(prefix).unwrap_err().to_string(), expected);
+
+        for (spelling, token_name) in structural_starts {
+            let program = format!("{prefix}{spelling}{suffix}");
+            let expected = format!(
+                "expected expression after {context}, found {token_name} at line 1, column {}",
+                prefix.len() + 1
+            );
+
+            assert_eq!(interpret(&program).unwrap_err().to_string(), expected);
+        }
+        for (spelling, token_name) in operator_starts {
+            let program = format!("{prefix}{spelling}{suffix}");
+            let expected = format!(
+                "expected expression after {context}, found {token_name} at line 1, column {}",
+                prefix.len() + 1
+            );
+
+            assert_eq!(interpret(&program).unwrap_err().to_string(), expected);
+        }
+        for (spelling, label) in keyword_starts {
+            let program = format!("{prefix}{spelling}{suffix}");
+            let expected = format!(
+                "expected expression after {context} before '{label}' at line 1, column {}",
+                prefix.len() + 1
+            );
+
+            assert_eq!(interpret(&program).unwrap_err().to_string(), expected);
+        }
+    }
+}
+
+#[test]
+fn supports_grouped_and_unary_control_condition_starts() {
+    let program = r#"
+int main(void) {
+    int values[1] = {1};
+    int *pointer = values;
+    int value = 2;
+    int total = 0;
+    if ((+value) && (-value)) total += 1;
+    while (--value) total += 2;
+    value = 1;
+    do { total += 4; } while (!value);
+    switch (~0) {
+        case -1: total += 8; break;
+        default: return 1;
+    }
+    if (*pointer && &value) total += 16;
+    return total == 31 ? 0 : 1;
+}
+"#;
+
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
 fn rejects_misplaced_for_increment_expressions_with_context() {
     let cases = [
         (
