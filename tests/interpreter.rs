@@ -42522,6 +42522,61 @@ fn rejects_missing_rhs_after_comma_operator() {
 }
 
 #[test]
+fn rejects_invalid_comma_operator_rhs_starts_with_context() {
+    let cases = [
+        ("/", "Slash"),
+        ("%", "Percent"),
+        ("&&", "AndAnd"),
+        ("|", "Pipe"),
+        ("||", "OrOr"),
+        ("^", "Caret"),
+        ("=", "Assign"),
+        ("+=", "PlusAssign"),
+        ("-=", "MinusAssign"),
+        ("*=", "StarAssign"),
+        ("/=", "SlashAssign"),
+        ("%=", "PercentAssign"),
+        ("&=", "AmpAssign"),
+        ("|=", "PipeAssign"),
+        ("^=", "CaretAssign"),
+        ("<<=", "ShiftLeftAssign"),
+        (">>=", "ShiftRightAssign"),
+        ("==", "Eq"),
+        ("!=", "Ne"),
+        ("<", "Lt"),
+        ("<=", "Le"),
+        ("<<", "ShiftLeft"),
+        (">", "Gt"),
+        (">=", "Ge"),
+        (">>", "ShiftRight"),
+        (",", "Comma"),
+        (":", "Colon"),
+    ];
+
+    for (token, name) in cases {
+        let program = format!("int main(void) {{\n    return (1, {token});\n}}\n");
+        let err = interpret(&program).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            format!("expected expression after comma operator, found {name} at line 2, column 16"),
+            "token: {token}"
+        );
+    }
+}
+
+#[test]
+fn rejects_invalid_comma_operator_rhs_in_array_index_with_context() {
+    let program = "int main(void) {\n    int values[2] = {1, 2};\n    return values[0, /];\n}\n";
+
+    let err = interpret(program).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "expected expression after comma operator, found Slash at line 3, column 22"
+    );
+}
+
+#[test]
 fn rejects_missing_array_index_expressions_with_context() {
     let cases = [
         (

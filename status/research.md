@@ -2,6 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-23 — Comma-operator RHS diagnostic closure
+
+- Candidate evaluation compared the queue-leading comma-RHS audit, broad parser-diagnostic expansion, compiler-oracle conformance fixtures, and CLI work. TODO 445 was selected because `(1, /)` had a deterministic generic fallback with a narrow shared parser seam.
+- Root cause: ordinary `parse_comma_expr()` and `parse_index_expr()` each parse comma operators, but their RHS guards were incomplete and independent. A shared `reject_invalid_comma_operator_rhs()` preserves structural/postfix, binary/assignment, then keyword precedence before `parse_assignment_expr()`.
+- Strict TDD: `(1, /)` first reported generic `expected expression, found Slash`; review then found the independent `values[0, /]` loop, whose exact regression also went RED. Both are GREEN after sharing the helper.
+- Stack-depth decision: putting the full matcher directly in recursive `parse_comma_expr()` caused the existing normal-stack nested `sizeof(strtol(...))` linearity test to SIGABRT. The same complete validation in a helper restores that regression, so avoid adding large diagnostic construction directly to recursive parser frames.
+- Native compiler-oracle coverage is inappropriate because the changed programs are intentionally invalid and the wording is Cust-local. See `references/cust-comma-operator-rhs-diagnostics.md`.
+
 ## 2026-09-17 — Complete control-condition start-token audit
 
 - Candidate evaluation compared the queue-leading all-token control-condition audit, a narrower comma-operator diagnostic audit, compiler-oracle conformance work, and CLI/product work. The all-token audit was selected because recent condition diagnostics needed a complete bounded proof before expanding to a new expression seam.

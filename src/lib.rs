@@ -17630,6 +17630,10 @@ impl Parser {
     }
 
     fn reject_invalid_control_condition_expr(&self, keyword: &str) -> CustResult<()> {
+        self.reject_invalid_expression_start(keyword)
+    }
+
+    fn reject_invalid_expression_start(&self, context: &str) -> CustResult<()> {
         if matches!(
             self.peek(),
             Token::Slash
@@ -17660,7 +17664,7 @@ impl Parser {
         ) {
             return Err(Self::error_at(
                 format!(
-                    "expected expression after {keyword}, found {:?}",
+                    "expected expression after {context}, found {:?}",
                     self.peek()
                 ),
                 self.peek_located(),
@@ -18128,36 +18132,44 @@ impl Parser {
         self.parse_comma_expr()
     }
 
+    fn reject_invalid_comma_operator_rhs(&self) -> CustResult<()> {
+        if matches!(
+            self.peek(),
+            Token::LBracket
+                | Token::LBrace
+                | Token::Question
+                | Token::Comma
+                | Token::Colon
+                | Token::Dot
+                | Token::Arrow
+                | Token::RParen
+                | Token::RBracket
+                | Token::Semi
+                | Token::RBrace
+                | Token::Eof
+        ) {
+            return Err(Self::error_at(
+                format!(
+                    "expected expression after comma operator, found {:?}",
+                    self.peek()
+                ),
+                self.peek_located(),
+            ));
+        }
+        self.reject_invalid_expression_start("comma operator")?;
+        if let Some(label) = self.integer_constant_invalid_start_label() {
+            return Err(Self::error_at(
+                format!("expected expression after comma operator before '{label}'"),
+                self.peek_located(),
+            ));
+        }
+        Ok(())
+    }
+
     fn parse_comma_expr(&mut self) -> CustResult<Expr> {
         let mut expr = self.parse_assignment_expr()?;
         while self.matches(&Token::Comma) {
-            if matches!(
-                self.peek(),
-                Token::LBracket
-                    | Token::LBrace
-                    | Token::Question
-                    | Token::Dot
-                    | Token::Arrow
-                    | Token::RParen
-                    | Token::RBracket
-                    | Token::Semi
-                    | Token::RBrace
-                    | Token::Eof
-            ) {
-                return Err(Self::error_at(
-                    format!(
-                        "expected expression after comma operator, found {:?}",
-                        self.peek()
-                    ),
-                    self.peek_located(),
-                ));
-            }
-            if let Some(label) = self.integer_constant_invalid_start_label() {
-                return Err(Self::error_at(
-                    format!("expected expression after comma operator before '{label}'"),
-                    self.peek_located(),
-                ));
-            }
+            self.reject_invalid_comma_operator_rhs()?;
             let rhs = self.parse_assignment_expr()?;
             expr = Expr::Comma(Box::new(expr), Box::new(rhs));
         }
@@ -18175,24 +18187,7 @@ impl Parser {
             self.parse_assignment_expr()?
         };
         while self.matches(&Token::Comma) {
-            if matches!(
-                self.peek(),
-                Token::RParen | Token::RBracket | Token::Semi | Token::RBrace | Token::Eof
-            ) {
-                return Err(Self::error_at(
-                    format!(
-                        "expected expression after comma operator, found {:?}",
-                        self.peek()
-                    ),
-                    self.peek_located(),
-                ));
-            }
-            if let Some(label) = self.integer_constant_invalid_start_label() {
-                return Err(Self::error_at(
-                    format!("expected expression after comma operator before '{label}'"),
-                    self.peek_located(),
-                ));
-            }
+            self.reject_invalid_comma_operator_rhs()?;
             expr = Expr::Comma(Box::new(expr), Box::new(self.parse_assignment_expr()?));
         }
         Ok(expr)

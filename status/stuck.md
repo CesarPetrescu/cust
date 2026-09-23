@@ -4,7 +4,15 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 444 exhaustive control-condition start-token audit is complete; TODO 445 comma-operator RHS audit is next, not an active blocker.
+None. TODO 445 comma-operator RHS diagnostics are complete; TODO 446 custom comma-loop audit is next, not an active blocker.
+
+### 2026-09-23 — TODO 445 comma-operator RHS diagnostics
+
+- Failure: `(1, /)` and `values[0, /]` reached generic primary parsing and reported `expected expression, found Slash` instead of comma-operator context.
+- Root cause: `parse_comma_expr()` lacked invalid binary/assignment-start validation, while `parse_index_expr()` maintained an independent comma loop that could bypass any general-loop fix.
+- RED/GREEN: exact focused tests first failed for the ordinary and index-loop forms. `reject_invalid_comma_operator_rhs()` now serves both loops and preserves structural, invalid-operator, and keyword precedence.
+- Stack closure: an initial in-frame check made `sizeof_base_integer_string_conversion_endptr_validation_remains_linear` abort with stack overflow; moving complete diagnostic construction into the helper returns the normal-stack regression to GREEN.
+- Review/gate: initial independent review identified the index-loop omission; the review-fix regression went RED then GREEN, and fresh re-review returned `AI_REVIEW:CLEAR`. Formatting, strict Clippy, full local tests, Docker test exit 0, rebuilt runtime output `10`, and diff hygiene pass. No external blocker remains.
 
 ### 2026-09-17 — TODO 441 leading comma in control conditions
 

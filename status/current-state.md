@@ -1,8 +1,10 @@
 # Cust Current State
 
-Last updated: 2026-09-17
+Last updated: 2026-09-23
 
 ## Latest autonomous verification
+
+Completion update (2026-09-23): TODO 445 closes demonstrated generic diagnostics after a comma operator. `reject_invalid_comma_operator_rhs()` centralizes structural/postfix, binary/assignment, and keyword-start validation for both ordinary comma expressions and the separate array-index comma loop. Strict TDD first exposed generic `Slash` diagnostics for `(1, /)` and `values[0, /]`; exact source-location regressions are GREEN after the shared helper. Keeping the complete checks outside recursive `parse_comma_expr()` frames also restores the existing normal-stack linear `sizeof(strtol(...))` regression, which the initial inline implementation overflowed. Independent re-review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, full local tests, Docker tests, rebuilt Docker runtime output `10`, and diff hygiene pass. See `references/cust-comma-operator-rhs-diagnostics.md`. TODO 446 is next: audit remaining custom comma-expression loops only for demonstrated generic RHS fallbacks while preserving valid unary and comma expressions.
 
 Completion update (2026-09-17): TODO 444 closes the exhaustive lexer-token audit for invalid starts of nonempty `if`, `while`, `do-while`, and `switch` conditions. A generated 312-case interpreter matrix proves exact context, token names, and columns for 11 structural/postfix-only tokens, 25 binary/assignment-only operators, 41 keywords, and EOF in all four controls; a companion execution regression retains grouped and unary `+`, `-`, `--`, `!`, `~`, `*`, and `&` starts. The initial coverage test was immediate GREEN because the existing shared guards already covered every reachable invalid lexer token; independent review found the omitted EOF cell, whose focused regression is GREEN. No parser production change was warranted. Independent read-only review returned `AI_REVIEW:CLEAR`; formatting, strict Clippy, all 2,675 local tests, Docker test exit 0, rebuilt Docker runtime output `10`, and diff hygiene pass. See `references/cust-control-condition-start-token-audit.md`. TODO 445 is next: audit demonstrated generic diagnostics after a comma operator without pre-rejecting legal comma expressions.
 
