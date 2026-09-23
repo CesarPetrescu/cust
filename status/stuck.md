@@ -4,7 +4,13 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Named double row addresses have focused/interpreter-oracle GREEN and independent pre-gate review CLEAR; aggregate double row-pointer fields remain a separately scoped candidate, not an active blocker.
+None. Direct double aggregate-field row addresses have focused/interpreter-oracle GREEN and independent pre-gate review CLEAR; aggregate double row-pointer fields remain a separately scoped candidate, not an active blocker.
+
+### 2026-09-24 — Direct aggregate double row addresses
+
+- Before-state: `double (*row)[2] = &table.rows[1];` failed at the existing unsupported double row-address boundary, although direct `table.rows` decay already yielded a typed row pointer.
+- Cause: direct `AddressOfStructArrayField` lacked the 2D-double row case and field-owner attachment, and the blanket double-address classifier rejected it. Typed field-backed base plus row offset preserves the root; `sizeof` stays metadata-only.
+- RED/GREEN: focused interpreter test first failed and now passes; a second test covers const/width/bounds/lifetime and non-evaluation. Registered C11 fixture agrees at exit 14. Read-only review returned `AI_REVIEW:CLEAR`. No external blocker remains.
 
 ### 2026-09-23 — TODO 445 comma-operator RHS diagnostics
 

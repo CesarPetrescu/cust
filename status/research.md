@@ -2,6 +2,11 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-24 — Direct aggregate-field double row addresses
+
+- Candidate comparison: aggregate pointer-to-row fields have high semantic impact but need new field storage and exhaustive copy/type/const/owner handling; arrow/indexed/temporary row-address forms require separate root/path tracing; direct `&table.rows[i]` reused existing field-backed row metadata and was a bounded, reproducible semantic gap. TODO 446 comma diagnostics had no demonstrated fallback. Chose the direct form; preserve broader candidates in `status/todo.md`.
+- C11 N1570 §6.5.2.1 defines `E1[E2]` as `*((E1)+(E2))`, and §6.5.3.2 gives `&E1[E2]` the pointer-addition result without evaluating the implied indirection (https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf). A real side-effecting index still runs once; `sizeof(&table.rows[index++])` does not run it. Field-backed base pointers carry the aggregate owner and its path; attach the owner before applying the row offset, retaining const/lifetime/bounds checks. The registered strict C11 fixture verifies copy isolation and portable exit 14 without asserting native layout or pointer size.
+
 ## 2026-09-23 — Named double row address semantics and representation
 
 - Candidates: aggregate row-pointer fields have high utility but need new `StructFieldType`/`StructFieldValue` shape and pervasive copy/initializer/type/const/`sizeof` routing; general pointer derivatives exceed the bounded representation; named 2D row addresses were a demonstrated C11 gap with existing `Array2DRow` identity; TODO 446 diagnostic audit has no reproduced generic fallback. Chose named row addresses as a coherent semantic slice with safe reuse of the row metadata. Overflow acceptance for aggregate fields and field-backed addresses is tracked in `status/todo.md`.

@@ -20978,7 +20978,6 @@ fn direct_double_named_row_address_preserves_const_width_lifetime_and_bounds() {
 #[test]
 fn two_dimensional_double_row_addresses_remain_consistently_unsupported() {
     for program in [
-        "struct Table { double rows[1][2]; }; int main(void) { struct Table table = {{{0}}}; return sizeof(&table.rows[0]); }",
         "struct Table { double rows[1][2]; }; int main(void) { struct Table table = {{{0}}}; struct Table *pointer = &table; return sizeof(&pointer->rows[0]); }",
         "struct Table { double rows[1][2]; }; int main(void) { struct Table tables[1] = {{{{0}}}}; return sizeof(&tables[0].rows[0]); }",
         "struct Table { double rows[1][2]; }; int main(void) { return sizeof(&((struct Table){{{0}}}).rows[0]); }",
@@ -20992,6 +20991,62 @@ fn two_dimensional_double_row_addresses_remain_consistently_unsupported() {
             "double pointers are not supported",
             "{program}"
         );
+    }
+}
+
+#[test]
+fn direct_double_aggregate_field_row_address_matches_decay() {
+    let program = r#"
+        struct Table { double rows[2][2]; };
+        int main(void) {
+            struct Table table = {{{1.5, 2.5}, {3.5, 4.5}}};
+            double (*row)[2] = &table.rows[1];
+            if (row != table.rows + 1 || row - table.rows != 1) return 1;
+            row[0][1] = 6.5;
+            return table.rows[1][1] == 6.5 ? 0 : 2;
+        }
+    "#;
+    assert_eq!(interpret(program), Ok(0));
+}
+
+#[test]
+fn direct_double_aggregate_field_row_address_preserves_sizeof_const_width_and_owner() {
+    let positive = r#"
+        struct Table { double rows[2][2]; };
+        int main(void) {
+            struct Table table = {{{1.0, 2.0}, {3.0, 4.0}}};
+            int index = 1;
+            double (*row)[2] = table.rows;
+            if (sizeof(&table.rows[index++]) != sizeof(row)) return 1;
+            row = &table.rows[index++];
+            return index == 2 && row[0][0] == 3.0 ? 0 : 2;
+        }
+    "#;
+    assert_eq!(interpret(positive), Ok(0));
+    for (source, message) in [
+        (
+            "struct T { double rows[1][2]; }; int main(void) { const struct T t = {{{0}}}; double (*p)[2] = &t.rows[0]; return 0; }",
+            "cannot discard const qualifier",
+        ),
+        (
+            "struct T { const double rows[1][2]; }; int main(void) { struct T t = {{{0}}}; const double (*p)[2] = &t.rows[0]; p[0][0] = 3.0; return 0; }",
+            "read-only",
+        ),
+        (
+            "struct T { double rows[1][3]; }; int main(void) { struct T t = {{{0}}}; double (*p)[2] = &t.rows[0]; return 0; }",
+            "2 columns",
+        ),
+        (
+            "struct T { double rows[1][2]; }; int main(void) { struct T t = {{{0}}}; double (*p)[2] = &t.rows[1]; return (int)p[0][0]; }",
+            "out of bounds",
+        ),
+        (
+            "struct T { double rows[1][2]; }; double (*escape(void))[2] { struct T t = {{{1.0, 2.0}}}; return &t.rows[0]; } int main(void) { return (int)escape()[0][0]; }",
+            "out-of-scope",
+        ),
+    ] {
+        let error = interpret(source).expect_err(source).to_string();
+        assert!(error.contains(message), "{source}: {error}");
     }
 }
 
