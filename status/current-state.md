@@ -1,5 +1,7 @@
 # Cust Current State
 
+Task-selection authority is [the product roadmap](../docs/ROADMAP.md) and the current guidance at the top of [`status/todo.md`](todo.md). Dated “next” notes below record their historical checkpoints, not a command to continue diagnostic audits.
+
 Last updated: 2026-09-23
 
 ## Latest autonomous verification

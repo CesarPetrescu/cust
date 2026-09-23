@@ -2,17 +2,17 @@
 
 > **For Hermes:** Use this plan as the operating specification for recurring autonomous development on Cust.
 
-**Goal:** Run a safe autonomous coding loop that aggressively finishes concrete Cust roadmap items each run while keeping status files, tests, Docker verification, and Git history clean.
+**Goal:** Run a safe autonomous coding loop that advances the [product roadmap](../ROADMAP.md) through substantive C-interpreter semantics or demonstrated conformance fixes, while keeping status files, tests, Docker verification, and Git history clean.
 
-**Architecture:** A Hermes cron job runs against `/root/hermes/cust-autonomous-maintainer/workspace`. Each run pulls first, reads `status/`, ideates candidate roadmap-completion work, thinks through impact/safety/testability, selects the highest-impact finishable work package, researches as needed, uses TDD for implementation, verifies locally and in Docker, updates status/backlog files, commits, pushes, and reports results. If blocked, it records the blocker and stops without pushing broken code.
+**Architecture:** A scheduled maintainer runs against a Cust repository checkout. Each run inspects checkout ownership, synchronizes its clean base, reads `status/`, ideates candidate roadmap-completion work, thinks through impact/safety/testability, selects the highest-impact finishable work package, researches as needed, uses TDD for implementation, verifies locally and in Docker, updates status/backlog files, commits, pushes, and reports results. If blocked, it records the blocker and stops without pushing broken code.
 
-**Tech Stack:** Rust, Cargo, Docker Compose, Git/GitHub SSH deploy key, Hermes cron, Hermes web/search + file + terminal toolsets.
+**Tech Stack:** Rust, Cargo, Docker Compose, Git, Hermes scheduling and development tools. Authentication and delivery configuration stay outside the public repository.
 
 ---
 
 ## Operating Principles
 
-1. **Finish roadmap items:** complete one meaningful C/interpreter/tooling work package per run, usually one full feature or 2-4 tightly related backlog items. The goal is to finish the backlog, not merely improve things.
+1. **Advance product scope:** treat [`docs/ROADMAP.md`](../ROADMAP.md) as the selection authority; finish one meaningful C-interpreter semantic or demonstrated conformance slice per run when feasible. The status backlog is evidence and candidate inventory, not a sequential obligation to finish diagnostic microtasks.
 2. **TDD for behavior:** tests before implementation for code changes.
 3. **Docker verification:** no push unless Docker test path passes.
 4. **Status-first:** update `status/` every run.
@@ -38,13 +38,14 @@
 ### 1. Sync and inspect
 
 ```bash
-cd /root/hermes/cust-autonomous-maintainer/workspace
+cd /path/to/your/cust-checkout
+git status --short
 git checkout main
 git pull --ff-only
 git status --short
 ```
 
-If the tree is dirty before changes, inspect carefully. Do not overwrite user work.
+If the tree is dirty or another worker owns this checkout, do not switch branches or overwrite user work; use an isolated worktree or stop and report the conflict.
 
 ### 2. Read status files
 
@@ -58,17 +59,16 @@ Read:
 
 ### 3. Ideate, evaluate, and choose a work package
 
-First list several candidate roadmap-completion tasks from `status/`, current code shape, and the C-subset/tooling roadmap. Think through whether each idea is good now: impact on Cust, safety, dependencies, testability, and expected verification cost. Choose the highest-impact work package that can be completed and verified in this run. If more good ideas exist than fit, preserve them in `status/todo.md` or `status/missing-features.md` with concrete acceptance tests.
+Read [`docs/ROADMAP.md`](../ROADMAP.md) alongside `status/`. List several candidates grounded in actual code/fixtures and a concrete C program that currently fails or exposes a correctness gap. Compare user-visible semantic impact, safe representation, dependencies, and testability. Select a coherent vertical slice with a defined supported/excluded boundary and acceptance fixtures; preserve overflow candidates with concrete tests. Reconcile `status/todo.md`'s top recommendation with the roadmap before choosing work; dated/numbered historical "next" statements are not authority.
 
 Priority order:
 
-1. Fix failing tests/builds
-2. Resolve active blocker if possible
-3. P0 item from `missing-features.md`
-4. First items from `todo.md`
-5. Documentation/status-only improvement only if no safe code task exists or code work is blocked
+1. Fix failing tests/builds and active correctness/safety blockers.
+2. Implement the highest-value finishable C-semantic or demonstrated conformance slice identified by the roadmap.
+3. Do diagnostic/CLI/tooling work when a reproduced user-visible defect blocks confidence in the subset, not simply because an audit is next-numbered.
+4. Do documentation/status-only work when safe code work is blocked or already complete.
 
-A work package should normally produce real interpreter/tooling/test changes. Prefer implementing missing C behavior, C-subset conformance tooling, diagnostics, or CLI/product items over cosmetic cleanup. Native compilers may be used only as external test oracles for supported fixtures, not as implementation helpers. It is acceptable to complete multiple tightly related TODOs in the same run when they share parser/interpreter/test setup.
+Native compilers may be used only as external test oracles for supported fixtures, not as implementation helpers. Multiple tightly related TODOs can form one slice; do not manufacture extra microtasks to fill a run.
 
 ### 4. Research if needed
 

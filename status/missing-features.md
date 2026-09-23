@@ -1,6 +1,6 @@
 # Cust Missing Features
 
-Prioritized backlog for autonomous implementation.
+Detailed feature and completion ledger. [Product scope and selection gates](../docs/ROADMAP.md) take precedence over historical numbered or dated “next” recommendations here; use this file to find candidates and preserve completed evidence, not to drive speculative diagnostic audits.
 
 Completion update (2026-09-23): TODO 445 is complete. Ordinary `parse_comma_expr()` and `parse_index_expr()` now share `reject_invalid_comma_operator_rhs()`, so invalid structural/postfix, binary/assignment, and keyword starts report exact `expected expression after comma operator` diagnostics instead of generic expression errors. TDD RED covered `(1, /)` and independent index-loop `values[0, /]`; focused regressions, stack-depth preservation, full local/Docker gates, and independent `AI_REVIEW:CLEAR` review are GREEN. The helper avoids inflating recursive comma parser frames. See `references/cust-comma-operator-rhs-diagnostics.md`. TODO 446 next: audit any other custom comma-expression parsing loops only where a generic RHS fallback is demonstrated.
 

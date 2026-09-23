@@ -1,240 +1,58 @@
 # Cust
 
-Cust is a tiny C interpreter written in Rust. It reads a safe subset of C, interprets it directly, and prints the integer value returned by `main()`.
+Cust is a Rust interpreter for a **bounded subset of C**. It preprocesses, parses, and executes supported source itself, then prints the integer result of `main()`. It does not compile or run the input with a host C compiler. Cust is useful for exploring C semantics and interpreter design, not as a drop-in C compiler or a general-purpose sandbox for hostile code.
 
-> Status: **v0.64.0 release package** — tested, Dockerized deterministic C-subset interpreter; the annotated tag is published only after the release commit is accepted on `origin/main`.
+## Try it
 
-## License
+From a checkout with a Rust toolchain and Cargo (no C compiler is needed to interpret a program):
 
-Cust is licensed under the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`). See `LICENSE` for the full text. This strong copyleft license is intended to keep distributed and network-served modified versions open-source.
-
-## Why Cust?
-
-Cust is meant as a clean starting point for experimenting with language implementation in Rust:
-
-- C-like syntax
-- Small lexer/parser/interpreter pipeline
-- Automated tests
-- Docker-based safe execution
-- No native C compilation or system execution
-
-## Quick start
-
-### Run locally
-
-```bash
-cargo run -- examples/sum.c
-```
-
-Expected output:
-
-```text
-10
-```
-
-### Run tests locally
-
-```bash
-cargo test
-```
-
-The v0.64.0 executable inventory is 2,664 tests: 2,500 interpreter tests, 101 deterministic fuzz-safety tests, 43 CLI tests, 6 pointer-classifier parity tests, 10 tracked pointer-output parity tests, 2 Docker metadata tests, 1 compiler-oracle harness, and 1 repository-license test.
-
-### Run inside Docker
-
-Build and run the example:
-
-```bash
-docker compose run --rm cust
-```
-
-Run the test suite in a container:
-
-```bash
-docker compose run --rm test
-```
-
-The Docker Compose setup is intentionally locked down for safer automated testing:
-
-| Setting | Purpose |
-|---|---|
-| `network_mode: "none"` | no network access during execution/tests |
-| `read_only: true` on runtime | interpreter runtime filesystem is read-only |
-| `cap_drop: [ALL]` | removes Linux capabilities |
-| `no-new-privileges:true` | blocks privilege escalation |
-| non-root runtime user | avoids running interpreted code as root |
-| read-only `examples` volume | sample C inputs cannot be modified by the runtime container |
-
-Both Compose services use `pull_policy: build`, so `docker compose run --rm test` and `docker compose run --rm cust` rebuild from the current checkout instead of silently reusing stale local images.
-
-The `test` service keeps a writable container overlay so Cargo can update `target/`, but it has no host source mount, no network, dropped capabilities, and no privilege escalation.
-
-## Current language subset
-
-Bounded v0.62.0 packages deterministic classifier/evaluator parity for fixed one-dimensional tracked scalar-output arrays embedded in supported struct fields (`struct Box { T **outputs[N]; }`). Across unqualified `char`, `int`, `_Bool`, and `double` pointees and direct, inner-pointer-alias, complete-output-alias, and chained-alias spellings, the identity-keyed matrix covers 13 direct/indexed/nested/arrow/temporary/copy/return/static/conditional/comma/assignment-result/`_Generic` routes and seven initializer/assignment/argument/equality/truthiness/runtime-`sizeof`/folded-`sizeof` consumers. All routes preserve stable interpreter-owned output-slot identity, one-time effects, containing-object and referenced-pointee lifetime checks, recursive const ancestry, and non-evaluation. The 1,456 success programs and 160 exact boundary programs retain the fixed-array field slice: nested-brace initialization such as `struct Box box = {{0}};`, field-array/object sizing, and typed indirect access work; union fields, decay, whole-array or element addresses, qualified or deeper pointers, flexible/multidimensional forms, casts, whole-array assignment, arithmetic, ordering, and update operators remain unsupported or targeted. Parser-folded aggregate conditionals, calls, and assignment results classify direct aggregate types without evaluating their operands. Fifty-two focused interpreter regressions, the generated parity matrix, three hostile CLI parser-depth regressions, and one registered warning-free compiler-oracle fixture cover the package; ordinary unary/grouping syntax remains capped at 40 levels and integer-constant syntax at 64 so mixed parser/type-query inputs fail recoverably on a 2 MiB host thread stack.
-
-Bounded v0.63.0 packages stable CLI discovery. `cust --help` and `cust -h` need no source file and print byte-identical reference output to stdout for normal interpretation, `--tokens`, `--ast`, `--max-steps N`, and `--version`; help produces no stderr. Missing source still prints its compact usage line to stderr with status 64. Unknown option-like operands fail closed with status 64, an exact stderr diagnostic, and usage both at top level and where the established mode flags expect a source, rather than being opened as paths. The current CLI accepts a bare `--` delimiter before the source operand, so dash-prefixed source filenames do not require a `./` or absolute-path prefix.
-
-Bounded v0.64.0 packages the post-v0.63.0 CLI delimiter and parser-diagnostic closures. The explicit `--` delimiter admits a literal dash-prefixed source path in normal, token, AST, and max-step modes while retaining the existing missing-operand and undelimited unknown-option status-64 contracts. Parser diagnostics now retain their local construct context for missing or impossible statement bodies after `else`, `if`, `while`, `do`, and `for`, malformed nonempty `for` clauses, and malformed nonempty `return` expressions. Exact source-located regressions cover punctuation, EOF, assignment, comparison, and binary-only starts while preserving legal empty, unary, declaration, scalar, pointer, aggregate, and dangling-`else` paths.
-
-Persistent object bytes remain available for every mutable scalar-only non-`double` union. Layouts with a non-const full-width `int` or `char` retain their deterministic visible carrier; carrierless layouts use hidden maximum-layout bytes while canonical typed routing still selects an actual mutable source member. Selected-member and whole-object `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` operations share one aggregate root at offset zero; raw bytes remain observable while `int`, `char`, and `_Bool` views synchronize under Cust's deterministic scalar model. Whole-object operations use the union's maximum layout size, selected-member operations retain that member's capacity, and overlap, recursive const/lifetime, deep-copy and aggregate-array-element isolation, zero-count identity, typed results, and non-evaluation remain enforced. All-const scalar unions and layouts containing arrays, pointers, `double`, or nested aggregates retain targeted rejection. Cust currently supports this C subset:
-
-```c
-int main() {
-    int i = 0;
-    int sum = 0;
-
-    while (i < 5) {
-        sum = sum + i;
-        i = i + 1;
-    }
-
-    if (sum == 10) {
-        return sum;
-    } else {
-        return 0;
-    }
-}
-```
-
-Features:
-
-- bounded object-like, named-parameter, and variadic function-like `#define` macros with balanced argument collection, raw/prescanned substitution, stringification (`#` / `%:`), token pasting (`##` / `%:%:`), rescanning, and nested expansion; bounded `#undef`; bounded nested `#ifdef`/`#ifndef`/`#if`/`#elif`/`#else`/`#endif`; direct-source C11 digraph punctuators (`<:`, `:>`, `<%`, `%>`, `%:`, `%:%:`) with spelling preservation; global LF/CRLF physical-line splicing; and project-relative quoted headers on Linux, including object/function-macro operands that expand to exactly one ordinary string-literal header name, with shared macro state plus expansion/depth/source-size/path-containment bounds; comments and string/character literal contents are not macro-expanded
-- `int main() { ... }` or `int main(void) { ... }` plus additional `int`, `char`, `double`, `void`, supported `struct`, supported `union`, or direct named-`enum` function definitions/prototypes; prototypes may use C-style unnamed parameter declarations such as `int add(int, int);`, `double scale(double);`, or `void use(int [], struct Point *);`
-- function calls with scalar/struct/union/pointer arguments, local function parameters, C-style empty `void` parameter lists, and by-value scalar/aggregate return types including top-level `const` spellings such as `const int f(void)` / `const struct Point make(void)`
-- integer, character, string, and bounded decimal `double` literals
-- manually declared C11 integer library calls: `abs`, `labs`, and `llabs` over Cust integers; `atoi`, `atol`, and `atoll` plus base-aware `strtol`, `strtoll`, `strtoul`, and `strtoull` over interpreter-owned NUL-terminated `char` storage; deterministic ASCII/C-locale `isalnum`/`isalpha`/`isblank`/`iscntrl`/`isdigit`/`isgraph`/`islower`/`isprint`/`ispunct`/`isspace`/`isupper`/`isxdigit` classification plus `tolower`/`toupper` conversion; bounded unsigned-byte lexical `strcmp`/`strncmp` plus C-locale `strcoll` and bounded `strxfrm`; bounded `strlen`; pointer-preserving bounded `strchr`/`strrchr`/`strpbrk`/`strstr`; initial-segment `strspn`/`strcspn`; capacity-checked mutable `strcpy`/`strcat`/`strncat`/`strncpy`; stateful in-place `strtok` over tracked mutable storage; bounded overlap-rejecting `memcpy`, overlap-safe `memmove`, unsigned-byte lexical `memcmp`, byte-normalizing `memset`, and unsigned-byte first-match `memchr` over standalone character storage, character scalars/one-dimensional arrays embedded in named, anonymous, or nested struct fields, row-local views of supported two-dimensional character arrays, deterministic little-endian object bytes of eight-byte `int` and one-byte canonical `_Bool` scalars/arrays/selected two-dimensional rows, deterministic eight-byte IEEE-754 binary64 little-endian object bytes of standalone scalar/one-dimensional-array `double` storage, scalar/one-dimensional-array `double` fields in supported non-union structs, and one selected row of supported direct, explicit-row-pointer, adjusted-parameter, or aggregate-field two-dimensional `double` storage—including source-ordered short-circuit composition of row-returning and row-comparing calls—selected members and complete object ranges of every mutable scalar-only non-`double` union, using either a non-const full-width `int`/`char` carrier or persistent hidden maximum-layout bytes, and complete supported non-union structs whose layouts contain no double or pointer fields, including supported integer/character/`_Bool` scalar fields, nested structs, and embedded struct arrays; deterministic per-interpreter `rand`/`srand`; and interpreter-owned `exit`/`_Exit`/`abort` unwinding, with one-time ordered argument evaluation, non-evaluating `sizeof`, deterministic bounds/state, exact diagnostics, safe absent/null/non-null `endptr` handling, and no host libc termination path
-- deterministic scalar spellings for `_Bool`, `char`, `short`, `int`, `long`, signed/unsigned permutations, and typedef aliases; Cust intentionally normalizes these onto its own fixed scalar model rather than host ABI widths
-- bounded direct `double` scalar objects, one-dimensional arrays, and fixed two-dimensional objects at local, file-global, and block-static scope plus scalar, one-dimensional-array, and fixed two-dimensional fields declared directly or through complete two-dimensional aliases in supported aggregates; adjusted direct/complete-two-dimensional-alias parameters and explicit pointer-to-row objects with row-scaled arithmetic/indexing; fixed/inferred one-dimensional lengths; nested two-dimensional initialization; positional/designated initialization and zero fill; direct and typedef-backed one-dimensional array compound literals with scoped hidden storage and ordinary decay; direct/reverse indexed and direct/indexed/arrow/nested field replacement/compound/prefix/postfix updates; double-index two-dimensional updates; aggregate pointer-field element routes; mixed arithmetic/comparison, conditional/comma/`_Generic` forwarding, truthiness, scalar compound literals, `int`/`double`/`_Bool` casts, integer-constant casts, direct scalar parameter/return declarations and call results, aggregate copies and function boundaries, recursive const protection, shared scalar-union bits, one-time index evaluation, non-evaluating full-object/row/field/element `sizeof`, deterministic eight-byte size/alignment relationships, and typedef aliases for each supported scalar, one-dimensional-array, function-boundary, aggregate-field, and fixed two-dimensional object form
-- safe one-level direct `double *` objects and typedef aliases over standalone and supported struct-field scalar/one-dimensional-array storage, including local/file-global/block-static declarations, direct/indexed/reverse/arrow/nested field address and array decay, indexed reads and updates, bounded arithmetic, same-array comparison, truthiness/equality, pointer fields, parameter/return forwarding, qualification-preserving `void *` conversion, pointer-slot versus pointee const preservation, and non-evaluating `sizeof`/`_Alignof`/`_Generic` classification with interpreter-owned owner/path/lifetime/const metadata
-- named and anonymous structs/unions, named and typedef-backed enums, nested aggregates, scalar/aggregate array fields, pointer fields, aggregate arrays, by-value parameters/returns/copies, designated initializers, and scalar/array/aggregate compound literals
-- declarations: initialized or zero/default-initialized `int`/`char` scalars, arrays, supported pointer variables, first-pass `const int` / `const char` scalars and arrays, direct named-`enum` variables, typedef aliases, structs, unions, and enum constants, such as `int x = 1;`, `int y;`, `char c;`, `const int limit = 5;`, `enum StateTag state = READY_TAG;`, `const enum StateTag saved = RUNNING_TAG;`, `int xs[3];`, `char text[4];`, `int *p;`, `typedef int Count;`, `struct Point { int x; char y; };`, anonymous object declarations such as `struct { int x; int y; } point = {1, 2};`, `typedef struct Pair { int left; int right; } Pair;`, `typedef enum { READY = 1, RUNNING } State;`, block-local aggregate typedef definitions that may shadow outer tags, and `enum StateTag { READY_TAG = 1, RUNNING_TAG };`
-- assignment statements and assignment expressions for scalar, array-index, field, and dereferenced pointer lvalues, such as `x = x + 1;`, `y = (x = 4);`, `xs[0] = (xs[1] = 7);`, `point.x += 1;`, and `*p = value;`
-- scalar cast expressions for supported scalar types and typedef aliases, such as `(int)expr`, `(char)expr`, and `(Count)expr`
-- one-dimensional scalar and aggregate arrays with fixed or initializer-inferred lengths, indexed reads/writes, reverse subscripting, array designators, string initializers for `char` arrays, and C array-to-pointer adjustment for function parameters
-- fixed two-dimensional `int[R][C]` and `char[R][C]` objects and aggregate fields with nested initialization, typedef aliases, comma-separated declarators, double-index scalar lvalues, deterministic type queries, and C-style parameter adjustment
-- safe pointer-to-row forms for fixed two-dimensional scalar arrays, including `T (*row)[C]` objects/parameters, pointer-to-row typedef aliases and function returns, row-scaled arithmetic/comparison, and double indexing through direct, call, conditional, comma, and supported aggregate-field decay expressions
-- safe one-level typed pointers such as `int *p = &x;`, `struct Point *point = points`, dereference/address-of, pointer-returning functions, bounded arithmetic, same-array difference/ordering, pointer truthiness/equality, and const-preserving scalar/aggregate conversions
-- bounded one-level `void *` objects at local, file-global, block-static, `for`-initializer, and parameter scope plus explicit function return types, prototypes, definitions, and call results, with null/equality/truthiness, ordinary assignment, conditional/comma forwarding, `_Generic`, compatible object-pointer conversions, qualification preservation, and constraint-aware non-evaluating pointer-size queries while retaining interpreter-owned owner/lifetime/read-only identity
-- narrowly typed unqualified `char **` objects at local, file-global, and block-static scope plus standard-library-style output parameters, preserving mutable `char *` slot identity, pointee owner/lifetime/read-only metadata, null/default state, ordinary reassignment from null, compatible mutable unqualified `char *` slot addresses, or tracked object values, indirect reads/writes, conditional/comma and assignment-result forwarding, equality/truthiness, `_Bool` normalization, and branch-compatible non-evaluating type checks without exposing host addresses; qualified slot addresses, deeper pointers, tracked-output array decay or element addresses, compound updates, address-taking, arithmetic, and relational ordering remain exact boundaries
-- narrowly typed unqualified `int **` objects at local, file-global, and block-static scope plus output parameters, preserving mutable `int *` slot identity through null/default and `(void *)0` state, compatible tracked-object reassignment, indirect pointer/scalar reads and writes, parameter forwarding, equality/truthiness, unqualified scalar-pointee aliases, static-storage validation, owner/lifetime/const metadata, and non-evaluating `sizeof`; qualified pointees/slots, deeper pointers, tracked-output array decay or element addresses, address-taking, arithmetic, ordering, and compound updates remain targeted boundaries
-- narrowly typed unqualified `_Bool **` objects at local, file-global, and block-static scope plus output parameters, preserving mutable `_Bool *` slot identity through null/default state, compatible forwarding, indirect pointer/scalar reads and writes with nonzero-to-`1` normalization, equality/truthiness, aliases, static-storage validation, owner/lifetime/const metadata, and non-evaluating `sizeof`; qualified pointees/slots, deeper pointers, tracked-output array decay or element addresses, address-taking, arithmetic, ordering, and compound updates remain targeted boundaries
-- narrowly typed unqualified `double **` objects at local, file-global, and block-static scope plus output parameters, preserving mutable `double *` slot identity through null/default state, compatible forwarding, binary64-preserving indirect pointer/scalar reads and writes, equality/truthiness, static-storage validation, owner/lifetime/const metadata, and non-evaluating `sizeof`; qualified or incompatible slots, deeper pointers, tracked-output array decay or element addresses, address-taking, arithmetic, ordering, and compound updates remain targeted boundaries
-- pointer typedef aliases may provide either the inner one-level scalar pointer or the complete tracked output type for each family, so `typedef T *ValuePtr; ValuePtr *output` and `typedef ValuePtr *Output; Output output` share the direct `T **output` representation across parameters, local/file-global/block-static objects, supported fixed tracked-output arrays, and function return declarations/call results, including chained complete aliases and comma declarators; qualification on the pointee, output slot, or alias chain remains rejected
-- tracked scalar-output functions may return caller-owned `char **`, `int **`, `_Bool **`, and `double **` identities through direct, inner-alias, complete-alias, or chained-alias declarations; compatible calls, assignment, forwarding, typed dereference, equality/truthiness, and non-evaluating `sizeof(call)` preserve pointee type, qualification, owner/lifetime, and static-storage metadata while callee-local escapes are rejected
-- tracked scalar-output fields spelled directly or through inner-pointer and complete-output typedef aliases in supported structs and direct same-pointee unions preserve containing-object owner/lifetime, recursive const ancestry, and tracked slot identity through direct/indexed/nested/arrow/embedded/reverse selection, aggregate copies and returns, static initialization, and non-evaluating call analysis; qualified fields, deeper pointers, mixed or nested union overlap, tracked-output casts, address-taking, arithmetic, ordering, and update operators remain targeted boundaries, while ordinary scalar truth conversion remains supported
-- fixed one-dimensional tracked scalar-output arrays such as `int **outputs[N]` preserve each element's typed output-slot identity across automatic, file-global, and block-static objects and supported struct fields, direct and alias-backed declarations, positional/designated/default or replacement initialization, indexed assignment, forwarding, aggregate copies/returns, typed indirect access, recursive const/lifetime/static checks, and non-evaluating full-array/element `sizeof`; array decay, whole-array and element addresses, tracked-output casts, array-parameter adjustment, union fields, deeper pointers, multidimensional arrays, arithmetic, ordering, and update operators remain outside this bounded slice
-- pointer parameters with scalar/aggregate array and string decay, pointer indexing (`p[i]`), supported field-array decay, and element/field addresses such as `&values[1]`, `&points[1]`, and `&point->x`
-- array parameters such as `char text[4]` and C-style unsized parameter spellings such as `int values[]`, `char text[]`, and `struct Point points[]`, which behave like pointer parameters; string literals are read-only NUL-terminated byte arrays and can be passed to matching array or pointer parameters
-- nested block scopes with inner shadowing
-- `return expr;` for supported non-void scalar and aggregate functions, including direct `double` returns, and `return;` for `void` functions
-- `if` / `else`
-- `while`
-- `for`
-- `break` / `continue`
-- `switch`, `case`, and `default` with C-style fallthrough
-- empty statements (`;`) and expression statements (`expr;`)
-- arithmetic and bitwise operators: `+ - * / %`, unary `~`, binary `& ^ |`, and shifts `<< >>`
-- comparisons: `== != < <= > >=`
-- logical operators with C-style truth values and short-circuiting: `&& || !`
-- unary plus: `+expr`
-- assignment/compound-assignment expressions, prefix/postfix `++`/`--`, conditional `?:`, comma expressions, scalar/pointer/void casts, and C-style scalar or pointer result classification
-- comments: `// line comments` and `/* block comments */`
-- `sizeof` and `_Alignof` for supported type names and expressions, including aggregate, enum, pointer, array, qualified, conditional, comma, and assignment-result forms, with non-evaluating operand semantics and Cust-defined sizes (`int = 8`, `char = 1`, pointer = `8`, no native struct padding)
-- C11 `_Static_assert`, storage-class/function-specifier syntax, supported `const`/`volatile`/`restrict`/`_Atomic` qualification, and per-function read-only `__func__` arrays
-- bounded C11 `_Generic` selections over deterministic scalar, one-level pointer, and named aggregate association types, including optional `default`, selected-expression value/type propagation, non-evaluation of the controlling and unselected expressions, integer-constant-expression use, and exact duplicate/default/type/no-match diagnostics
-
-
-## CLI
-
-```bash
-cust <file.c>
-cust --max-steps N <file.c>
-cust --tokens <file.c>
-cust --ast <file.c>
-cust --help
-cust --version
-cust -- -program.c
-cust --tokens -- -program.c
-cust --ast -- -program.c
-cust --max-steps N -- -program.c
-```
-
-Default output is the integer returned from `main()`. `--help` (or `-h`) prints the stable CLI reference without reading a source file, while `--version` prints the package version. `--max-steps N` runs the program with an explicit total loop-iteration budget, which is useful for bounding runaway programs from the CLI without changing the library default. `--tokens` prints the lexer token stream with source locations, and `--ast` prints the parsed syntax tree without interpreting the program, which is useful for inspecting parse results even when the program would fail at runtime. Unknown option-like operands are rejected before file I/O with status 64. Put `--` immediately before a literal dash-prefixed source path in normal or option mode; after the delimiter, that operand is treated as a path rather than as `--help`, `--version`, or another option.
-
-Example:
-
-```bash
+```sh
 cargo run -- examples/sum.c
 # 10
+cargo run -- --help
 ```
 
-## Project layout
+[`examples/sum.c`](examples/sum.c) sums the integers below five. Pass your own supported `.c` file in its place. For a bounded loop budget, use `cargo run -- --max-steps 1000 examples/sum.c`; `--tokens` and `--ast` print the token stream and parsed syntax tree without executing the program. `--version` reports the package version. Use `--` before a source filename that begins with `-` (also after a mode's arguments). The CLI accepts one source path; see `--help` for the exact forms.
 
-```text
-.
-├── src/
-│   ├── lib.rs        # lexer, parser, AST, interpreter
-│   └── main.rs       # CLI wrapper
-├── tests/
-│   ├── fixtures/      # valid/invalid C fixture programs
-│   └── interpreter.rs
-├── examples/
-│   └── sum.c
-├── docs/
-│   ├── autonomous-agent-prompt.md
-│   ├── plans/autonomous-agent.md
-│   └── v0.1.md
-├── status/           # autonomous maintainer state/backlog/blockers/research
-├── Dockerfile
-└── docker-compose.yml
+With Docker and Compose, from the same checkout:
+
+```sh
+docker compose run --rm cust  # runs examples/sum.c; prints 10
+docker compose run --rm test  # builds and runs the Rust tests
 ```
 
-## Autonomous maintenance
+For another container input, place the supported source under `examples/` and run `docker compose run --rm cust /workspace/examples/your-program.c`. Compose builds from the checkout. The runtime service mounts `examples/` read-only and has no network, a read-only root filesystem, a non-root user, dropped capabilities, and no-new-privileges. The test service builds and runs `cargo test --locked` in the image with no network and a writable container layer; it does **not** mount the host source tree. These settings reduce exposure, but do not make Docker or Cust a security boundary for untrusted C programs.
 
-Cust includes a `status/` workspace for an autonomous Hermes maintainer:
+## What the interpreter covers
 
-| File | Purpose |
-|---|---|
-| `status/current-state.md` | current project snapshot |
-| `status/missing-features.md` | prioritized backlog |
-| `status/todo.md` | next tasks and every-run checklist |
-| `status/stuck.md` | blockers and failed attempts |
-| `status/research.md` | links/findings from docs research |
+- Control flow and expressions: functions/prototypes, local/global/static objects, block scopes, `if`/`else`, loops, `switch`, `break`/`continue`, arithmetic, bitwise, comparison, assignment, conditional and comma expressions, casts, `sizeof`, `_Alignof`, and bounded C11 `_Generic`/`_Static_assert` forms.
+- Values and storage: deterministic scalar `int`/`char`/`_Bool` spellings and bounded `double`; fixed and inferred arrays (including supported two-dimensional scalar arrays), strings, structs/unions/enums, typedefs, designated initializers, aggregate copies/returns, and scoped compound literals. Supported typed pointers carry interpreter-owned identity, bounds, const, and lifetime metadata rather than host addresses.
+- Preprocessing: bounded macros, conditional directives, line splicing and digraphs. File-aware quoted includes and file-identity-dependent `#pragma once` are supported on Linux for project-relative headers, **not** system headers.
+- Selected C library functions work only with supported explicit prototypes and interpreter-owned storage, including bounded string/byte operations, integer conversions, character classification, deterministic `rand`/`srand`, and interpreter-owned termination behavior. GCC/Clang/`cc` are used only by compiler-oracle **tests**, never to execute Cust input. The full `cargo test` suite requires an available C compiler (`gcc`, `clang`, or `cc`).
 
-See `docs/plans/autonomous-agent.md` and `docs/autonomous-agent-prompt.md` for the cron-based maintenance loop.
+The exact supported shapes matter: a supported scalar, pointer, or array does **not** imply all C declarators or combinations of them work. Look at [`status/missing-features.md`](status/missing-features.md) and the valid/invalid [`tests/fixtures`](tests/fixtures) for the detailed, evolving boundary.
 
-## Development
+### Explicit limits
 
-Useful commands:
+Cust is not ISO C conforming or ABI compatible. Its sizes and layout are deterministic interpreter choices (for example, `int` and pointers are 8 bytes, `char` is 1 byte, and structs have no native padding). It does not implement system headers, general host libc/stdio, arbitrary variadic calls, function pointers, `goto`, bit-fields, flexible array members, VLAs, or arrays above the supported two-dimensional shapes. Pointer support is not general recursive pointer support: ordinary typed pointers are scoped to supported storage, while the `T **` families for `char`, `int`, `_Bool`, and `double` are narrow tracked output-slot forms with further restrictions on decay, address-taking, arithmetic, casts, and qualifiers. `void *` cannot be dereferenced. `float`, `long double`, complex values, and many `double` declarator/storage combinations are unsupported. Raw-memory operations are limited to modeled object-byte roots; they do not expose host addresses or arbitrary object representations. Unsupported programs may be rejected with diagnostics rather than interpreted as C would execute them.
 
-```bash
-cargo fmt
-cargo test
+## How it is organized
+
+`src/main.rs` implements the CLI; `src/lib.rs` contains preprocessing/lexing, parsing and the interpreter. The parser builds an AST, and the evaluator tracks Cust-owned values and storage instead of invoking native C. `tests/interpreter.rs` exercises behavior and rejection paths; `tests/c_compat.rs` compares explicitly registered supported fixtures with a native compiler where the expected behavior is portable; other integration tests cover CLI, parser safety and metadata. [`docs/ROADMAP.md`](docs/ROADMAP.md) records product scope and acceptance gates. [`CHANGELOG.md`](CHANGELOG.md) has releases; [`status/`](status/) holds the detailed maintainer backlog/history, not a feature guarantee for every C program.
+
+## Develop and contribute
+
+The full local test suite requires a C compiler (`gcc`, `clang`, or `cc`) as well as Rust and Cargo; `tests/c_compat.rs` invokes it for portable comparisons. Docker builds the test environment with its own compiler.
+
+```sh
+cargo fmt --check
 cargo clippy -- -D warnings
-cargo run -- examples/sum.c
-```
-
-Docker commands:
-
-```bash
-docker compose build
+cargo test
+# Optional container verification (requires Docker Compose):
 docker compose run --rm test
 docker compose run --rm cust
 ```
 
-## Current limitations
+When adding a language feature, first define a narrow supported shape and its adjacent rejected shapes. Add focused interpreter tests and valid/invalid fixtures; where C behavior is portable, register a warning-free compiler-oracle fixture in `tests/c_compat.rs`. Run the local checks and, when available, the Compose checks. Avoid host-ABI assumptions in tests. Prefer a semantic C feature or a conformance gap with a concrete counterexample over speculative diagnostic sweeps; see the [roadmap](docs/ROADMAP.md) for phase gates. The [autonomous development plan](docs/plans/autonomous-agent.md) describes maintainer operations, not Cust's public contract.
 
-Cust is not a full C implementation. On current `main`, the bounded raw-memory slice supports `memcpy`, `memmove`, `memcmp`, `memset`, and `memchr` over interpreter-owned standalone character storage, character scalars/one-dimensional arrays embedded in struct fields, one selected row of supported two-dimensional character storage, scalar/one-dimensional-array/selected-two-dimensional-row eight-byte `int` plus canonical one-byte `_Bool` storage both standalone and embedded in supported struct fields, selected members and complete objects of every mutable scalar-only non-`double` union, using either a non-const full-width `int`/`char` carrier or persistent hidden maximum-layout bytes, standalone scalar/one-dimensional-array `double` storage, scalar/one-dimensional-array `double` fields in supported non-union structs, and one selected row of supported direct, explicit-row-pointer, adjusted-parameter, or aggregate-field two-dimensional `double` storage under Cust's deterministic eight-byte IEEE-754 binary64 little-endian representation, and complete supported non-union structs whose whole-object layouts contain no double or pointer fields, including supported integer/character/`_Bool` scalar fields, one- and two-dimensional scalar arrays, nested structs, and embedded struct arrays under Cust's deterministic field-order no-padding model; every range remains within its selected storage root. Supported scalar-only unions expose one canonical aggregate root at byte offset zero through every member and the complete object, preserving selected-member capacity, maximum-layout whole-object capacity, raw bytes beneath normalized `_Bool` views, overlap, const/lifetime, zero-count, and non-evaluating rules. All-const scalar unions and union layouts containing arrays, pointers, `double`, or nested aggregates, whole two-dimensional `double` objects, ranges spanning adjacent rows, whole aggregates containing double fields, whole pointer-object storage, and structs containing pointer fields remain unsupported because Cust does not model those union or pointer object encodings and does not flatten aggregate/row double storage. Evaluated helper calls can return supported standalone or field-backed double pointers to bounded-memory intrinsics, but unprovable helper-returned double targets remain conservatively rejected in non-evaluating contexts. Fixed two-dimensional `int` and `char` arrays, their aggregate fields, adjusted parameters, and safe pointer-to-row forms are supported. Direct and complete-two-dimensional-alias `double` objects are supported at local, file-global, and block-static scope, as fixed aggregate fields, through adjusted array parameters, and through explicit row-pointer object arithmetic/indexing. One-dimensional `double` array aliases followed by another array suffix in aggregate fields, `double` pointer-to-row typedef aliases, and explicit `double` pointer-to-row function parameter/return declarators remain unsupported. Variable-length arrays, arrays with more than two dimensions, aggregate-valued multidimensional elements, and two-dimensional controlling expressions in `_Generic` remain unsupported. Preprocessing supports bounded object-like, named-parameter, and variadic function-like `#define`, function-like macro stringification and token pasting, `#undef`, C11 null `#` / `%:` directives, active `#error` / `%:error` diagnostics, dynamic predefined `__FILE__`/`__LINE__`, C11 `#line`/`%:line` presumed source locations, physical-line splicing, nested conditionals, direct-source C11 digraph punctuators, and project-relative quoted headers on Linux with direct or exactly-one-string-literal macro-expanded operands plus shared expansion/depth/source-size/path-containment bounds. File-aware Linux preprocessing also supports active `#pragma once` / `%:pragma once` and direct or macro-produced `_Pragma("once")`, keyed by opened file identity across repeated, symlinked, hard-linked, and recursive header paths. Other pragma names remain unsupported; direct string-only library entry points reject file-identity-dependent pragmas and includes. System headers remain unsupported, and quoted inclusion fails closed on non-Linux platforms. Other unsupported areas include standard-library calls beyond explicitly prototyped `abs`/`labs`/`llabs`, `atoi`/`atol`/`atoll`, `strtol`/`strtoll`/`strtoul`/`strtoull`, `strcmp`/`strncmp`/`strcoll`, `strlen`/`strxfrm`, `strchr`/`strrchr`/`strpbrk`/`strstr`, `strspn`/`strcspn`, `strcpy`/`strcat`/`strncat`/`strncpy`, `strtok`, `memcpy`/`memmove`/`memcmp`/`memset`/`memchr`, the twelve C11 `is*` character classifiers, `tolower`/`toupper`, `rand`/`srand`, and `exit`/`_Exit`/`abort`; locale-sensitive behavior outside Cust's fixed ASCII/C-locale model; floating types and forms beyond bounded direct and typedef-backed `double` scalar/function-boundary/one-dimensional-array/aggregate-field support, direct and complete-two-dimensional-alias object and aggregate-field storage, adjusted two-dimensional array parameters, explicit row-pointer object arithmetic/indexing, and one-level pointers to standalone and supported struct-field scalar/one-dimensional-array storage (`float`, `long double`, hexadecimal/suffixed/non-finite literals, qualified or incompatible slots in tracked `double **` objects, `double ***` or deeper pointers, arrays of double pointers, whole-array or row addresses, union-backed double field addresses/decay, atomic double-pointer aliases, direct one-dimensional double-array parameter declarators, one-dimensional-array-alias-derived multidimensional aggregate fields, pointer-to-row typedef aliases, explicit pointer-to-row function parameters/returns, array returns, two-dimensional double array compound literals, three-dimensional double arrays, and raw-memory operations over whole two-dimensional objects, adjacent rows, union-backed double storage, or whole aggregates containing double fields) plus complex runtime values; general multiple pointer levels beyond narrow tracked unqualified `char **`, `int **`, `_Bool **`, and `double **` objects, output parameters, function return declarations/call results, and supported struct/direct-same-pointee-union fields, whose inner scalar pointer or complete two-level output type may be spelled directly or through typedef aliases; qualified or non-scalar aliases, tracked-output arrays outside the fixed one-dimensional direct-object and supported struct-field slices, mixed-pointee/output-versus-ordinary/nested-output union overlap, tracked-output casts except ordinary scalar truth conversion, address-taking, arithmetic, ordering, and update operators remain unsupported; `void *` dereference, indexing, arithmetic, ordering, deeper pointers, pointer arrays, pointer-to-array forms, and other memory intrinsics; function pointers and variadic function calls; flexible array members and bit-fields; `goto`; general aggregate casts; and native ABI layout/promotion compatibility. The bounded termination intrinsics do not implement `atexit`, stdio flushing, signal delivery, or host-process termination: `exit` and `_Exit` return the supplied status through Cust's library/CLI result surface, while `abort` produces the recoverable `program aborted` interpreter error. Cust executes programs itself; GCC/Clang may be used only as optional test oracles for supported fixtures.
-
-See [CHANGELOG.md](CHANGELOG.md) for current release notes and [docs/v0.1.md](docs/v0.1.md) for the historical v0.1 foundation notes.
-
-## Roadmap
-
-- Parser quality: continue recovery/error-message expansion only for newly discovered malformed programs that are not already covered by exact-output diagnostics tests.
-- Product quality: keep release-oriented docs and exact package/Docker/CLI version assertions synchronized.
-- Longer term: extend standard-library calls cautiously, then reconsider multiple pointer levels and broader C conformance fixtures.
-
-## License
-
-GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`). See [LICENSE](LICENSE).
+Cust is licensed under [AGPL-3.0-or-later](LICENSE).
