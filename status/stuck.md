@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Direct double row-pointer function declarators have focused and compiler-oracle GREEN; aggregate double row-pointer fields remain an unimplemented candidate, not an active blocker.
+None. Named double row addresses have focused/interpreter-oracle GREEN and independent pre-gate review CLEAR; aggregate double row-pointer fields remain a separately scoped candidate, not an active blocker.
 
 ### 2026-09-23 — TODO 445 comma-operator RHS diagnostics
 

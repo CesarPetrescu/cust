@@ -13022,16 +13022,8 @@ fn direct_fixed_two_dimensional_double_array_dimension_overflow_is_diagnostic() 
 }
 
 #[test]
-fn direct_fixed_two_dimensional_double_array_sizeof_preserves_pointer_and_const_boundaries() {
+fn direct_fixed_two_dimensional_double_array_sizeof_preserves_const_boundaries() {
     for (program, expected) in [
-        (
-            "int main(void) { double values[1][2] = {{1, 2}}; return sizeof(&values[0]); }",
-            "double pointers are not supported",
-        ),
-        (
-            "int main(void) { double values[1][2] = {{1, 2}}; return sizeof(1 ? &values[0] : &values[0]); }",
-            "double pointers are not supported",
-        ),
         (
             "int main(void) { const double values[1][1] = {{1}}; return sizeof(values[0][0]++); }",
             "cannot modify read-only array 'values'",
@@ -20945,9 +20937,47 @@ fn bounded_memory_two_dimensional_double_dereferenced_rows_are_non_evaluating() 
 }
 
 #[test]
+fn direct_double_named_row_address_matches_decay_and_preserves_sizeof() {
+    let program = include_str!("fixtures/compat/valid/direct_double_named_row_addresses.c");
+    assert_eq!(interpret(program), Ok(15));
+}
+
+#[test]
+fn direct_double_named_row_address_preserves_const_width_lifetime_and_bounds() {
+    for (program, expected) in [
+        (
+            "int main(void) { const double values[1][2] = {{0}}; double (*row)[2] = &values[0]; return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "int main(void) { const double values[1][2] = {{0}}; const double (*row)[2] = &values[0]; row[0][0] = 1; return 0; }",
+            "cannot modify read-only array",
+        ),
+        (
+            "int main(void) { double values[1][3] = {{0}}; double (*row)[2] = &values[0]; return 0; }",
+            "2 columns",
+        ),
+        (
+            "double (*escape(void))[2] { double values[1][2] = {{1, 2}}; return &values[0]; } int main(void) { return (int)escape()[0][0]; }",
+            "out-of-scope",
+        ),
+        (
+            "int main(void) { double values[1][2] = {{0}}; double (*row)[2] = &values[1]; return row[0][0]; }",
+            "out of bounds",
+        ),
+        (
+            "int main(void) { double values[1][2] = {{0}}; return (int)(&values[-1])[0][0]; }",
+            "out of bounds",
+        ),
+    ] {
+        let error = interpret(program).expect_err(program).to_string();
+        assert!(error.contains(expected), "{program}: {error}");
+    }
+}
+
+#[test]
 fn two_dimensional_double_row_addresses_remain_consistently_unsupported() {
     for program in [
-        "int main(void) { double values[1][2] = {{0}}; return sizeof(&values[0]); }",
         "struct Table { double rows[1][2]; }; int main(void) { struct Table table = {{{0}}}; return sizeof(&table.rows[0]); }",
         "struct Table { double rows[1][2]; }; int main(void) { struct Table table = {{{0}}}; struct Table *pointer = &table; return sizeof(&pointer->rows[0]); }",
         "struct Table { double rows[1][2]; }; int main(void) { struct Table tables[1] = {{{{0}}}}; return sizeof(&tables[0].rows[0]); }",

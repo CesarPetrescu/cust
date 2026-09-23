@@ -49,6 +49,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/fixed_two_dimensional_scalar_array_typedefs.c",
     "tests/fixtures/compat/valid/double_row_pointer_typedef_objects.c",
     "tests/fixtures/compat/valid/direct_double_row_pointer_functions.c",
+    "tests/fixtures/compat/valid/direct_double_named_row_addresses.c",
     "tests/fixtures/compat/valid/predefined_func_name.c",
     #[cfg(target_os = "linux")]
     "tests/fixtures/compat/valid/predefined_file_line.c",

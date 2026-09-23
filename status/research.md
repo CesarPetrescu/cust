@@ -2,6 +2,12 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-23 — Named double row address semantics and representation
+
+- Candidates: aggregate row-pointer fields have high utility but need new `StructFieldType`/`StructFieldValue` shape and pervasive copy/initializer/type/const/`sizeof` routing; general pointer derivatives exceed the bounded representation; named 2D row addresses were a demonstrated C11 gap with existing `Array2DRow` identity; TODO 446 diagnostic audit has no reproduced generic fallback. Chose named row addresses as a coherent semantic slice with safe reuse of the row metadata. Overflow acceptance for aggregate fields and field-backed addresses is tracked in `status/todo.md`.
+- Before-state `double (*row)[2] = &values[1]` failed with `two-dimensional array 'values' requires a second index`; a strict native C11 compiler accepted it and returned 15. N1570 §6.5.2.1 says `a[i]` is `*((a)+(i))`, and §6.5.3.2 says `&a[i]` behaves as `a+i` without evaluating the implied indirection: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf . Cust still evaluates the real index once, while `sizeof(&values[marker++])` does not.
+- Existing named-array runtime storage yields the row's column count, constness and lexical owner; `&values[i]` can reuse the same offset row pointer as `values+i`. Aggregate-field row addresses remain deliberately rejected rather than erasing a field path. Two focused interpreter tests and one registered strict C11 fixture cover positive identity/binary64, const/width/lifetime/bounds and non-evaluating expressions. Independent read-only pre-gate review returned `AI_REVIEW:CLEAR`. Implementation/verification details: `references/cust-direct-double-named-row-addresses.md`.
+
 ## 2026-09-23 — Direct double row-pointer function declarations
 
 - Candidate evaluation: direct function forms have executable value and reuse typed row metadata; aggregate fields require separate storage/field-copy fan-out; recursive pointers exceed the bounded representation; speculative comma diagnostics have no demonstrated fallback. Selected direct parameters/returns as the safest complete slice.

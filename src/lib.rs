@@ -22291,6 +22291,12 @@ impl Interpreter {
                 Expr::Deref(pointer)
                     if self.array2d_row_pointer_element_type(pointer) == Some(CType::Double)
             );
+        if matches!(expr, Expr::AddressOfArray { name, .. }
+            if matches!(self.find_variable(name), Some(Value::Array(array))
+                if array.borrow().dimensions.is_some() && array.borrow().elem_type == CType::Double))
+        {
+            return false;
+        }
         if matches!(
             expr,
             Expr::AddressOfArray { .. }
@@ -52154,6 +52160,14 @@ impl Interpreter {
                 self.eval_pointer(right)
             }
             Expr::AddressOf(name) => self.address_of_scalar(name),
+            Expr::AddressOfArray { name, index }
+                if matches!(self.find_variable(name), Some(Value::Array(array))
+                    if array.borrow().dimensions.is_some() && array.borrow().elem_type == CType::Double) =>
+            {
+                let row = self.eval_array_subscript(index)?;
+                let pointer = self.eval_pointer(&Expr::Var(name.clone()))?;
+                self.offset_array_pointer(&pointer, row)
+            }
             Expr::AddressOfArray { name, index } => {
                 if let Some(pointer) =
                     self.scalar_variable_reverse_subscript_pointer(name, index)?
