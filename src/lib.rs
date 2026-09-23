@@ -8661,12 +8661,6 @@ impl Parser {
                 ));
             }
             if let DeclType::Scalar(elem_type) = base_type {
-                if elem_type == CType::Double {
-                    return Err(Self::error_at(
-                        "double pointer-to-row typedef aliases are not supported".to_string(),
-                        self.peek_located(),
-                    ));
-                }
                 self.expect(Token::LParen)?;
                 self.expect(Token::Star)?;
                 let post_star_qualified = self.leading_type_qualifier_token().is_some();
@@ -9605,7 +9599,9 @@ impl Parser {
             }
             if matches!(
                 decl_type,
-                DeclType::Pointer { .. } | DeclType::PointerOutput(_)
+                DeclType::Pointer { .. }
+                    | DeclType::PointerOutput(_)
+                    | DeclType::Array2DPointer { .. }
             ) || self.check(&Token::Star)
             {
                 return Err(Self::error_at(
@@ -9933,7 +9929,9 @@ impl Parser {
             if pointer_output_pointee.is_none()
                 && matches!(
                     decl_type,
-                    DeclType::Pointer { .. } | DeclType::PointerOutput(_)
+                    DeclType::Pointer { .. }
+                        | DeclType::PointerOutput(_)
+                        | DeclType::Array2DPointer { .. }
                 )
                 && has_explicit_star
             {

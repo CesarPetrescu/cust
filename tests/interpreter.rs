@@ -11587,10 +11587,6 @@ fn direct_double_typedef_aliases_preserve_safety_boundaries() {
 
     for (program, expected) in [
         (
-            "typedef double (*RowPointer)[3]; int main(void) { return 0; }",
-            "double pointer-to-row typedef aliases are not supported",
-        ),
-        (
             "typedef double Row[3]; Row *make(void) { return 0; } int main(void) { return make() != 0; }",
             "pointer-to-array return types are not supported",
         ),
@@ -33059,6 +33055,111 @@ fn explicit_two_dimensional_row_pointers_match_fixture() {
     let program = include_str!("fixtures/valid/explicit_two_dimensional_row_pointers.c");
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn double_row_typedef_objects_preserve_binary64_and_row_identity() {
+    let program = r#"
+        typedef double (*Row)[2];
+        int main(void) {
+            double values[2][2] = {{1.25, 2.5}, {3.75, 4.5}};
+            Row row = values;
+            row += 1;
+            row[0][1] = row[0][0] + 0.5;
+            return (int)(row[0][1] * 4) + (int)(row - values);
+        }
+    "#;
+    assert_eq!(interpret(program).unwrap(), 18);
+}
+
+#[test]
+fn double_row_typedef_qualifiers_width_and_unevaluated_access() {
+    let program = r#"
+        typedef const double (*ConstRow)[2];
+        typedef double (*Row)[2];
+        int main(void) {
+            double values[2][2] = {{1.5, 2.5}, {3.5, 4.5}};
+            Row row = values;
+            ConstRow view = row;
+            int marker = 0;
+            if (sizeof(row[marker++]) != 2 * sizeof(double)) return 1;
+            if (sizeof(row[marker++][0]) != sizeof(double)) return 2;
+            if (sizeof(row) != sizeof(double *)) return 3;
+            if (marker != 0 || view[1][0] != 3.5) return 4;
+            return 0;
+        }
+    "#;
+    assert_eq!(interpret(program), Ok(0));
+
+    for (source, expected) in [
+        (
+            "typedef double (*Row)[2]; int main(void) { double values[2][3] = {{0}}; Row row = values; return 0; }",
+            "row pointer expected a two-dimensional double array with 2 columns",
+        ),
+        (
+            "typedef double (*Row)[2]; int main(void) { const double values[1][2] = {{0}}; Row row = values; return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "typedef const double (*Row)[2]; int main(void) { double values[1][2] = {{0}}; Row row = values; row[0][0] = 1.0; return 0; }",
+            "cannot modify read-only array 'row'",
+        ),
+        (
+            "typedef double (* const Row)[2]; int main(void) { double values[2][2] = {{0}}; Row row = values; row += 1; return 0; }",
+            "cannot assign to const variable 'row'",
+        ),
+        (
+            "typedef double (*Row)[2]; int main(void) { double values[1][2] = {{0}}; Row row = values; return (int)row[1][0]; }",
+            "out of bounds",
+        ),
+    ] {
+        assert!(
+            interpret(source)
+                .unwrap_err()
+                .to_string()
+                .contains(expected),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn double_row_typedef_parameter_return_and_expired_owner() {
+    let valid = r#"
+        typedef double (*Row)[2];
+        Row next(Row rows) { return rows + 1; }
+        int main(void) {
+            double values[2][2] = {{1.5, 2.5}, {3.5, 4.5}};
+            Row row = next(values);
+            return row[0][0] == 3.5 && row - values == 1 ? 0 : 1;
+        }
+    "#;
+    assert_eq!(interpret(valid), Ok(0));
+    let expired = r#"
+        typedef double (*Row)[2];
+        Row escape(void) {
+            double values[1][2] = {{1.5, 2.5}};
+            return values;
+        }
+        int main(void) { Row row = escape(); return (int)row[0][0]; }
+    "#;
+    assert!(
+        interpret(expired)
+            .unwrap_err()
+            .to_string()
+            .contains("out-of-scope")
+    );
+}
+
+#[test]
+fn double_row_typedef_rejects_deeper_function_pointer_shapes_without_panicking() {
+    for source in [
+        "typedef double (*Row)[2]; Row *extra(void) { return 0; } int main(void) { return 0; }",
+        "typedef double (*Row)[2]; int read(Row *extra) { return 0; } int main(void) { return 0; }",
+    ] {
+        let error = interpret(source).expect_err(source).to_string();
+        assert!(error.starts_with("pointer-to-pointer"), "{error}");
+    }
 }
 
 #[test]

@@ -8,9 +8,9 @@ Choose work by user-visible semantic value, not by the next number in a diagnost
 
 Before implementation, name (1) an example C program currently rejected or handled incorrectly, (2) the intended supported and excluded shapes, (3) the ownership/const/lifetime and non-evaluation consequences, and (4) the tests that would establish completion. Compare portable behavior with a C11 compiler when useful, but never execute user programs by compiling them as Cust's runtime. Reject a candidate that only inventories more syntax tokens without a real fallback or capability gap. A diagnostic fix is appropriate when a concrete malformed input currently produces a misleading, generic, or unsafe result; it should not become a sequence of speculative token-by-token audits.
 
-## First investigation: `double` pointer-to-row typedefs
+## First investigation: `double` pointer-to-row typedefs (completed)
 
-A concrete next semantic candidate is the currently rejected `typedef double (*Row)[2];` over an existing fixed two-dimensional `double` object. For example:
+The previously rejected `typedef double (*Row)[2];` over an existing fixed two-dimensional `double` object is now supported:
 
 ```c
 typedef double (*Row)[2];
@@ -21,7 +21,9 @@ int main(void) {
 }
 ```
 
-Cust currently reports `double pointer-to-row typedef aliases are not supported` at the typedef; a C11 compiler accepts this sample and it returns 3. Investigate whether the existing direct `double` row-pointer and scalar row-alias machinery can safely share type metadata. If so, make the first slice cover alias declarations, local use, row-scaled indexing/arithmetic and `sizeof`, with explicit width/type/const/bounds/lifetime and unevaluated checks; decide separately whether parameter/return, aggregate-field, and pointer-to-row alias chains are admissible. Add negative fixtures for those still excluded. If this requires an unsafe or disproportionate representation change, document the reason and compare another candidate before proceeding; this is a priority investigation, **not** a promise of support.
+Cust previously reported `double pointer-to-row typedef aliases are not supported` at the typedef; a C11 compiler accepts this sample and it returns 3. The existing typed row-pointer metadata now admits `double` aliases without host addresses. Local objects, parameter/return aliases, row-scaled indexing/arithmetic, const pointees and slots, bounds/lifetime checks, and non-evaluating `sizeof` have focused tests; a warning-clean native fixture is registered. Explicit double row-pointer function declarators and aggregate fields remain separate investigations; recursive pointer derivatives retain targeted rejection.
+
+The next concrete candidate is direct `double` row-pointer **function** declarators, such as `int read(double (*rows)[2])` or `double (*advance(double (*rows)[2]))[2]`: these still hit the deliberate `double row pointers are not supported` guard. Investigate whether the same row-width/const/lifetime metadata and alias-signature checks can admit a bounded direct parameter/return slice without changing object storage; require a RED program, negative width/deeper-pointer/escape checks, and warning-clean compiler-oracle parity before admitting it.
 
 ## Outcomes, in dependency order (not version promises)
 

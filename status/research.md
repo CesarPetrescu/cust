@@ -2,6 +2,14 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-23 — Double pointer-to-row typedef representation decision
+
+- Compared `double (*Row)[C]` aliases (high-value missing executable behavior, reusable `Array2DPointer` metadata), direct double row-pointer function declarators (same semantic impact, still guarded and now next), aggregate double row-pointer fields (requires a distinct field-storage design), and TODO 446 comma-loop diagnostics (deferred without a demonstrated fallback). Selected aliases because width/owner/const/`sizeof` metadata already existed and a bounded vertical slice was testable without host pointers.
+- Before-state focused RED: `typedef double (*Row)[2]` failed at its typedef; minimal removal of the special double rejection made local binary64 row writes/scaling GREEN. Alias parameter/return and unevaluated `sizeof` routes reuse existing 2D signatures; width/const/bounds/expired-owner failures were asserted in focused tests.
+- Independent pre-gate review found a safety defect exposed by alias admission: `Row *` in function returns/parameters reached `decl_type_to_pointee_type` or parameter `unreachable!`; a new test reproduced the panic, then both branches gained a narrow `DeclType::Array2DPointer` rejection. Fresh read-only review returned `AI_REVIEW:CLEAR`.
+- C11 oracle: `tests/fixtures/compat/valid/double_row_pointer_typedef_objects.c` compiles under `-std=c11 -Wall -Wextra -Werror` and the registered native exit code matches Cust at 18. Compare only portable `sizeof(*row) == C * sizeof(double)` and pointer-size type relationships, not Cust/native struct layout. No external documentation was needed: this implementation reuses established repository row-pointer metadata and the native compiler served only as an external conformance oracle.
+- Full gate: `cargo fmt --check`, strict Clippy and all local tests passed. Foreground Docker Compose test client exceeded its wait window, but retained test container `2446b3f81152` exited 0 under `docker wait`; rebuilt `docker compose run --rm cust` printed `10`. `git diff --check` passed.
+
 ## 2026-09-23 — Comma-operator RHS diagnostic closure
 
 - Candidate evaluation compared the queue-leading comma-RHS audit, broad parser-diagnostic expansion, compiler-oracle conformance fixtures, and CLI work. TODO 445 was selected because `(1, /)` had a deterministic generic fallback with a narrow shared parser seam.

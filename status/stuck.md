@@ -4,7 +4,7 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. TODO 445 comma-operator RHS diagnostics are complete; TODO 446 custom comma-loop audit is next, not an active blocker.
+None. The double row-pointer typedef slice and its review-found deeper-pointer panic are verified locally and in Docker; direct double row-pointer function declarators remain a planned feature, not a blocker.
 
 ### 2026-09-23 — TODO 445 comma-operator RHS diagnostics
 
