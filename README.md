@@ -1,5 +1,7 @@
 # Cust
 
+[![Rust implementation](https://img.shields.io/badge/implementation-Rust-DEA584?logo=rust)](#how-it-is-organized) [![Language: C subset](https://img.shields.io/badge/language-bounded%20C%20subset-2563EB)](docs/ROADMAP.md) [![Docker](https://img.shields.io/badge/Docker-runnable-2496ED?logo=docker)](#try-it) [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
+
 Cust is a Rust interpreter for a **bounded subset of C**. It preprocesses, parses, and executes supported source itself, then prints the integer result of `main()`. It does not compile or run the input with a host C compiler. Cust is useful for exploring C semantics and interpreter design, not as a drop-in C compiler or a general-purpose sandbox for hostile code.
 
 ## Try it
@@ -21,7 +23,15 @@ docker compose run --rm cust  # runs examples/sum.c; prints 10
 docker compose run --rm test  # builds and runs the Rust tests
 ```
 
-For another container input, place the supported source under `examples/` and run `docker compose run --rm cust /workspace/examples/your-program.c`. Compose builds from the checkout. The runtime service mounts `examples/` read-only and has no network, a read-only root filesystem, a non-root user, dropped capabilities, and no-new-privileges. The test service builds and runs `cargo test --locked` in the image with no network and a writable container layer; it does **not** mount the host source tree. These settings reduce exposure, but do not make Docker or Cust a security boundary for untrusted C programs.
+For another container input, place the supported source under `examples/` and run `docker compose run --rm cust /workspace/examples/your-program.c`. To use plain Docker instead of Compose:
+
+```sh
+docker build -t cust-local .
+docker run --rm --network none --read-only -v "$PWD/examples:/workspace/examples:ro" cust-local /workspace/examples/sum.c
+# 10
+```
+
+Run these from the repository root; the read-only bind mount gives Cust access to the example file. Compose builds from the checkout. The runtime service mounts `examples/` read-only and has no network, a read-only root filesystem, a non-root user, dropped capabilities, and no-new-privileges. The test service builds and runs `cargo test --locked` in the image with no network and a writable container layer; it does **not** mount the host source tree. These settings reduce exposure, but do not make Docker or Cust a security boundary for untrusted C programs.
 
 ## What the interpreter covers
 
