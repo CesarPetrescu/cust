@@ -9262,7 +9262,6 @@ impl Parser {
                 self.tokens.get(self.pos + 3).map(|token| &token.kind),
                 Some(Token::LParen)
             );
-        let row_pointer_return_star = row_pointer_return.then(|| self.tokens[self.pos + 1].clone());
         let name = if row_pointer_return {
             self.advance();
             self.advance();
@@ -9290,14 +9289,6 @@ impl Parser {
             let inline_param_enum_decl = self.take_pending_inline_enum_decl();
             self.expect_closing_paren_after("function parameters")?;
             if row_pointer_return {
-                if matches!(return_type, ReturnType::Scalar(CType::Double)) {
-                    return Err(Self::error_at(
-                        "double row pointers are not supported".to_string(),
-                        row_pointer_return_star
-                            .as_ref()
-                            .expect("row-pointer return has a star token"),
-                    ));
-                }
                 self.expect_closing_paren_after("row-pointer function declarator")?;
                 self.expect(Token::LBracket)?;
                 let columns = self.expect_array_len()?;
@@ -9825,12 +9816,6 @@ impl Parser {
                 && matches!(self.peek_next(), Token::Star)
                 && !self.parenthesized_pointer_declarator_is_function_at(self.pos)
             {
-                if matches!(decl_type, DeclType::Scalar(CType::Double)) {
-                    return Err(Self::error_at(
-                        "double row pointers are not supported".to_string(),
-                        &self.tokens[self.pos + 1],
-                    ));
-                }
                 let DeclType::Scalar(elem_type) = &decl_type else {
                     unreachable!("guard requires scalar row pointer parameter type")
                 };

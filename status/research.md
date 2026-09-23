@@ -2,6 +2,12 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-23 — Direct double row-pointer function declarations
+
+- Candidate evaluation: direct function forms have executable value and reuse typed row metadata; aggregate fields require separate storage/field-copy fan-out; recursive pointers exceed the bounded representation; speculative comma diagnostics have no demonstrated fallback. Selected direct parameters/returns as the safest complete slice.
+- The two explicit `double row pointers are not supported` parser guards sat after function-return and parameter type parsing. Removing only those guards lets both forms lower through existing `ReturnType::Array2DPointer` and `ParamKind::Array2D` with width/const/owner checks. TDD RED observed both source-located rejections; GREEN covers prototype compatibility, binary64 writes, `sizeof` non-evaluation, mismatched width, const discard, bounds and expired owners.
+- Compiler oracle `tests/fixtures/compat/valid/direct_double_row_pointer_functions.c` passes the registered C11 `-Wall -Wextra -Werror` harness, returning 36 in Cust and native C; row size is compared only against `2 * sizeof(double)`. Review exposed stale old rejection expectations; replace them with a positive prototype test while retaining unrelated unsupported-array/invalid-main diagnostics.
+
 ## 2026-09-23 — Double pointer-to-row typedef representation decision
 
 - Compared `double (*Row)[C]` aliases (high-value missing executable behavior, reusable `Array2DPointer` metadata), direct double row-pointer function declarators (same semantic impact, still guarded and now next), aggregate double row-pointer fields (requires a distinct field-storage design), and TODO 446 comma-loop diagnostics (deferred without a demonstrated fallback). Selected aliases because width/owner/const/`sizeof` metadata already existed and a bounded vertical slice was testable without host pointers.

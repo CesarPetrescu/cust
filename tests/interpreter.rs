@@ -19535,18 +19535,6 @@ fn double_function_declarations_keep_pointer_and_array_boundaries_source_located
             "double array parameters are not supported at line 1, column 22",
         ),
         (
-            "double (*make(void))[2];\nint main(void) { return 0; }",
-            "double row pointers are not supported at line 1, column 9",
-        ),
-        (
-            "int sum(double (*values)[2]);\nint main(void) { return 0; }",
-            "double row pointers are not supported at line 1, column 17",
-        ),
-        (
-            "int sum(double (*)[2]);\nint main(void) { return 0; }",
-            "double row pointers are not supported at line 1, column 17",
-        ),
-        (
             "double main(void) { return 1.5; }",
             "main must have return type int at line 1, column 8",
         ),
@@ -33055,6 +33043,77 @@ fn explicit_two_dimensional_row_pointers_match_fixture() {
     let program = include_str!("fixtures/valid/explicit_two_dimensional_row_pointers.c");
 
     assert_eq!(interpret(program).unwrap(), 0);
+}
+
+#[test]
+fn direct_double_row_pointer_function_prototypes_match_definitions() {
+    let program = r#"
+        double (*make(void))[2];
+        int sum(double (*)[2]);
+        int sum(double (*values)[2]) { return (int)(values[0][0] * 4); }
+        double values[1][2] = {{2.5, 3.5}};
+        double (*make(void))[2] { return values; }
+        int main(void) { return sum(make()); }
+    "#;
+    assert_eq!(interpret(program), Ok(10));
+}
+
+#[test]
+fn direct_double_row_pointer_parameter_preserves_binary64_and_const_view() {
+    let program = r#"
+        double read(const double (*rows)[2]) { return rows[1][0]; }
+        int main(void) {
+            double values[2][2] = {{1.25, 2.5}, {3.75, 4.5}};
+            return (int)(read(values) * 4);
+        }
+    "#;
+    assert_eq!(interpret(program), Ok(15));
+}
+
+#[test]
+fn direct_double_row_pointer_return_preserves_owner_and_unevaluated_size() {
+    let program = r#"
+        double (*advance(double (*rows)[2]))[2] { return rows + 1; }
+        int main(void) {
+            double values[2][2] = {{1.25, 2.5}, {3.75, 4.5}};
+            int marker = 0;
+            if (sizeof(advance(values)[marker++]) != 2 * sizeof(double)) return 1;
+            if (marker != 0) return 2;
+            advance(values)[0][1] = 5.25;
+            return (int)(values[1][1] * 4);
+        }
+    "#;
+    assert_eq!(interpret(program), Ok(21));
+}
+
+#[test]
+fn direct_double_row_pointer_functions_enforce_width_const_bounds_and_lifetime() {
+    let cases = [
+        (
+            "int read(double (*rows)[2]) { return 0; } int main(void) { double values[1][3] = {{0}}; return read(values); }",
+            "expected a two-dimensional double array with 2 columns",
+        ),
+        (
+            "int read(double (*rows)[2]) { return 0; } int main(void) { const double values[1][2] = {{0}}; return read(values); }",
+            "cannot discard const qualifier from two-dimensional array argument",
+        ),
+        (
+            "const double (*view(const double (*rows)[2]))[2] { return rows; } int main(void) { double values[1][2] = {{0}}; double (*row)[2] = view(values); return 0; }",
+            "cannot discard const qualifier from pointer target",
+        ),
+        (
+            "double (*escape(void))[2] { double values[1][2] = {{1.0, 2.0}}; return values; } int main(void) { return (int)escape()[0][0]; }",
+            "out-of-scope",
+        ),
+        (
+            "double (*advance(double (*rows)[2]))[2] { return rows + 1; } int main(void) { double values[1][2] = {{0}}; return (int)advance(values)[0][0]; }",
+            "out of bounds",
+        ),
+    ];
+    for (program, expected) in cases {
+        let error = interpret(program).unwrap_err().to_string();
+        assert!(error.contains(expected), "{program}: {error}");
+    }
 }
 
 #[test]
