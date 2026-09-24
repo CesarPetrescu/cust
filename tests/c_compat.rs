@@ -51,6 +51,7 @@ const COMPAT_FIXTURES: &[&str] = &[
     "tests/fixtures/compat/valid/direct_double_row_pointer_functions.c",
     "tests/fixtures/compat/valid/direct_double_named_row_addresses.c",
     "tests/fixtures/compat/valid/direct_double_aggregate_field_row_addresses.c",
+    "tests/fixtures/compat/valid/arrow_double_aggregate_field_row_addresses.c",
     "tests/fixtures/compat/valid/predefined_func_name.c",
     #[cfg(target_os = "linux")]
     "tests/fixtures/compat/valid/predefined_file_line.c",

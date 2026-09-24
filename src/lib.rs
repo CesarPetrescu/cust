@@ -22295,6 +22295,7 @@ impl Interpreter {
             if matches!(self.find_variable(name), Some(Value::Array(array))
                 if array.borrow().dimensions.is_some() && array.borrow().elem_type == CType::Double))
             || matches!(expr, Expr::AddressOfStructArrayField { .. }
+                | Expr::AddressOfStructPtrArrayField { .. }
                 if self.array2d_row_pointer_element_type(expr) == Some(CType::Double))
         {
             return false;
@@ -52266,7 +52267,13 @@ impl Interpreter {
                 ..
             } => {
                 let pointer = self.eval_pointer(pointer)?;
-                if self
+                if self.array2d_row_pointer_element_type(expr) == Some(CType::Double) {
+                    let row = self.eval_array_subscript(index)?;
+                    let base = self.attach_array_pointer_owner(
+                        self.find_struct_pointer_array_field_base_pointer(&pointer, fields)?,
+                    );
+                    self.offset_array_pointer(&base, row)
+                } else if self
                     .struct_pointer_pointer_field_type(&pointer, fields)?
                     .is_some()
                 {

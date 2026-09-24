@@ -2,6 +2,11 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-24 — Arrow-backed double aggregate row address
+
+- Candidate comparison: pointer-to-row aggregate fields need new storage/type/copy handling across many interpreter variants; `&tables[j].rows[i]` requires indexed-root provenance; `&owner->rows[i]` instead reused existing field-backed row decay and repaired a demonstrated runtime/classifier mismatch. TODO 446 has no demonstrated fallback and is deferred. Subsequent candidates retain concrete acceptance in `status/todo.md`.
+- C11 N1570 §6.5.2.1 and §6.5.3.2 define `&E1[E2]` as pointer addition without evaluating the implied indirection (https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf). The selected arrow form evaluates the explicit index once; under `sizeof` it must not evaluate index or aggregate-pointer expression. The existing `Array2DRow` carries width; attach the aggregate field owner before offset. A registered strict C11 oracle compares copy isolation and return 14 without depending on host struct layout.
+
 ## 2026-09-24 — Direct aggregate-field double row addresses
 
 - Candidate comparison: aggregate pointer-to-row fields have high semantic impact but need new field storage and exhaustive copy/type/const/owner handling; arrow/indexed/temporary row-address forms require separate root/path tracing; direct `&table.rows[i]` reused existing field-backed row metadata and was a bounded, reproducible semantic gap. TODO 446 comma diagnostics had no demonstrated fallback. Chose the direct form; preserve broader candidates in `status/todo.md`.

@@ -4,7 +4,14 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Direct double aggregate-field row addresses have focused/interpreter-oracle GREEN and independent pre-gate review CLEAR; aggregate double row-pointer fields remain a separately scoped candidate, not an active blocker.
+None. Arrow-backed double aggregate-field row addresses passed focused interpreter/compiler-oracle tests, independent read-only `AI_REVIEW:CLEAR` review, and all local/Docker gates. Aggregate double row-pointer fields require a separate storage design, not an active gate blocker.
+
+### 2026-09-24 — Arrow-backed double aggregate row addresses
+
+- Before-state: `double (*row)[2] = &owner->rows[1];` reached `pointer does not reference a two-dimensional array row` despite its metadata identifying a double row.
+- Root cause: `AddressOfStructPtrArrayField` evaluated through scalar field-element indexing rather than the existing row-base pointer; the double-address classifier rejected the supported row-address shape.
+- Focused GREEN: row-base offset retains the aggregate pointer owner and field path. Valid/invalid tests and the compiler oracle exercise width, const, bounds, expiry, copy isolation and non-evaluating `sizeof`. No external blocker.
+
 
 ### 2026-09-24 — Direct aggregate double row addresses
 
