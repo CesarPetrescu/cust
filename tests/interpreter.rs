@@ -20978,7 +20978,6 @@ fn direct_double_named_row_address_preserves_const_width_lifetime_and_bounds() {
 #[test]
 fn two_dimensional_double_row_addresses_remain_consistently_unsupported() {
     for program in [
-        "struct Table { double rows[1][2]; }; int main(void) { struct Table tables[1] = {{{{0}}}}; return sizeof(&tables[0].rows[0]); }",
         "struct Table { double rows[1][2]; }; int main(void) { return sizeof(&((struct Table){{{0}}}).rows[0]); }",
         "struct Table { double rows[1][2]; }; int main(void) { struct Table table = {{{0}}}; double *pointer = &table.rows; return *pointer != 0.0; }",
         "struct Table { double rows[1][2]; }; int main(void) { struct Table table = {{{0}}}; struct Table *owner = &table; double *pointer = &owner->rows; return *pointer != 0.0; }",
@@ -21041,6 +21040,46 @@ fn direct_double_aggregate_field_row_address_preserves_sizeof_const_width_and_ow
         ),
         (
             "struct T { double rows[1][2]; }; double (*escape(void))[2] { struct T t = {{{1.0, 2.0}}}; return &t.rows[0]; } int main(void) { return (int)escape()[0][0]; }",
+            "out-of-scope",
+        ),
+    ] {
+        let error = interpret(source).expect_err(source).to_string();
+        assert!(error.contains(message), "{source}: {error}");
+    }
+}
+
+#[test]
+fn indexed_double_aggregate_field_row_address_matches_decay() {
+    let program =
+        include_str!("fixtures/compat/valid/indexed_double_aggregate_field_row_addresses.c");
+    assert_eq!(interpret(program), Ok(14));
+}
+
+#[test]
+fn indexed_double_aggregate_field_row_address_preserves_const_width_bounds_and_lifetime() {
+    for (source, message) in [
+        (
+            "struct T { double rows[1][2]; }; int main(void) { const struct T tables[1] = {{{{0}}}}; double (*p)[2] = &tables[0].rows[0]; return 0; }",
+            "cannot discard const qualifier",
+        ),
+        (
+            "struct T { const double rows[1][2]; }; int main(void) { struct T tables[1] = {{{{0}}}}; const double (*p)[2] = &tables[0].rows[0]; p[0][0] = 3.0; return 0; }",
+            "read-only",
+        ),
+        (
+            "struct T { double rows[1][3]; }; int main(void) { struct T tables[1] = {{{{0}}}}; double (*p)[2] = &tables[0].rows[0]; return 0; }",
+            "2 columns",
+        ),
+        (
+            "struct T { double rows[1][2]; }; int main(void) { struct T tables[1] = {{{{0}}}}; double (*p)[2] = &tables[1].rows[0]; return (int)p[0][0]; }",
+            "out of bounds",
+        ),
+        (
+            "struct T { double rows[1][2]; }; int main(void) { struct T tables[1] = {{{{0}}}}; double (*p)[2] = &tables[0].rows[1]; return (int)p[0][0]; }",
+            "out of bounds",
+        ),
+        (
+            "struct T { double rows[1][2]; }; double (*escape(void))[2] { struct T tables[1] = {{{{1.0, 2.0}}}}; return &tables[0].rows[0]; } int main(void) { return (int)escape()[0][0]; }",
             "out-of-scope",
         ),
     ] {

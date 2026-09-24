@@ -2,6 +2,11 @@
 
 Research notes for the autonomous agent. Add links, summaries, and decisions here.
 
+## 2026-09-24 — Indexed aggregate-array double row addresses
+
+- Evaluated candidate impacts: pointer-to-row aggregate fields would need separate pointer slot/type/initializer/copy/const/lifetime metadata; temporary aggregate field addresses need captured hidden-root lifetime; indexed aggregate-array row addresses reused established `StructElement` field-backed row pointers with a narrower representation and an exact failing C program. TODO 446 comma diagnostics remain deferred without a demonstrated failure.
+- C11 N1570 §6.5.2.1 defines `E1[E2]` through pointer addition and §6.5.3.2 specifies `&E1[E2]` without the implied indirection (https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf). Both explicit indexes evaluate once when the expression is evaluated; `sizeof(&tables[marker++].rows[other++])` evaluates neither. Resolve the selected element first, then attach its field-backed row base/owner before applying the row offset, rather than addressing a scalar double. Registered C11 `-Wall -Wextra -Werror` fixture verifies a layout-independent exit code of 14 and by-value copy isolation.
+
 ## 2026-09-24 — Arrow-backed double aggregate row address
 
 - Candidate comparison: pointer-to-row aggregate fields need new storage/type/copy handling across many interpreter variants; `&tables[j].rows[i]` requires indexed-root provenance; `&owner->rows[i]` instead reused existing field-backed row decay and repaired a demonstrated runtime/classifier mismatch. TODO 446 has no demonstrated fallback and is deferred. Subsequent candidates retain concrete acceptance in `status/todo.md`.

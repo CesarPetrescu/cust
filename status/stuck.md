@@ -4,7 +4,12 @@ Use this file to log blockers that need user input or deeper research.
 
 ## Active blockers
 
-None. Arrow-backed double aggregate-field row addresses passed focused interpreter/compiler-oracle tests, independent read-only `AI_REVIEW:CLEAR` review, and all local/Docker gates. Aggregate double row-pointer fields require a separate storage design, not an active gate blocker.
+None. Indexed double aggregate-field row addresses passed focused interpreter/compiler-oracle tests, independent read-only `AI_REVIEW:CLEAR` review, and all local/Docker gates. Aggregate double row-pointer fields require a separate storage design, not an active gate blocker.
+
+### 2026-09-24 — Indexed aggregate-array double row addresses
+
+- Before-state: `&tables[j].rows[i]` produced a scalar-element pointer despite metadata identifying a typed double row; an additional guard rejected this row-address AST route as an unsupported double-pointer shape.
+- Focused RED/GREEN: selected element field-base offset and a narrow row-aware classifier allowance make the two focused tests pass, including owner path, copy, index-once, const, width, bounds, expired owner and non-evaluating `sizeof`; registered native fixture agrees. Independent read-only review reported `AI_REVIEW:CLEAR`; all local and Docker gates passed. No active blocker.
 
 ### 2026-09-24 — Arrow-backed double aggregate row addresses
 
